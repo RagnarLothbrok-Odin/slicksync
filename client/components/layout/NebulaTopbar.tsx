@@ -85,8 +85,10 @@ export function NebulaTopbar() {
       .catch(() => {});
   }, [isPublicInstance]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('slicksync-admin-token');
+  // Ends the session on the server too (api.logout) - dropping the local
+  // token alone left the cookies, and so the session, alive.
+  const handleLogout = async () => {
+    await api.logout();
     window.location.href = '/login?mode=admin';
   };
 

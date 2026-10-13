@@ -38,7 +38,12 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   }
 
-  async function getPublicUser(authKey, req) {
+  // `targetId`, when the request is about one particular person, narrows the
+  // lookup to that person: the same Stremio email can belong to people in more
+  // than one household, and a key proves "this Stremio account", not which of
+  // their rows. Without it the first match wins, which is only right for a
+  // sign-in that has no person yet.
+  async function getPublicUser(authKey, req, targetId = null) {
     try {
       // Validate auth key
       const validation = await validateStremioAuthKey(authKey);
@@ -60,6 +65,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       if (stremioEmail) {
         user = await prisma.user.findFirst({
           where: {
+            ...(targetId ? { id: targetId } : {}),
             email: stremioEmail.toLowerCase(),
             providerType: 'stremio',
             isActive: true  // Only find active users
@@ -171,7 +177,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // USER_NOT_IN_GROUP sentinels and the same self-healing re-persist pattern
   // getPublicUser uses for a rotated Stremio authKey, just keyed on
   // nuvioUserId + providerType:'nuvio' instead.
-  async function getPublicUserNuvio(nuvioUserId, refreshTokenToStore, req) {
+  //
+  // `targetId` narrows it to one person, as in getPublicUser: one Nuvio account
+  // can be added in more than one household.
+  async function getPublicUserNuvio(nuvioUserId, refreshTokenToStore, req, targetId = null) {
     try {
       if (!nuvioUserId) {
         throw new Error('Invalid or expired Nuvio session');
@@ -179,6 +188,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       let user = await prisma.user.findFirst({
         where: {
+          ...(targetId ? { id: targetId } : {}),
           nuvioUserId,
           providerType: 'nuvio',
           isActive: true
@@ -240,7 +250,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
   // Nuvio session token - issued once at /authenticate-nuvio (and reissued
   // on every /validate-nuvio), carried by the client exactly like the
-  // Stremio authKey (same x-stremio-auth header/query/body slot, read via
+  // Stremio authKey (same x-stremio-auth header/body slot, read via
   // getAuthKey below - the field name is a historical artifact of Stremio
   // being first, but it's genuinely provider-agnostic: "the caller's own
   // bearer credential, whichever provider they are"). This is what
@@ -283,35 +293,65 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // and in a group - the same rules getPublicUserNuvio applies. A fresh token
   // from the sign-in replaces the stored one (the server retires the old
   // token for the same device when it issues a new one).
+  //
+  // Which server counts as "the same" depends on who is asking (serverMatch):
+  // on an instance serving strangers only the address the person was added
+  // with does (under either scheme), because the server id and user id in a
+  // sign-in are whatever the server at a typed-in address chooses to say. So
+  // someone whose server moves to a new address is reconnected by their admin
+  // before signing in here.
   async function getPublicUserJellyfin(probe, login) {
-    const ors = [{ jellyfinServerUrl: probe.serverUrl }]
-    if (login.serverId) ors.unshift({ jellyfinServerId: login.serverId })
+    const { serverMatch } = require('../utils/jellyfinConnect');
+    const { restrictsPrivateAddresses } = require('../providers/jellyfinAuth');
     const personSelect = { id: true, username: true, email: true, accountId: true, isActive: true, colorIndex: true, createdAt: true, expiresAt: true };
-    let user = await prisma.user.findFirst({
-      where: { providerType: 'jellyfin', jellyfinUserId: login.userId, OR: ors },
-      select: personSelect
+    // The same server user can be a person in more than one household (a
+    // relative in two families), and the session is for one of them. The
+    // oldest one that is active and in a group is the one signed in to; if
+    // none of them is, the oldest says why.
+    const refusal = async (person) => {
+      if (!person.isActive) return 'USER_NOT_ACTIVE';
+      // Groups name their members in a JSON list of ids; only the person's own
+      // household's groups can hold them, so only those are looked at.
+      const inGroup = await prisma.group.findFirst({
+        where: { isActive: true, accountId: person.accountId || DEFAULT_ACCOUNT_ID, userIds: { contains: JSON.stringify(person.id) } },
+        select: { id: true }
+      });
+      return inGroup ? null : 'USER_NOT_IN_GROUP';
+    };
+    const choose = async (people) => {
+      let firstRefusal = null;
+      for (const person of people) {
+        const why = await refusal(person);
+        if (!why) return { user: person };
+        firstRefusal = firstRefusal || why;
+      }
+      return { why: firstRefusal };
+    };
+    const candidates = await prisma.user.findMany({
+      where: { providerType: 'jellyfin', jellyfinUserId: login.userId, ...serverMatch(probe, login) },
+      select: personSelect,
+      orderBy: { createdAt: 'asc' }
     });
+    let chosen = candidates.length ? await choose(candidates) : null;
     // A household profile (utils/jellyfinProfiles.js) signs in as the person
     // it belongs to, the way a Nuvio profile does.
-    if (!user) {
-      const owners = await prisma.user.findMany({ where: { providerType: 'jellyfin', OR: ors }, select: { id: true } });
-      const profile = owners.length
-        ? await prisma.jellyfinProfile.findFirst({ where: { ownerUserId: { in: owners.map((o) => o.id) }, jellyfinUserId: login.userId, skip: false } })
-        : null;
-      if (profile) {
-        user = await prisma.user.findUnique({ where: { id: profile.ownUserId || profile.ownerUserId }, select: personSelect });
+    if (!candidates.length) {
+      const owners = await prisma.user.findMany({ where: { providerType: 'jellyfin', ...serverMatch(probe, login) }, select: { id: true } });
+      const profiles = owners.length
+        ? await prisma.jellyfinProfile.findMany({ where: { ownerUserId: { in: owners.map((o) => o.id) }, jellyfinUserId: login.userId, skip: false }, orderBy: { createdAt: 'asc' } })
+        : [];
+      const people = [];
+      for (const profile of profiles) {
+        const person = await prisma.user.findUnique({ where: { id: profile.ownUserId || profile.ownerUserId }, select: personSelect });
         // The profile's own sign-in was already kept (rememberSignIn); the
         // person's stays theirs.
-        if (user) user.viaProfile = true;
+        if (person) people.push({ ...person, viaProfile: true });
       }
+      chosen = people.length ? await choose(people) : null;
     }
-    if (!user) throw new Error('USER_NOT_FOUND');
-    if (!user.isActive) throw new Error('USER_NOT_ACTIVE');
-    const groups = await prisma.group.findMany({ where: { isActive: true }, select: { userIds: true } });
-    const inGroup = groups.some((group) => {
-      try { const ids = JSON.parse(group.userIds || '[]'); return Array.isArray(ids) && ids.includes(user.id) } catch { return false }
-    });
-    if (!inGroup) throw new Error('USER_NOT_IN_GROUP');
+    if (!chosen) throw new Error('USER_NOT_FOUND');
+    if (chosen.why) throw new Error(chosen.why);
+    const user = chosen.user;
     if (user.viaProfile) return user;
     const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
     await healedBySignIn(user.id);
@@ -319,7 +359,9 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       where: { id: user.id },
       data: {
         jellyfinToken: encrypt(login.token, mockReq),
-        jellyfinServerUrl: probe.serverUrl,
+        // Where strangers sign in, the address stays as the admin added it,
+        // even when the person typed the other scheme for it.
+        ...(restrictsPrivateAddresses() ? {} : { jellyfinServerUrl: probe.serverUrl }),
         jellyfinServerKind: probe.kind,
         ...(login.serverId ? { jellyfinServerId: login.serverId } : {}),
         providerConnectionError: null,
@@ -335,6 +377,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // (stored refresh token) so each call site doesn't hand-roll the same
   // branch. Throws with .message set to what the caller should return as
   // the error body (matches this file's existing per-route wording).
+  //
+  // What it returns is the person `user` is - only ever them, for every
+  // provider. A route that asks "is the caller this person?" and ignores the
+  // answer is still safe, because a key that belongs to someone else never
+  // gets this far.
   async function verifyProviderIdentity(user, authKey, req) {
     if (user.providerType === 'jellyfin') {
       if (!authKey || !verifyJellyfinSessionToken(authKey, user.id)) {
@@ -356,16 +403,23 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       }
       const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
       const storedRefreshToken = decrypt(user.nuvioRefreshToken, mockReq);
-      return await getPublicUserNuvio(user.nuvioUserId, storedRefreshToken, req);
+      const who = await getPublicUserNuvio(user.nuvioUserId, storedRefreshToken, req, user.id);
+      if (!who || who.id !== user.id) throw new Error('Authentication required');
+      return who;
     }
     if (!authKey) {
       throw new Error('Authentication required');
     }
+    // A Stremio key proves a Stremio account, which can be this person or
+    // someone who merely shares their email; only this person's row counts.
+    let who;
     try {
-      return await getPublicUser(authKey, req);
+      who = await getPublicUser(authKey, req, user.id);
     } catch (e) {
       throw new Error('Invalid auth key');
     }
+    if (!who || who.id !== user.id) throw new Error('Invalid auth key');
+    return who;
   }
 
   // Helper to get or create user from Stremio auth (kept for backward compatibility if needed elsewhere)
@@ -503,9 +557,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  // Helper to extract auth key from header or query
+  // The caller's credential: the header, or the body of a request that has
+  // one. Never the query string - a long-lived key in a URL ends up in access
+  // logs, browser history and Referer headers.
   const getAuthKey = (req) => {
-    return req.headers['x-stremio-auth'] || req.query.authKey || req.body?.authKey;
+    return req.headers['x-stremio-auth'] || (req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body?.authKey);
   };
 
   // Authenticate with OAuth and get/create user
@@ -591,7 +647,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       const authKeyToValidate = authKey;
 
       // Validate using getPublicUser which checks existence, active status, and group membership
-      const user = await getPublicUser(authKeyToValidate, req);
+      const user = await getPublicUser(authKeyToValidate, req, userId || null);
       if (userId && user.id !== userId) {
         return res.status(403).json({ error: 'Session mismatch', message: 'This Stremio session does not match this account' });
       }
@@ -803,7 +859,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(401).json({ error: 'Validation failed', message: 'Invalid or expired Nuvio session' });
       }
 
-      const validatedUser = await getPublicUserNuvio(user.nuvioUserId, refreshed.refresh_token || storedRefreshToken, req);
+      const validatedUser = await getPublicUserNuvio(user.nuvioUserId, refreshed.refresh_token || storedRefreshToken, req, userId);
 
       res.json({
         success: true,
@@ -853,7 +909,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
   router.post('/authenticate-jellyfin', async (req, res) => {
     try {
-      const { signInFromBody } = require('../utils/jellyfinConnect');
+      const { signInFromBody, rememberSignIn } = require('../utils/jellyfinConnect');
       let signedIn;
       try {
         signedIn = await signInFromBody(req.body);
@@ -861,7 +917,9 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         const status = err?.status === 401 ? 401 : 400;
         return res.status(status).json({ error: 'Authentication failed', message: err?.message || 'Could not sign in to the server', ...(err?.pinNeeded ? { pinNeeded: true } : {}) });
       }
-      await require('../utils/jellyfinConnect').rememberSignIn(prisma, encrypt, signedIn.probe, signedIn.login);
+      // Whoever holds this login takes the fresh token before anything can
+      // turn the person away - the server has already retired the old one.
+      await rememberSignIn(prisma, encrypt, signedIn.probe, signedIn.login);
       const user = await getPublicUserJellyfin(signedIn.probe, signedIn.login);
       res.json({
         success: true,
@@ -1097,6 +1155,67 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       }
       
       res.status(500).json({ error: 'Failed to update activity visibility', message: error?.message });
+    }
+  });
+
+  // A person's own notification settings (their Discord webhook and whether
+  // their watching notifies at all). Proved the same way as activity
+  // visibility, so it works on an instance with a login, where the household
+  // route for this is closed to someone who only signed in as themselves.
+  router.patch('/user-settings', async (req, res) => {
+    try {
+      const { userId } = req.body || {};
+      const authKey = getAuthKey(req);
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      const updateData = {};
+      if (req.body.discordWebhookUrl !== undefined) {
+        const raw = req.body.discordWebhookUrl;
+        if (raw !== null && typeof raw !== 'string') {
+          return res.status(400).json({ error: 'discordWebhookUrl must be text or empty' });
+        }
+        const webhook = typeof raw === 'string' ? raw.trim() : '';
+        if (webhook.length > 2048) {
+          return res.status(400).json({ error: 'That webhook address is too long' });
+        }
+        updateData.discordWebhookUrl = webhook || null;
+      }
+      if (req.body.notifyOnWatch !== undefined) {
+        if (typeof req.body.notifyOnWatch !== 'boolean') {
+          return res.status(400).json({ error: 'notifyOnWatch must be true or false' });
+        }
+        updateData.notifyOnWatch = req.body.notifyOnWatch;
+      }
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ error: 'Nothing to change' });
+      }
+
+      const targetUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, accountId: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true }
+      });
+      if (!targetUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const user = await verifyProviderIdentity(targetUser, authKey, req);
+      if (user.id !== userId) {
+        return res.status(403).json({ error: 'Access denied: Cannot update another user\'s settings' });
+      }
+
+      const updated = await prisma.user.update({ where: { id: userId }, data: updateData });
+      res.json({
+        discordWebhookUrl: updated.discordWebhookUrl || null,
+        notifyOnWatch: updated.notifyOnWatch !== false
+      });
+    } catch (error) {
+      console.error('Error updating user settings:', error);
+      if (/Authentication required|Invalid auth key|USER_NOT_/.test(error?.message || '')) {
+        return res.status(401).json({ error: error.message, message: 'Please sign in again.' });
+      }
+      res.status(500).json({ error: 'Failed to update settings', message: error?.message });
     }
   });
 
@@ -1446,12 +1565,22 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       // Get user
       if (!(await requireSelf(req, res, userId))) return;
 
-      // The addon address is fetched from this server; on an instance that
-      // serves other households it must not reach the server's own network.
-      if (require('../utils/config').INSTANCE_TYPE === 'public') {
-        try {
-          await require('../utils/safeUrl').assertSafeUrl(String(addonUrl).replace(/^stremio:\/\//i, 'https://'));
-        } catch {
+      // The addon address is fetched from this server, so every install holds
+      // it to a rule: an instance that serves other households may not reach
+      // its own network at all, a household's own install may reach anything on
+      // its network (a LAN server, a docker service) but never the link-local
+      // range where a cloud host keeps its credentials. The address checked is
+      // the one fetched below, with stremio:// read as https://.
+      const { assertSafeUrl, safeFetch, instancePolicy } = require('../utils/safeUrl');
+      const policy = instancePolicy();
+      const fetchableUrl = String(addonUrl).replace(/^stremio:\/\//i, 'https://');
+      try {
+        await assertSafeUrl(fetchableUrl, policy);
+      } catch (e) {
+        // A household's browser may know a name this server cannot resolve;
+        // that is only a problem if this server is the one to fetch it.
+        const onlyPassedOn = policy.allowPrivate && e?.message === 'unresolvable host' && providedManifestData;
+        if (!onlyPassedOn) {
           return res.status(400).json({ error: 'That addon address can’t be used', message: 'That addon address can’t be used' });
         }
       }
@@ -1491,12 +1620,13 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       if (!manifest) {
         try {
           console.log(`[public-library] Fetching manifest from server: ${addonUrl}`);
-          const manifestResponse = await fetch(addonUrl, {
+          // safeFetch holds every redirect to the same rule as the address.
+          const manifestResponse = await safeFetch(fetchableUrl, {
             headers: {
               'User-Agent': 'SlickSync/1.0',
               'Accept': 'application/json'
             }
-          });
+          }, policy);
           if (!manifestResponse.ok) {
             console.error(`[public-library] Failed to fetch manifest: ${manifestResponse.status} ${manifestResponse.statusText}`);
             return res.status(400).json({ 
@@ -1508,9 +1638,11 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           console.log(`[public-library] Successfully fetched manifest server-side: ${manifest?.name || 'Unknown'}`);
         } catch (fetchError) {
           console.error('[public-library] Error fetching manifest:', fetchError);
-          return res.status(400).json({ 
-            error: 'Failed to fetch addon manifest', 
-            message: fetchError?.message || 'Unable to fetch manifest from the provided URL. Please check the URL is correct and accessible.' 
+          // A redirect the address rule refused reads as the address itself being refused.
+          const refused = ['invalid url', 'unsupported protocol', 'blocked host', 'unresolvable host', 'too many redirects'].includes(fetchError?.message);
+          return res.status(400).json({
+            error: 'Failed to fetch addon manifest',
+            message: refused ? 'That addon address can’t be used' : (fetchError?.message || 'Unable to fetch manifest from the provided URL. Please check the URL is correct and accessible.')
           });
         }
       } else {
@@ -2180,12 +2312,15 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  // Generate/rotate user API key (user-specific, for accessing own metrics only)
+  // Generate/rotate user API key (user-specific, for accessing own metrics only).
+  // A person who already has a key gets it back as it is; only `rotate: true`
+  // replaces it, so a page that merely found no key to show cannot cut off
+  // whatever already uses the one they have.
   router.post('/user-api-key', async (req, res) => {
     try {
-      const { userId } = req.body;
+      const { userId, rotate } = req.body;
       const authKey = getAuthKey(req);
-      
+
       if (!userId) {
         return res.status(400).json({ error: 'User ID is required' });
       }
@@ -2197,6 +2332,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           id: true,
           accountId: true,
           isActive: true,
+          apiKey: true,
           stremioAuthKey: true,
           providerType: true,
           nuvioRefreshToken: true,
@@ -2214,15 +2350,25 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.status(401).json({ error: e.message });
       }
 
-      // Generate new API key
-      const { generateApiKey } = require('../utils/apiKey');
-      const { getServerKey, aesGcmEncrypt } = require('../utils/encryption');
-      const key = generateApiKey();
-      
       // Encrypt using user-specific key (userId + server key) - same pattern as account API keys
+      const { getServerKey, aesGcmEncrypt, aesGcmDecrypt } = require('../utils/encryption');
       const serverKey = getServerKey();
       const crypto = require('crypto');
       const userKey = crypto.createHash('sha256').update(Buffer.concat([Buffer.from(userId), serverKey])).digest();
+
+      if (user.apiKey && rotate !== true) {
+        try {
+          return res.json({ apiKey: aesGcmDecrypt(userKey, user.apiKey) });
+        } catch (e) {
+          // A key that can no longer be read is no key (the GET route treats
+          // it the same way), so a new one is made below.
+          console.error('Failed to decrypt user API key:', e.message);
+        }
+      }
+
+      // Generate new API key
+      const { generateApiKey } = require('../utils/apiKey');
+      const key = generateApiKey();
       const encrypted = aesGcmEncrypt(userKey, key);
       
       await prisma.user.update({
@@ -2716,7 +2862,13 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       
       // A Jellyfin login's live signal is its server's sessions list (added
       // below); its library-read sessions linger after a viewing stops.
-      const nowPlaying = (user.providerType === 'jellyfin' ? [] : activeSessions).map(s => ({
+      // A session whose last checkpoint sits at the end of the runtime is a
+      // watch that ended, not one that is playing - the same rule the admin
+      // Activity page uses (metricsBuilder.js).
+      const { hasReachedEnd } = require('../utils/sessionTracker');
+      const nowPlaying = (user.providerType === 'jellyfin' ? [] : activeSessions)
+        .filter(s => !hasReachedEnd(s.lastPosition, s.totalDuration))
+        .map(s => ({
         item: {
           id: s.itemId,
           name: s.itemName,
@@ -2726,7 +2878,9 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           episode: s.episode
         },
         startTime: s.startTime,
-        videoId: s.videoId
+        videoId: s.videoId,
+        lastPosition: s.lastPosition ?? null,
+        totalDuration: s.totalDuration ?? null
       }));
 
       // Playing in AIOStreams' own apps - see utils/watchState.js liveViewings() -
@@ -2753,10 +2907,27 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       // scoped to one user) unlike metricsBuilder.js's account-wide list.
       try {
         const { mergeProxyNowPlaying } = require('../utils/proxyNowPlaying');
-        const wrapped = nowPlaying.map(np => ({ user: { id: userId }, item: np.item, startTime: np.startTime, videoId: np.videoId }));
-        const merged = await mergeProxyNowPlaying(prisma, user.accountId || DEFAULT_ACCOUNT_ID, [user], wrapped);
+        const wrapped = nowPlaying.map(np => ({ user: { id: userId }, ...np }));
+        // Attributed among the whole household, then narrowed to this person.
+        // Given only this one person to choose from, a stream that belongs to
+        // someone else in the household (matched by their own AIOStreams
+        // login) had nobody else to go to and showed up here as theirs.
+        const household = await prisma.user.findMany({
+          where: { accountId: user.accountId || DEFAULT_ACCOUNT_ID, isActive: true },
+          select: { id: true, username: true, email: true, colorIndex: true, avatarUrl: true, useGravatar: true }
+        });
+        const merged = await mergeProxyNowPlaying(prisma, user.accountId || DEFAULT_ACCOUNT_ID, household.length ? household : [user], wrapped);
         nowPlaying.length = 0;
-        nowPlaying.push(...merged.map(m => ({ item: m.item, startTime: m.startTime, videoId: m.videoId })));
+        nowPlaying.push(...merged.filter(m => m.user?.id === userId).map(m => ({
+          item: m.item,
+          startTime: m.startTime,
+          videoId: m.videoId,
+          // What the admin page gets too: where playback is, and whether
+          // this is a live proxy stream and its timer still running.
+          lastPosition: m.lastPosition ?? null,
+          totalDuration: m.totalDuration ?? null,
+          ...(m.source ? { source: m.source, elapsedSeconds: m.elapsedSeconds, elapsedFrozen: m.elapsedFrozen } : {})
+        })));
       } catch (error) {
         console.warn('[PublicLibrary] Failed to merge proxy now playing:', error.message);
       }
@@ -2946,7 +3117,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         }
         let validated
         try {
-          validated = await getPublicUser(authKey, req)
+          validated = await getPublicUser(authKey, req, userId)
         } catch {
           return res.status(401).json({ error: 'Invalid or expired Stremio session', message: 'Invalid or expired Stremio session - please sign in again before deleting your account' })
         }

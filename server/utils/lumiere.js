@@ -86,12 +86,17 @@ async function call(base, path, { params, body, timeoutMs = TIMEOUT_MS } = {}) {
   const { url, headers } = requestParts(base, path, params)
   let res
   try {
-    res = await fetch(url, {
+    const init = {
       method: body ? 'POST' : 'GET',
       headers: body ? { ...headers, 'Content-Type': 'application/json' } : headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
-    })
+    }
+    // The check above vouches for the first address only; on an instance
+    // serving strangers a redirect is held to the same rule, hop by hop.
+    res = isPublic()
+      ? await require('./safeUrl').safeFetch(url, init, { allowPrivate: false })
+      : await fetch(url, init)
   } catch (e) {
     throw fail(e?.name === 'TimeoutError' ? 'LumiereDB didn’t answer in time' : 'Can’t reach LumiereDB at that address', 0)
   }

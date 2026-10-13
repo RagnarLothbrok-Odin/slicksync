@@ -48,12 +48,27 @@ function accountOf(typedLogin) {
   return typed.includes('/') ? typed.slice(0, typed.lastIndexOf('/')) : typed
 }
 
-/** Sign one household user in, trying each possible name; the first that is really them wins. */
-async function signInAs(serverUrl, names, userId, secret) {
+/**
+ * What to do with each sign-in made on the way: hand it to everyone holding
+ * that server user (jellyfinConnect.rememberSignIn). Signing a household user
+ * in retires the token they held for this device, and the name tried second
+ * on AIOStreams is the main user's own, so every sign-in counts, not only
+ * the one that is kept.
+ */
+function handToHolders(prisma, encrypt, serverUrl) {
+  return (signed) => require('./jellyfinConnect').rememberSignIn(prisma, encrypt, { serverUrl }, signed)
+}
+
+/**
+ * Sign one household user in, trying each possible name; the first that is
+ * really them wins. `onSignIn(signed)` hears of every successful sign-in.
+ */
+async function signInAs(serverUrl, names, userId, secret, onSignIn) {
   let pinNeeded = false
   for (const name of names) {
     try {
       const signed = await jfAuth.authenticateByName(serverUrl, name, secret)
+      if (typeof onSignIn === 'function') await Promise.resolve(onSignIn(signed)).catch(() => {})
       if (signed.userId === userId) return { token: signed.token, loginName: name }
     } catch (e) {
       if (e?.pinNeeded) pinNeeded = true
@@ -67,7 +82,7 @@ async function signInAs(serverUrl, names, userId, secret) {
  * there is one. Users that need a PIN, or that would not sign in, come back
  * without a token so the household card can offer to finish them.
  */
-async function signInHousehold({ probe, login, password, typedLogin }) {
+async function signInHousehold({ probe, login, password, typedLogin, onSignIn }) {
   if (!hasHousehold(probe.kind)) return []
   let users = []
   try {
@@ -87,7 +102,7 @@ async function signInHousehold({ probe, login, password, typedLogin }) {
     const pinHint = probe.kind === 'aiostreams' && user.needsPin === true
     const entry = { jellyfinUserId: user.id, name: user.name, loginName: names[0] || null, token: null, needsPin: pinHint }
     if (names.length && password != null && !entry.needsPin) {
-      const signed = await signInAs(probe.serverUrl, names, user.id, password)
+      const signed = await signInAs(probe.serverUrl, names, user.id, password, onSignIn)
       if (signed.token) { entry.token = signed.token; entry.loginName = signed.loginName }
       else if (signed.pinNeeded) entry.needsPin = true
     }
@@ -196,7 +211,7 @@ async function setTracked(prisma, profile, tracked) {
 async function signInProfile(prisma, encrypt, { profile, owner, password, pin }) {
   const names = String(profile.loginName || profile.name).split('\n').filter(Boolean)
   const secret = pin ? `${password || ''}/${pin}` : (password || '')
-  const signed = await signInAs(owner.jellyfinServerUrl, names, profile.jellyfinUserId, secret)
+  const signed = await signInAs(owner.jellyfinServerUrl, names, profile.jellyfinUserId, secret, handToHolders(prisma, encrypt, owner.jellyfinServerUrl))
   if (!signed.token) {
     throw Object.assign(new Error(signed.pinNeeded ? 'That PIN did not work' : 'Wrong password'), { status: 400 })
   }
@@ -300,6 +315,7 @@ module.exports = {
   hasHousehold,
   loginNamesFor,
   signInAs,
+  handToHolders,
   signInHousehold,
   saveHousehold,
   trackedProfiles,

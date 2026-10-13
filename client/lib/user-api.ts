@@ -862,6 +862,14 @@ export const userPush = {
   },
 };
 
+/**
+ * The person's own API key. Their sign-in goes in the header like every other
+ * call here - never the address, which ends up in access logs and history.
+ */
+export async function getUserApiKey(userId: string, authKey: string): Promise<{ hasKey: boolean; apiKey: string | null }> {
+  return request(`/public-library/user-api-key?${new URLSearchParams({ userId })}`, { authKey });
+}
+
 // Convenience export
 export const userApi = {
   oauth: userOAuth,

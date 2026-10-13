@@ -69,6 +69,10 @@ export interface PersonCredit {
 
 interface FetchOptions extends RequestInit {
   token?: string;
+  // For a background read a page fires on its own rather than data the page
+  // needs: a 401 stays an answer for the caller and never clears the sign-in
+  // or sends anyone to the login page.
+  quiet401?: boolean;
 }
 
 // Helper to get CSRF token from cookies (for non-GET requests)
@@ -352,11 +356,21 @@ class ApiClient {
         // tenant-scoped requests there and 401 - without this exclusion that
         // 401 hijacked the page to /login?mode=admin before the superadmin
         // login form ever got a chance to render.
+        //
+        // /u/ is the shared stats page (never /u alone, which would also
+        // match /user): it is open to anyone with the link and makes no
+        // signed-in calls of its own, so a 401 there is never a reason to
+        // send the visitor away. The same goes for any call that opts out
+        // with quiet401 - the theme preference read, which every page fires
+        // and which is how a logged-out visitor on a public page (a stats
+        // link, an invite) would otherwise be bounced to the login page.
         if (
           response.status === 401 &&
+          !options.quiet401 &&
           typeof window !== 'undefined' &&
           !window.location.pathname.startsWith('/login') &&
-          !window.location.pathname.startsWith('/superadmin')
+          !window.location.pathname.startsWith('/superadmin') &&
+          !window.location.pathname.startsWith('/u/')
         ) {
           // Do not redirect if the failure happened during an active auth attempt/management,
           // or came from /ext/* - that prefix runs its own API-key auth (see server/routes/
@@ -469,6 +483,42 @@ class ApiClient {
       this.setToken(data.token);
     }
     return data;
+  }
+
+  /**
+   * Signs the admin out for real. The server drops its session cookies (they
+   * are httpOnly, so only it can), then this browser forgets the bearer token,
+   * the signed-in flag and the cached account data - forgetting only those
+   * left the session alive, and on a private instance the login page simply
+   * let the person back in. Plain fetch plus the cookie helper, so it behaves
+   * the same with a mouse, a touch screen or a D-pad inside a WebView.
+   * Never throws: an expired session answers 401 and there is nothing left to
+   * end, and an unreachable server must not stop this browser forgetting (nor
+   * leave someone with only a D-pad staring at a button that does nothing).
+   */
+  async logout() {
+    const csrfToken = getCsrfToken();
+    // Older WebViews have no AbortController; they just wait as fetch does.
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        signal: controller?.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+        },
+        body: '{}',
+      });
+    } catch {
+      // Unreachable server - carry on and clear what is held here.
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    this.clearToken();
+    try { localStorage.removeItem('slicksync-admin-token'); } catch {}
   }
 
   async unlinkStremio(password: string) {
@@ -1715,7 +1765,7 @@ class ApiClient {
   }
 
   async deploySnapshot(id: string, targetUserId: string) {
-    return this.fetch<{ deployed: number; failed: number; targetUserId: string }>(`/snapshots/${id}/deploy`, {
+    return this.fetch<{ deployed: number; failed: number; targetUserId: string; leftOut?: string[] }>(`/snapshots/${id}/deploy`, {
       method: 'POST',
       body: JSON.stringify({ targetUserId }),
     });
@@ -2934,7 +2984,10 @@ class ApiClient {
   }
 
   async getThemePref() {
-    return this.fetch<{ themePref: ThemePref | null }>('/settings/theme-pref');
+    // A preference, not a page's data - and the theme provider asks for it on
+    // every page, signed in or not. Without a session the answer is 401 and
+    // the colours simply stay as this device has them.
+    return this.fetch<{ themePref: ThemePref | null }>('/settings/theme-pref', { quiet401: true });
   }
   async saveThemePref(themePref: ThemePref | null) {
     return this.fetch<{ themePref: ThemePref | null }>('/settings/theme-pref', {

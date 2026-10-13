@@ -1,16 +1,50 @@
 const express = require('express');
 const { StremioAPIClient } = require('stremio-api-client');
-const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { handleStremioError } = require('../utils/handlers');
 const { findUserById } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { sendShareNotification } = require('../utils/activityMonitor');
 const { postDiscord, fetchMetadata } = require('../utils/notify');
-const { getAccountDateString, resolveAccountTimezone } = require('../utils/dateUtils');
+const { getAccountDateString, resolveAccountTimezone, getAccountDayNumber } = require('../utils/dateUtils');
+const { assertSafeUrl, safeFetch, instancePolicy } = require('../utils/safeUrl');
 const { fetchOmdbRatings } = require('../utils/omdb');
 const { isProviderConnected, PROVIDER_SELECT } = require('../utils/providerInfo');
 const { resolveSimklClientId, startSimklPin, pollSimklPin, getSimklAccountInfo } = require('../utils/simklAuth');
+
+// What a person is told when an addon address they brought in is one this
+// server will not connect to. Anything else (a timeout, a 404) is described
+// by the caller. The check itself is utils/safeUrl.js; the rule is the same
+// as when an addon is added by hand: an instance serving strangers refuses
+// its own network, a household install only refuses link-local.
+function addonAddressProblem(err) {
+  switch (err?.message) {
+    case 'invalid url':
+      return 'That is not a valid web address.'
+    case 'unsupported protocol':
+      return 'Addon addresses must start with http:// or https://.'
+    case 'blocked host':
+      return instancePolicy().allowPrivate
+        ? 'That address is a link-local one (such as 169.254.x.x), which this server never connects to.'
+        : 'That address is on a private or internal network, which this server does not connect to.'
+    case 'too many redirects':
+      return 'That address redirected too many times.'
+    default:
+      return null
+  }
+}
+
+// Whether this address is one the server will never connect to. A name it
+// cannot look up is not: the addon may simply be down today, and an import
+// still keeps it.
+async function isRefusedAddonAddress(url) {
+  try {
+    await assertSafeUrl(url, instancePolicy())
+    return false
+  } catch (e) {
+    return e?.message === 'blocked host'
+  }
+}
 
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash, createProvider }) => {
@@ -484,6 +518,120 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   // slug itself, a random 32-char token unguessable by brute force, is the
   // only "auth" this needs.
 
+  // The link is a page meant to be shared, so it can be loaded again and again
+  // by anyone who has it, and working out the stats reads every watch-history
+  // row the person has. That part is done at most once per link per five
+  // minutes (and once, not several times, when many views arrive together).
+  // The link itself is looked up on every view - one indexed row - so a link
+  // that has been turned off stops answering at once instead of when the
+  // cached numbers expire, and a changed name or picture shows straight away.
+  const PUBLIC_STATS_TTL_MS = 5 * 60 * 1000
+  const PUBLIC_STATS_MAX_LINKS = 500
+  const publicStatsCache = new Map() // slug -> { userId, at, stats }, oldest first
+  const publicStatsPending = new Map() // slug -> the scan already running for it
+
+  // The calendar day before `day`, both as YYYYMMDD numbers (see
+  // getAccountDayNumber). Plain calendar arithmetic in UTC, so a daylight-
+  // saving change in the account's zone can never skip or repeat a day.
+  const dayBefore = (day) => {
+    const earlier = new Date(Date.UTC(Math.floor(day / 10000), (Math.floor(day / 100) % 100) - 1, day % 100) - 86400000)
+    return earlier.getUTCFullYear() * 10000 + (earlier.getUTCMonth() + 1) * 100 + earlier.getUTCDate()
+  }
+
+  async function computePublicStats(user) {
+    const accountId = user.accountId || 'default'
+    const [movies, episodes, timeZone] = await Promise.all([
+      prisma.movieWatchHistory.findMany({
+        where: { accountId, userId: user.id },
+        select: { itemName: true, poster: true, durationSeconds: true, watchedAt: true },
+      }),
+      prisma.episodeWatchHistory.findMany({
+        where: { accountId, userId: user.id },
+        select: { showName: true, poster: true, durationSeconds: true, watchedAt: true },
+      }),
+      resolveAccountTimezone(prisma, accountId),
+    ])
+
+    const totalWatchSeconds = [...movies, ...episodes].reduce((sum, r) => sum + (r.durationSeconds || 0), 0)
+
+    // Top titles by accumulated duration - movies and episodes of the same
+    // show grouped together under the show's own name.
+    const byTitle = new Map()
+    for (const m of movies) {
+      if (!m.itemName) continue
+      const key = m.itemName
+      const cur = byTitle.get(key) || { name: m.itemName, poster: m.poster, seconds: 0 }
+      cur.seconds += m.durationSeconds || 0
+      byTitle.set(key, cur)
+    }
+    for (const e of episodes) {
+      if (!e.showName) continue
+      const key = e.showName
+      const cur = byTitle.get(key) || { name: e.showName, poster: e.poster, seconds: 0 }
+      cur.seconds += e.durationSeconds || 0
+      if (!cur.poster && e.poster) cur.poster = e.poster
+      byTitle.set(key, cur)
+    }
+    const topTitles = Array.from(byTitle.values())
+      .sort((a, b) => b.seconds - a.seconds)
+      .slice(0, 10)
+      .map((t) => ({ name: t.name, poster: t.poster }))
+
+    // Simple day-streak over this user's own watchedAt dates - ending
+    // today or yesterday (so a streak survives up until the point the
+    // account's actual "today" catches up), consecutive days back from
+    // there. Days are the account's own calendar days, not UTC ones, so a
+    // late-evening watch counts for the evening it happened in. Self-contained
+    // rather than reusing buildMetricsForAccount's version, which is entangled
+    // with a full account-wide, period-filtered aggregation this lightweight
+    // public endpoint has no need for.
+    const watchDays = new Set()
+    for (const r of [...movies, ...episodes]) {
+      if (!r.watchedAt) continue
+      const watched = new Date(r.watchedAt)
+      if (!Number.isNaN(watched.getTime())) watchDays.add(getAccountDayNumber(watched, timeZone))
+    }
+    let streak = 0
+    const today = getAccountDayNumber(new Date(Date.now()), timeZone)
+    let day = watchDays.has(today) ? today : (watchDays.has(dayBefore(today)) ? dayBefore(today) : null)
+    // Each pass uses up one distinct watched day, so this ends on its own.
+    while (day !== null && watchDays.has(day)) {
+      streak++
+      day = dayBefore(day)
+    }
+
+    return {
+      totalWatchHours: Math.round((totalWatchSeconds / 3600) * 10) / 10,
+      totalTitles: byTitle.size,
+      streak,
+      topTitles,
+    }
+  }
+
+  function publicStatsFor(slug, user) {
+    const cached = publicStatsCache.get(slug)
+    if (cached && cached.userId === user.id && Date.now() - cached.at < PUBLIC_STATS_TTL_MS) {
+      return Promise.resolve(cached.stats)
+    }
+    let pending = publicStatsPending.get(slug)
+    if (!pending) {
+      pending = computePublicStats(user)
+        .then((stats) => {
+          // Re-adding moves a link to the newest end; when the cache is full
+          // the link that was worked out longest ago goes.
+          publicStatsCache.delete(slug)
+          while (publicStatsCache.size >= PUBLIC_STATS_MAX_LINKS) {
+            publicStatsCache.delete(publicStatsCache.keys().next().value)
+          }
+          publicStatsCache.set(slug, { userId: user.id, at: Date.now(), stats })
+          return stats
+        })
+        .finally(() => publicStatsPending.delete(slug))
+      publicStatsPending.set(slug, pending)
+    }
+    return pending
+  }
+
   // GET /users/public-stats/:slug - the actual public payload. No auth, no
   // accountId scoping (the slug IS the scope - it's globally unique). Only
   // ever returns a small, deliberately curated set of fields: username,
@@ -491,79 +639,26 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   // provider details, never anything else on the account.
   router.get('/public-stats/:slug', async (req, res) => {
     try {
+      const slug = req.params.slug
       const user = await prisma.user.findFirst({
-        where: { publicStatsSlug: req.params.slug, publicStatsEnabled: true },
+        where: { publicStatsSlug: slug, publicStatsEnabled: true },
         select: { id: true, accountId: true, username: true, avatarUrl: true, colorIndex: true },
       })
-      if (!user) return res.status(404).json({ error: 'This stats page is not available' })
-
-      const [movies, episodes] = await Promise.all([
-        prisma.movieWatchHistory.findMany({
-          where: { accountId: user.accountId || 'default', userId: user.id },
-          select: { itemName: true, poster: true, durationSeconds: true, watchedAt: true },
-        }),
-        prisma.episodeWatchHistory.findMany({
-          where: { accountId: user.accountId || 'default', userId: user.id },
-          select: { showName: true, poster: true, durationSeconds: true, watchedAt: true },
-        }),
-      ])
-
-      const totalWatchSeconds = [...movies, ...episodes].reduce((sum, r) => sum + (r.durationSeconds || 0), 0)
-
-      // Top titles by accumulated duration - movies and episodes of the same
-      // show grouped together under the show's own name.
-      const byTitle = new Map()
-      for (const m of movies) {
-        if (!m.itemName) continue
-        const key = m.itemName
-        const cur = byTitle.get(key) || { name: m.itemName, poster: m.poster, seconds: 0 }
-        cur.seconds += m.durationSeconds || 0
-        byTitle.set(key, cur)
+      if (!user) {
+        publicStatsCache.delete(slug)
+        return res.status(404).json({ error: 'This stats page is not available' })
       }
-      for (const e of episodes) {
-        if (!e.showName) continue
-        const key = e.showName
-        const cur = byTitle.get(key) || { name: e.showName, poster: e.poster, seconds: 0 }
-        cur.seconds += e.durationSeconds || 0
-        if (!cur.poster && e.poster) cur.poster = e.poster
-        byTitle.set(key, cur)
-      }
-      const topTitles = Array.from(byTitle.values())
-        .sort((a, b) => b.seconds - a.seconds)
-        .slice(0, 10)
-        .map((t) => ({ name: t.name, poster: t.poster }))
 
-      // Simple day-streak over this user's own watchedAt dates - ending
-      // today or yesterday (so a streak survives up until the point the
-      // account's actual "today" catches up), consecutive days back from
-      // there. Self-contained rather than reusing buildMetricsForAccount's
-      // version, which is entangled with a full account-wide, period-
-      // filtered aggregation this lightweight public endpoint has no need for.
-      const dateSet = new Set(
-        [...movies, ...episodes]
-          .filter((r) => r.watchedAt)
-          .map((r) => new Date(r.watchedAt).toISOString().split('T')[0])
-      )
-      let streak = 0
-      const today = new Date().toISOString().split('T')[0]
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
-      let checkDateStr = dateSet.has(today) ? today : (dateSet.has(yesterday) ? yesterday : null)
-      if (checkDateStr) {
-        let checkDate = new Date(checkDateStr)
-        while (dateSet.has(checkDate.toISOString().split('T')[0])) {
-          streak++
-          checkDate.setDate(checkDate.getDate() - 1)
-        }
-      }
+      const stats = await publicStatsFor(slug, user)
 
       res.json({
         username: user.username,
         avatarUrl: user.avatarUrl,
         colorIndex: user.colorIndex,
-        totalWatchHours: Math.round((totalWatchSeconds / 3600) * 10) / 10,
-        totalTitles: byTitle.size,
-        streak,
-        topTitles,
+        totalWatchHours: stats.totalWatchHours,
+        totalTitles: stats.totalTitles,
+        streak: stats.streak,
+        topTitles: stats.topTitles,
       })
     } catch (error) {
       console.error('Error fetching public stats:', error)
@@ -1897,8 +1992,17 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const cached = (nocache || deepActivity) ? null : getCachedMetrics(accountId, period)
       if (cached) {
         console.log(`[API] Returning cached metrics for ${period}`)
-        res.json(cached)
-        warmActivityPosters(cached)
+        // Everything in the cached object can be a few minutes old except
+        // who is watching right now - that is read live on every request.
+        let answer = cached
+        try {
+          const { liveNowPlaying } = require('../utils/metricsBuilder')
+          answer = { ...cached, nowPlaying: await liveNowPlaying(prisma, accountId) }
+        } catch (e) {
+          console.warn('[API] Live Now Playing failed, sending the cached list:', e?.message)
+        }
+        res.json(answer)
+        warmActivityPosters(answer)
         return
       }
 
@@ -3007,7 +3111,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params
-      const { username, email, password, groupId, colorIndex, avatarUrl, expiresAt } = req.body
+      const { username, email, groupId, colorIndex, avatarUrl, expiresAt } = req.body
 
 
       // Check if user exists
@@ -3048,10 +3152,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         }
 
         updateData.email = email
-      }
-
-      if (password !== undefined && password.trim() !== '') {
-        updateData.password = await bcrypt.hash(password, 12)
       }
 
       if (colorIndex !== undefined) {
@@ -3603,7 +3703,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
             try {
               const controller = new AbortController()
               const timeout = setTimeout(() => controller.abort(), 5000)
-              const resp = await fetch(manifestUrl, { signal: controller.signal })
+              // The address comes from the person's own provider account, so
+              // it is checked like any other address typed in somewhere. A
+              // refused one reads as an addon that did not answer.
+              const resp = await safeFetch(manifestUrl, { signal: controller.signal }, instancePolicy())
               clearTimeout(timeout)
               if (!resp.ok) return null
               return await resp.json()
@@ -4513,7 +4616,27 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const timeout = setTimeout(() => controller.abort(), 8000)
       let data
       try {
-        const resp = await fetch(url, { signal: controller.signal })
+        // The address is whatever the caller typed, so it goes through the
+        // same check as every other address the server fetches for someone:
+        // an instance serving strangers refuses its own network, a household
+        // install may reach its own, and neither may reach link-local (where
+        // a cloud host keeps its credentials). Redirects are checked hop by
+        // hop. The loopback address built above from a verified SlickTrax
+        // token is ours, not the caller's, and is read as it always was.
+        let resp
+        try {
+          resp = loopback
+            ? await fetch(url, { signal: controller.signal })
+            : await safeFetch(url, { signal: controller.signal }, instancePolicy())
+        } catch (fetchError) {
+          if (['blocked host', 'unsupported protocol', 'invalid url'].includes(fetchError.message)) {
+            return res.status(400).json({ message: "That address can't be used" })
+          }
+          if (fetchError.message === 'unresolvable host') {
+            return res.status(400).json({ message: "That address couldn't be found" })
+          }
+          throw fetchError
+        }
         if (!resp.ok) return res.status(502).json({ message: `Addon returned ${resp.status}` })
         data = await resp.json()
       } finally {
@@ -4886,27 +5009,59 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   router.patch('/:id', async (req, res) => {
     try {
       const { id } = req.params
-      const updateData = req.body
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
 
-      // Remove any fields that shouldn't be updated directly
-      delete updateData.id
-      delete updateData.accountId
-      delete updateData.createdAt
-      delete updateData.updatedAt
+      // Only a person's two notification settings are written here. Which
+      // server a person is, and the sign-in that proves it, are set by
+      // signing in to that server and never by a request that names them:
+      // a household that could write them could point a person at someone
+      // else's server account and be handed that account's next sign-in.
+      const allowed = new Set(['discordWebhookUrl', 'notifyOnWatch'])
+      const unknown = Object.keys(body).filter((key) => !allowed.has(key))
+      if (unknown.length > 0) {
+        return res.status(400).json({ message: `These cannot be changed here: ${unknown.join(', ')}` })
+      }
+
+      const updateData = {}
+      if (body.discordWebhookUrl !== undefined) {
+        if (body.discordWebhookUrl !== null && typeof body.discordWebhookUrl !== 'string') {
+          return res.status(400).json({ message: 'discordWebhookUrl must be text or empty' })
+        }
+        const webhook = typeof body.discordWebhookUrl === 'string' ? body.discordWebhookUrl.trim() : ''
+        if (webhook.length > 2048) {
+          return res.status(400).json({ message: 'That webhook address is too long' })
+        }
+        updateData.discordWebhookUrl = webhook || null
+      }
+      if (body.notifyOnWatch !== undefined) {
+        if (typeof body.notifyOnWatch !== 'boolean') {
+          return res.status(400).json({ message: 'notifyOnWatch must be true or false' })
+        }
+        updateData.notifyOnWatch = body.notifyOnWatch
+      }
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ message: 'Nothing to change' })
+      }
+
+      const existing = await prisma.user.findFirst({
+        where: { id, accountId: getAccountId(req) },
+        select: { id: true }
+      })
+      if (!existing) {
+        return responseUtils.notFound(res, 'User')
+      }
 
       const user = await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
+        where: { id },
         data: updateData
       })
 
-      // Hide sensitive fields
-      delete user.password
-      delete user.stremioAuthKey
-
-      res.json(user)
+      res.json({
+        id: user.id,
+        username: user.username,
+        discordWebhookUrl: user.discordWebhookUrl || null,
+        notifyOnWatch: user.notifyOnWatch !== false
+      })
     } catch (error) {
       console.error('Error patching user:', error)
       res.status(500).json({ message: 'Failed to patch user' })
@@ -5120,7 +5275,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         for (const addonUrl of addonUrls) {
           try {
             // Fetch addon manifest
-            const manifestResponse = await fetch(addonUrl)
+            const manifestResponse = await safeFetch(addonUrl, {}, instancePolicy())
             if (!manifestResponse.ok) {
               throw new Error(`Failed to fetch manifest: ${manifestResponse.status}`)
             }
@@ -5139,7 +5294,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
             results.push({
               url: addonUrl,
               status: 'error',
-              error: error.message
+              error: addonAddressProblem(error) || error.message
             })
           }
         }
@@ -6630,7 +6785,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       return res.json({ message: 'Addon removed from their account' })
     } catch (error) {
       console.error('Error removing Stremio addon:', error)
-      return res.status(502).json({ message: 'Failed to remove addon from Stremio', error: error?.message })
+      // When the provider could not write the list back, its own message says
+      // the list may now be empty and to run a sync; a generic line hides that.
+      const message = error?.code === 'ADDON_LIST_NOT_RESTORED' ? error.message : 'Failed to remove addon from Stremio'
+      return res.status(502).json({ message, error: error?.message })
     }
   })
 
@@ -6901,7 +7059,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       for (const addonUrl of addonUrls) {
         try {
           // Fetch addon manifest
-          const manifestResponse = await fetch(addonUrl)
+          const manifestResponse = await safeFetch(addonUrl, {}, instancePolicy())
           if (!manifestResponse.ok) {
             throw new Error(`Failed to fetch manifest: ${manifestResponse.status}`)
           }
@@ -6994,7 +7152,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           results.push({
             url: addonUrl,
             status: 'error',
-            error: error.message
+            error: addonAddressProblem(error) || error.message
           })
         }
       }
@@ -7094,7 +7252,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error reordering Stremio addons:', error)
-      res.status(500).json({ message: 'Failed to reorder addons', error: error?.message })
+      const message = error?.code === 'ADDON_LIST_NOT_RESTORED' ? error.message : 'Failed to reorder addons'
+      res.status(500).json({ message, error: error?.message })
     }
   });
 
@@ -7387,7 +7546,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           if ((a?.manifestUrl || a?.transportUrl || a?.url) && (!a?.manifest || !a?.name || a.name === 'Unknown')) {
             try {
               const manifestUrl = a?.manifestUrl || a?.transportUrl || a?.url;
-              const response = await fetch(manifestUrl);
+              // An address from the person's own Stremio account, checked
+              // like any other: a refused one reads as an addon that did not answer.
+              const response = await safeFetch(manifestUrl, {}, instancePolicy());
               if (response.ok) {
                 manifestData = await response.json();
               }
@@ -7508,6 +7669,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const processedAddons = []
       const newlyImportedAddons = []
       const existingAddons = []
+      const skippedAddons = []
 
       for (const addonData of addons) {
         const addonUrl = addonData.manifestUrl || addonData.transportUrl || addonData.url
@@ -7516,11 +7678,21 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           continue
         }
 
+        // Every later reload and sync fetches this address, so one this
+        // server will not connect to is left out whether or not the manifest
+        // came with it - the same rule as adding an addon by hand. The rest
+        // of the list is still imported.
+        if (await isRefusedAddonAddress(addonUrl)) {
+          console.log(`⚠️ Skipping addon at an address this server does not connect to: ${addonUrl}`)
+          skippedAddons.push({ url: addonUrl, reason: addonAddressProblem({ message: 'blocked host' }) })
+          continue
+        }
+
         // Get manifest data first
         let manifestData = addonData.manifest
         if (!manifestData) {
           try {
-            const resp = await fetch(addonUrl)
+            const resp = await safeFetch(addonUrl, {}, instancePolicy())
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
             manifestData = await resp.json()
           } catch (e) {
@@ -7589,7 +7761,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           // Fetch original manifest for full capabilities - always try to fetch from transportUrl first
           let originalManifestObj = null
           try {
-            const resp = await fetch(addonUrl)
+            const resp = await safeFetch(addonUrl, {}, instancePolicy())
             if (resp.ok) {
               originalManifestObj = await resp.json()
             }
@@ -7767,9 +7939,10 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         await assignUserToGroup(prisma, userId, group.id, req)
       }
 
-      const message = existingAddons.length > 0
+      const message = (existingAddons.length > 0
         ? `Successfully imported ${processedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed, ${newlyImportedAddons.length} newly created)`
-        : `Successfully imported ${processedAddons.length} addons to group "${groupName}"`
+        : `Successfully imported ${processedAddons.length} addons to group "${groupName}"`)
+        + (skippedAddons.length > 0 ? `. ${skippedAddons.length} left out: ${skippedAddons[0].reason}` : '')
 
       res.json({
         message,
@@ -7777,7 +7950,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         groupName: group.name,
         addonCount: processedAddons.length,
         newlyImported: newlyImportedAddons.length,
-        existing: existingAddons.length
+        existing: existingAddons.length,
+        skipped: skippedAddons
       })
 
     } catch (error) {

@@ -292,6 +292,31 @@ const OPERATORS = {
 // Throwing is fine and expected: the engine records the failure per-action and
 // keeps going with the rest of the rule.
 
+// Headers a webhook rule may never set: the ones that describe the connection
+// or the body, which would corrupt the request or confuse where the body ends.
+// Compared in lower case.
+const WEBHOOK_CONNECTION_HEADERS = new Set([
+  'content-length', 'connection', 'transfer-encoding', 'upgrade', 'te',
+  'trailer', 'keep-alive', 'proxy-authorization', 'proxy-connection', 'expect',
+])
+// On an instance serving strangers a rule may not name another virtual host or
+// borrow a cookie either. A household's own install keeps both: a rule that
+// calls a LAN service by its address behind a name-routed proxy needs Host, and
+// some services want a Cookie.
+const WEBHOOK_STRANGER_HEADERS = new Set(['host', 'cookie'])
+// An HTTP header name is a "token": letters, digits and a few symbols.
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+// What the run log says when safeUrl turns an address away.
+const WEBHOOK_REFUSALS = {
+  'blocked host': (policy) => (policy.allowPrivate
+    ? 'Webhook address not allowed: this server never calls link-local addresses'
+    : 'Webhook address not allowed: this server only calls public addresses'),
+  'unresolvable host': 'Webhook address could not be found',
+  'too many redirects': 'Webhook redirected too many times',
+  'unsupported protocol': 'Webhook redirected to an address that is not http or https',
+  'invalid url': 'Webhook redirected to an invalid address',
+}
+
 const ACTIONS = {
   notify: {
     label: 'Send a notification',
@@ -316,34 +341,56 @@ const ACTIONS = {
       { name: 'url', label: 'URL', type: 'string', required: true },
       { name: 'headers', label: 'Extra headers (optional)', type: 'text', hint: 'One per line, e.g. Authorization: Bearer xxx' },
     ],
-    // Same trust model as the Discord webhook URL already configurable in
-    // Settings - only an account admin can create/edit an automation rule,
-    // so a URL pointed at an internal address is exactly as much (and no
-    // more) of a concern as that existing feature already is. Not treating
-    // this as a new attack surface requiring SSRF guarding the Discord path
-    // never needed either.
+    // The URL and headers are free text, and on an instance that serves
+    // strangers any account can write a rule, so this is a way to make the
+    // server send a request wherever it likes. It goes through safeFetch: such
+    // an instance only calls public addresses (and a redirect is checked at
+    // every hop), while a household install may reach its own network - Home
+    // Assistant, ntfy or n8n on the LAN is the point of this action - and is
+    // only kept away from link-local addresses. The Discord webhook is not
+    // comparable: it is always https on port 443 with a fixed body.
     async run({ config, payload }) {
+      const { safeFetch, instancePolicy } = require('../safeUrl')
       const url = typeof config.url === 'string' ? config.url.trim() : ''
       if (!url) throw new Error('No webhook URL configured')
       let parsed
       try { parsed = new URL(url) } catch { throw new Error('Invalid webhook URL') }
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Webhook URL must be http or https')
 
+      const policy = instancePolicy()
       const headers = { 'Content-Type': 'application/json' }
+      const ignored = []
       for (const line of String(config.headers || '').split('\n')) {
         const idx = line.indexOf(':')
         if (idx === -1) continue
         const key = line.slice(0, idx).trim()
         const value = line.slice(idx + 1).trim()
-        if (key) headers[key] = value
+        if (!key) continue
+        // These belong to the connection and the request itself, not to the
+        // person writing the rule. Left out rather than failing the action,
+        // and named in the result so the run log says why.
+        const lower = key.toLowerCase()
+        if (WEBHOOK_CONNECTION_HEADERS.has(lower) || (!policy.allowPrivate && WEBHOOK_STRANGER_HEADERS.has(lower))) {
+          ignored.push(key.slice(0, 40))
+          continue
+        }
+        if (!HEADER_NAME.test(key) || /[\r\n\0]/.test(value)) throw new Error(`Invalid header "${key.slice(0, 40)}"`)
+        headers[key] = value
       }
 
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 8000)
       try {
-        const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload || {}), signal: controller.signal })
+        let res
+        try {
+          res = await safeFetch(url, { method: 'POST', headers, body: JSON.stringify(payload || {}), signal: controller.signal }, policy)
+        } catch (e) {
+          const refused = WEBHOOK_REFUSALS[e?.message]
+          if (refused) throw new Error(typeof refused === 'function' ? refused(policy) : refused)
+          throw e
+        }
         if (!res.ok) throw new Error(`Webhook returned ${res.status}`)
-        return `Called webhook (${res.status})`
+        return `Called webhook (${res.status})${ignored.length ? `; not sent: ${ignored.join(', ')}` : ''}`
       } finally {
         clearTimeout(timeoutId)
       }

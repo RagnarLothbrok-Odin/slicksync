@@ -47,19 +47,26 @@ function isAio(person) {
 }
 
 async function call(base, path, { auth, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
-  if (restrictsPrivateAddresses()) {
+  const strict = restrictsPrivateAddresses()
+  if (strict) {
     const { assertSafeUrl } = require('./safeUrl')
     await assertSafeUrl(base)
   }
   let res
   try {
-    res = await fetch(`${base}${path}`, {
+    const init = {
       headers: { Accept: 'application/json', ...(auth ? { Authorization: auth } : {}) },
       signal: AbortSignal.timeout(timeoutMs),
-    })
+    }
+    // The check above vouches for the first address only; on an instance
+    // serving strangers a redirect is held to the same rule, hop by hop.
+    res = strict
+      ? await require('./safeUrl').safeFetch(`${base}${path}`, init, { allowPrivate: false })
+      : await fetch(`${base}${path}`, init)
   } catch (e) {
     const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError'
-    throw fail(timedOut ? 'AIOStreams did not answer in time' : `Could not reach AIOStreams: ${e?.cause?.code || e?.message || 'network error'}`, 502)
+    const refused = /^(blocked host|unsupported protocol|invalid url|too many redirects)$/.test(e?.message || '')
+    throw fail(timedOut ? 'AIOStreams did not answer in time' : refused ? 'AIOStreams sent this server to an address it does not connect to' : `Could not reach AIOStreams: ${e?.cause?.code || e?.message || 'network error'}`, 502)
   }
   const body = await res.json().catch(() => null)
   if (!res.ok || body?.success === false) {

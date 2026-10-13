@@ -76,7 +76,12 @@ async function fetchImage(url, headers = {}, { checkAddress = false } = {}) {
       const { assertSafeUrl } = require('./safeUrl')
       await assertSafeUrl(url)
     }
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000), redirect: 'follow' })
+    const init = { headers, signal: AbortSignal.timeout(10000), redirect: 'follow' }
+    // When the address is checked, so is every redirect it meets: a picture
+    // address that answers with a redirect to an internal one is not followed.
+    const res = checkAddress
+      ? await require('./safeUrl').safeFetch(url, init, { allowPrivate: false })
+      : await fetch(url, init)
     if (!res.ok) return null
     const type = String(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
     if (!EXT_BY_TYPE[type]) return null

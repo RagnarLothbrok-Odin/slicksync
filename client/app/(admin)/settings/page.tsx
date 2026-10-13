@@ -1251,14 +1251,14 @@ export default function SettingsPage() {
   };
 
   // Irreversible - server re-checks public-instance-only and always deletes
-  // the caller's own account (never an id from here). Clears the same
-  // localStorage token NebulaTopbar's own handleLogout does and sends the
-  // browser to /login, since the account (and its session) no longer exists.
+  // the caller's own account (never an id from here). Signs out the same way
+  // NebulaTopbar's own handleLogout does and sends the browser to /login,
+  // since the account (and its session) no longer exists.
   const handleDeleteAccount = async () => {
     setIsDeletingAccount(true);
     try {
       await api.deleteMyAccount();
-      localStorage.removeItem('slicksync-admin-token');
+      await api.logout();
       toast.success('Account deleted');
       window.location.href = '/login?mode=admin';
     } catch (e: any) {
@@ -2541,8 +2541,9 @@ export default function SettingsPage() {
                           // Not fatal - the manual key field below always works.
                           toast.error(r.error || 'Could not read that backend - enter the anon key manually');
                         }
-                      } catch {
-                        toast.error('Could not reach that backend - enter the anon key manually');
+                      } catch (e) {
+                        // The server says why when it has a reason (an address it may not reach).
+                        toast.error((e instanceof Error && e.message) || 'Could not reach that backend - enter the anon key manually');
                       } finally {
                         setNuvioDiscovering(false);
                       }

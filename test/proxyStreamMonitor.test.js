@@ -89,3 +89,56 @@ test('resolveUserForActiveConnection: no match returns null', () => {
   assert.equal(resolveUserForActiveConnection(USERS, 'nobody'), null)
 })
 
+
+// --- parseDisplayName: which number is the year -----------------------------
+
+test('parseDisplayName: a number in the title is not the release year', () => {
+  assert.equal(parseDisplayName('Blade.Runner.2049.2017.1080p.BluRay.mkv'), 'Blade Runner 2049 (2017)')
+  assert.equal(parseDisplayName('Wonder.Woman.1984.2020.mkv'), 'Wonder Woman 1984 (2020)')
+  assert.equal(parseDisplayName('Death.Race.2000.1975.mkv'), 'Death Race 2000 (1975)')
+  assert.equal(parseDisplayName('Fall.2.2025.2160p.WEB-DL.mkv'), 'Fall 2 (2025)')
+})
+
+test('parseDisplayName: a number that cannot be a release year stays in the title', () => {
+  assert.equal(parseDisplayName('Blade.Runner.2049.1080p.BluRay.mkv'), 'Blade Runner 2049')
+})
+
+test('parseDisplayName: a title that is itself a year', () => {
+  assert.equal(parseDisplayName('1917.2019.mkv'), '1917 (2019)')
+  assert.equal(parseDisplayName('1984.1984.1080p.mkv'), '1984 (1984)')
+  assert.equal(parseDisplayName('2001.A.Space.Odyssey.1968.1080p.mkv'), '2001 A Space Odyssey (1968)')
+})
+
+test('parseDisplayName: a year among the release tags does not replace the release year', () => {
+  assert.equal(parseDisplayName('Movie.2019.1080p.BluRay.REMASTERED.2021.x264.mkv'), 'Movie (2019)')
+  assert.equal(parseDisplayName('Film.1999.Remastered.2021.1080p.mkv'), 'Film (1999)')
+})
+
+test('parseDisplayName: no extension, name ends in its year', () => {
+  assert.equal(parseDisplayName('Some.Film.2020'), 'Some Film (2020)')
+})
+
+test('parseDisplayName: scene tags after a second year do not make it an edition year', () => {
+  assert.equal(parseDisplayName('Wonder.Woman.1984.2020.PROPER.1080p.WEB-DL.mkv'), 'Wonder Woman 1984 (2020)')
+  assert.equal(parseDisplayName('Wonder.Woman.1984.2020.REPACK.1080p.mkv'), 'Wonder Woman 1984 (2020)')
+  assert.equal(parseDisplayName('Alien.1979.2024.PROPER.Remaster.1080p.mkv'), 'Alien (1979)')
+})
+
+test('parseDisplayName: any wording between two years means the second dates a re-release', () => {
+  assert.equal(parseDisplayName('The.Wizard.of.Oz.1939.75th.Anniversary.Edition.2013.1080p.mkv'), 'The Wizard of Oz (1939)')
+  assert.equal(parseDisplayName('Casablanca.1942.70th.Anniversary.2012.1080p.mkv'), 'Casablanca (1942)')
+  assert.equal(parseDisplayName('Metropolis.1927.Restored.Version.2010.1080p.mkv'), 'Metropolis (1927)')
+  assert.equal(parseDisplayName('Titanic.1997.3D.2012.1080p.mkv'), 'Titanic (1997)')
+  assert.equal(parseDisplayName('Movie.2010.Extended.Version.2012.mkv'), 'Movie (2010)')
+})
+
+test('parseDisplayName: a title that starts with a release-tag word keeps it', () => {
+  assert.equal(parseDisplayName('4K.Kings.2019.1080p.WEB.mkv'), '4K Kings (2019)')
+  assert.equal(parseDisplayName('HDR.Hunters.2020.1080p.mkv'), 'HDR Hunters (2020)')
+})
+
+test('parseDisplayName: a second year that dates an edition is not the release year', () => {
+  assert.equal(parseDisplayName('Blade.Runner.1982.Final.Cut.2007.1080p.mkv'), 'Blade Runner (1982)')
+  assert.equal(parseDisplayName('Alien.1979.2024.Remaster.1080p.mkv'), 'Alien (1979)')
+  assert.equal(parseDisplayName('Movie.Name.1998.2000.Special.Edition.1080p.mkv'), 'Movie Name (1998)')
+})

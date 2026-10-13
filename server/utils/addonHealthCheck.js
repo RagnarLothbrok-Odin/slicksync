@@ -5,6 +5,7 @@
 
 const { performance } = require('perf_hooks');
 const { decrypt } = require('./encryption');
+const { safeFetch, instancePolicy } = require('./safeUrl');
 
 const MINUTE_MS = 60 * 1000;
 
@@ -167,16 +168,18 @@ async function checkUrlHealth(url, name) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     
-    const response = await fetch(url, {
+    // The address is one a person saved, so it is checked like any other the
+    // server fetches for them, on every redirect too - an addon saved before
+    // that check existed is covered here rather than left as it was.
+    const response = await safeFetch(url, {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/plain, */*',
       },
       signal: controller.signal,
-      redirect: 'follow',
-    });
-    
+    }, instancePolicy());
+
     clearTimeout(timeout);
     const responseTime = Math.round(performance.now() - startTime);
     
@@ -189,6 +192,9 @@ async function checkUrlHealth(url, name) {
     const responseTime = Math.round(performance.now() - startTime);
     if (error.name === 'AbortError') {
       return { isOnline: false, error: 'Timeout', responseTime };
+    }
+    if (/^(blocked host|unsupported protocol|invalid url)$/.test(error.message || '')) {
+      return { isOnline: false, error: 'This address cannot be checked from here', responseTime };
     }
     return { isOnline: false, error: error.message || 'Network error', responseTime };
   }

@@ -29,11 +29,14 @@ export default function PublicStatsPage() {
   const [stats, setStats] = useState<PublicStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // Asked too often from this address - not the same thing as a link that is off.
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
     fetch(`${API_BASE}/users/public-stats/${encodeURIComponent(slug)}`)
       .then(async (res) => {
+        if (res.status === 429) { setBusy(true); return; }
         if (!res.ok) { setNotFound(true); return; }
         const data = await res.json();
         setStats(data);
@@ -46,6 +49,17 @@ export default function PublicStatsPage() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--color-bg)' }}>
         <div className="w-8 h-8 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ color: 'var(--color-primary)' }} />
+      </div>
+    );
+  }
+
+  if (busy) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: 'var(--color-bg)' }}>
+        <div className="text-center">
+          <h1 className="text-xl font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Try again in a moment</h1>
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>This page has been opened a lot in the last minute.</p>
+        </div>
       </div>
     );
   }

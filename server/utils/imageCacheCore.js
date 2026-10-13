@@ -29,6 +29,8 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const net = require('net')
+const dns = require('dns').promises
 const { getEncoder, sniffFormat, sourceDimensions } = require('./imageEncoder')
 const pool = require('./imageEncodePool')
 
@@ -62,7 +64,49 @@ let writesSincePrune = 0
 // Workers start (and load their codecs) at boot, while nothing is waiting.
 pool.start()
 
-const { assertSafeUrl } = require('./safeUrl')
+const { assertSafeUrl, isPrivateIp, safeFetch, instancePolicy } = require('./safeUrl')
+
+// Ranges the entry check below refuses on an instance serving strangers but
+// that a household's own install has always been able to fetch posters from:
+// carrier-grade NAT (a Tailscale address, an addon on a tailnet), Tailscale's
+// IPv6 range, and the benchmarking block (where a fake-IP proxy answers every
+// name).
+function isHouseholdReachableRange(ip) {
+  const kind = net.isIP(ip)
+  if (kind === 6) return /^fd7a:115c:a1e0:/i.test(ip)
+  if (kind !== 4) return false
+  const [a, b] = ip.split('.').map(Number)
+  return (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
+}
+
+// The entry check for a remote poster, used by the route, the pre-warmer and
+// every redirect hop. Strict for everyone, except that on a household install an
+// address in one of the ranges above is let through - and only those: LAN,
+// loopback and link-local stay refused, since the poster route answers anyone
+// and would otherwise fetch from the household's network.
+async function assertImageUrl(src) {
+  try {
+    return await assertSafeUrl(src)
+  } catch (e) {
+    if (e?.message !== 'blocked host' || !instancePolicy().allowPrivate) throw e
+    let url
+    try { url = new URL(src) } catch { throw e }
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    let addresses
+    if (net.isIP(host)) addresses = [host]
+    else if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) throw e
+    else {
+      try { addresses = (await dns.lookup(host, { all: true })).map((a) => a.address) } catch { throw e }
+    }
+    if (!addresses.length || !addresses.every((ip) => !isPrivateIp(ip) || isHouseholdReachableRange(ip))) throw e
+    return url
+  }
+}
+
+// A refusal will not change on a second attempt, so it is not retried the way
+// a timeout or a 503 is. (A name that could not be looked up may be a passing
+// DNS failure, and keeps its retries.)
+const NOT_RETRYABLE = new Set(['blocked host', 'unsupported protocol', 'invalid url', 'too many redirects'])
 
 function snapWidth(requested) {
   const n = parseInt(String(requested || ''), 10)
@@ -139,7 +183,17 @@ async function fetchOriginWithRetry(src, { followRedirects = true } = {}) {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
     try {
-      const upstream = await fetch(src, { signal: controller.signal, redirect: followRedirects ? 'follow' : 'manual' })
+      // Redirects are followed by safeFetch, which checks every hop: a poster
+      // host that is itself public could otherwise answer with a redirect to
+      // an address this server must not fetch. Real poster hosts (TMDb,
+      // fanart, Kitsu, MetaHub) redirect over http to https and across
+      // regions, which stays well inside its five-hop limit. Every hop is held
+      // to the same rule as the address the route accepted, so a household
+      // install does not follow a redirect to its LAN either. The no-follow
+      // mode is for a home server's own posters and is left as it was.
+      const upstream = followRedirects
+        ? await safeFetch(src, { signal: controller.signal }, { ...instancePolicy(), vet: assertImageUrl })
+        : await fetch(src, { signal: controller.signal, redirect: 'manual' })
       if (!upstream.ok) {
         const retryable = upstream.status === 429 || upstream.status >= 500
         const err = new Error(`upstream ${upstream.status}`)
@@ -150,6 +204,7 @@ async function fetchOriginWithRetry(src, { followRedirects = true } = {}) {
       }
     } catch (e) {
       if (/^upstream (4\d\d)/.test(e?.message || '') && !/429/.test(e.message)) throw e
+      if (NOT_RETRYABLE.has(e?.message)) throw e
       lastErr = e
     } finally {
       clearTimeout(timer)
@@ -254,7 +309,7 @@ async function warm(src, w) {
   if (!/^https?:\/\//i.test(String(src || '')) || isPassthroughUrl(src)) return false
   const width = snapWidth(w)
   if (await findCached(src, width, true)) return false
-  await assertSafeUrl(src)
+  await assertImageUrl(src)
   await produce(src, { w: width, wantsWebp: true })
   return true
 }
@@ -265,6 +320,8 @@ module.exports = {
   resolveLocalAvatar,
   isPassthroughUrl,
   assertSafeUrl,
+  assertImageUrl,
+  isHouseholdReachableRange,
   findCached,
   produce,
   warm,

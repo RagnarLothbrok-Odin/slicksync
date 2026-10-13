@@ -18,7 +18,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { copyToClipboard } from '@/lib/clipboard';
-import { userAuth, userExport } from '@/lib/user-api';
+import { userAuth, userExport, getUserApiKey } from '@/lib/user-api';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
 import { ToggleSwitch, Avatar, ConfirmModal } from '@/components/ui';
 import { useTheme, themeMeta, themeIds, ThemeId } from '@/lib/theme';
@@ -222,8 +222,7 @@ export default function UserSettingsPage() {
 
         // Fetch API key
         try {
-          const response = await fetch(`${API_BASE}/public-library/user-api-key?userId=${userId}&authKey=${encodeURIComponent(authKey)}`);
-          const data = await response.json();
+          const data = await getUserApiKey(userId, authKey);
           const hasKey = data?.hasKey || false;
           const apiKey = data?.apiKey || null;
           setApiKeyStatus({ hasKey });
@@ -344,14 +343,18 @@ export default function UserSettingsPage() {
 
   // Save Discord webhook
   const handleSaveWebhook = async () => {
-    if (!userId) return;
+    if (!userId || !authKey) return;
     setIsSavingWebhook(true);
     try {
-      await fetch(`${API_BASE}/users/${userId}`, {
+      const response = await fetch(`${API_BASE}/public-library/user-settings`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discordWebhookUrl: discordWebhookUrl.trim() || null }),
+        headers: { 'Content-Type': 'application/json', 'x-stremio-auth': authKey },
+        body: JSON.stringify({ userId, discordWebhookUrl: discordWebhookUrl.trim() || null }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || data?.error || 'Failed to save webhook');
+      }
       toast.success('Webhook URL saved');
     } catch (e: any) {
       toast.error(e.message || 'Failed to save webhook');
@@ -362,16 +365,20 @@ export default function UserSettingsPage() {
 
   // Toggle whether MY watch activity notifies at all
   const handleToggleNotifyOnWatch = async () => {
-    if (!userId || isSavingNotifyOnWatch) return;
+    if (!userId || !authKey || isSavingNotifyOnWatch) return;
     const next = !notifyOnWatch;
     setNotifyOnWatch(next);
     setIsSavingNotifyOnWatch(true);
     try {
-      await fetch(`${API_BASE}/users/${userId}`, {
+      const response = await fetch(`${API_BASE}/public-library/user-settings`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notifyOnWatch: next }),
+        headers: { 'Content-Type': 'application/json', 'x-stremio-auth': authKey },
+        body: JSON.stringify({ userId, notifyOnWatch: next }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || data?.error || 'Failed to update notification preference');
+      }
       toast.success(next ? 'Watch notifications enabled' : 'Watch notifications disabled');
     } catch (e: any) {
       setNotifyOnWatch(!next);
@@ -410,10 +417,12 @@ export default function UserSettingsPage() {
     if (!userId || !authKey) return;
     setIsGeneratingKey(true);
     try {
+      // This button is the person asking for a new key; the server only
+      // replaces one they already have when told to.
       const response = await fetch(`${API_BASE}/public-library/user-api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, authKey }),
+        body: JSON.stringify({ userId, authKey, rotate: true }),
       });
       const data = await response.json();
       const newKey = data?.apiKey;

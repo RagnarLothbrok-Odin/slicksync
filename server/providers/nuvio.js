@@ -3,8 +3,9 @@
  * Translates between Supabase addon rows and the universal addon shape.
  */
 
-const { supabaseGet, supabasePost, supabaseDelete, supabaseRpc } = require('./supabase')
+const { supabaseGet, supabasePost, supabaseDelete, supabaseRpc, isCircuitOpen, isTransientFailure } = require('./supabase')
 const { refreshNuvioToken, isTokenExpired } = require('./nuvioAuth')
+const { mapLimit } = require('../utils/mapLimit')
 
 // Module-level (not per-provider-instance) token cache and in-flight-refresh
 // tracking, keyed by Nuvio userId. createProvider() is called fresh on
@@ -28,6 +29,164 @@ const { refreshNuvioToken, isTokenExpired } = require('./nuvioAuth')
 // concurrent callers await the same refresh instead of racing each other.
 const tokenCache = new Map()      // userId -> { accessToken, refreshToken }
 const refreshPromises = new Map() // userId -> Promise<string> (in-flight refresh)
+
+// One write at a time per person and profile. A list is replaced by deleting
+// it and inserting the new one, so two writes for the same list that overlap
+// can interleave (delete, delete, insert, insert) and leave it holding both,
+// or break on the insert that finds the other's rows still there. Sync All,
+// a group edit and a person's own sync all reach the same list, so this is
+// not rare. In-process on purpose: one server process serves a household, so
+// a database lock would add nothing. A write that fails does not hold up the
+// next one.
+const writeQueues = new Map() // `${userId}:${profileId}` -> tail of the queue
+function inWriteQueue(key, task) {
+  const run = (writeQueues.get(key) || Promise.resolve()).then(task)
+  const tail = run.then(() => {}, () => {})
+  writeQueues.set(key, tail)
+  tail.then(() => { if (writeQueues.get(key) === tail) writeQueues.delete(key) })
+  return run
+}
+
+// While the backend is being held back (see the breaker in supabase.js), a
+// write does not start: the person's sync fails with this message before
+// their list is touched, instead of going ahead and being refused halfway.
+// This only covers a write that has not begun. Once the old list has been
+// deleted, setAddons carries on whatever the breaker says (see there), because
+// stopping at that point is what would leave the list empty.
+function refuseWhileBackendIsDown(serverConfig) {
+  if (!isCircuitOpen(serverConfig)) return
+  const err = new Error('Nuvio backend unavailable - too many recent failures')
+  err.status = 503
+  throw err
+}
+
+// After the old list has been deleted, the only thing between a person and an
+// empty list is the insert that follows, so it is not held back by the breaker
+// and is sent again when the backend was merely busy: the same backend that
+// has just been rate-limiting is the one this has to get through. Waits are
+// short and few (the person's queue slot is held for all of them), and are
+// stretched to a Retry-After the backend asked for, up to maxWaitMs. A mutable
+// object so a test can shorten them.
+const WRITE_RETRY = {
+  insertMs: [1500, 4000],
+  restoreMs: [1500, 4000, 10000],
+  maxWaitMs: 15000
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Runs `attempt`, and again after each wait in `waitsMs` for as long as it
+// fails in a way that is worth another try. Throws the last failure.
+async function retryWhileTransient(attempt, waitsMs) {
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt()
+    } catch (e) {
+      if (i >= waitsMs.length || !isTransientFailure(e)) throw e
+      await sleep(Math.min(Math.max(waitsMs[i], e?.retryAfterMs || 0), WRITE_RETRY.maxWaitMs))
+    }
+  }
+}
+
+// A write that may have reached the backend without its answer coming back:
+// no status at all (timeout, dropped connection) or a server error. A 429, a
+// conflict or any other 4xx was answered, and the breaker's own refusal never
+// left this server.
+function isUnansweredWrite(err) {
+  if (err?.code === 'BACKEND_REFUSED' || err?.code === 'CIRCUIT_OPEN') return false
+  const status = err?.status
+  return status === undefined || status === null || status >= 500
+}
+
+// What the caller's failure message says when the new list was not saved and
+// the old one could not be put back either. Callers show an error's message
+// as the reason the sync failed, so it says what state the list is in and what
+// to do about it.
+function listNotRestoredError(insertErr) {
+  const err = new Error('Their addon list could not be written back after the change failed and may be empty. Run a sync to fill it again.')
+  err.status = insertErr?.status
+  err.retryAfterMs = insertErr?.retryAfterMs
+  err.code = 'ADDON_LIST_NOT_RESTORED'
+  err.cause = insertErr
+  return err
+}
+
+// The same address twice is never a wanted list, and some Nuvio backends
+// reject the whole insert over it. Keeps the first of each, matching how the
+// desired list is built (utils/sync.js dedupeByUrl).
+//
+// Two addresses are the same when they match apart from the case of the
+// scheme and the host, which a server never tells apart. The rest of the
+// address is compared as it is: a config token or key in the path or query is
+// case-sensitive, and two addons that differ only there are two addons.
+function addonKey(raw) {
+  const trimmed = String(raw || '').trim()
+  if (!trimmed) return ''
+  try {
+    const u = new URL(trimmed)
+    return `${u.protocol.toLowerCase()}//${u.username}:${u.password}@${u.host.toLowerCase()}${u.pathname}${u.search}${u.hash}`
+  } catch {
+    return trimmed
+  }
+}
+
+function dedupeAddonsByUrl(addons) {
+  const seen = new Set()
+  const out = []
+  for (const addon of addons) {
+    const key = addonKey(addon?.transportUrl)
+    if (key && seen.has(key)) continue
+    if (key) seen.add(key)
+    out.push(addon)
+  }
+  return out
+}
+
+// Titles Nuvio sent no name or poster for are looked up on Cinemeta. What a
+// lookup found is kept between polls: this runs for every Nuvio person every
+// minute, and every title in their library was being asked for again each
+// time, with nothing to stop a slow answer holding the whole pass up. A title
+// Cinemeta has never heard of is kept longer than one it simply failed to
+// answer for - a name that is missing is not recorded as watched, so a blip
+// must not hold it back for long.
+const META = {
+  ttlMs: 24 * 60 * 60 * 1000,      // found
+  missTtlMs: 60 * 60 * 1000,       // answered "no such title"
+  failTtlMs: 5 * 60 * 1000,        // no answer at all (timeout, network, 5xx)
+  max: 5000,
+  concurrency: 6,
+  timeoutMs: 8000,
+  // Past this, the titles still to ask for wait for the next poll rather than
+  // holding this one up; names missing go first so they are what gets done.
+  budgetMs: 20000
+}
+const metaCache = new Map() // `${metaType}:${id}` -> { meta: { name, poster } | null, expires }
+
+function cachedMeta(key) {
+  const hit = metaCache.get(key)
+  if (!hit) return undefined
+  if (hit.expires <= Date.now()) { metaCache.delete(key); return undefined }
+  return hit
+}
+
+function rememberMeta(key, meta, ttlMs) {
+  metaCache.delete(key)
+  if (metaCache.size >= META.max) metaCache.delete(metaCache.keys().next().value)
+  metaCache.set(key, { meta, expires: Date.now() + ttlMs })
+}
+
+// Never throws: a title that cannot be looked up keeps whatever name it had.
+async function lookUpTitle(key, metaType, id) {
+  try {
+    const res = await fetch(`https://v3-cinemeta.strem.io/meta/${metaType}/${id}.json`, { signal: AbortSignal.timeout(META.timeoutMs) })
+    if (res.status === 404) return rememberMeta(key, null, META.missTtlMs)
+    if (!res.ok) return rememberMeta(key, null, META.failTtlMs)
+    const data = await res.json()
+    if (data?.meta) rememberMeta(key, { name: data.meta.name || '', poster: data.meta.poster || null }, META.ttlMs)
+    else rememberMeta(key, null, META.missTtlMs)
+  } catch {
+    rememberMeta(key, null, META.failTtlMs)
+  }
+}
 
 // profileId is Nuvio's own profile_index (1 for the primary profile), NOT the
 // profile row's UUID. A Nuvio account can hold several profiles, and a profile
@@ -99,6 +258,9 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
         return newAccessToken
       } catch (e) {
         console.warn(`[NuvioProvider] Auth expired for user ${userId}, token refresh failed:`, e?.message)
+        // A backend address that is refused is not an expired sign-in, and
+        // reconnecting cannot help; the person is told what is actually wrong.
+        if (e?.code === 'BACKEND_REFUSED') throw e
         const err = new Error('Provider authentication expired')
         err.code = 'PROVIDER_AUTH_EXPIRED'
         err.cause = e
@@ -143,78 +305,159 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
     },
 
     async setAddons(addons) {
-      const accessToken = await ensureAuth()
+      // Checked before anything is touched: a list that is not a list used to
+      // fail only after the old one had been deleted.
+      if (!Array.isArray(addons)) throw new TypeError('setAddons needs a list of addons')
       const addonProfileId = await getAddonProfileId()
-      // Snapshot current addons before delete for rollback on failure
-      const snapshot = await supabaseGet('addons', {
-        user_id: `eq.${userId}`,
-        profile_id: `eq.${addonProfileId}`,
-        select: '*'
-      }, accessToken, await getServerConfig())
+      return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
+        const serverConfig = await getServerConfig()
+        refuseWhileBackendIsDown(serverConfig)
+        const accessToken = await ensureAuth()
+        const wanted = dedupeAddonsByUrl(addons)
+        // Snapshot current addons before delete for rollback on failure
+        const snapshot = await supabaseGet('addons', {
+          user_id: `eq.${userId}`,
+          profile_id: `eq.${addonProfileId}`,
+          select: '*'
+        }, accessToken, serverConfig)
 
-      // Delete all current addons, then insert desired set
-      await supabaseDelete('addons', {
-        user_id: `eq.${userId}`,
-        profile_id: `eq.${addonProfileId}`
-      }, accessToken, await getServerConfig())
-
-      if (addons.length > 0) {
-        const rows = addons.map((addon, i) => ({
-          user_id: userId,
-          profile_id: addonProfileId,
-          url: addon.transportUrl,
-          name: addon.manifest?.name || addon.transportName || addon.name || '',
-          enabled: true,
-          sort_order: i
-        }))
-        try {
-          await supabasePost('addons', rows, accessToken, await getServerConfig())
-        } catch (insertErr) {
-          // Attempt to restore previous addons
-          console.error('setAddons: insert failed after delete, attempting rollback:', insertErr?.message)
-          if (snapshot && snapshot.length > 0) {
-            try {
-              const cleanRows = snapshot.map(({ id, created_at, updated_at, ...rest }) => rest)
-              await supabasePost('addons', cleanRows, accessToken, await getServerConfig())
-            } catch (rollbackErr) {
-              console.error('setAddons: rollback also failed, user has empty addon list:', rollbackErr?.message)
-            }
+        // What the list holds right now, read without regard to the breaker
+        // because it is what decides what to do after a write whose answer was
+        // lost. Null when it could not be read.
+        const readListBack = async () => {
+          try {
+            return await supabaseGet('addons', {
+              user_id: `eq.${userId}`,
+              profile_id: `eq.${addonProfileId}`,
+              select: '*'
+            }, await ensureAuth(), serverConfig, { bypassBreaker: true })
+          } catch {
+            return null
           }
-          throw insertErr
         }
-      }
+
+        // Delete all current addons, then insert desired set. A backend that
+        // is held back by now refuses the delete itself, before it is sent.
+        try {
+          await supabaseDelete('addons', {
+            user_id: `eq.${userId}`,
+            profile_id: `eq.${addonProfileId}`
+          }, accessToken, serverConfig)
+        } catch (deleteErr) {
+          // A delete that went through but whose answer was lost leaves the
+          // list empty: carry on as if it had been answered. Anything still
+          // there means nothing was deleted, and the failure stands.
+          if (!isUnansweredWrite(deleteErr)) throw deleteErr
+          const now = await readListBack()
+          if (!Array.isArray(now) || now.length > 0) throw deleteErr
+        }
+
+        // From here the list is only whole again once something has been
+        // inserted, so these writes are not held back by the breaker and are
+        // sent again while the backend is only busy (see WRITE_RETRY). The
+        // token is asked for each time, as the waits can outlast it. `sent`
+        // notes whether any try went unanswered, as that one may have landed.
+        const insertRows = (rows, waitsMs, sent) => retryWhileTransient(
+          async () => {
+            try {
+              return await supabasePost('addons', rows, await ensureAuth(), serverConfig, { bypassBreaker: true })
+            } catch (e) {
+              if (isUnansweredWrite(e)) sent.unanswered = true
+              throw e
+            }
+          },
+          waitsMs
+        )
+        const restoreRows = snapshot && snapshot.length > 0
+          ? snapshot.map(({ id, created_at, updated_at, ...rest }) => rest)
+          : null
+
+        if (wanted.length > 0) {
+          const rows = wanted.map((addon, i) => ({
+            user_id: userId,
+            profile_id: addonProfileId,
+            url: addon.transportUrl,
+            name: addon.manifest?.name || addon.transportName || addon.name || '',
+            enabled: true,
+            sort_order: i
+          }))
+          const sent = { unanswered: false }
+          try {
+            await insertRows(rows, WRITE_RETRY.insertMs, sent)
+          } catch (insertErr) {
+            // A try that went unanswered may have landed, and a retry after it
+            // meets a conflict. Look at what the list holds before putting
+            // anything back: if it is the new list the write is done.
+            if (sent.unanswered) {
+              const now = await readListBack()
+              if (Array.isArray(now) && now.length > 0) {
+                const have = new Set(now.map((row) => addonKey(row?.url)))
+                const want = new Set(rows.map((row) => addonKey(row.url)))
+                if (have.size === want.size && [...want].every((key) => have.has(key))) return
+              }
+            }
+            // Attempt to restore previous addons
+            console.error('setAddons: insert failed after delete, attempting rollback:', insertErr?.message)
+            if (restoreRows) {
+              const restoreSent = { unanswered: false }
+              try {
+                await insertRows(restoreRows, WRITE_RETRY.restoreMs, restoreSent)
+              } catch (rollbackErr) {
+                console.error(`setAddons: rollback also failed, user ${userId} profile ${addonProfileId} has no addon list (${restoreRows.length} addons to put back):`, rollbackErr?.message)
+                // A conflict means rows of that list are there already (an
+                // insert that did land but whose answer was lost), so the list
+                // is not empty and the original failure is the true one. The
+                // same goes for any list found there after an unanswered try.
+                let listThere = rollbackErr?.status === 409
+                if (!listThere && restoreSent.unanswered) {
+                  const now = await readListBack()
+                  listThere = Array.isArray(now) && now.length > 0
+                }
+                if (!listThere) throw listNotRestoredError(insertErr)
+              }
+            }
+            throw insertErr
+          }
+        }
+      })
     },
 
     async addAddon(url, manifest) {
-      const accessToken = await ensureAuth()
       const addonProfileId = await getAddonProfileId()
-      // Get current max sort_order
-      const current = await supabaseGet('addons', {
-        user_id: `eq.${userId}`,
-        profile_id: `eq.${addonProfileId}`,
-        select: 'sort_order',
-        order: 'sort_order.desc',
-        limit: '1'
-      }, accessToken, await getServerConfig())
-      const nextOrder = (current[0]?.sort_order ?? -1) + 1
+      return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
+        const accessToken = await ensureAuth()
+        // Get current max sort_order
+        const current = await supabaseGet('addons', {
+          user_id: `eq.${userId}`,
+          profile_id: `eq.${addonProfileId}`,
+          select: 'sort_order',
+          order: 'sort_order.desc',
+          limit: '1'
+        }, accessToken, await getServerConfig())
+        const nextOrder = (current[0]?.sort_order ?? -1) + 1
 
-      await supabasePost('addons', [{
-        user_id: userId,
-        profile_id: addonProfileId,
-        url,
-        name: manifest?.name || '',
-        enabled: true,
-        sort_order: nextOrder
-      }], accessToken, await getServerConfig())
+        await supabasePost('addons', [{
+          user_id: userId,
+          profile_id: addonProfileId,
+          url,
+          name: manifest?.name || '',
+          enabled: true,
+          sort_order: nextOrder
+        }], accessToken, await getServerConfig())
+      })
     },
 
     async clearAddons() {
-      const accessToken = await ensureAuth()
       const addonProfileId = await getAddonProfileId()
-      await supabaseDelete('addons', {
-        user_id: `eq.${userId}`,
-        profile_id: `eq.${addonProfileId}`
-      }, accessToken, await getServerConfig())
+      return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
+        const serverConfig = await getServerConfig()
+        refuseWhileBackendIsDown(serverConfig)
+        const accessToken = await ensureAuth()
+        await supabaseDelete('addons', {
+          user_id: `eq.${userId}`,
+          profile_id: `eq.${addonProfileId}`
+        }, accessToken, serverConfig)
+      })
     },
 
     // --- Content ---
@@ -347,28 +590,34 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
         }
       }
 
-      // Enrich items with metadata (titles + posters) from Cinemeta
-      const seen = new Set()
-      const idsToEnrich = items.filter(i => !i.name || !i.poster).reduce((acc, i) => {
-        if (!seen.has(i._id)) { seen.add(i._id); acc.push({ id: i._id, type: i.type }) }
-        return acc
-      }, [])
-      const metaMap = new Map()
-      await Promise.allSettled(
-        idsToEnrich.map(async ({ id, type }) => {
-          try {
-            const metaType = type === 'series' ? 'series' : 'movie'
-            const res = await fetch(`https://v3-cinemeta.strem.io/meta/${metaType}/${id}.json`)
-            if (res.ok) {
-              const data = await res.json()
-              if (data?.meta) metaMap.set(id, data.meta)
-            }
-          } catch {}
+      // Enrich items with metadata (titles + posters) from Cinemeta. What was
+      // found on an earlier poll is reused; only titles not known yet are
+      // asked for, a few at a time, within a time budget (see META). A title
+      // that cannot be looked up keeps the name it had, and never fails the
+      // library read.
+      const keyOf = (item) => `${item.type === 'series' ? 'series' : 'movie'}:${item._id}`
+      const toAsk = new Map() // key -> { key, metaType, id, needsName }
+      for (const item of items) {
+        if (!item._id || (item.name && item.poster)) continue
+        const key = keyOf(item)
+        const queued = toAsk.get(key)
+        if (queued) queued.needsName = queued.needsName || !item.name
+        else toAsk.set(key, { key, metaType: item.type === 'series' ? 'series' : 'movie', id: item._id, needsName: !item.name })
+      }
+      const unknown = [...toAsk.values()]
+        .filter((t) => cachedMeta(t.key) === undefined)
+        .sort((a, b) => Number(b.needsName) - Number(a.needsName))
+      if (unknown.length > 0) {
+        const stopAsking = Date.now() + META.budgetMs
+        await mapLimit(unknown, META.concurrency, async (t) => {
+          if (Date.now() >= stopAsking) return
+          await lookUpTitle(t.key, t.metaType, t.id)
         })
-      )
+      }
 
       for (const item of items) {
-        const meta = metaMap.get(item._id)
+        if (!item._id) continue
+        const meta = cachedMeta(keyOf(item))?.meta
         if (meta) {
           if (!item.name) item.name = meta.name || ''
           if (!item.poster) item.poster = meta.poster || null
@@ -499,4 +748,12 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
   }
 }
 
-module.exports = { createNuvioProvider }
+module.exports = {
+  createNuvioProvider,
+  _test: {
+    META,
+    WRITE_RETRY,
+    clearMetaCache() { metaCache.clear() },
+    metaCacheSize() { return metaCache.size },
+  }
+}

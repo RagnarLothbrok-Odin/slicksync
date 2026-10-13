@@ -31,7 +31,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
       if (!presented) return res.status(401).json({ message: 'Missing or invalid API key' })
       
       // Find account by decrypting stored keys and comparing
-      const accounts = await prisma.appAccount.findMany({ where: { apiKeyHash: { not: null } }, select: { id: true, apiKeyHash: true } })
+      const accounts = await prisma.appAccount.findMany({ where: { apiKeyHash: { not: null } }, select: { id: true, apiKeyHash: true, disabled: true } })
       const serverKey = getServerKey()
       for (const acct of accounts) {
         try {
@@ -39,6 +39,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
           const accountKey = crypto.createHash('sha256').update(Buffer.concat([Buffer.from(acct.id || ''), serverKey])).digest()
           const decrypted = aesGcmDecrypt(accountKey, acct.apiKeyHash)
           if (keysMatch(decrypted, presented)) {
+            // The operator's Disable switch has to reach the key as well as
+            // the session: this route is open to the global login check.
+            if (acct.disabled) return res.status(401).json({ message: 'This account has been disabled' })
             req.appAccountId = acct.id
             return next()
           }
@@ -204,7 +207,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
       // Try in-memory metrics cache first (populated by activityMonitor every 5 minutes)
       const cached = getCachedMetrics(accountId, period)
       if (cached) {
-        return res.json(cached)
+        // Now Playing is read live, never from the five-minute cache.
+        try {
+          const { liveNowPlaying } = require('../utils/metricsBuilder')
+          return res.json({ ...cached, nowPlaying: await liveNowPlaying(prisma, accountId) })
+        } catch {
+          return res.json(cached)
+        }
       }
 
       // Build on demand (also used on first boot or if scheduler hasn't run yet)

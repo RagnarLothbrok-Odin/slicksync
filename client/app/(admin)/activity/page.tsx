@@ -131,7 +131,9 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
   // under the following day and fail to match the card it should dedupe with.
   const dayKeyOf = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const seenUserItemKeys = new Set<string>();
+  // The card each key produced, so a later entry for the same viewing can
+  // improve it rather than only being dropped.
+  const seenUserItemKeys = new Map<string, ActivityItem | null>();
 
   if (metrics.watchSessions && metrics.watchSessions.length > 0) {
     metrics.watchSessions.forEach((session) => {
@@ -144,8 +146,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
       // and would only show as a blank duplicate of the native card.
       if ((session.durationSeconds || 0) <= 0) return;
 
-      seenUserItemKeys.add(`${session.user.id}:${session.item.id}:${session.videoId || ''}:${dayKeyOf(new Date(session.startTime))}`);
-      activities.push({
+      const sessionCard: ActivityItem = {
         id: session.id,
         userId: session.user.id,
         userName: session.user.username,
@@ -165,7 +166,9 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         isSynthetic: false,
         poster: session.item.poster,
         userAvatarUrl: session.user.useGravatar ? null : (session.user.avatarUrl ?? null),
-      });
+      };
+      seenUserItemKeys.set(`${session.user.id}:${session.item.id}:${session.videoId || ''}:${dayKeyOf(new Date(session.startTime))}`, sessionCard);
+      activities.push(sessionCard);
     });
   }
 
@@ -183,11 +186,21 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
       // the SHOW, so two episodes watched the same day would otherwise collide
       // and the second would be silently dropped.
       const key = `${entry.user.id}:${entry.item.id}:${entry.videoId || ''}:${dayKeyOf(new Date(entry.watchedAt))}`;
-      if (seenUserItemKeys.has(key)) return;
+      if (seenUserItemKeys.has(key)) {
+        // Same viewing, already on the page from its session - but a session
+        // only holds its latest sitting, while this entry carries the whole
+        // day's watched time. Keep the card and show the larger figure
+        // (never the sum: both describe the same viewing).
+        const shown = seenUserItemKeys.get(key);
+        if (shown && (entry.durationSeconds || 0) > (shown.durationSeconds || 0)) {
+          shown.durationSeconds = entry.durationSeconds;
+        }
+        return;
+      }
       // Recorded, not just tested: the feed can now legitimately carry several
       // entries for the same title on DIFFERENT days, so without adding each
       // key the same day could still slip through twice.
-      seenUserItemKeys.add(key);
+      seenUserItemKeys.set(key, null);
 
       activities.push({
         id: `activity-${entry.user.id}-${entry.item.id}-${entry.videoId || 'movie'}-${entry.watchedAtTimestamp}`,

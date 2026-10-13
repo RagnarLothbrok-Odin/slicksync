@@ -22,14 +22,17 @@ export default function DeleteAccountPage() {
   const [state, setState] = useState<DeleteState>('confirm');
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Set when SlickSync's side is gone but the addons are still on their Stremio account.
+  const [addonsLeft, setAddonsLeft] = useState(false);
 
   // Handle OAuth completion - delete the user
   const handleAuthKey = async (authKey: string) => {
     setIsDeleting(true);
     setErrorMessage(null);
-    
+
     try {
-      await inviteApi.deleteUser(authKey);
+      const result = await inviteApi.deleteUser(authKey);
+      setAddonsLeft(result?.addonsCleared === false);
       setState('success');
     } catch (error) {
       if (error instanceof InviteApiError) {
@@ -197,6 +200,12 @@ export default function DeleteAccountPage() {
         return (
           <StatusCard type="completed" title="Account Deleted">
             <p>Your account has been successfully deleted.</p>
+            {addonsLeft && (
+              <p className="mt-2">
+                We couldn&apos;t remove the SlickSync addons from your Stremio account, so they are still there.
+                To take them off yourself, open Stremio&apos;s Addons page and uninstall the ones SlickSync added.
+              </p>
+            )}
             <p className="mt-2 opacity-75">
               Thank you for using SlickSync. You can request access again if you change your mind.
             </p>

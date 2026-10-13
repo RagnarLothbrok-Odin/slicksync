@@ -1,7 +1,12 @@
 const express = require('express');
 const crypto = require('crypto');
-const { Readable } = require('stream');
+const { Readable, pipeline } = require('stream');
 const { logProxyRequest } = require('../utils/proxyLogger');
+const { assertSafeUrl, safeFetch, instancePolicy } = require('../utils/safeUrl');
+
+// What safeFetch / assertSafeUrl say when the address itself is the problem
+// (as opposed to the host being slow or down).
+const REFUSED_ADDRESS = new Set(['blocked host', 'unsupported protocol', 'invalid url']);
 
 /**
  * Set CORS headers for Stremio/streaming compatibility
@@ -73,29 +78,46 @@ function decryptStreamUrl(encryptedPayload, serverKey) {
 
 /**
  * Resolve the final URL after following redirects, without downloading the body.
+ *
+ * Every address on the way is checked, so an addon cannot use a stream link
+ * to make this server call something it should not. Returns null when this
+ * install will not fetch the address - the caller must not hand out a link
+ * for it.
  */
 async function getRedirectedUrl(url) {
+  const policy = instancePolicy();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
   try {
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       method: 'GET',
-      redirect: 'follow',
       signal: controller.signal,
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; SlickSync/1.0)",
       },
-    });
-    const finalUrl = response.url;
+    }, policy);
+    const finalUrl = response.url || url;
     // Don't download body: cancel the stream
     if (response.body) {
       await response.body.cancel();
     }
     return finalUrl;
   } catch (error) {
+    if (REFUSED_ADDRESS.has(error.message)) {
+      console.warn(`[StreamProxy] Not proxying a stream address: ${error.message}`);
+      return null;
+    }
     console.warn(`[StreamProxy] Failed to resolve redirect for ${url}: ${error.message}`);
-    return url; // Fallback to original URL on error
+    // The host was slow or unreachable, not refused. The original address is
+    // still fine to hand out as long as it passes the same check - it is
+    // checked again, hop by hop, when the stream is played.
+    try {
+      await assertSafeUrl(url, policy);
+      return url;
+    } catch {
+      return null;
+    }
   } finally {
     clearTimeout(timeoutId);
   }
@@ -128,10 +150,14 @@ async function processStreamResponse(data, serverKey, proxyBaseUrl) {
             console.log(`[StreamProxy] Resolving redirect for URL: ${stream.url.substring(0, 100)}...`);
             // Resolve the final URL (follow redirects)
             const resolvedUrl = await getRedirectedUrl(stream.url);
-            console.log(`[StreamProxy] Resolved to: ${resolvedUrl.substring(0, 100)}...`);
+            // An address this install will not fetch keeps the link the addon
+            // gave, so the player can still try it from its own network.
+            if (resolvedUrl) {
+              console.log(`[StreamProxy] Resolved to: ${resolvedUrl.substring(0, 100)}...`);
 
-            const encryptedUrl = encryptStreamUrl(resolvedUrl, serverKey);
-            stream.url = `${proxyBaseUrl}/stream/${encryptedUrl}`;
+              const encryptedUrl = encryptStreamUrl(resolvedUrl, serverKey);
+              stream.url = `${proxyBaseUrl}/stream/${encryptedUrl}`;
+            }
           } catch (e) {
             console.error('[StreamProxy] Failed to process stream URL:', e.message);
             // Keep original URL if encryption/resolution fails
@@ -144,8 +170,10 @@ async function processStreamResponse(data, serverKey, proxyBaseUrl) {
         if (stream.externalUrl && typeof stream.externalUrl === 'string') {
           try {
             const resolvedExternalUrl = await getRedirectedUrl(stream.externalUrl);
-            const encryptedUrl = encryptStreamUrl(resolvedExternalUrl, serverKey);
-            stream.externalUrl = `${proxyBaseUrl}/stream/${encryptedUrl}`;
+            if (resolvedExternalUrl) {
+              const encryptedUrl = encryptStreamUrl(resolvedExternalUrl, serverKey);
+              stream.externalUrl = `${proxyBaseUrl}/stream/${encryptedUrl}`;
+            }
           } catch (e) {
             console.error('Failed to encrypt externalUrl:', e.message);
             // Keep original URL if encryption fails
@@ -241,12 +269,32 @@ module.exports = ({ getServerKey }) => {
         fetchHeaders['Range'] = req.headers.range;
       }
 
+      // The player going away - every seek, every stop - ends the upstream
+      // request with it. Left alone, the download from the debrid or CDN host
+      // would run on to the end of the file with nobody reading it.
+      const upstreamAbort = new AbortController();
+      const playerGone = () => {
+        if (!res.writableFinished) upstreamAbort.abort();
+      };
+      // Bun does not report a dropped connection on the response, only on
+      // the socket; Node reports it on both. The socket listener comes off
+      // again once this response is done, since keep-alive reuses the socket.
+      const socket = req.socket;
+      const forgetSocket = () => socket?.off('close', playerGone);
+      socket?.once('close', playerGone);
+      res.once('close', playerGone);
+      res.once('close', forgetSocket);
+      res.once('finish', forgetSocket);
+
       try {
-        const upstreamResponse = await fetch(targetUrl, {
+        // Every address on the way is checked, here and not only when the
+        // link was handed out: a name can point somewhere else by now, and a
+        // public host can answer with a redirect to an internal one.
+        const upstreamResponse = await safeFetch(targetUrl, {
           method: 'GET',
           headers: fetchHeaders,
-          redirect: 'follow'
-        });
+          signal: upstreamAbort.signal
+        }, instancePolicy());
 
         // Capture the final URL (after redirects)
         resolvedUrl = upstreamResponse.url;
@@ -295,14 +343,30 @@ module.exports = ({ getServerKey }) => {
           }
         }
 
-        // Pipe the response body
+        // Pipe the response body. pipeline (not pipe) so an upstream that
+        // drops mid-file closes the player's connection instead of leaving it
+        // hanging, and so the error is handled here rather than thrown.
         if (upstreamResponse.body) {
-          Readable.fromWeb(upstreamResponse.body).pipe(res);
+          pipeline(Readable.fromWeb(upstreamResponse.body), res, (pipeError) => {
+            if (pipeError && !upstreamAbort.signal.aborted) {
+              console.warn('[StreamProxy] Upstream ended early:', pipeError.message);
+            }
+          });
         } else {
           res.end();
         }
 
       } catch (fetchError) {
+        // The player left before the upstream answered - nobody to reply to.
+        if (upstreamAbort.signal.aborted) return;
+        if (REFUSED_ADDRESS.has(fetchError.message)) {
+          console.warn(`[StreamProxy] Refused stream address: ${fetchError.message}`);
+          errorMessage = 'This stream address cannot be used';
+          if (!res.headersSent) {
+            res.status(403).json({ error: errorMessage });
+          }
+          return;
+        }
         console.error('[StreamProxy] Error fetching upstream:', fetchError);
         errorMessage = 'Error fetching upstream content';
         if (!res.headersSent) {

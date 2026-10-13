@@ -17,11 +17,12 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
     try {
       const accountId = getAccountId(req);
       const { probe, login } = await signInFromBody(req.body);
+      // Whoever already holds this login keeps working (see rememberSignIn),
+      // whatever this request goes on to do with it.
+      await rememberSignIn(prisma, encrypt, probe, login);
       if (!req.body?.quickConnectSecret && typeof req.body?.password === 'string') {
         reqPassword.set(login, { password: req.body.password, loginName: String(req.body.jellyfinUsername || '') });
       }
-      // Whoever already holds this login keeps working (see rememberSignIn).
-      await rememberSignIn(prisma, encrypt, probe, login);
       const fields = jellyfinFields(probe, login, encrypt, req);
       const { identityEmail } = require('../providers/jellyfinAuth');
       const email = identityEmail(probe.serverUrl, login.userId);
@@ -123,6 +124,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
         login,
         password: typed.password ?? null,
         typedLogin: typed.loginName || null,
+        onSignIn: household.handToHolders(prisma, encrypt, probe.serverUrl),
       });
       await household.saveHousehold(prisma, encrypt, person, found);
       return household.describeHousehold(prisma, person.id);

@@ -16,14 +16,6 @@ function hmacHex(keyBuf, input) {
 }
 
 /**
- * Manifest URL hash (backward-compatible global peppered hash)
- */
-function manifestUrlHash(url) {
-  const PEPPER = process.env.HASH_PEPPER || process.env.ENCRYPTION_KEY || 'slicksync-pepper'
-  return sha256Hex(normalizeUrl(url) + '|' + PEPPER)
-}
-
-/**
  * Manifest URL HMAC (per-account)
  */
 function manifestUrlHmac(req, url) {
@@ -45,20 +37,26 @@ function normalizeUrl(u) {
  * Get account HMAC key for per-account hashing
  */
 function getAccountHmacKey(req) {
-  const { selectKeyForRequest } = require('./encryption')
-  // Derive per-account HMAC key from DEK if available, fallback to PEPPER
+  const { selectKeyForRequest, getServerKey } = require('./encryption')
+  // Derive per-account HMAC key from DEK if available, else from the server key
   try {
-    const dek = selectKeyForRequest(req) // Uint8Array/Buffer used for AES-GCM
-    const salt = Buffer.from('slicksync-hmac-salt')
-    // Simple HKDF-like derivation using SHA-256 (not full HKDF API to avoid deps)
-    const ikm = Buffer.isBuffer(dek) ? dek : Buffer.from(String(dek || ''))
-    const prk = crypto.createHmac('sha256', salt).update(ikm).digest()
-    const okm = crypto.createHmac('sha256', prk).update('slicksync-manifest-hmac').digest()
-    return okm
+    return deriveHmacKey(selectKeyForRequest(req)) // Uint8Array/Buffer used for AES-GCM
   } catch {
-    const PEPPER = process.env.HASH_PEPPER || process.env.ENCRYPTION_KEY || 'slicksync-pepper'
-    return Buffer.from(String(PEPPER))
+    // selectKeyForRequest answers with the server key whenever an account has
+    // no key of its own, so that is also what to use when it cannot decide at
+    // all - the key the stored hashes were made under. Never a fixed string:
+    // that is public in the source, and hashes made under it would match
+    // nothing already stored.
+    return deriveHmacKey(getServerKey())
   }
+}
+
+function deriveHmacKey(dek) {
+  const salt = Buffer.from('slicksync-hmac-salt')
+  // Simple HKDF-like derivation using SHA-256 (not full HKDF API to avoid deps)
+  const ikm = Buffer.isBuffer(dek) ? dek : Buffer.from(String(dek || ''))
+  const prk = crypto.createHmac('sha256', salt).update(ikm).digest()
+  return crypto.createHmac('sha256', prk).update('slicksync-manifest-hmac').digest()
 }
 
 /**
@@ -183,7 +181,6 @@ function manifestHmac(req, manifest) {
 module.exports = {
   sha256Hex,
   hmacHex,
-  manifestUrlHash,
   manifestUrlHmac,
   normalizeUrl,
   getAccountHmacKey,

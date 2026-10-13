@@ -4,6 +4,33 @@ const { handleDatabaseError, sendError, createRouteHandler, DatabaseTransactions
 const { findAddonById, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { readProxyLogs } = require('../utils/proxyLogger');
+const { assertSafeUrl, safeFetch, instancePolicy } = require('../utils/safeUrl');
+
+// Every addon address is fetched by this server, so each fetch below goes
+// through safeFetch: an instance serving strangers refuses internal addresses,
+// a household install only refuses link-local ones (see utils/safeUrl.js), and
+// a redirect is checked at every hop rather than followed blindly.
+//
+// What a person is told when it is the address itself that was turned away.
+// Anything else (a timeout, a refused connection) is described by the caller.
+function addressProblem(err, { allowPrivate } = {}) {
+  switch (err?.message) {
+    case 'invalid url':
+      return 'That is not a valid web address.'
+    case 'unsupported protocol':
+      return 'Addon addresses must start with http:// or https:// (stremio:// is accepted too).'
+    case 'blocked host':
+      return allowPrivate
+        ? 'That address is a link-local one (such as 169.254.x.x), which this server never connects to.'
+        : 'That address is on a private or internal network, which this server does not connect to.'
+    case 'unresolvable host':
+      return "That addon's address could not be found - it looks like the addon is offline or no longer exists."
+    case 'too many redirects':
+      return 'That address redirected too many times.'
+    default:
+      return null
+  }
+}
 
 // In-memory manifest cache (short TTL) to avoid hammering when multiple addons share a URL
 const _manifestCache = new Map() // key: url, value: { data, ts }
@@ -35,23 +62,25 @@ const LOCAL_ADDON_URL = 'http://127.0.0.1:11470/local-addon/manifest.json'
  * data - only the waiting overlaps, so the cost becomes the slowest single
  * addon rather than the total.
  *
- * Nothing here can break a sync: a URL that fails or times out is simply
- * left uncached, and the reload fetches it properly (and reports its error)
- * exactly as it does today. Already-cached URLs are skipped, so calling
- * this twice in quick succession costs nothing.
+ * Nothing here can break a sync: a URL that fails, times out or is turned
+ * away as an address this server does not connect to is simply left
+ * uncached, and the reload fetches it properly (and reports its error)
+ * exactly as it does today. The saved addon is never touched. Already-cached
+ * URLs are skipped, so calling this twice in quick succession costs nothing.
  */
 async function prewarmManifests(urls, { concurrency = 6, timeoutMs = 8000 } = {}) {
   const pending = [...new Set((urls || []).filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u) && u !== LOCAL_ADDON_URL))]
     .filter((u) => !getCachedManifest(u))
   if (pending.length === 0) return { warmed: 0, attempted: 0 }
 
+  const policy = instancePolicy()
   let warmed = 0
   let cursor = 0
   const worker = async () => {
     while (cursor < pending.length) {
       const url = pending[cursor++]
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+        const res = await safeFetch(url, { signal: AbortSignal.timeout(timeoutMs) }, policy)
         if (!res.ok) continue
         const data = await res.json()
         if (data && typeof data === 'object') {
@@ -123,14 +152,19 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
   if (cached) {
     manifestData = cached
   } else {
+    // An address this server will not connect to makes the addon unreachable
+    // for this pass, the same as one that does not answer: it throws before
+    // anything below touches the saved addon, and every caller already
+    // carries on to the next addon when a reload throws.
+    const policy = instancePolicy()
     try {
-      const manifestResponse = await fetch(transportUrl);
+      const manifestResponse = await safeFetch(transportUrl, {}, policy);
       if (!manifestResponse.ok) throw new Error(`HTTP ${manifestResponse.status}: ${manifestResponse.statusText}`)
       manifestData = await manifestResponse.json();
       setCachedManifest(cacheKey, manifestData)
     } catch (e) {
       console.error(`❌ Failed to fetch manifest:`, e.message);
-      throw new Error(`Failed to fetch addon manifest: ${e.message}`);
+      throw new Error(`Failed to fetch addon manifest: ${addressProblem(e, policy) || e.message}`);
     }
   }
 
@@ -384,6 +418,9 @@ async function reloadAddon(prisma, getAccountId, addonId, req, { filterManifestB
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, INSTANCE_TYPE, manifestHash, filterManifestByResources, filterManifestByCatalogs, manifestUrlHmac }) => {
   const router = express.Router();
+  // Same rule as instancePolicy() in utils/safeUrl.js, read from the type this
+  // router was built with.
+  const addressPolicy = { allowPrivate: INSTANCE_TYPE !== 'public' };
   // PUT /api/addons/reorder - bulk update addon display order (drag-and-drop)
   router.put('/reorder', async (req, res) => {
     try {
@@ -1025,6 +1062,19 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         })
       }
 
+      // The address is checked whether or not the browser already sent the
+      // manifest: it is what every later reload and health check will fetch.
+      // A name this server cannot look up is let through here - when it has
+      // to fetch the manifest itself the fetch below reports that, and when
+      // the browser supplied it nothing needs resolving yet.
+      try {
+        await assertSafeUrl(sanitizedUrl, addressPolicy)
+      } catch (e) {
+        if (e?.message !== 'unresolvable host') {
+          return res.status(400).json({ message: `Could not add this addon. ${addressProblem(e, addressPolicy) || 'That address cannot be used.'}` })
+        }
+      }
+
       // Use provided manifest data if available, otherwise fetch it
       let manifestData = providedManifestData
       if (!manifestData) {
@@ -1037,7 +1087,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         // thepiratebay-plus both 403 from two different VPS hosts while
         // cinemeta returns 200 from the same machines.
         try {
-          const resp = await fetch(sanitizedUrl)
+          const resp = await safeFetch(sanitizedUrl, {}, addressPolicy)
           if (!resp.ok) {
             const detail = resp.status === 403 || resp.status === 401
               ? `The addon refused the request (HTTP ${resp.status}). Some addons block servers/VPS IPs even though they work from a normal browser - this is set by the addon, not by SlickSync.`
@@ -1049,13 +1099,13 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           manifestData = await resp.json()
         } catch (e) {
           const msg = String(e?.message || '')
-          const detail = /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)
+          const detail = addressProblem(e, addressPolicy) || (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)
             ? "That addon's address could not be found - it looks like the addon is offline or no longer exists."
             : /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ETIMEDOUT|timeout|aborted/i.test(msg)
               ? 'Could not reach that addon (it did not respond). It may be down or temporarily unavailable.'
               : /JSON|Unexpected token/i.test(msg)
                 ? 'That address did not return a valid addon manifest.'
-                : `Could not reach that addon: ${msg}`
+                : `Could not reach that addon: ${msg}`)
           return res.status(400).json({ message: `Could not add this addon. ${detail}` })
         }
       }
@@ -2138,18 +2188,17 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       let nameConflictResolved = false;
 
       if (url !== undefined) {
-        const trimmedUrl = String(url).trim()
-        let sanitizedUrl = trimmedUrl.replace(/^@+/, '')
-
-        // Convert stremio:// scheme to https://
-        if (sanitizedUrl.toLowerCase().startsWith('stremio://')) {
-          sanitizedUrl = sanitizedUrl.replace(/^stremio:\/\//i, 'https://')
+        // Same trimming and stremio:// handling as adding an addon, and the
+        // same refusal of anything that is not a web address.
+        const sanitizedUrl = sanitizeUrl(String(url))
+        if (!sanitizedUrl) {
+          return res.status(400).json({ message: 'Invalid URL provided' });
         }
 
         nextUrl = sanitizedUrl;
         try {
           console.log(`🔍 Fetching manifest for updated URL: ${sanitizedUrl}`);
-          const resp = await fetch(sanitizedUrl);
+          const resp = await safeFetch(sanitizedUrl, {}, addressPolicy);
           if (!resp.ok) {
             return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
           }
@@ -2165,7 +2214,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
           console.log(`🔍 Manifest fetched: name="${derivedName}", version="${derivedVersion}", iconUrl="${derivedIconUrl}"`);
         } catch (e) {
-          return res.status(400).json({ message: 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
+          const problem = addressProblem(e, addressPolicy);
+          return res.status(400).json({ message: problem ? `Failed to fetch addon manifest. ${problem}` : 'Failed to fetch addon manifest. The add-on URL may be incorrect.' });
         }
 
         // Check for name conflict with other addons (when URL changes, name comes from manifest)

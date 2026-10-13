@@ -38,6 +38,22 @@ function restrictsPrivateAddresses() {
   try { return require('./config').INSTANCE_TYPE === 'public' } catch { return false }
 }
 
+// The address check at the top of readConfig and writeConfig vouches for the
+// first address only. On an instance serving strangers the fetch itself holds
+// every redirect to the same rule; a household install fetches as it always did.
+function guardedFetch(url, init) {
+  return restrictsPrivateAddresses()
+    ? require('./safeUrl').safeFetch(url, init, { allowPrivate: false })
+    : fetch(url, init)
+}
+
+function unreachableMessage(e) {
+  if (/^(blocked host|unsupported protocol|invalid url|too many redirects)$/.test(e?.message || '')) {
+    return 'AIOStreams sent this server to an address it does not connect to'
+  }
+  return `Could not reach AIOStreams: ${e?.cause?.code || e?.message || 'network error'}`
+}
+
 /** The AIOStreams instance behind a Jellyfin address: everything before /jellyfin. */
 function instanceBase(serverUrl) {
   try {
@@ -80,12 +96,12 @@ async function readConfig({ serverUrl, account, password }) {
   const auth = Buffer.from(`${account}:${password}`).toString('base64')
   let res
   try {
-    res = await fetch(`${base}/api/v1/user?raw=true`, {
+    res = await guardedFetch(`${base}/api/v1/user?raw=true`, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
   } catch (e) {
-    throw Object.assign(new Error(`Could not reach AIOStreams: ${e?.cause?.code || e?.message || 'network error'}`), { status: 502 })
+    throw Object.assign(new Error(unreachableMessage(e)), { status: 502 })
   }
   const body = await res.json().catch(() => null)
   if (!res.ok || !body?.success || !body?.data?.userData) {
@@ -109,14 +125,14 @@ async function writeConfig({ serverUrl, account, password }, config) {
   const auth = Buffer.from(`${account}:${password}`).toString('base64')
   let res
   try {
-    res = await fetch(`${base}/api/v1/user`, {
+    res = await guardedFetch(`${base}/api/v1/user`, {
       method: 'PUT',
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
   } catch (e) {
-    throw Object.assign(new Error(`Could not reach AIOStreams: ${e?.cause?.code || e?.message || 'network error'}`), { status: 502 })
+    throw Object.assign(new Error(unreachableMessage(e)), { status: 502 })
   }
   const body = await res.json().catch(() => null)
   if (!res.ok || !body?.success) {

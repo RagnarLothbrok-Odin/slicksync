@@ -25,6 +25,7 @@
 // Not the main user's own PIN: that is SlickSync's sign-in to the whole
 // configuration.
 
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const crypto = require('crypto')
 const { readConfig, writeConfig, rebaseline, noteOutsideChanges, instanceBase } = require('./aiostreamsConfig')
 
@@ -75,7 +76,7 @@ async function save(prisma, owner, access, config) {
 
 async function maxPersonas(owner) {
   try {
-    const res = await fetch(`${instanceBase(owner.jellyfinServerUrl)}/api/v1/status`, { signal: AbortSignal.timeout(15000) })
+    const res = await safeFetch(`${instanceBase(owner.jellyfinServerUrl)}/api/v1/status`, { signal: AbortSignal.timeout(15000) }, instancePolicy())
     const body = await res.json()
     return Number(body?.data?.settings?.jellyfin?.maxPersonas) || 0
   } catch {
@@ -88,7 +89,7 @@ async function signInOnce(prisma, encrypt, owner, { jellyfinUserId, name }, pass
   const profiles = require('./jellyfinProfiles')
   const names = profiles.loginNamesFor('aiostreams', owner.jellyfinServerUrl, owner.aioConfigId, { name })
   const secret = pin ? `${password}/${pin}` : password
-  const signed = await profiles.signInAs(owner.jellyfinServerUrl, names, jellyfinUserId, secret).catch(() => ({ token: null }))
+  const signed = await profiles.signInAs(owner.jellyfinServerUrl, names, jellyfinUserId, secret, profiles.handToHolders(prisma, encrypt, owner.jellyfinServerUrl)).catch(() => ({ token: null }))
   await profiles.saveHousehold(prisma, encrypt, owner, [{
     jellyfinUserId,
     name,

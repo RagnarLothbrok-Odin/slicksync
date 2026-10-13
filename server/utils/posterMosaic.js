@@ -20,6 +20,7 @@
 // on Jimp's bitmap-font plugin at all, and a caption above a picture is a
 // perfectly normal Discord message shape anyway.
 
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const { Jimp } = require('jimp')
 const { monthBoundsInTimezone } = require('./dateUtils')
 const { postDiscordFile } = require('./notify')
@@ -75,7 +76,7 @@ async function getMonthTitles(prisma, accountId, yearMonth, timeZone) {
 
 async function fetchPosterTile(url) {
   try {
-    const res = await fetch(url)
+    const res = await safeFetch(url, {}, instancePolicy())
     if (!res.ok) return null
     const buf = Buffer.from(await res.arrayBuffer())
     const img = await Jimp.read(buf)

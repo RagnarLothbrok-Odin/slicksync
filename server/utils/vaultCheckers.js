@@ -2,6 +2,16 @@
 // testConfig is a parsed JSON object stored per-entry; shape varies by testType.
 
 const net = require('net')
+const dns = require('dns').promises
+const { assertSafeUrl, safeFetch, instancePolicy, isPrivateIp, isLinkLocalIp } = require('./safeUrl')
+
+// A check that reaches out to an address the account typed in goes through the
+// same rule as every other such address (utils/safeUrl.js): an instance
+// serving strangers may not point it at its own network, a household's own
+// install may, and nobody may point it at link-local. A refusal is a plain
+// "could not reach it" result for that entry - never a thrown error, and it is
+// not retried.
+const REFUSALS = new Set(['blocked host', 'unsupported protocol', 'invalid url', 'too many redirects'])
 
 function timeoutSignal(ms) {
   const controller = new AbortController()
@@ -27,17 +37,25 @@ function timeoutSignal(ms) {
 // Deliberately does NOT retry on a returned status. A 401 is a real answer
 // about the credential and must surface immediately; retrying it would just
 // hammer the provider and delay a genuine failure.
-async function fetchWithRetry(url, options = {}, { timeoutMs = 10000, attempts = 3, backoffMs = 750 } = {}) {
+//
+// `checked` is for an address the account chose (an HTTP check, an indexer):
+// it is fetched through safeFetch, which also holds every redirect to the
+// same rule. The providers' own fixed hosts are fetched as they always were.
+async function fetchWithRetry(url, options = {}, { timeoutMs = 10000, attempts = 3, backoffMs = 750, checked = false } = {}) {
   let lastErr
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const { signal, cancel } = timeoutSignal(timeoutMs)
     try {
-      const res = await fetch(url, { ...options, signal })
+      const res = checked
+        ? await safeFetch(url, { ...options, signal }, instancePolicy())
+        : await fetch(url, { ...options, signal })
       cancel()
       return res
     } catch (err) {
       cancel()
       lastErr = err
+      // Asking again would only be refused again.
+      if (REFUSALS.has(err?.message)) throw err
       if (attempt < attempts) {
         // Linear backoff - these stalls look like transient upstream
         // congestion, so a short pause before retrying is enough.
@@ -51,7 +69,23 @@ async function fetchWithRetry(url, options = {}, { timeoutMs = 10000, attempts =
 // Shared shape for the catch block of every checker below, so a timeout
 // reads the same way everywhere.
 function describeRequestError(err) {
-  return err?.name === 'AbortError' ? 'Timed out' : (err?.message || 'Request failed')
+  if (err?.name === 'AbortError') return 'Timed out'
+  switch (err?.message) {
+    case 'invalid url':
+      return 'That is not a valid web address'
+    case 'unsupported protocol':
+      return 'The test address must start with http:// or https://'
+    case 'blocked host':
+      return instancePolicy().allowPrivate
+        ? 'That address is a link-local one (such as 169.254.x.x), which this server never connects to'
+        : 'That address is on a private or internal network, which this server does not connect to'
+    case 'unresolvable host':
+      return 'That address could not be found'
+    case 'too many redirects':
+      return 'That address redirected too many times'
+    default:
+      return err?.message || 'Request failed'
+  }
 }
 
 // Generic HTTP check: hits a URL, optionally injecting the secret as a bearer token,
@@ -79,7 +113,7 @@ async function checkGenericHttp(secret, config = {}) {
   }
 
   try {
-    const res = await fetchWithRetry(finalUrl, { method, headers })
+    const res = await fetchWithRetry(finalUrl, { method, headers }, { checked: true })
     const text = await res.text().catch(() => '')
     const statusOk = Array.isArray(expectStatus) ? expectStatus.includes(res.status) : res.status === expectStatus
     if (!statusOk) return { ok: false, message: `Unexpected status ${res.status}` }
@@ -166,7 +200,7 @@ async function checkNewznabCaps(secret, config = {}) {
     // bare script to a lot of indexers' own bot-protection (Cloudflare, etc.)
     // and can produce a 403 that has nothing to do with the API key itself.
     // A normal browser UA costs nothing and rules that out as a cause.
-    const res = await fetchWithRetry(testUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' } })
+    const res = await fetchWithRetry(testUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' } }, { checked: true })
     if (res.status === 403) {
       return { ok: false, message: 'Indexer returned 403 - likely blocking this server\'s IP (common for private indexers/Usenet providers toward cloud/VPS hosting ranges), not necessarily the API key' }
     }
@@ -191,14 +225,36 @@ async function checkNewznabCaps(secret, config = {}) {
 
 // Raw TCP reachability — for things like Usenet NNTP servers where a full protocol
 // login check isn't implemented. Confirms the host:port accepts a connection, nothing more.
-async function checkTcpReachability(secret, config = {}) {
-  const { host, port } = config
-  if (!host || !port) return { ok: false, message: 'No host/port configured' }
+//
+// The host is held to the same rule as an HTTP address, and the connection is
+// made to an address that was vetted rather than to the name again - a name
+// that answers differently the second time cannot steer it somewhere else.
+// IPv4 addresses come first: a container that has no IPv6 route would
+// otherwise stall on a host's AAAA record, which dialling the name itself
+// never did.
+async function vettedTcpAddresses(host) {
+  const policy = instancePolicy()
+  const bare = String(host).trim().replace(/^\[|\]$/g, '')
+  const url = await assertSafeUrl(`http://${net.isIP(bare) === 6 ? `[${bare}]` : bare}`, policy)
+  // A bare host only: a port or path glued on would be read by the URL parser
+  // but not by the socket, which would then dial something else.
+  if (url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('invalid url')
+  const name = url.hostname.replace(/^\[|\]$/g, '')
+  if (net.isIP(name)) return [name]
+  const refused = policy.allowPrivate ? isLinkLocalIp : isPrivateIp
+  let addresses
+  try { addresses = await dns.lookup(name, { all: true }) } catch { throw new Error('unresolvable host') }
+  if (!addresses.length) throw new Error('unresolvable host')
+  if (addresses.some((a) => refused(a.address))) throw new Error('blocked host')
+  return [...addresses].sort((a, b) => a.family - b.family).map((a) => a.address)
+}
+
+function dialOnce(address, port, label) {
   return new Promise((resolve) => {
-    const socket = net.createConnection({ host, port: Number(port), timeout: 8000 })
+    const socket = net.createConnection({ host: address, port: Number(port), timeout: 8000 })
     socket.once('connect', () => {
       socket.destroy()
-      resolve({ ok: true, message: `${host}:${port} reachable (connectivity only, not a login check)` })
+      resolve({ ok: true, message: `${label} reachable (connectivity only, not a login check)` })
     })
     socket.once('timeout', () => {
       socket.destroy()
@@ -208,6 +264,23 @@ async function checkTcpReachability(secret, config = {}) {
       resolve({ ok: false, message: err?.message || 'Connection failed' })
     })
   })
+}
+
+async function checkTcpReachability(secret, config = {}) {
+  const { host, port } = config
+  if (!host || !port) return { ok: false, message: 'No host/port configured' }
+  let addresses
+  try {
+    addresses = await vettedTcpAddresses(host)
+  } catch (err) {
+    return { ok: false, message: describeRequestError(err) }
+  }
+  let result
+  for (const address of addresses) {
+    result = await dialOnce(address, port, `${host}:${port}`)
+    if (result.ok) break
+  }
+  return result
 }
 
 // Stremio account credentials: config.identifier is the email/username (stored in
@@ -308,6 +381,23 @@ async function checkNuvioAuth(secret, config = {}) {
   }
 }
 
+// GET /models on an AI Services address. The address is whatever the account
+// entered (any OpenAI-compatible endpoint), so it is fetched the way the chat
+// calls fetch it (postChat in nlCatalog.js): a household's install may point it
+// at a model on its own network, an instance serving strangers may not be
+// pointed at its own. A refusal reads the same wherever it surfaces - the
+// Vault check below and Settings' model list.
+async function fetchAiModels(base, apiKey, signal) {
+  try {
+    return await safeFetch(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal }, instancePolicy())
+  } catch (err) {
+    if (/^(blocked host|unsupported protocol|invalid url|unresolvable host|too many redirects)$/.test(err?.message || '')) {
+      throw new Error('The AI Services address cannot be used from this server - check it under Settings -> External API Keys')
+    }
+    throw err
+  }
+}
+
 // AI Services entries (category 'ai', created by Settings' AI front door).
 // GET /models against the entry's own configured base URL - the cheapest
 // call every OpenAI-compatible provider implements, and the same endpoint
@@ -324,7 +414,7 @@ async function checkOpenAiCompatible(secret, config = {}) {
     const timer = setTimeout(() => controller.abort(), 10000)
     let res
     try {
-      res = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${secret}` }, signal: controller.signal })
+      res = await fetchAiModels(base, secret, controller.signal)
     } finally { clearTimeout(timer) }
     if (res.ok) return { ok: true, message: 'Provider accepted the key' }
     if (res.status === 401 || res.status === 403) return { ok: false, message: `Provider rejected the key (${res.status})` }
@@ -359,4 +449,4 @@ async function runCheck(testType, secret, config) {
   }
 }
 
-module.exports = { runCheck, CHECKERS }
+module.exports = { runCheck, CHECKERS, fetchAiModels }

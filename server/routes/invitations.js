@@ -7,9 +7,19 @@ const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin } = require('.
 const { formatCodeBlock, formatRelativeTime, parseSyncConfig, getAppVersion } = require('../utils/webhookHelpers')
 const { getUserAvatarUrl } = require('../utils/avatarUtils')
 
-// generates a random invite code - 8 chars uppercase
+// An invite code opens a door for anyone who holds it, so it has to be out of
+// reach of guessing: 17 characters, each drawn evenly from 30 (about 83 bits)
+// with the system's cryptographic generator. The 30 leave out the characters
+// that get mistaken for each other when a code is read aloud or retyped from
+// a screenshot (0/O, 1/I/L) and U, and stay uppercase like every code made
+// before. Those older codes are shorter; they are only ever matched as
+// stored, so they keep working.
+const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'
+const INVITE_CODE_LENGTH = 17
 function generateInviteCode() {
-  return crypto.randomBytes(4).toString('base64url').substring(0, 8).toUpperCase()
+  let code = ''
+  for (let i = 0; i < INVITE_CODE_LENGTH; i++) code += INVITE_CODE_ALPHABET[crypto.randomInt(INVITE_CODE_ALPHABET.length)]
+  return code
 }
 
 // An invitation names its group rather than pointing at it. If that group has
@@ -478,34 +488,10 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assig
               }
             })
             if (group) {
-              // Remove user from all other groups first
-              const allGroups = await prisma.group.findMany({
-                where: { accountId: request.invitation.accountId },
-                select: { id: true, userIds: true }
-              })
-
-              for (const g of allGroups) {
-                if (g.userIds) {
-                  const userIds = JSON.parse(g.userIds)
-                  const updatedUserIds = userIds.filter(id => id !== newUser.id)
-                  if (updatedUserIds.length !== userIds.length) {
-                    await prisma.group.update({
-                      where: { id: g.id },
-                      data: { userIds: JSON.stringify(updatedUserIds) }
-                    })
-                  }
-                }
-              }
-
-              // Add user to target group
-              const currentUserIds = group.userIds ? JSON.parse(group.userIds) : []
-              if (!currentUserIds.includes(newUser.id)) {
-                currentUserIds.push(newUser.id)
-                await prisma.group.update({
-                  where: { id: group.id },
-                  data: { userIds: JSON.stringify(currentUserIds) }
-                })
-              }
+              // One queued, transactional change (see assignUserToGroup): two
+              // people accepted at the same moment each used to read the old
+              // member list and the second write erased the first person.
+              await require('../utils/helpers/database').assignUserToGroup(prisma, newUser.id, group.id, { appAccountId: request.invitation.accountId })
 
               // Sync user addons if syncOnJoin is enabled
               if (request.invitation.syncOnJoin) {
@@ -816,9 +802,13 @@ async function getStremioUserInfo(authKey, username, email) {
   }
 }
 
+module.exports.generateInviteCode = generateInviteCode
+module.exports.INVITE_CODE_ALPHABET = INVITE_CODE_ALPHABET
+module.exports.INVITE_CODE_LENGTH = INVITE_CODE_LENGTH
+
 // Public invite routes (no auth required)
 // These routes are mounted at /invite/:inviteCode/*
-module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decrypt }) => {
+module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decrypt }) => {
   const publicRouter = express.Router()
 
   // --- Nuvio device login, for someone joining by invite ---
@@ -1035,12 +1025,45 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         return res.status(400).json({ error: 'Could not retrieve email from Stremio account' })
       }
 
-      // Clear Stremio addons using the OAuth-provided authKey (current valid session)
-      // Do this BEFORE finding/deleting users so we have a valid session
+      // Every Stremio person with this email - the opt-out is for the Stremio
+      // account the key just proved. A Nuvio or Jellyfin person who happens to
+      // share the email is someone else's sign-in and stays.
+      const users = await prisma.user.findMany({
+        where: {
+          email: stremioEmail,
+          providerType: 'stremio'
+        }
+      })
+
+      // Nothing is touched on their Stremio account unless there is someone
+      // here to opt out - a person SlickSync never held keeps their addons.
+      if (users.length === 0) {
+        res.setHeader('Content-Type', 'application/json')
+        return res.status(404).json({ error: 'No user found with this email address' })
+      }
+
+      // For each user, cascade-delete their own data (watch history, group
+      // membership, etc.) - not just the bare User row. This used to only
+      // remove group membership and delete(User), silently orphaning every
+      // userId-scoped table (WatchSnapshot, EpisodeWatchHistory,
+      // MovieWatchHistory, WatchSession, ...) forever, despite this page
+      // telling people "all associated data will be permanently deleted."
+      const { deleteUserCascade } = require('../utils/accountDeletion')
+      for (const user of users) {
+        await deleteUserCascade(prisma, user.id)
+        console.log(`✅ Deleted user via opt-out: ${user.id}`)
+      }
+
+      // Clear Stremio addons using the OAuth-provided authKey (a session that
+      // stays valid after the rows above are gone). This comes last: if the
+      // deletion fails part-way the person's addons are still there, and
+      // running the opt-out again finishes both. Clearing is best-effort -
+      // the person is already out of SlickSync whether or not Stremio answers,
+      // and a second run would find nobody here, so the answer says whether it
+      // worked.
       let addonsCleared = false
       try {
         const { StremioAPIClient } = require('stremio-api-client')
-        // Use the authKey from OAuth (current valid session) to clear addons
         // The authKey from OAuth is already plain text, no decryption needed
         console.log('🔄 Attempting to clear Stremio addons for an opted-out user')
         const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKey })
@@ -1065,41 +1088,16 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
           error: e,
           authKeyLength: authKey ? authKey.length : 0
         })
-        // Continue with deletion even if addon clearing fails
-        // But log the full error so we can debug
       }
 
-      // Every Stremio person with this email - the opt-out is for the Stremio
-      // account the key just proved. A Nuvio or Jellyfin person who happens to
-      // share the email is someone else's sign-in and stays.
-      const users = await prisma.user.findMany({
-        where: {
-          email: stremioEmail,
-          providerType: 'stremio'
-        }
-      })
-
-      if (users.length === 0) {
-        res.setHeader('Content-Type', 'application/json')
-        return res.status(404).json({ error: 'No user found with this email address' })
-      }
-
-      // For each user, cascade-delete their own data (watch history, group
-      // membership, etc.) - not just the bare User row. This used to only
-      // remove group membership and delete(User), silently orphaning every
-      // userId-scoped table (WatchSnapshot, EpisodeWatchHistory,
-      // MovieWatchHistory, WatchSession, ...) forever, despite this page
-      // telling people "all associated data will be permanently deleted."
-      const { deleteUserCascade } = require('../utils/accountDeletion')
-      for (const user of users) {
-        await deleteUserCascade(prisma, user.id)
-        console.log(`✅ Deleted user via opt-out: ${user.id}`)
-      }
-
+      // Whether the Stremio side was cleared goes back too: asking again finds
+      // nobody left here and touches nothing, so the page has to tell the
+      // person when they are the one who needs to remove the addons.
       res.setHeader('Content-Type', 'application/json')
       res.json({
         message: 'User deleted successfully',
-        success: true
+        success: true,
+        addonsCleared
       })
     } catch (error) {
       console.error('Error deleting user:', error)
@@ -1341,20 +1339,16 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
         return res.status(400).json({ error: 'Invitation is not active' })
       }
 
-      // check oauth validity
-      let oauthValid = false
-      if (request.status === 'accepted' && request.oauthLink && request.oauthExpiresAt) {
-        oauthValid = new Date(request.oauthExpiresAt) > new Date()
-      }
-
+      // Where the request stands, and nothing to sign in with. This is
+      // answered to anyone who knows the invite code plus an email and a
+      // username, and a Stremio link code is a bearer secret: whoever holds it
+      // gets the account's auth key once it is approved. The invite page never
+      // shows it from here (it makes its own), and the admin reads a request's
+      // link through the signed-in invitations API.
       res.json({
         status: request.status,
-        oauthCode: oauthValid ? request.oauthCode : null,
-        oauthLink: oauthValid ? request.oauthLink : null,
-        oauthExpiresAt: request.oauthExpiresAt,
         groupName: request.groupName || request.invitation.groupName || null,
-        createdAt: request.createdAt,
-        hasOAuthLink: !!request.oauthLink
+        createdAt: request.createdAt
       })
     } catch (error) {
       console.error('Error checking request status:', error)
@@ -1706,56 +1700,8 @@ module.exports.createPublicRouter = ({ prisma, encrypt, assignUserToGroup, decry
             }
           })
           if (group) {
-            // Create a wrapper that binds prisma to assignUserToGroup
-            // assignUserToGroup expects prisma in scope, so we need to call it with prisma bound
-            const assignUserToGroupWithPrisma = async (userId, groupId, req) => {
-              // Temporarily set prisma in the function's scope by creating a bound version
-              // Since assignUserToGroup uses prisma directly, we need to ensure it's available
-              const { assignUserToGroup: originalAssign } = require('../utils/helpers/database')
-              // The function uses prisma from closure, but we need to pass it
-              // Actually, let's manually do the assignment since we have prisma here
-              const accId = invitation.accountId
-
-              // Remove user from all other groups
-              const allGroups = await prisma.group.findMany({
-                where: { accountId: accId },
-                select: { id: true, userIds: true }
-              })
-
-              for (const g of allGroups) {
-                if (g.userIds) {
-                  const userIds = JSON.parse(g.userIds)
-                  const updatedUserIds = userIds.filter(id => id !== userId)
-                  if (updatedUserIds.length !== userIds.length) {
-                    await prisma.group.update({
-                      where: { id: g.id },
-                      data: { userIds: JSON.stringify(updatedUserIds) }
-                    })
-                  }
-                }
-              }
-
-              // Add user to target group
-              const targetGroup = await prisma.group.findUnique({
-                where: { id: groupId, accountId: accId },
-                select: { id: true, userIds: true }
-              })
-
-              if (!targetGroup) {
-                throw new Error(`Target group not found: ${groupId}`)
-              }
-
-              const currentUserIds = targetGroup.userIds ? JSON.parse(targetGroup.userIds) : []
-              if (!currentUserIds.includes(userId)) {
-                currentUserIds.push(userId)
-                await prisma.group.update({
-                  where: { id: groupId },
-                  data: { userIds: JSON.stringify(currentUserIds) }
-                })
-              }
-            }
-
-            await assignUserToGroupWithPrisma(newUser.id, group.id, { appAccountId: invitation.accountId })
+            // One queued, transactional change - see the same call above.
+            await require('../utils/helpers/database').assignUserToGroup(prisma, newUser.id, group.id, { appAccountId: invitation.accountId })
 
             // Sync user addons if syncOnJoin is enabled
             if (invitation.syncOnJoin) {

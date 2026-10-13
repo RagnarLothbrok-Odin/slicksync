@@ -17,6 +17,7 @@
 // household user separated into a person of their own, the password of the
 // person whose configuration it is.
 
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const { readConfig, writeConfig, rebaseline, noteOutsideChanges, instanceBase } = require('./aiostreamsConfig')
 const { personaUserId } = require('./aioHousehold')
 
@@ -64,7 +65,7 @@ async function pauseAccess(prisma, accountId, person) {
 /** AIOStreams' own list of what each kind of addon offers: preset type -> resources. */
 async function presetResources(base) {
   try {
-    const res = await fetch(`${base}/api/v1/status`, { signal: AbortSignal.timeout(15000) })
+    const res = await safeFetch(`${base}/api/v1/status`, { signal: AbortSignal.timeout(15000) }, instancePolicy())
     const body = await res.json()
     const list = body?.data?.settings?.presets || body?.data?.presets || []
     return new Map((Array.isArray(list) ? list : []).map((p) => [p?.ID, Array.isArray(p?.SUPPORTED_RESOURCES) ? p.SUPPORTED_RESOURCES : []]))
@@ -75,7 +76,7 @@ async function presetResources(base) {
 
 async function manifestResources(url) {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    const res = await safeFetch(url, { signal: AbortSignal.timeout(8000) }, instancePolicy())
     const manifest = await res.json()
     return (Array.isArray(manifest?.resources) ? manifest.resources : []).map((r) => (typeof r === 'string' ? r : r?.name)).filter(Boolean)
   } catch {

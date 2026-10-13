@@ -4,7 +4,7 @@
  * Used at connection time (invitations, user login), not during sync.
  */
 
-const { resolveConfig } = require('./supabase')
+const { resolveConfig, backendFetch } = require('./supabase')
 
 // Every exported function below takes an optional serverConfig so an
 // account can point Nuvio at its own backend. resolveConfig() falls back to
@@ -15,14 +15,14 @@ const { resolveConfig } = require('./supabase')
 async function validateNuvioCredentials(email, password, serverConfig) {
   const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = resolveConfig(serverConfig)
   const url = `${SUPABASE_URL}/auth/v1/token?grant_type=password`
-  const res = await fetch(url, {
+  const res = await backendFetch(url, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON_KEY,
       'content-type': 'application/json'
     },
     body: JSON.stringify({ email, password })
-  })
+  }, serverConfig)
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
@@ -49,14 +49,14 @@ async function validateNuvioCredentials(email, password, serverConfig) {
 async function refreshNuvioToken(refreshToken, serverConfig) {
   const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = resolveConfig(serverConfig)
   const url = `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`
-  const res = await fetch(url, {
+  const res = await backendFetch(url, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON_KEY,
       'content-type': 'application/json'
     },
     body: JSON.stringify({ refresh_token: refreshToken })
-  })
+  }, serverConfig)
 
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
@@ -106,11 +106,11 @@ function parseJwtPayload(jwt) {
 async function startNuvioTvLogin(serverConfig) {
   const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = resolveConfig(serverConfig)
   // Step 0: Create anonymous Supabase session
-  const signupRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+  const signupRes = await backendFetch(`${SUPABASE_URL}/auth/v1/signup`, {
     method: 'POST',
     headers: { 'apikey': SUPABASE_ANON_KEY, 'content-type': 'application/json' },
     body: JSON.stringify({ data: { tv_client: 'slicksync' } })
-  })
+  }, serverConfig)
   if (!signupRes.ok) {
     const bodyText = await signupRes.text().catch(() => '')
     console.error(`Nuvio anonymous signup failed (${signupRes.status}): ${bodyText}`)
@@ -121,7 +121,7 @@ async function startNuvioTvLogin(serverConfig) {
 
   // Step 1: Start TV login session
   const deviceNonce = crypto.randomUUID()
-  const startRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/start_tv_login_session`, {
+  const startRes = await backendFetch(`${SUPABASE_URL}/rest/v1/rpc/start_tv_login_session`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON_KEY,
@@ -133,7 +133,7 @@ async function startNuvioTvLogin(serverConfig) {
       p_redirect_base_url: 'https://nuvioapp.space/tv-login',
       p_device_name: 'SlickSync'
     })
-  })
+  }, serverConfig)
   if (!startRes.ok) {
     const bodyText = await startRes.text().catch(() => '')
     console.error(`Nuvio TV login start failed (${startRes.status}): ${bodyText}`)
@@ -154,7 +154,7 @@ async function startNuvioTvLogin(serverConfig) {
 
 async function pollNuvioTvLogin(code, deviceNonce, anonToken, serverConfig) {
   const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = resolveConfig(serverConfig)
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/poll_tv_login_session`, {
+  const res = await backendFetch(`${SUPABASE_URL}/rest/v1/rpc/poll_tv_login_session`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON_KEY,
@@ -162,7 +162,7 @@ async function pollNuvioTvLogin(code, deviceNonce, anonToken, serverConfig) {
       'content-type': 'application/json'
     },
     body: JSON.stringify({ p_code: code, p_device_nonce: deviceNonce })
-  })
+  }, serverConfig)
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
     console.error(`Nuvio TV login poll failed (${res.status}): ${bodyText}`)
@@ -179,7 +179,7 @@ async function pollNuvioTvLogin(code, deviceNonce, anonToken, serverConfig) {
 
 async function exchangeNuvioTvLogin(code, deviceNonce, anonToken, serverConfig) {
   const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = resolveConfig(serverConfig)
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/tv-logins-exchange`, {
+  const res = await backendFetch(`${SUPABASE_URL}/functions/v1/tv-logins-exchange`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON_KEY,
@@ -187,7 +187,7 @@ async function exchangeNuvioTvLogin(code, deviceNonce, anonToken, serverConfig) 
       'content-type': 'application/json'
     },
     body: JSON.stringify({ code, device_nonce: deviceNonce })
-  })
+  }, serverConfig)
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
     console.error(`Nuvio TV login exchange failed (${res.status}): ${bodyText}`)

@@ -31,6 +31,16 @@ const PENDING_TTL_MS = 10 * 60 * 1000 // 10m - covers a slow provider-side login
 let discoveryCache = null // { doc, fetchedAt }
 const DISCOVERY_TTL_MS = 60 * 60 * 1000 // 1h - these endpoints essentially never change
 
+// An error whose text was written for the person signing in. Anything else
+// that goes wrong here (a network failure, a bug) says nothing useful to them
+// and can carry internal detail, so the routes show a fixed line for it and
+// keep the real error in the server log - see publicMessage.
+class OidcError extends Error {}
+
+function publicMessage(error, fallback) {
+  return error instanceof OidcError ? error.message : fallback
+}
+
 function isConfigured() {
   return OIDC_ENABLED
 }
@@ -45,7 +55,7 @@ async function getDiscoveryDocument() {
   }
   const base = OIDC_ISSUER.replace(/\/+$/, '')
   const res = await fetch(`${base}/.well-known/openid-configuration`)
-  if (!res.ok) throw new Error(`OIDC discovery failed (${res.status}) - check OIDC_ISSUER`)
+  if (!res.ok) throw new OidcError(`OIDC discovery failed (${res.status}) - check OIDC_ISSUER`)
   const doc = await res.json()
   discoveryCache = { doc, fetchedAt: Date.now() }
   return doc
@@ -65,12 +75,14 @@ function decodeJwtPayload(token) {
   }
 }
 
-// Returns { authorizationUrl } - caller does a real top-level redirect
-// (this is a browser navigation flow, not a fetch/JSON API).
+// Returns { authorizationUrl, state } - caller does a real top-level redirect
+// (this is a browser navigation flow, not a fetch/JSON API). `state` is also
+// handed back so the caller can tie the round trip to the browser that
+// started it (see the cookie in publicAuth.js's /oidc/start).
 async function startAuthorization() {
-  if (!isConfigured()) throw new Error('OIDC is not configured')
+  if (!isConfigured()) throw new OidcError('OIDC is not configured')
   const doc = await getDiscoveryDocument()
-  if (!doc.authorization_endpoint) throw new Error('OIDC provider did not advertise an authorization_endpoint')
+  if (!doc.authorization_endpoint) throw new OidcError('OIDC provider did not advertise an authorization_endpoint')
 
   const codeVerifier = base64url(crypto.randomBytes(32))
   const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest())
@@ -86,23 +98,23 @@ async function startAuthorization() {
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
   })
-  return { authorizationUrl: `${doc.authorization_endpoint}?${params.toString()}` }
+  return { authorizationUrl: `${doc.authorization_endpoint}?${params.toString()}`, state }
 }
 
 // Completes the callback: exchanges the code, fetches userinfo, sanity-
 // checks the id_token claims. Returns { sub, email, name } on success -
 // throws on any failure (caller maps that to a login-page error redirect).
 async function handleCallback(code, state) {
-  if (!isConfigured()) throw new Error('OIDC is not configured')
-  if (!code || !state) throw new Error('Missing code or state')
+  if (!isConfigured()) throw new OidcError('OIDC is not configured')
+  if (!code || !state) throw new OidcError('Missing code or state')
 
   const pending = pendingStore.get(state)
   pendingStore.delete(state) // one-shot regardless of outcome
-  if (!pending) throw new Error('This sign-in attempt has expired - try again')
-  if (Date.now() > pending.expiresAt) throw new Error('This sign-in attempt has expired - try again')
+  if (!pending) throw new OidcError('This sign-in attempt has expired - try again')
+  if (Date.now() > pending.expiresAt) throw new OidcError('This sign-in attempt has expired - try again')
 
   const doc = await getDiscoveryDocument()
-  if (!doc.token_endpoint) throw new Error('OIDC provider did not advertise a token_endpoint')
+  if (!doc.token_endpoint) throw new OidcError('OIDC provider did not advertise a token_endpoint')
 
   const tokenRes = await fetch(doc.token_endpoint, {
     method: 'POST',
@@ -119,19 +131,19 @@ async function handleCallback(code, state) {
   if (!tokenRes.ok) {
     const body = await tokenRes.text().catch(() => '')
     console.error(`[OIDC] token exchange failed (${tokenRes.status}): ${body}`)
-    throw new Error('Sign-in with your identity provider failed')
+    throw new OidcError('Sign-in with your identity provider failed')
   }
   const tokens = await tokenRes.json()
-  if (!tokens.access_token) throw new Error('OIDC provider did not return an access token')
+  if (!tokens.access_token) throw new OidcError('OIDC provider did not return an access token')
 
   const idClaims = tokens.id_token ? decodeJwtPayload(tokens.id_token) : null
   if (idClaims) {
     const issuerHost = new URL(OIDC_ISSUER).host
     const claimIssuerHost = (() => { try { return new URL(idClaims.iss).host } catch { return null } })()
-    if (claimIssuerHost && claimIssuerHost !== issuerHost) throw new Error('OIDC id_token issuer mismatch')
+    if (claimIssuerHost && claimIssuerHost !== issuerHost) throw new OidcError('OIDC id_token issuer mismatch')
     const aud = Array.isArray(idClaims.aud) ? idClaims.aud : [idClaims.aud]
-    if (!aud.includes(OIDC_CLIENT_ID)) throw new Error('OIDC id_token audience mismatch')
-    if (idClaims.exp && Date.now() / 1000 > idClaims.exp) throw new Error('OIDC id_token expired')
+    if (!aud.includes(OIDC_CLIENT_ID)) throw new OidcError('OIDC id_token audience mismatch')
+    if (idClaims.exp && Date.now() / 1000 > idClaims.exp) throw new OidcError('OIDC id_token expired')
   }
 
   let profile = idClaims || {}
@@ -145,13 +157,18 @@ async function handleCallback(code, state) {
   }
 
   const sub = profile.sub || idClaims?.sub
-  if (!sub) throw new Error('OIDC provider did not return a subject id')
+  if (!sub) throw new OidcError('OIDC provider did not return a subject id')
   const email = (profile.email || '').trim().toLowerCase() || null
   const name = profile.name || profile.preferred_username || null
-  // Absent claim is treated as fine (not every provider sends it); only an
-  // explicit `false` counts as unverified. Used to gate auto-linking an
-  // OIDC identity onto an existing account purely by email match.
-  const emailVerified = profile.email_verified !== false
+  // Verified only when the provider says so outright. A missing claim, or
+  // the string "false" some providers send, proves nothing about who owns
+  // the address - and this decides whether an OIDC identity may be linked
+  // onto an existing account (or keep an email on a new one) on the strength
+  // of that address alone. Some providers send the answer as the text "true"
+  // (in the user info reply, which wins over the id_token), and that is the
+  // provider saying so just the same.
+  const claim = profile.email_verified
+  const emailVerified = claim === true || (typeof claim === 'string' && claim.trim().toLowerCase() === 'true')
 
   return { sub: String(sub), email, name, emailVerified }
 }
@@ -159,7 +176,9 @@ async function handleCallback(code, state) {
 // Private-mode extra gate - if OIDC_ALLOWED_EMAILS is set, only those
 // emails may log into the single admin account this way. Unset = trust the
 // provider itself as the access-control boundary (the normal
-// SSO-in-front-of-a-homelab-app expectation).
+// SSO-in-front-of-a-homelab-app expectation). The address is matched as the
+// provider reports it, verified or not: a household runs its own identity
+// provider, and several common ones send no email_verified claim at all.
 function isEmailAllowedForPrivateMode(email) {
   if (OIDC_ALLOWED_EMAILS.length === 0) return true
   return !!email && OIDC_ALLOWED_EMAILS.includes(email.toLowerCase())
@@ -171,4 +190,6 @@ module.exports = {
   startAuthorization,
   handleCallback,
   isEmailAllowedForPrivateMode,
+  publicMessage,
+  PENDING_TTL_MS,
 }

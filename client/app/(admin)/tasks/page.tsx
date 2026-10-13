@@ -962,7 +962,9 @@ export default function TasksPage() {
     setIsDeploying(true);
     try {
       const result = await api.deploySnapshot(deployingSnapshot.id, deployTargetUserId);
-      toast.success(`Deployed ${result.deployed} addon${result.deployed !== 1 ? 's' : ''}${result.failed ? `, ${result.failed} failed` : ''}`);
+      // Say which ones did not make it, not just how many.
+      const leftOut = result.leftOut?.length ? `, left out: ${result.leftOut.join(', ')}` : (result.failed ? `, ${result.failed} failed` : '');
+      toast.success(`Deployed ${result.deployed} addon${result.deployed !== 1 ? 's' : ''}${leftOut}`);
       setDeployingSnapshot(null);
       setDeployTargetUserId('');
     } catch (e: any) {

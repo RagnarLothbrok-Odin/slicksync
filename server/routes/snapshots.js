@@ -1,3 +1,4 @@
+const { safeFetch, instancePolicy } = require('../utils/safeUrl');
 const express = require('express');
 
 // Addon snapshots ("library"): save a named, portable copy of a user's or group's
@@ -199,25 +200,42 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, createProvider }) =>
       let addons = [];
       try { addons = JSON.parse(snapshot.addonsJson || '[]'); } catch {}
 
-      const urls = addons
-        .map(a => {
-          try { return a.manifestUrl ? decrypt(a.manifestUrl, req) : null; } catch { return null; }
-        })
-        .filter(Boolean);
-
       // Re-fetch each manifest fresh (addons may have updated since the snapshot was taken)
-      // rather than deploying stale cached manifest data.
+      // rather than deploying stale cached manifest data. An address this server cannot reach
+      // (Stremio's Local Files addon lives on the person's own computer) falls back to the
+      // manifest the template carries, and is left out when there is none. `failed` holds the
+      // names of the addons left out (never their addresses, which carry keys).
       const collection = [];
       const failed = [];
-      for (const url of urls) {
+      for (const a of addons) {
+        // An entry saved without an address has nothing to fetch and never counted as a failure.
+        if (!a?.manifestUrl) continue;
+        const label = (typeof a.name === 'string' && a.name) || 'Unknown';
+        let url = null;
+        try { url = decrypt(a.manifestUrl, req); } catch { url = null; }
+        if (!url) { failed.push(label); continue; }
+        let manifest = null;
         try {
-          const resp = await fetch(url);
-          if (!resp.ok) { failed.push(url); continue; }
-          const manifest = await resp.json();
-          collection.push({ transportUrl: url, transportName: '', manifest });
+          const resp = await safeFetch(url, {}, instancePolicy());
+          if (resp.ok) manifest = await resp.json();
         } catch {
-          failed.push(url);
+          manifest = null;
         }
+        if (!manifest && a.manifest && typeof a.manifest === 'object' && !Array.isArray(a.manifest)) {
+          manifest = a.manifest;
+        }
+        if (!manifest) { failed.push(label); continue; }
+        collection.push({ transportUrl: url, transportName: '', manifest });
+      }
+
+      // A template that names addons must never be written as an empty list: that would
+      // take everything off their account. Anything less than that is deployed as it was at
+      // HEAD, with the addons that could not be fetched left out and named in the answer.
+      if (addons.length > 0 && collection.length === 0) {
+        return res.status(502).json({
+          error: 'None of the addons in this template could be fetched, so nothing was changed on their account',
+          failed,
+        });
       }
 
       const provider = createProvider(targetUser, { decrypt, req });
@@ -227,9 +245,14 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, createProvider }) =>
       await provider.setAddons(collection);
       await require('../utils/accountGuard').recordAssertedState(prisma, targetUserId, targetUser.providerType, collection);
 
-      res.json({ deployed: collection.length, failed: failed.length, targetUserId });
+      const answer = { deployed: collection.length, failed: failed.length, targetUserId };
+      if (failed.length > 0) answer.leftOut = failed;
+      res.json(answer);
     } catch (error) {
       console.error('Error deploying snapshot:', error);
+      // Their list may have been left empty, which the admin has to act on, so this
+      // message goes through as it is.
+      if (error?.code === 'ADDON_LIST_NOT_RESTORED') return res.status(500).json({ error: error.message });
       res.status(500).json({ error: 'Failed to deploy snapshot' });
     }
   });

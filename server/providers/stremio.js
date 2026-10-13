@@ -20,17 +20,14 @@ function createStremioProvider({ authKey }) {
     async getAddons() {
       const collection = await client.request('addonCollectionGet', {})
 
+      // Reading never writes to a person's account. This runs for every
+      // status badge and background check, and an account whose list came
+      // back as null once (a degraded answer from Stremio, not necessarily an
+      // empty account) used to be overwritten with an empty one by the read
+      // itself. Null is treated as "no addons" below; the next sync writes a
+      // proper list.
+      //
       // Normalization logic from sync.js:16-62 — handles null, non-array, corrupted responses
-      if (collection && collection.addons === null) {
-        try {
-          await client.request('addonCollectionSet', { addons: [] })
-          const repaired = await client.request('addonCollectionGet', {})
-          if (repaired && repaired.addons !== null) {
-            Object.assign(collection, repaired)
-          }
-        } catch (_) { /* continue with null handling below */ }
-      }
-
       const rawAddons = collection?.addons !== undefined ? collection.addons : collection
       let addonsArray = []
       if (rawAddons !== null && rawAddons !== undefined) {

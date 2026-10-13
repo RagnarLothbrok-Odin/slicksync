@@ -149,3 +149,74 @@ test('a checkpoint short of the end keeps the session open, as before', async ()
   assert.equal(r.sessionsClosed, 0)
   assert.equal(prisma.rows()[0].isActive, true)
 })
+
+// --- Several sittings of one title in a day, and the next episode starting ---
+
+const FILM = 98 * MIN
+function film(now, { position, lastWatchedAgo = 0 }) {
+  return {
+    _id: 'tt31192372',
+    type: 'movie',
+    name: 'Fall 2: Deadpoint',
+    poster: 'https://example.com/fall2.jpg',
+    state: { timeOffset: position, duration: FILM, lastWatched: new Date(now - lastWatchedAgo).toISOString() },
+  }
+}
+// Midday UTC: the same calendar day in every timezone the default could be.
+const DAY = Date.parse('2026-10-10T18:00:00Z')
+const run = (prisma, at, item) => processUserSessions(prisma, 'default', 'u1', [item], new Date(at))
+
+test('a film watched in three sittings on one day ends up with the whole viewing, not the last sitting', async () => {
+  const prisma = fakePrisma()
+  // Sitting 1: first seen 26 minutes in, then up to 41.
+  await run(prisma, DAY, film(DAY, { position: 26 * MIN }))
+  await run(prisma, DAY + 15 * MIN, film(DAY + 15 * MIN, { position: 41 * MIN }))
+  // Nothing new for longer than the freshness window: the sitting closes.
+  await run(prisma, DAY + 45 * MIN, film(DAY + 45 * MIN, { position: 41 * MIN, lastWatchedAgo: 30 * MIN }))
+  assert.equal(prisma.rows()[0].isActive, false)
+  assert.equal(prisma.rows()[0].durationSeconds, 41 * 60)
+
+  // Sitting 2, over an hour later: resumes and reaches 61.
+  await run(prisma, DAY + 110 * MIN, film(DAY + 110 * MIN, { position: 61 * MIN }))
+  assert.equal(prisma.rows()[0].isActive, true)
+  assert.equal(prisma.rows()[0].durationSeconds, 61 * 60, 'the earlier sitting is kept, plus what moved since')
+  await run(prisma, DAY + 150 * MIN, film(DAY + 150 * MIN, { position: 61 * MIN, lastWatchedAgo: 30 * MIN }))
+
+  // Sitting 3: to the end.
+  await run(prisma, DAY + 200 * MIN, film(DAY + 200 * MIN, { position: 70 * MIN }))
+  await run(prisma, DAY + 228 * MIN, film(DAY + 228 * MIN, { position: FILM }))
+  const [row] = prisma.rows()
+  assert.equal(row.isActive, false, 'reaching the end closes it')
+  assert.equal(row.durationSeconds, 98 * 60)
+})
+
+test('a title picked up again on a later day starts its own figure', async () => {
+  const yesterday = DAY - 24 * 60 * MIN
+  const prisma = fakePrisma([{
+    id: 's1', accountId: 'default', userId: 'u1', itemId: 'tt31192372', videoId: null,
+    itemName: 'Fall 2: Deadpoint', itemType: 'movie', season: null, episode: null, poster: null,
+    startTime: new Date(yesterday), endTime: new Date(yesterday + 40 * MIN), startPosition: 0, lastPosition: 40 * MIN,
+    totalDuration: FILM, isActive: false, durationSeconds: 40 * 60,
+  }])
+  await run(prisma, DAY, film(DAY, { position: 55 * MIN }))
+  const [row] = prisma.rows()
+  assert.equal(row.isActive, true)
+  // Only what moved since yesterday's 40-minute mark - yesterday's 40 minutes are yesterday's.
+  assert.equal(row.durationSeconds, 15 * 60)
+})
+
+test('the next episode starting does not close the session it just opened', async () => {
+  const prisma = fakePrisma([{
+    id: 's1', accountId: 'default', userId: 'u1', itemId: 'tt1844624', videoId: 'tt1844624:13:5',
+    itemName: 'American Horror Story', itemType: 'series', season: 13, episode: 5, poster: null,
+    startTime: new Date(DAY - 20 * MIN), endTime: null, startPosition: 0, lastPosition: 15 * MIN, totalDuration: DURATION,
+    isActive: true, durationSeconds: 15 * 60,
+  }])
+  const next = episode(DAY, { position: 2 * MIN, lastWatchedAgo: 0 })
+  next.state.video_id = 'tt1844624:13:6'
+  await run(prisma, DAY, next)
+  const [row] = prisma.rows()
+  assert.equal(row.videoId, 'tt1844624:13:6')
+  assert.equal(row.isActive, true, 'still playing')
+  assert.equal(row.durationSeconds, 2 * 60, 'its own two minutes, not the previous episode\'s time')
+})

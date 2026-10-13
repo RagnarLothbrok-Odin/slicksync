@@ -21,9 +21,6 @@ export interface InviteRequestStatus {
   email: string;
   username: string;
   groupName?: string;
-  oauthCode?: string;
-  oauthLink?: string;
-  oauthExpiresAt?: string;
 }
 
 export interface OAuthGenerateResponse {
@@ -262,9 +259,10 @@ export const inviteApi = {
   },
 
   /**
-   * Delete user account via OAuth
+   * Delete user account via OAuth. `addonsCleared` is false when SlickSync's
+   * side is gone but its addons could not be taken off their Stremio account.
    */
-  async deleteUser(authKey: string): Promise<{ message: string }> {
+  async deleteUser(authKey: string): Promise<{ message: string; addonsCleared?: boolean }> {
     return request('/delete-user', {
       method: 'POST',
       body: JSON.stringify({ authKey }),

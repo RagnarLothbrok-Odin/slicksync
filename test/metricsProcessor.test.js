@@ -34,7 +34,7 @@ function makeMockPrisma({ latestSnapshotForToday = null, previousSnapshot = null
   }
 }
 
-function makeItem({ overallTimeWatchedMs, type = 'movie' } = {}) {
+function makeItem({ overallTimeWatchedMs, type = 'movie', lastWatched = new Date() } = {}) {
   return {
     _id: 'tt1234567',
     type,
@@ -42,7 +42,7 @@ function makeItem({ overallTimeWatchedMs, type = 'movie' } = {}) {
     state: {
       overallTimeWatched: overallTimeWatchedMs != null ? String(overallTimeWatchedMs) : undefined,
       timeOffset: undefined,
-      lastWatched: new Date().toISOString(),
+      lastWatched: lastWatched.toISOString(),
     },
   }
 }
@@ -101,18 +101,51 @@ test('processLibraryItem: no delta when overallTimeWatched matches the existing 
   assert.equal(prisma.calls.transactions.length, 0, 'nothing changed, so no writes at all should happen')
 })
 
-test('processLibraryItem: a delta under the 60-second threshold updates the baseline but does not record activity', async () => {
+test('processLibraryItem: a short advance on a title that has gone quiet moves the baseline and records nothing', async () => {
   const priorSnapshot = { overallTimeWatched: '1000000', timeOffset: null }
   const prisma = makeMockPrisma({ latestSnapshotForToday: null, previousSnapshot: priorSnapshot, mostRecentActivity: null })
-  const item = makeItem({ overallTimeWatchedMs: 1000000 + 30 * 1000 }) // only 30s of new progress
+  // 30s of new progress, last played an hour ago - nothing more is coming.
+  const item = makeItem({ overallTimeWatchedMs: 1000000 + 30 * 1000, lastWatched: new Date(Date.now() - 60 * 60 * 1000) })
 
   const result = await processLibraryItem(prisma, 'acct-1', 'user-1', item, new Date())
 
   assert.equal(result.activityCreated, false)
-  assert.equal(result.snapshotCreated, true, 'baseline still advances even when the delta is too small to log')
+  assert.equal(result.snapshotCreated, true, 'the short tail is let go so the title is not re-examined on every pass')
   const ops = prisma.calls.transactions[0]
   assert.equal(ops.length, 1)
   assert.equal(ops[0].__op, 'watchSnapshot.upsert')
+})
+
+test('processLibraryItem: a short advance on a title still being played is carried to the next pass, not lost', async () => {
+  // Progress that arrives in steps just under a minute used to move the
+  // baseline each time and record nothing, so that viewing vanished.
+  const priorSnapshot = { overallTimeWatched: '1000000', timeOffset: null }
+  const prisma = makeMockPrisma({ latestSnapshotForToday: null, previousSnapshot: priorSnapshot, mostRecentActivity: null })
+
+  const first = await processLibraryItem(prisma, 'acct-1', 'user-1', makeItem({ overallTimeWatchedMs: 1000000 + 40 * 1000 }), new Date())
+  assert.equal(first.activityCreated, false)
+  assert.equal(first.snapshotCreated, false, 'the baseline stays where it was')
+  assert.equal(prisma.calls.transactions.length, 0, 'nothing is written for an advance that is only being carried')
+
+  // The next pass, another 40s on - measured from the same baseline.
+  const second = await processLibraryItem(prisma, 'acct-1', 'user-1', makeItem({ overallTimeWatchedMs: 1000000 + 80 * 1000 }), new Date())
+  assert.equal(second.activityCreated, true)
+  assert.equal(second.snapshotCreated, true)
+  const ops = prisma.calls.transactions[0]
+  const activity = ops.find((o) => o.__op === 'watchActivity.create')
+  assert.equal(activity.args.data.watchTimeSeconds, 80, 'both advances, in one entry')
+  const snapshot = ops.find((o) => o.__op === 'watchSnapshot.upsert')
+  assert.equal(snapshot.args.update.overallTimeWatched, String(1000000 + 80 * 1000))
+})
+
+test('processLibraryItem: a value that dropped and came back is not carried or recorded', async () => {
+  // The stored high-water mark is above what the provider reports right now
+  // (a profile fetch that failed and recovered). No progress, nothing held.
+  const todaySnapshot = { overallTimeWatched: '2000000', timeOffset: null }
+  const prisma = makeMockPrisma({ latestSnapshotForToday: todaySnapshot, previousSnapshot: null, mostRecentActivity: null })
+  const result = await processLibraryItem(prisma, 'acct-1', 'user-1', makeItem({ overallTimeWatchedMs: 1500000 }), new Date())
+  assert.equal(result.activityCreated, false)
+  assert.equal(prisma.calls.transactions[0].some((o) => o.__op === 'watchActivity.create'), false)
 })
 
 // A Jellyfin server reports where playback IS - a seek or a "mark played"

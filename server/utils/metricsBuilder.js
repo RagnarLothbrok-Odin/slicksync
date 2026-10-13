@@ -351,6 +351,196 @@ function generateAlerts(userLifecycle, topContent, engagement, period) {
 const ACTIVITY_TAKE = 5000
 const ACTIVITY_TAKE_DEEP = 100000
 
+/**
+ * Who is watching what right now, for one account. Built from live state
+ * every time it is asked for - it is deliberately NOT part of the cached
+ * metrics object any more: that is kept for five minutes, so the card on the
+ * Activity page could show a title for minutes after the stream had moved on
+ * or stopped.
+ */
+async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
+  const nowPlaying = []
+  // "Now Playing" is seeded from BOTH signals, because neither covers
+  // everything on its own:
+  //   - The AIOStreams proxy sees streams it carries open/close in real time
+  //     (accurate liveness), but never sees content routed outside it - e.g.
+  //     usenet via newznab, which bypasses the proxy entirely.
+  //   - Native tracking sees anything the provider records, but only learns of
+  //     a session at the provider's checkpoint (at stop, for Nuvio) and then
+  //     holds it "active" for its whole freshness window (~15 min).
+  // So native is seeded here, and mergeProxyNowPlaying below reconciles them:
+  // the proxy wins for content it carries (including suppressing the stale
+  // native echo of a stream it knows already ended - which is what made an
+  // exited stream linger), while native survives untouched for content the
+  // proxy never carried. Native remains the sole source of history/duration.
+  const userMap = new Map(activeUsers.map(u => [u.id, u]))
+
+  let activeSessionsFromDb = []
+  try {
+    activeSessionsFromDb = await prisma.watchSession.findMany({
+      where: {
+        accountId: accountIdValue || 'default',
+        isActive: true
+      },
+      orderBy: { startTime: 'desc' }
+    })
+  } catch (error) {
+    console.warn('[MetricsBuilder] Failed to fetch active sessions from database:', error.message)
+  }
+
+  for (const session of activeSessionsFromDb) {
+    const user = userMap.get(session.userId)
+    if (!user) continue
+    // A session whose last checkpoint sits at the end of the runtime is a
+    // watch that ended, not one that is playing. sessionTracker closes such
+    // a session on its next poll; a session it creates from that final
+    // checkpoint stays active until the poll after that, and this keeps it
+    // out of the panel in between.
+    if (hasReachedEnd(session.lastPosition, session.totalDuration)) continue
+    // Someone on a Jellyfin-compatible server has a real live signal - the
+    // server's own sessions list, added below - so a session only kept open
+    // by the library read's ~15-minute freshness window would leave a
+    // finished viewing on screen long after it stopped.
+    if (user.providerType === 'jellyfin') continue
+
+    nowPlaying.push({
+      user: {
+        id: user.id,
+        username: user.username || user.email,
+        email: user.email,
+        colorIndex: user.colorIndex || 0,
+        avatarUrl: user.avatarUrl || null,
+        useGravatar: user.useGravatar ?? false
+      },
+      item: {
+        id: session.itemId,
+        name: session.itemName,
+        type: session.itemType,
+        year: null,
+        poster: session.poster,
+        season: session.season,
+        episode: session.episode
+      },
+      videoId: session.videoId ?? null,
+      watchedAt: session.startTime.toISOString(),
+      watchedAtTimestamp: session.startTime.getTime(),
+      // Position for the "resume here" quick-launch (Now Playing panel) -
+      // lastPosition is a direct snapshot value per WatchSession's own field
+      // comment ("always accurate the instant new data arrives"), safe to
+      // surface as-is, unlike overallTimeWatched which needs two
+      // observations to diff (see this repo's CLAUDE.md).
+      lastPosition: session.lastPosition ?? null,
+      totalDuration: session.totalDuration ?? null,
+      // Same episode-aware deep-link builder Continue Watching already uses
+      // (server/utils/appLinks.js) - not the plain client-side one, which
+      // has no season/episode parameter at all for series.
+      ...(session.itemId ? {
+        stremioAppUrl: buildStremioLinks(session.itemId, session.itemType === 'series' ? 'series' : 'movie', session.season, session.episode).appUrl,
+        nuvioAppUrl: buildNuvioAppUrl(session.itemType === 'series' ? 'series' : 'movie', session.itemId),
+      } : {}),
+    })
+  }
+
+  // AIOStreams' own apps (Odin, Infuse, Swiftfin, its desktop app) report
+  // playback through Watch State, which none of the above can see - see
+  // utils/watchState.js liveViewings(). Added before the proxy merge, so a
+  // viewing that also streams through the proxy is shown once.
+  //
+  // A Jellyfin server's own sessions list does the same for people signed in
+  // to one - see utils/jellyfinLive.js.
+  try {
+    const { liveViewings } = require('./watchState')
+    const jellyfinViewings = require('./jellyfinLive').liveViewings(activeUsers.map((u) => u.id)).map((v) => ({ ...v, source: 'jellyfin' }))
+    for (const v of [...await liveViewings(prisma, accountIdValue || 'default'), ...jellyfinViewings]) {
+      const user = userMap.get(v.userId)
+      if (!user) continue
+      if (nowPlaying.some((np) => np.user.id === v.userId && np.item.id === v.itemId)) continue
+      nowPlaying.push({
+        user: {
+          id: user.id,
+          username: user.username || user.email,
+          email: user.email,
+          colorIndex: user.colorIndex || 0,
+          avatarUrl: user.avatarUrl || null,
+          useGravatar: user.useGravatar ?? false
+        },
+        item: {
+          id: v.itemId,
+          name: v.itemName || v.itemId,
+          type: v.itemType,
+          year: null,
+          poster: v.poster,
+          season: v.season,
+          episode: v.episode
+        },
+        videoId: v.videoId,
+        watchedAt: v.startedAt.toISOString(),
+        watchedAtTimestamp: v.startedAt.getTime(),
+        lastPosition: v.positionMs,
+        totalDuration: v.durationMs,
+        source: v.source || 'aiostreams',
+        // The device and app it's playing on, when the server says (Jellyfin does).
+        ...(v.device ? { device: v.device } : {}),
+        // A Jellyfin app has no link to open a title with, and a Stremio or
+        // Nuvio one would open the wrong app.
+        ...(v.source === 'jellyfin' ? {} : {
+          stremioAppUrl: buildStremioLinks(v.itemId, v.itemType === 'series' ? 'series' : 'movie', v.season, v.episode).appUrl,
+          nuvioAppUrl: buildNuvioAppUrl(v.itemType === 'series' ? 'series' : 'movie', v.itemId),
+        }),
+      })
+    }
+  } catch (error) {
+    console.warn('[MetricsBuilder] Failed to read AIOStreams viewings:', error.message)
+  }
+
+  // Reconcile against AIOStreams proxy-detected streams (see above).
+  try {
+    const { mergeProxyNowPlaying } = require('./proxyNowPlaying')
+    // Copied before the list is emptied: with no proxy streams to reconcile,
+    // the merge hands back this very array, and clearing it first used to
+    // wipe Now Playing whenever nothing had gone through the proxy lately.
+    const merged = [...await mergeProxyNowPlaying(prisma, accountIdValue || 'default', activeUsers, nowPlaying)]
+    nowPlaying.length = 0
+    nowPlaying.push(...merged)
+  } catch (error) {
+    console.warn('[MetricsBuilder] Failed to merge proxy now playing:', error.message)
+  }
+
+  // Most recent first.
+  nowPlaying.sort((a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp)
+  return nowPlaying
+}
+
+// Several dashboards and tabs ask within the same few seconds; one answer
+// serves them all. Short enough that a stream starting or stopping shows on
+// the next refresh.
+const LIVE_NOW_PLAYING_TTL_MS = 8 * 1000
+const liveNowPlayingMemo = new Map() // accountId -> { at, promise }
+
+/** Forget the remembered list - a stream just started or stopped. */
+function invalidateLiveNowPlaying(accountId) {
+  liveNowPlayingMemo.delete(accountId || 'default')
+}
+
+/** The current Now Playing list for an account, fresh to within a few seconds. */
+function liveNowPlaying(prisma, accountId) {
+  const accountIdValue = accountId || 'default'
+  const hit = liveNowPlayingMemo.get(accountIdValue)
+  if (hit && Date.now() - hit.at < LIVE_NOW_PLAYING_TTL_MS) return hit.promise
+  const promise = (async () => {
+    const activeUsers = await prisma.user.findMany({
+      where: { accountId: accountIdValue, isActive: true },
+      select: { id: true, username: true, email: true, colorIndex: true, avatarUrl: true, useGravatar: true, providerType: true, jellyfinServerKind: true, isActive: true },
+    })
+    return buildNowPlaying(prisma, accountIdValue, activeUsers)
+  })()
+  liveNowPlayingMemo.set(accountIdValue, { at: Date.now(), promise })
+  // A failed build must not be served for the rest of the window.
+  promise.catch(() => { if (liveNowPlayingMemo.get(accountIdValue)?.promise === promise) liveNowPlayingMemo.delete(accountIdValue) })
+  if (liveNowPlayingMemo.size > 500) liveNowPlayingMemo.delete(liveNowPlayingMemo.keys().next().value)
+  return promise
+}
+
 async function buildMetricsForAccount({ prisma, accountId, period = '30d', decrypt, deepActivity = false }) {
   const activityTake = deepActivity ? ACTIVITY_TAKE_DEEP : ACTIVITY_TAKE
   if (!accountId) {
@@ -847,151 +1037,8 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
 
   const now = Date.now()
 
-  // "Now Playing" is seeded from BOTH signals, because neither covers
-  // everything on its own:
-  //   - The AIOStreams proxy sees streams it carries open/close in real time
-  //     (accurate liveness), but never sees content routed outside it - e.g.
-  //     usenet via newznab, which bypasses the proxy entirely.
-  //   - Native tracking sees anything the provider records, but only learns of
-  //     a session at the provider's checkpoint (at stop, for Nuvio) and then
-  //     holds it "active" for its whole freshness window (~15 min).
-  // So native is seeded here, and mergeProxyNowPlaying below reconciles them:
-  // the proxy wins for content it carries (including suppressing the stale
-  // native echo of a stream it knows already ended - which is what made an
-  // exited stream linger), while native survives untouched for content the
-  // proxy never carried. Native remains the sole source of history/duration.
-  const userMap = new Map(activeUsers.map(u => [u.id, u]))
-
-  let activeSessionsFromDb = []
-  try {
-    activeSessionsFromDb = await prisma.watchSession.findMany({
-      where: {
-        accountId: accountIdValue || 'default',
-        isActive: true
-      },
-      orderBy: { startTime: 'desc' }
-    })
-  } catch (error) {
-    console.warn('[MetricsBuilder] Failed to fetch active sessions from database:', error.message)
-  }
-
-  for (const session of activeSessionsFromDb) {
-    const user = userMap.get(session.userId)
-    if (!user) continue
-    // A session whose last checkpoint sits at the end of the runtime is a
-    // watch that ended, not one that is playing. sessionTracker closes such
-    // a session on its next poll; a session it creates from that final
-    // checkpoint stays active until the poll after that, and this keeps it
-    // out of the panel in between.
-    if (hasReachedEnd(session.lastPosition, session.totalDuration)) continue
-    // Someone on a Jellyfin-compatible server has a real live signal - the
-    // server's own sessions list, added below - so a session only kept open
-    // by the library read's ~15-minute freshness window would leave a
-    // finished viewing on screen long after it stopped.
-    if (user.providerType === 'jellyfin') continue
-
-    nowPlaying.push({
-      user: {
-        id: user.id,
-        username: user.username || user.email,
-        email: user.email,
-        colorIndex: user.colorIndex || 0,
-        avatarUrl: user.avatarUrl || null,
-        useGravatar: user.useGravatar ?? false
-      },
-      item: {
-        id: session.itemId,
-        name: session.itemName,
-        type: session.itemType,
-        year: null,
-        poster: session.poster,
-        season: session.season,
-        episode: session.episode
-      },
-      videoId: session.videoId ?? null,
-      watchedAt: session.startTime.toISOString(),
-      watchedAtTimestamp: session.startTime.getTime(),
-      // Position for the "resume here" quick-launch (Now Playing panel) -
-      // lastPosition is a direct snapshot value per WatchSession's own field
-      // comment ("always accurate the instant new data arrives"), safe to
-      // surface as-is, unlike overallTimeWatched which needs two
-      // observations to diff (see this repo's CLAUDE.md).
-      lastPosition: session.lastPosition ?? null,
-      totalDuration: session.totalDuration ?? null,
-      // Same episode-aware deep-link builder Continue Watching already uses
-      // (server/utils/appLinks.js) - not the plain client-side one, which
-      // has no season/episode parameter at all for series.
-      ...(session.itemId ? {
-        stremioAppUrl: buildStremioLinks(session.itemId, session.itemType === 'series' ? 'series' : 'movie', session.season, session.episode).appUrl,
-        nuvioAppUrl: buildNuvioAppUrl(session.itemType === 'series' ? 'series' : 'movie', session.itemId),
-      } : {}),
-    })
-  }
-
-  // AIOStreams' own apps (Odin, Infuse, Swiftfin, its desktop app) report
-  // playback through Watch State, which none of the above can see - see
-  // utils/watchState.js liveViewings(). Added before the proxy merge, so a
-  // viewing that also streams through the proxy is shown once.
-  //
-  // A Jellyfin server's own sessions list does the same for people signed in
-  // to one - see utils/jellyfinLive.js.
-  try {
-    const { liveViewings } = require('./watchState')
-    const jellyfinViewings = require('./jellyfinLive').liveViewings(activeUsers.map((u) => u.id)).map((v) => ({ ...v, source: 'jellyfin' }))
-    for (const v of [...await liveViewings(prisma, accountIdValue || 'default'), ...jellyfinViewings]) {
-      const user = userMap.get(v.userId)
-      if (!user) continue
-      if (nowPlaying.some((np) => np.user.id === v.userId && np.item.id === v.itemId)) continue
-      nowPlaying.push({
-        user: {
-          id: user.id,
-          username: user.username || user.email,
-          email: user.email,
-          colorIndex: user.colorIndex || 0,
-          avatarUrl: user.avatarUrl || null,
-          useGravatar: user.useGravatar ?? false
-        },
-        item: {
-          id: v.itemId,
-          name: v.itemName || v.itemId,
-          type: v.itemType,
-          year: null,
-          poster: v.poster,
-          season: v.season,
-          episode: v.episode
-        },
-        videoId: v.videoId,
-        watchedAt: v.startedAt.toISOString(),
-        watchedAtTimestamp: v.startedAt.getTime(),
-        lastPosition: v.positionMs,
-        totalDuration: v.durationMs,
-        source: v.source || 'aiostreams',
-        // The device and app it's playing on, when the server says (Jellyfin does).
-        ...(v.device ? { device: v.device } : {}),
-        // A Jellyfin app has no link to open a title with, and a Stremio or
-        // Nuvio one would open the wrong app.
-        ...(v.source === 'jellyfin' ? {} : {
-          stremioAppUrl: buildStremioLinks(v.itemId, v.itemType === 'series' ? 'series' : 'movie', v.season, v.episode).appUrl,
-          nuvioAppUrl: buildNuvioAppUrl(v.itemType === 'series' ? 'series' : 'movie', v.itemId),
-        }),
-      })
-    }
-  } catch (error) {
-    console.warn('[MetricsBuilder] Failed to read AIOStreams viewings:', error.message)
-  }
-
-  // Reconcile against AIOStreams proxy-detected streams (see above).
-  try {
-    const { mergeProxyNowPlaying } = require('./proxyNowPlaying')
-    // Copied before the list is emptied: with no proxy streams to reconcile,
-    // the merge hands back this very array, and clearing it first used to
-    // wipe Now Playing whenever nothing had gone through the proxy lately.
-    const merged = [...await mergeProxyNowPlaying(prisma, accountIdValue || 'default', activeUsers, nowPlaying)]
-    nowPlaying.length = 0
-    nowPlaying.push(...merged)
-  } catch (error) {
-    console.warn('[MetricsBuilder] Failed to merge proxy now playing:', error.message)
-  }
+  // Built by buildNowPlaying (above), from both signals - see its comments.
+  nowPlaying = await buildNowPlaying(prisma, accountIdValue, activeUsers)
 
   // Build startedPlaying from library cache (for period-based metrics, not UI display)
   const periodStartTime = startDate.getTime()
@@ -1471,11 +1518,33 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
     return !!activityTitle && activityTitle === sessionTitle
   }
 
+  // The household's calendar day a moment falls on. Compared whole, never
+  // sliced - see dateUtils.js.
+  const accountDayOf = (ms) => getAccountDateString(new Date(ms), accountTimeZone)
+
   function mergeCrossPipelineDuplicates(recentActivityList, watchSessionsList) {
     const MERGE_WINDOW_MS = 3 * 60 * 60 * 1000 // 3 hours
+    // Two moments further apart than this cannot share a calendar day (25h
+    // covers the day a clock change makes longer), so no date is worked out.
+    const SAME_DAY_REACH_MS = 25 * 60 * 60 * 1000
     const consumedSessionIds = new Set()
+    // Working out a calendar day is slow next to comparing two numbers, and
+    // this loop compares every entry with every session of the same person -
+    // millions of pairs for a long history. So a day is worked out at most
+    // once per session and once per entry, and only for a pair that is
+    // outside the three hours yet close enough to share a day at all.
+    const sessionDays = new Map()
+    const sessionDay = (session) => {
+      let day = sessionDays.get(session.id)
+      if (day === undefined) {
+        day = accountDayOf(session.updatedAtTimestamp)
+        sessionDays.set(session.id, day)
+      }
+      return day
+    }
 
     for (const activity of recentActivityList) {
+      let activityDay
       const match = watchSessionsList.find((session) => {
         if (consumedSessionIds.has(session.id)) return false
         if (session.user.id !== activity.user.id) return false
@@ -1486,8 +1555,19 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
         // any show watched across more than one sitting fell outside the
         // merge window for every episode after the first, permanently
         // losing its duration in the Activity feed.
+        // Within three hours of each other, or on the same day for this
+        // household. The History row keeps the time of the FIRST sitting, so
+        // a title picked up again later that evening sat more than three
+        // hours from its own session - the two were then sent as separate
+        // entries and the page showed the session's last-sitting figure
+        // (confirmed real case: 32m shown for a film whose day totalled
+        // far more).
         const diff = Math.abs(session.updatedAtTimestamp - activity.watchedAtTimestamp)
-        if (diff > MERGE_WINDOW_MS) return false
+        if (diff > MERGE_WINDOW_MS) {
+          if (diff > SAME_DAY_REACH_MS) return false
+          if (activityDay === undefined) activityDay = accountDayOf(activity.watchedAtTimestamp)
+          if (sessionDay(session) !== activityDay) return false
+        }
         return isSameEvent(activity, session)
       })
 
@@ -1723,6 +1803,9 @@ async function buildMetricsForAccount({ prisma, accountId, period = '30d', decry
 }
 
 module.exports = {
+  buildNowPlaying,
+  liveNowPlaying,
+  invalidateLiveNowPlaying,
   buildMetricsForAccount
 }
 

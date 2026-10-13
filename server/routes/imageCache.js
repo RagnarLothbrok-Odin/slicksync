@@ -18,7 +18,8 @@ const core = require('../utils/imageCacheCore');
 // One narrow exception to the private-address rule: a Jellyfin-compatible
 // server's own poster on a server someone here signed in to, on an instance
 // allowed to reach private addresses (utils/jellyfinImages.js). Fetched
-// without following redirects.
+// without following redirects; every other fetch follows them one hop at a
+// time through safeFetch (utils/safeUrl.js), which checks each address.
 module.exports = ({ prisma } = {}) => {
   const router = express.Router();
 
@@ -52,7 +53,22 @@ module.exports = ({ prisma } = {}) => {
     const wantsWebp = encoder.webp && /image\/webp/i.test(String(req.get('accept') || ''));
     res.setHeader('Vary', 'Accept');
 
-    const fallback = () => { try { res.redirect(302, src); } catch {} };
+    // When the image cannot be produced here (an animated GIF or SVG, a CDN
+    // that turns this server away, a failed fetch) the device is handed the
+    // original address, so it never sees a broken poster. That only makes
+    // sense for an image being loaded into a page or by a device: a browser
+    // always says when it is navigating to the address itself, and following
+    // that redirect would make this route a way to send people from this
+    // site's domain to any address at all. Native clients send neither header.
+    const fallback = () => {
+      if (req.get('sec-fetch-mode') === 'navigate' || req.get('sec-fetch-dest') === 'document') {
+        // Not storable: a cache must not hand this 404 to the image request
+        // for the same address.
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(404).json({ error: 'not found' });
+      }
+      try { res.redirect(302, src); } catch {}
+    };
 
     // Cache hit, in either format. The other format is served immediately
     // and the requested one produced behind the response - the day WebP
@@ -68,7 +84,7 @@ module.exports = ({ prisma } = {}) => {
     let followRedirects = true;
     if (!localFile) {
       try {
-        await core.assertSafeUrl(src);
+        await core.assertImageUrl(src);
       } catch {
         if (!(await require('../utils/jellyfinImages').allowPrivatePoster(prisma, src).catch(() => false))) {
           // Not a fetchable/safe URL - don't even redirect to it.

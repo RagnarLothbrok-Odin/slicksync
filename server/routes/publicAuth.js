@@ -1,18 +1,27 @@
 const express = require('express');
 const { SETTINGS_SECRET_FIELDS } = require('../utils/settingsSecrets')
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const crypto = require('crypto');
 const { repairAddonsList } = require('../utils/repair');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { validateStremioAuthKey } = require('../utils/stremio');
 const { encrypt } = require('../utils/encryption');
+const { safeEqual } = require('../utils/safeEqual');
+const { safeFetch, instancePolicy } = require('../utils/safeUrl');
 const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin, refreshNuvioToken, parseJwtPayload } = require('../providers/nuvioAuth');
 
-module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET }) => {
+// Names the cookie that ties an SSO round trip to the browser that started it.
+const OIDC_STATE_COOKIE = 'sfm_oidc';
+
+module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, verifyAccountToken = require('../utils/auth').verifyAccountToken }) => {
   console.log('PublicAuth router initialized, prisma available:', !!prisma);
   const router = express.Router();
+
+  // What a failed request tells the caller. The real error stays in the server
+  // log: a database or driver error carries query text and addresses, and
+  // these routes answer people who may not be signed in yet.
+  const GENERIC_FAILURE = 'Something went wrong - please try again';
 
   // Shared function to reset account data
   // One reset for import and Reset alike - this used to be its own copy and
@@ -288,7 +297,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('Registration error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -338,7 +347,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('Login error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -354,10 +363,14 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         return responseUtils.badRequest(res, 'username and password are required');
       }
 
-      // Compare with env vars (trim whitespace)
+      // Compare with env vars (trim whitespace). Both are checked before
+      // either answer is used, so how long this takes never says whether the
+      // user name was the part that was right.
       const trimmedUsername = (username || '').trim();
       const trimmedPassword = (password || '').trim();
-      if (trimmedUsername !== PRIVATE_AUTH_USERNAME || trimmedPassword !== PRIVATE_AUTH_PASSWORD) {
+      const usernameOk = safeEqual(trimmedUsername, PRIVATE_AUTH_USERNAME);
+      const passwordOk = safeEqual(trimmedPassword, PRIVATE_AUTH_PASSWORD);
+      if (!usernameOk || !passwordOk) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
@@ -383,7 +396,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('Private login error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -420,7 +433,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('2FA verification error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -459,7 +472,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       return res.json({ available: true, challengeId, options });
     } catch (error) {
       console.error('Passkey options error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -528,7 +541,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('Passkey verify error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -557,17 +570,27 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
     return res.json({ configured: oidc.isConfigured(), displayName: oidc.displayName() });
   });
 
+  // The cookie that ties an SSO round trip to the browser that started it.
+  // SameSite=Lax, not Strict: the browser comes back from the identity
+  // provider by a top-level redirect, which Strict would leave the cookie off.
+  // Path '/' because the __Host- prefix used in production requires it.
+  const oidcStateCookieOptions = (extra) => ({ httpOnly: true, secure: isProdEnv(), sameSite: 'lax', path: '/', ...extra });
+
   // GET /oidc/start - real browser navigation (not fetch/JSON): redirects
   // straight to the provider's own login page.
   router.get('/oidc/start', async (req, res) => {
+    const oidc = require('../utils/oidc');
     try {
-      const oidc = require('../utils/oidc');
       if (!oidc.isConfigured()) return res.status(400).json({ message: 'OIDC is not configured' });
-      const { authorizationUrl } = await oidc.startAuthorization();
+      const { authorizationUrl, state } = await oidc.startAuthorization();
+      // The callback only accepts a return that carries this same value. Without
+      // it, anyone holding a finished (code, state) pair could send it to
+      // someone else's browser and sign them in to the sender's account.
+      res.cookie(cookieName(OIDC_STATE_COOKIE), state, oidcStateCookieOptions({ maxAge: oidc.PENDING_TTL_MS }));
       return res.redirect(authorizationUrl);
     } catch (error) {
       console.error('OIDC start error:', error);
-      return res.redirect('/login?oidcError=' + encodeURIComponent(error?.message || 'Failed to start SSO login'));
+      return res.redirect('/login?oidcError=' + encodeURIComponent(oidc.publicMessage(error, 'Failed to start SSO login')));
     }
   });
 
@@ -576,15 +599,35 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
   // (private mode), then redirects into the app or back to /login with
   // either an error or a pending-2FA token.
   router.get('/oidc/callback', async (req, res) => {
+    const oidc = require('../utils/oidc');
     try {
-      const oidc = require('../utils/oidc');
       if (!oidc.isConfigured()) {
         return res.redirect('/login?oidcError=' + encodeURIComponent('OIDC is not configured'));
       }
       const { code, state, error: providerError } = req.query || {};
+
+      // Did this browser start the sign-in? Where strangers sign in, only a
+      // return carrying the cookie set by /oidc/start, with the same state,
+      // did. A household's own install may be opened by more than one name
+      // (a LAN address and the public one), and the cookie only reaches the
+      // name the sign-in was started on, so there a return without it is let
+      // through - the pending state held here is still required - while one
+      // carrying a different cookie is still refused.
+      const bound = parseCookies ? parseCookies(req)[cookieName(OIDC_STATE_COOKIE)] : undefined;
+      const cookieBound = typeof bound === 'string' && bound !== '';
+      const sameBrowser = typeof state === 'string' && state !== '' && (cookieBound ? safeEqual(bound, state) : INSTANCE_TYPE !== 'public');
+      const clearStateCookie = () => res.cookie(cookieName(OIDC_STATE_COOKIE), '', oidcStateCookieOptions({ expires: new Date(0) }));
+
       if (providerError) {
+        if (sameBrowser) clearStateCookie();
         return res.redirect('/login?oidcError=' + encodeURIComponent(String(providerError)));
       }
+      if (!sameBrowser) {
+        // Left as it is: a return that does not belong to this browser must
+        // not cancel a sign-in this browser really has under way.
+        return res.redirect('/login?oidcError=' + encodeURIComponent('This sign-in was not started in this browser - try again'));
+      }
+      clearStateCookie();
 
       const { sub, email, name, emailVerified } = await oidc.handleCallback(code, state);
       let account;
@@ -606,41 +649,52 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         }
       } else {
         account = await prisma.appAccount.findUnique({ where: { oidcSubject: sub } });
-        if (!account && email) {
+        if (!account) {
+          // An address is only worth anything here when the provider says it
+          // has checked that this person owns it: otherwise whoever can get
+          // the provider to issue an unchecked claim for someone else's
+          // address could sign in to that person's account.
+          const byEmail = email ? await prisma.appAccount.findUnique({ where: { email } }) : null;
           // Auto-link onto an existing account with a matching, verified
-          // email - no separate "link my account" UI to build for this.
-          const byEmail = await prisma.appAccount.findUnique({ where: { email } });
-          if (byEmail && emailVerified) {
+          // email - no separate "link my account" UI to build for this. An
+          // account already tied to another identity is left as it is.
+          if (byEmail && emailVerified && !byEmail.oidcSubject) {
             account = await prisma.appAccount.update({
               where: { id: byEmail.id },
               data: { oidcSubject: sub, linkedProvider: byEmail.linkedProvider || 'oidc' },
             });
           }
-        }
-        if (!account) {
-          // uuid: null, same as the stremio-login/nuvio-login account-
-          // creation paths above - it's only meaningful for the uuid+
-          // password /login flow, and this account has no password to go
-          // with it either way. Multiple accounts can share uuid: null
-          // (NULL isn't unique-constrained against itself).
-          account = await prisma.appAccount.create({
-            data: {
-              uuid: null,
-              email: email || null,
-              displayName: name || null,
-              oidcSubject: sub,
-              linkedProvider: 'oidc',
-              sync: JSON.stringify({ enabled: false, frequency: '0' }),
-            },
-          });
+          if (!account) {
+            // uuid: null, same as the stremio-login/nuvio-login account-
+            // creation paths above - it's only meaningful for the uuid+
+            // password /login flow, and this account has no password to go
+            // with it either way. Multiple accounts can share uuid: null
+            // (NULL isn't unique-constrained against itself).
+            //
+            // The email is kept only when it is verified and nobody else
+            // holds it - it is unique, and an unverified one could otherwise
+            // park someone else's address on a new account.
+            account = await prisma.appAccount.create({
+              data: {
+                uuid: null,
+                email: email && emailVerified && !byEmail ? email : null,
+                displayName: name || null,
+                oidcSubject: sub,
+                linkedProvider: 'oidc',
+                sync: JSON.stringify({ enabled: false, frequency: '0' }),
+              },
+            });
+          }
         }
       }
 
       const redirectTo = await completeOidcLogin(res, account);
       return res.redirect(redirectTo);
     } catch (error) {
+      // Whatever went wrong stays in the log; a database error must never end
+      // up in the address bar.
       console.error('OIDC callback error:', error);
-      return res.redirect('/login?oidcError=' + encodeURIComponent(error?.message || 'Sign-in failed'));
+      return res.redirect('/login?oidcError=' + encodeURIComponent(oidc.publicMessage(error, 'Sign-in failed')));
     }
   });
 
@@ -675,15 +729,17 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
       // Only extract if user is actually logged in (has valid session)
       let originalAccountId = req.appAccountId
-      if (!originalAccountId && INSTANCE_TYPE === 'public' && parseCookies && JWT_SECRET) {
+      if (!originalAccountId && INSTANCE_TYPE === 'public' && parseCookies) {
         try {
           const cookies = parseCookies(req)
           const accessCookie = cookies[cookieName('sfm_at')] || cookies['sfm_at']
           const refreshCookie = cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
           const token = accessCookie || refreshCookie
           if (token) {
-            const jwt = require('jsonwebtoken')
-            const decoded = jwt.verify(token, JWT_SECRET)
+            // Either kind of session token: the refresh cookie stands in once
+            // the access cookie has expired. Other tokens signed with the same
+            // secret (superadmin, portal, pending 2FA) are not accounts.
+            const decoded = verifyAccountToken(token, ['access', 'refresh'])
             if (decoded && decoded.accId) {
               // Verify the account actually exists before setting originalAccountId
               const accountExists = await prisma.appAccount.findUnique({ where: { id: decoded.accId } })
@@ -907,7 +963,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       })
     } catch (error) {
       console.error('Stremio login error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   })
 
@@ -1002,14 +1058,14 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
 
       // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
       let originalAccountId = req.appAccountId
-      if (!originalAccountId && parseCookies && JWT_SECRET) {
+      if (!originalAccountId && parseCookies) {
         try {
           const cookies = parseCookies(req)
           const accessCookie = cookies[cookieName('sfm_at')] || cookies['sfm_at']
           const refreshCookie = cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
           const token = accessCookie || refreshCookie
           if (token) {
-            const decoded = jwt.verify(token, JWT_SECRET)
+            const decoded = verifyAccountToken(token, ['access', 'refresh'])
             if (decoded && decoded.accId) {
               const accountExists = await prisma.appAccount.findUnique({ where: { id: decoded.accId } })
               if (accountExists) {
@@ -1186,7 +1242,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       })
     } catch (error) {
       console.error('Nuvio login error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   })
 
@@ -1206,7 +1262,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       if (INSTANCE_TYPE !== 'public') {
         return res.status(400).json({ message: 'Server sign-in is only available in public auth mode' })
       }
-      const { signInFromBody, jellyfinFields } = require('../utils/jellyfinConnect')
+      const { signInFromBody, jellyfinFields, rememberSignIn } = require('../utils/jellyfinConnect')
       const { identityEmail } = require('../providers/jellyfinAuth')
       let signedIn
       try {
@@ -1216,18 +1272,20 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         return res.status(status).json({ message: err?.message || 'Could not sign in to the server', ...(err?.pinNeeded ? { pinNeeded: true } : {}) })
       }
       const { probe, login } = signedIn
-      await require('../utils/jellyfinConnect').rememberSignIn(prisma, encrypt, probe, login)
+      // Signing in retired the token anyone else holding this server user had,
+      // so they take the new one now, whatever the checks below decide.
+      await rememberSignIn(prisma, encrypt, probe, login)
       const email = identityEmail(probe.serverUrl, login.userId)
 
       // Signed in already: link this server login to the current account,
       // which must already have a person with this login.
       let currentAccountId = req.appAccountId
-      if (!currentAccountId && parseCookies && JWT_SECRET) {
+      if (!currentAccountId && parseCookies) {
         try {
           const cookies = parseCookies(req)
           const token = cookies[cookieName('sfm_at')] || cookies['sfm_at'] || cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
           if (token) {
-            const decoded = jwt.verify(token, JWT_SECRET)
+            const decoded = verifyAccountToken(token, ['access', 'refresh'])
             if (decoded?.accId && await prisma.appAccount.findUnique({ where: { id: decoded.accId } })) currentAccountId = decoded.accId
           }
         } catch { /* not signed in */ }
@@ -1333,7 +1391,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       return res.json({ message: 'Stremio account unlinked successfully. You can now log in with your UUID and password.', uuid: account.uuid })
     } catch (error) {
       console.error('Unlink Stremio error:', error)
-      return responseUtils.internalError(res, String(error && error.message || error))
+      return responseUtils.internalError(res, GENERIC_FAILURE)
     }
   })
 
@@ -1373,7 +1431,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       return res.json({ message: 'UUID and password removed. You can now log in with Stremio only.' })
     } catch (error) {
       console.error('Unlink UUID error:', error)
-      return responseUtils.internalError(res, String(error && error.message || error))
+      return responseUtils.internalError(res, GENERIC_FAILURE)
     }
   })
 
@@ -1419,7 +1477,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       }
     } catch (error) {
       console.error('Set credentials error:', error)
-      return responseUtils.internalError(res, String(error && error.message || error))
+      return responseUtils.internalError(res, GENERIC_FAILURE)
     }
   })
 
@@ -1457,7 +1515,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       res.json({ account });
     } catch (error) {
       console.error('Session error:', error);
-      return responseUtils.internalError(res, String(error && error.message || error));
+      return responseUtils.internalError(res, GENERIC_FAILURE);
     }
   });
 
@@ -1661,7 +1719,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           const transportUrl = getDecryptedManifestUrl(addon, req)
           if (transportUrl) {
             try {
-              const rsp = await fetch(transportUrl)
+              const rsp = await safeFetch(transportUrl, {}, instancePolicy())
               if (rsp.ok) {
                 originalManifest = await rsp.json()
                 console.log(`Fetched originalManifest for config export: ${originalManifest?.name}`)
@@ -1846,7 +1904,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           // Last resort: fetch from URL if available
           if (!originalManifest && transportUrl) {
             try {
-              const rsp = await fetch(transportUrl)
+              const rsp = await safeFetch(transportUrl, {}, instancePolicy())
               if (rsp.ok) {
                 originalManifest = await rsp.json()
                 console.log(`Fetched originalManifest for export: ${originalManifest?.name}`)
@@ -2086,7 +2144,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
             // If no originalManifest in export, try to fetch from URL
             if (!originalManifestObj) {
               try {
-                const resp = await fetch(transportUrl)
+                const resp = await safeFetch(transportUrl, {}, instancePolicy())
                 if (resp.ok) {
                   originalManifestObj = await resp.json()
                   console.log(`Fetched originalManifest for config import: ${originalManifestObj?.name}`)
@@ -2306,7 +2364,18 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           if (a?.stremioAddonId && a?.id) stremioIdToAddonId.set(a.stremioAddonId, a.id)
         }
 
+        // On an instance serving strangers a file can claim any server
+        // address and user id, and a person row holding another household's
+        // would be handed that household's next sign-in. So a Jellyfin
+        // identity from the file is kept only once the server vouches for
+        // its token; anyone else reconnects. A household's own install has
+        // no strangers to keep apart and imports as it always did.
+        const jellyfinProofs = INSTANCE_TYPE === 'public'
+          ? await require('../utils/jellyfinConnect').proveImportedSignIns(users)
+          : null;
+
         for (const userData of users) {
+          const provenUrl = jellyfinProofs ? (jellyfinProofs.personUrl.get(userData) || null) : null;
           const { id: _exportUserId, ref: exportRef, stremioAuthKey, nuvioRefreshToken, jellyfinToken, aioConfigPassword, simklAccessToken, jellyfinHousehold, protectedAddons, excludedAddons, ...userFields } = userData;
 
           // Parse protectedAddons and excludedAddons if they're JSON strings
@@ -2372,11 +2441,12 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           const user = await prisma.user.create({
             data: {
               ...userFields,
+              ...(jellyfinProofs ? { jellyfinServerUrl: provenUrl, ...(provenUrl ? {} : { jellyfinServerId: null, jellyfinUserId: null }) } : {}),
               ...(keepId ? { id: keepId } : {}),
               accountId,
               stremioAuthKey: stremioAuthKey ? encrypt(stremioAuthKey, req) : null,
               nuvioRefreshToken: nuvioRefreshToken ? encrypt(nuvioRefreshToken, req) : null,
-              jellyfinToken: jellyfinToken ? encrypt(jellyfinToken, req) : null,
+              jellyfinToken: jellyfinToken && (!jellyfinProofs || provenUrl) ? encrypt(jellyfinToken, req) : null,
               aioConfigPassword: aioConfigPassword ? encrypt(aioConfigPassword, req) : null,
               simklAccessToken: simklAccessToken ? encrypt(simklAccessToken, req) : null,
               protectedAddons: normalizedProtectedNames.length > 0 ? JSON.stringify(normalizedProtectedNames) : null,
@@ -2388,7 +2458,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           if (exportRef) exportUserIdToNewId.set(exportRef, user.id)
           if (jellyfinHousehold && jellyfinHousehold.ref) {
             exportUserIdToNewId.set(jellyfinHousehold.ref, user.id)
-            importedHouseholds.push({ owner: user, household: jellyfinHousehold })
+            importedHouseholds.push({ owner: user, household: jellyfinHousehold, proofs: jellyfinProofs })
           }
         }
       }
@@ -2399,7 +2469,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       {
         const byUsername = new Map(importedUsers.filter(u => u.username).map(u => [u.username, u.id]))
         const profileRefToNewId = new Map()
-        for (const { owner, household } of importedHouseholds) {
+        for (const { owner, household, proofs } of importedHouseholds) {
           for (const p of Array.isArray(household.profiles) ? household.profiles : []) {
             if (!p || !p.jellyfinUserId || !p.name) continue
             try {
@@ -2415,7 +2485,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
                   jellyfinUserId: String(p.jellyfinUserId),
                   name: String(p.name),
                   loginName: p.loginName || null,
-                  token: p.token ? encrypt(String(p.token), req) : null,
+                  token: p.token && (!proofs || proofs.profileProven.get(p) === true) ? encrypt(String(p.token), req) : null,
                   needsPin: p.needsPin === true,
                   skip: p.skip === true,
                   ownUserId: p.ownUsername ? (byUsername.get(p.ownUsername) || null) : null,
@@ -2543,7 +2613,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('Config import error:', error);
-      res.status(500).json({ message: 'Failed to import config', error: error.message });
+      res.status(500).json({ message: 'Failed to import config' });
     }
   });
 
@@ -2559,7 +2629,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       res.json({ message: 'Account data reset successfully' });
     } catch (error) {
       console.error('Reset error:', error);
-      res.status(500).json({ message: 'Failed to reset account data', error: error.message });
+      res.status(500).json({ message: 'Failed to reset account data' });
     }
   });
 
@@ -2614,7 +2684,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           // If no originalManifest in export, try to fetch from URL
           if (!originalManifestObj) {
             try {
-              const resp = await fetch(transportUrl)
+              const resp = await safeFetch(transportUrl, {}, instancePolicy())
               if (resp.ok) {
                 originalManifestObj = await resp.json()
                 console.log(`Fetched originalManifest for import: ${originalManifestObj?.name}`)
@@ -2766,7 +2836,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       });
     } catch (error) {
       console.error('Addon import error:', error);
-      res.status(500).json({ message: 'Failed to import addons', error: error.message });
+      res.status(500).json({ message: 'Failed to import addons' });
     }
   });
 
@@ -2801,7 +2871,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       res.json({ message: 'Account deleted successfully' });
     } catch (error) {
       console.error('Account deletion error:', error);
-      res.status(500).json({ message: 'Failed to delete account', error: error.message });
+      res.status(500).json({ message: 'Failed to delete account' });
     }
   });
 

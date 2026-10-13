@@ -23,6 +23,8 @@
 // The token is the addon's credential and is unique per user, so it
 // identifies the owner on its own - no account scoping needed.
 const TRAX_URL = /\/trax\/([A-Za-z0-9]{16,})(?:\/|$)/
+// The same, as the start of an address's path.
+const TRAX_PATH = /^\/trax\/([A-Za-z0-9]{16,})(?:\/|$)/
 
 async function localTraxManifest(prisma, transportUrl) {
   if (!prisma || !transportUrl) return null
@@ -71,12 +73,16 @@ async function localTraxManifest(prisma, transportUrl) {
  */
 async function loopbackTraxUrl(prisma, rawUrl) {
   if (!prisma || !rawUrl) return null
-  const match = TRAX_URL.exec(String(rawUrl))
-  if (!match) return null
   try {
+    const parsed = new URL(String(rawUrl))
+    // The token has to open the PATH, as the address is read once parsed
+    // (dot-segments collapsed). Matching it anywhere in the text would let any
+    // address that merely mentions /trax/<token> - in a query, or a path that
+    // climbs out of /trax/ - be sent to this process under that path.
+    const match = TRAX_PATH.exec(parsed.pathname)
+    if (!match) return null
     const owner = await prisma.user.findFirst({ where: { traxToken: match[1] }, select: { id: true } })
     if (!owner) return null
-    const parsed = new URL(String(rawUrl))
     const port = process.env.PORT || 4000
     return `http://127.0.0.1:${port}${parsed.pathname}${parsed.search || ''}`
   } catch {

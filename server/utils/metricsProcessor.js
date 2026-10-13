@@ -249,7 +249,7 @@ async function recordEpisodeWatch(prisma, accountId, userId, item, users = []) {
     // that case using independent proof from the proxy pipeline.
     if (!isActuallyWatched(item)) {
       const confirmedByProxy = await hasConfirmedProxyPlayback(prisma, {
-        accountId: accountIdValue, userId, title: showName, watchedAt, users
+        accountId: accountIdValue, userId, title: showName, watchedAt, users, type: 'series'
       })
       if (!confirmedByProxy) return
     }
@@ -289,7 +289,7 @@ async function recordEpisodeWatch(prisma, accountId, userId, item, users = []) {
     // given episode, and re-querying ProxyStreamSession on every poll for
     // already-labeled rows would be pure waste.
     const debridService = existing?.debridService
-      || await findDebridServiceForWatch(prisma, { accountId: accountIdValue, userId, title: showName, watchedAt, users })
+      || await findDebridServiceForWatch(prisma, { accountId: accountIdValue, userId, title: showName, watchedAt, users, type: 'series' })
 
     // Episode title, fetched once per episode (never re-fetched once known -
     // a title never changes) via the same Cinemeta lookup already used for
@@ -451,7 +451,7 @@ async function recordMovieWatch(prisma, accountId, userId, item, users = []) {
     // preview/hover-autoplay noise the proxy never sees in the first place).
     if (!isActuallyWatched(item)) {
       const confirmedByProxy = await hasConfirmedProxyPlayback(prisma, {
-        accountId: accountIdValue, userId, title: itemName, watchedAt, users
+        accountId: accountIdValue, userId, title: itemName, watchedAt, users, type: 'movie'
       })
       if (!confirmedByProxy) return false
     }
@@ -491,7 +491,7 @@ async function recordMovieWatch(prisma, accountId, userId, item, users = []) {
     // See recordEpisodeWatch's matching comment - only look up if not
     // already confirmed.
     const debridService = existing?.debridService
-      || await findDebridServiceForWatch(prisma, { accountId: accountIdValue, userId, title: itemName, watchedAt, users })
+      || await findDebridServiceForWatch(prisma, { accountId: accountIdValue, userId, title: itemName, watchedAt, users, type: 'movie' })
 
     // Upsert the movie watch (updates watchedAt if already exists)
     await prisma.movieWatchHistory.upsert({
@@ -568,6 +568,9 @@ const WALL_CLOCK_SLACK_SECONDS = 120
 // The smallest step such a provider's progress is recorded in (see the
 // minimum-delta comment in processLibraryItem).
 const WALL_CLOCK_MIN_DELTA_SECONDS = 10
+// How recently a title must have been played for a too-small advance to be
+// carried to the next pass rather than let go (see processLibraryItem).
+const HOLD_BASELINE_WINDOW_MS = 5 * 60 * 1000
 
 // Ratio of runtime a movie's position must drop below to count as "restarted".
 const REWATCH_ARM_RATIO = 0.15
@@ -827,6 +830,8 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
     }
 
     let activityDeltaSeconds = null
+    // Progress seen on this pass that was too little to record on its own.
+    let unrecordedDeltaSeconds = 0
     if (current.overallTimeWatched && snapshotChanged) {
       let totalDeltaSeconds = 0
 
@@ -917,11 +922,30 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
       const minDeltaSeconds = item.state?.wallClockCapped ? WALL_CLOCK_MIN_DELTA_SECONDS : 60
       if (remainingDeltaSeconds >= minDeltaSeconds && !shouldSubtractRecent) {
         activityDeltaSeconds = totalDeltaSeconds
-      } else if (shouldSubtractRecent) {
-        // Log when we skip creating activity due to very recent activity
-        console.log(`[MetricsProcessor] Skipping activity creation for ${userId}/${itemId}: recent activity created ${Math.floor((new Date() - mostRecentActivity.createdAt) / 1000)}s ago`)
+      } else {
+        unrecordedDeltaSeconds = totalDeltaSeconds
+        if (shouldSubtractRecent) {
+          // Log when we skip creating activity due to very recent activity
+          console.log(`[MetricsProcessor] Skipping activity creation for ${userId}/${itemId}: recent activity created ${Math.floor((new Date() - mostRecentActivity.createdAt) / 1000)}s ago`)
+        }
       }
     }
+
+    // An advance too small to record used to move the baseline anyway, so
+    // those seconds were gone for good - a title whose progress arrives in
+    // steps just under a minute lost most of its time that way. While the
+    // title is still being played the baseline now stays where it is and the
+    // next pass measures from it: two 40-second advances make one 80-second
+    // entry instead of nothing. Once the title has gone quiet the short tail
+    // is let go as before, so a stopped title is not re-examined on every
+    // pass for ever. The baseline only ever lags by this - it is never
+    // lowered, so the high-water mark below keeps its meaning.
+    let holdBaseline = false
+    if (activityDeltaSeconds === null && unrecordedDeltaSeconds > 0) {
+      const movedAt = (current.lastWatched || current.mtime)?.getTime()
+      holdBaseline = Number.isFinite(movedAt) && Math.abs(Date.now() - movedAt) <= HOLD_BASELINE_WINDOW_MS
+    }
+    const writeSnapshot = snapshotChanged && !!current.overallTimeWatched && !holdBaseline
 
     // Record the activity delta (if any) and advance the snapshot baseline
     // together in one transaction. These used to be two separate writes -
@@ -937,7 +961,7 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
     // does, so a mid-cycle interruption can no longer leave the delta
     // recorded without the baseline that's supposed to prevent recording
     // it again.
-    if (activityDeltaSeconds !== null || (snapshotChanged && current.overallTimeWatched)) {
+    if (activityDeltaSeconds !== null || writeSnapshot) {
       const ops = []
       if (activityDeltaSeconds !== null) {
         ops.push(prisma.watchActivity.create({
@@ -959,7 +983,7 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
           }
         }))
       }
-      if (snapshotChanged && current.overallTimeWatched) {
+      if (writeSnapshot) {
         // Clamp the stored overallTimeWatched to the monotonic high-water-mark:
         // never let a snapshot regress below the max ever seen for THIS episode
         // (maxSeenBig is scoped by videoId above). WITHIN one episode,
@@ -1014,7 +1038,7 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
       try {
         await prisma.$transaction(ops)
         if (activityDeltaSeconds !== null) activityCreated = true
-        if (snapshotChanged && current.overallTimeWatched) {
+        if (writeSnapshot) {
           snapshotCreated = true
           // Debug: Log snapshot updates for items with significant changes
           if (latestSnapshot && latestSnapshot.overallTimeWatched) {

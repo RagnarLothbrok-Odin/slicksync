@@ -36,6 +36,7 @@
 // never built here. Applied when turned on, on install, and by the 30-minute
 // check if something pushed it down again.
 
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const crypto = require('crypto')
 const { readConfig, writeConfig, rebaseline, noteOutsideChanges } = require('./aiostreamsConfig')
 const { slickTraxPreset } = require('./aioProfileVariants')
@@ -226,12 +227,12 @@ async function collectionsFirstFor(prisma, accountId, userId) {
 /** SlickSync's collections catalog as AIOStreams lists it: { id, type }, or null. */
 async function findCollectionsCatalog(serverUrl, config, preset) {
   const { instanceBase } = require('./aiostreamsConfig')
-  const res = await fetch(`${instanceBase(serverUrl)}/api/v1/catalogs`, {
+  const res = await safeFetch(`${instanceBase(serverUrl)}/api/v1/catalogs`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ userData: config }),
     signal: AbortSignal.timeout(30000),
-  })
+  }, instancePolicy())
   const body = await res.json().catch(() => null)
   if (!res.ok || !Array.isArray(body?.data)) throw fail(body?.error?.message || `AIOStreams answered ${res.status}`, 502)
   const found = body.data.find((c) => typeof c?.id === 'string' && c.id.startsWith(String(preset.instanceId)) && c.id.endsWith(`.${COLLECTIONS_CATALOG}`))
@@ -291,7 +292,7 @@ async function readLibraries(person, decrypt) {
     const token = decrypt(person.jellyfinToken, { appAccountId: person.accountId || 'default' })
     const [views, status] = await Promise.all([
       jfRequest(person.jellyfinServerUrl, `/UserViews?userId=${encodeURIComponent(person.jellyfinUserId)}`, { token }),
-      fetch(`${instanceBase(person.jellyfinServerUrl)}/api/v1/status`, { signal: AbortSignal.timeout(15000) }).then((r) => r.json()).catch(() => null),
+      safeFetch(`${instanceBase(person.jellyfinServerUrl)}/api/v1/status`, { signal: AbortSignal.timeout(15000) }, instancePolicy()).then((r) => r.json()).catch(() => null),
     ])
     const items = Array.isArray(views?.Items) ? views.Items : []
     return { names: items.map((v) => v.Name), max: Number(status?.data?.settings?.jellyfin?.maxLibraries) || 0 }
