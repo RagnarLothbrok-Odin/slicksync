@@ -10,6 +10,7 @@
  */
 
 const { extractSeasonEpisode } = require('./kitsuUtils')
+const { resolveAccountTimezone, getAccountDayNumber } = require('./dateUtils')
 const { postDiscord, fetchMetadata } = require('./notify')
 const { getUserAvatarUrl } = require('./avatarUtils')
 const { resolveSinglePoster } = require('./libraryHelpers')
@@ -352,6 +353,17 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
     }
   })
 
+  // The account's timezone, looked up once and only if something below needs
+  // to know whether two moments fall on the same day for this household.
+  let accountTimeZone = null
+  const sameAccountDay = async (a, b) => {
+    if (!accountTimeZone) accountTimeZone = await resolveAccountTimezone(prisma, accountIdValue)
+    return getAccountDayNumber(a, accountTimeZone) === getAccountDayNumber(b, accountTimeZone)
+  }
+  // Rows this pass (re)opened. The close loop below works from the list read
+  // at the top of the pass, which still describes such a row as it WAS.
+  const reopenedSessionIds = new Set()
+
   // Create a map of active sessions by composite key: userId + itemId + videoId
   // This ensures we can have multiple active sessions for the same item (different episodes)
   // but prevents duplicates for the same user+item+videoId combination
@@ -622,6 +634,15 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
           // "resumed near where it was left off" apart from "genuinely
           // watched this much fresh in one sitting".
           let priorLastPosition = null
+          // What an earlier sitting of this same title TODAY had already
+          // accumulated. There is one row per title, and reopening it used to
+          // start its duration over - so a film watched in three sittings
+          // across one evening ended up showing only the last sitting
+          // (confirmed real case: 32m on the card for a 98-minute film
+          // watched to the end). Carried over for the same account day only:
+          // a row reopened on a later day is a new viewing and starts fresh,
+          // which is what keeps an old row from re-crediting old time.
+          let earlierTodaySeconds = 0
           try {
             const priorRow = await prisma.watchSession.findUnique({
               where: { accountId_userId_itemId: { accountId: accountIdValue, userId, itemId } },
@@ -629,6 +650,11 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
             })
             if (priorRow && (!priorRow.videoId || priorRow.videoId === videoId)) {
               priorLastPosition = priorRow.lastPosition ?? null
+              if (priorRow.endTime && priorRow.durationSeconds > 0
+                && (nowMs - priorRow.endTime.getTime()) > CHECK_INTERVAL_MS
+                && await sameAccountDay(priorRow.endTime, sessionStartTime)) {
+                earlierTodaySeconds = priorRow.durationSeconds
+              }
             }
             // The finish was already recorded: this row closed (see
             // reachedEnd above) at the very position the provider still
@@ -724,7 +750,19 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
               seedDurationSeconds = Math.max(0, Math.floor((cappedMs - baselineMs) / 1000))
             }
           }
-          const initialDurationSeconds = Math.max(priorDurationSeconds, seedDurationSeconds)
+          // An earlier sitting today adds to this one: what it had, plus
+          // whatever the position has moved since (the seed above is already
+          // measured from where that sitting left off, never from zero).
+          // Never more than the runtime at this point - further viewing
+          // accrues from the checkpoints that follow, as always.
+          let initialDurationSeconds = Math.max(priorDurationSeconds, seedDurationSeconds)
+          if (earlierTodaySeconds > 0 && priorDurationSeconds === 0) {
+            initialDurationSeconds = earlierTodaySeconds + seedDurationSeconds
+            const runtimeMs = Number(state.duration ?? NaN)
+            if (!Number.isNaN(runtimeMs) && runtimeMs > 0) {
+              initialDurationSeconds = Math.min(initialDurationSeconds, Math.floor(runtimeMs / 1000))
+            }
+          }
 
           const newSession = await prisma.watchSession.upsert({
             where: {
@@ -769,6 +807,7 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
             }
           })
           sessionsCreated++
+          reopenedSessionIds.add(newSession.id)
           console.log(`[SessionTracker] Session created/reactivated successfully`)
           heartbeat('sessionTracker:session_created', { itemId, userId, sessionId: newSession.id })
 
@@ -793,6 +832,12 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
   // Close sessions for items that are no longer active
   // Use composite key to ensure we only close the correct session (not all sessions for an itemId)
   for (const session of activeSessions) {
+    // Reopened a moment ago for the next episode: there is one row per show,
+    // so `session` here is that same row as it was for the PREVIOUS episode.
+    // Its key is not among the active ones, and closing it would shut the
+    // episode that just started - it dropped out of Now Playing until the
+    // next pass, and came back carrying the previous episode's duration.
+    if (reopenedSessionIds.has(session.id)) continue
     const sessionKey = getSessionKey(session)
     if (!currentlyActiveItems.has(sessionKey)) {
       const lastActivity = lastActivityByItemId.get(session.itemId)

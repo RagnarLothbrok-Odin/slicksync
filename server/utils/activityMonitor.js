@@ -1,8 +1,7 @@
-// Activity monitor - checks for new watch activity and sends Discord notifications
-const { StremioAPIClient } = require('stremio-api-client')
+// Activity monitor - reads every connected person's library once a minute and
+// feeds metrics and sessions. Watch notifications are sent by sessionTracker.js.
 const { setCachedLibrary } = require('./libraryCache')
 const { processAccountSessions } = require('./sessionTracker')
-const { fetchKitsuMetadata } = require('./kitsuUtils')
 const { sendShareNotification: notifySendShareNotification } = require('./notify')
 
 const CHECK_INTERVAL_MS = 1 * 60 * 1000 // 1 minute
@@ -27,8 +26,6 @@ let isAccountsPassRunning = false
 const ACCOUNT_BATCH_SIZE = 5
 
 let activityTimer = null
-// Track notified items: Map<accountId, Set<itemId>>
-const notifiedItems = new Map()
 
 // Direct file-based heartbeat, bypassing console.log/stdout entirely. Console
 // output from this backend process has not reliably reached `docker logs`
@@ -50,65 +47,19 @@ function clearActivityMonitor() {
     clearInterval(activityTimer)
     activityTimer = null
   }
-  notifiedItems.clear()
-}
-
-function getWatchDate(item) {
-  // IMPORTANT: Only use state.lastWatched - this is the actual watch timestamp
-  // Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
-  // Do NOT use _ctime - that's creation time
-  if (item.state?.lastWatched) {
-    const d = new Date(item.state.lastWatched)
-    if (!isNaN(d.getTime())) return d
-  }
-  return null
-}
-
-function isActuallyWatched(item) {
-  // Check if the item was actually watched vs just previewed/bookmarked.
-  // Nuvio records a nonzero position even for brief hover/preview autoplay
-  // while browsing the library - so overallTimeWatched/timeOffset > 0 alone
-  // is NOT reliable "watched" evidence on its own. Require it to be a
-  // meaningful fraction of the item's actual runtime instead.
-  const state = item.state || {}
-
-  const timeWatched = Number(state.timeWatched || 0)
-  if (timeWatched > 0) return true
-
-  const progressMs = Math.max(Number(state.timeOffset || 0), Number(state.overallTimeWatched || 0))
-  if (progressMs <= 0) return false
-
-  const duration = Number(state.duration || 0)
-  if (duration > 0) {
-    // Same 5% threshold used by AIOManager - filters out preview-autoplay
-    // noise while still catching real partial watches
-    return (progressMs / duration) > 0.05
-  }
-
-  // No duration to compute a ratio against - fall back to requiring a
-  // real video_id alongside the progress (e.g. live TV/IPTV items report
-  // duration: 0 but a genuine position)
-  return !!(state.video_id && state.video_id.trim() !== '')
 }
 
 async function checkActivityForAccount(prisma, accountId, decrypt, getAccountId) {
   heartbeat('checkActivityForAccount:start', { accountId })
   try {
-    // Get account sync config to check for webhook URL
+    // Nothing to do for an account that is not there.
     const account = await prisma.appAccount.findUnique({
       where: { id: accountId },
-      select: { sync: true }
+      select: { id: true }
     })
 
     heartbeat('checkActivityForAccount:account_lookup_done', { found: !!account })
     if (!account) return
-
-    let syncCfg = account.sync || null
-    if (syncCfg && typeof syncCfg === 'string') {
-      try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-    }
-
-    const webhookUrl = syncCfg?.webhookUrl
 
     // Get all active users for this account
     const users = await prisma.user.findMany({
@@ -143,7 +94,7 @@ async function checkActivityForAccount(prisma, accountId, decrypt, getAccountId)
 
     heartbeat('checkActivityForAccount:users_found', { count: users.length })
 
-    // Process metrics for all users (regardless of webhook configuration)
+    // Process metrics for all users
     // This runs every 5 minutes to compute accurate watch time deltas
     try {
       const { processAccountMetrics } = require('./metricsProcessor')
@@ -414,137 +365,9 @@ async function checkActivityForAccount(prisma, accountId, decrypt, getAccountId)
       console.error(`[ActivityMonitor] Error stack:`, metricsError.stack)
     }
 
-    // Only process Discord notifications if webhook is configured
-    if (!webhookUrl) return
-
-    const now = Date.now()
-    const cutoffTime = now - CHECK_INTERVAL_MS
-    const newActivities = []
-
-    // Initialize notified items set for this account if needed
-    if (!notifiedItems.has(accountId)) {
-      notifiedItems.set(accountId, new Set())
-    }
-    const accountNotifiedItems = notifiedItems.get(accountId)
-
-    // Check each user with usable provider credentials for new activity to notify
-    const { makeCreateProvider: makeCreateProviderNotify } = require('../providers')
-    const { encrypt: encryptNotify } = require('./encryption')
-    const createProviderNotify = makeCreateProviderNotify({ prisma, encrypt: encryptNotify })
-    const usersWithAuth = users.filter(u => u.stremioAuthKey || (u.nuvioRefreshToken && u.nuvioUserId))
-
-    for (const user of usersWithAuth) {
-      try {
-        // Create a mock request object for decrypt
-        const mockReq = { appAccountId: accountId }
-        const provider = createProviderNotify(user, { decrypt: (t) => decrypt(t, mockReq), req: mockReq })
-        if (!provider) continue
-
-        const libraryItems = await provider.getLibrary()
-
-        let library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
-
-        // Cache the library data for metrics queries
-        if (Array.isArray(library) && library.length > 0) {
-          setCachedLibrary(accountId, user, library)
-        }
-
-        // Check each item for recent activity
-        for (const item of library) {
-          const watchDate = getWatchDate(item)
-          if (!watchDate || watchDate < cutoffTime) continue // Not recent enough
-
-          // Skip items that weren't actually watched (e.g., just added to library from share)
-          if (!isActuallyWatched(item)) continue
-
-          // Create unique item ID (for movies: just _id, for series: _id:season:episode)
-          let itemId = item._id || item.id
-          if (item.type === 'series' && item.state?.season !== undefined && item.state?.episode !== undefined) {
-            itemId = `${item._id}:${item.state.season}:${item.state.episode}`
-          }
-
-          // Check if we've already notified about this item
-          const notificationKey = `${user.id}:${itemId}`
-          if (accountNotifiedItems.has(notificationKey)) continue
-
-          // Extract season/episode from video_id if available
-          // Format: "tt8080122:4:6" = season 4, episode 6
-          // Format: "tt8080122:6" = episode 6 only (no season or season 0)
-          let season = item.state?.season
-          let episode = item.state?.episode
-
-          if (item.state?.video_id) {
-            const videoId = item.state.video_id
-            const videoIdParts = videoId.split(':')
-
-            // Special handling for kitsu ids:
-            // - Format: "kitsu:46676:1" -> episode = last segment ("1"), season from Kitsu API title
-            if (videoId.startsWith('kitsu:') && videoIdParts.length >= 2) {
-              const kitsuId = videoIdParts[1] // e.g., "46676"
-              const episodePart = videoIdParts[videoIdParts.length - 1]
-              const parsedEpisode = parseInt(episodePart, 10)
-              if (!isNaN(parsedEpisode)) {
-                episode = parsedEpisode
-              }
-              // Fetch season from Kitsu API title (e.g., "My Hero Academia Season 3" -> 3)
-              const kitsuData = await fetchKitsuMetadata(kitsuId)
-              if (kitsuData && kitsuData.season !== null) {
-                season = kitsuData.season
-              }
-            } else {
-              // Default handling for normal ids:
-              // Format: "tt8080122:4:6" (2 colons = 3 parts)
-              if (videoIdParts.length === 3) {
-                season = parseInt(videoIdParts[1], 10) || season
-                episode = parseInt(videoIdParts[2], 10) || episode
-              }
-              // Format: "tt8080122:6" (1 colon = 2 parts)
-              else if (videoIdParts.length === 2) {
-                episode = parseInt(videoIdParts[1], 10) || episode
-                // No season specified, keep existing or default to 0
-                if (season === undefined) season = 0
-              }
-            }
-          }
-
-          // This is a new activity!
-          newActivities.push({
-            user: {
-              id: user.id,
-              username: user.username || user.email,
-              email: user.email,
-              colorIndex: user.colorIndex || 0
-            },
-            item: {
-              id: itemId,
-              _id: item._id || item.id, // Original ID for link generation
-              name: item.name,
-              type: item.type,
-              year: item.year,
-              poster: item.poster,
-              season: season,
-              episode: episode,
-              video_id: item.state?.video_id // Keep video_id for reference
-            },
-            watchDate: watchDate,
-            notificationKey: notificationKey
-          })
-
-          // Mark as notified
-          accountNotifiedItems.add(notificationKey)
-        }
-      } catch (error) {
-        // Skip user if there's an error fetching their library, but log it —
-        // silently skipping made a real, persistent failure indistinguishable
-        // from "this user has nothing new to report" for weeks.
-        console.warn(`[ActivityMonitor] Skipping user ${user.id} due to error:`, error.message)
-        continue
-      }
-    }
-
-    // Note: Discord notifications for watch activity are now handled by sessionTracker.js
-    // which sends notifications when a session starts (now playing) using user-level webhooks.
-    // The old account-level activity notification has been disabled to avoid duplicate notifications.
+    // Discord notifications for watch activity are handled by sessionTracker.js,
+    // which sends them when a session starts (now playing) using user-level
+    // webhooks. Nothing here reads the libraries a second time for that.
   } catch (error) {
     // This used to be a bare silent catch ("don't spam logs"), which meant a
     // genuine, persistent bug here (e.g. a broken Prisma model reference)

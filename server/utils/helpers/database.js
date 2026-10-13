@@ -283,6 +283,44 @@ async function getGroupAddons(prisma, groupId, req) {
   return processedAddons.filter(Boolean)
 }
 
+// A group's members are a JSON list on the group row, so every membership
+// change reads the list, changes it and writes it back. Two of those at once
+// (two invitations accepted together, an automation run, an admin edit during
+// an accept) both read the old list, and the second write erased the first
+// person - who then silently stopped getting the group's addons. So they run
+// one at a time per household, each as one transaction: it either lands whole
+// or not at all. In-process on purpose: one server process serves a
+// household, so a database lock would add nothing (and SQLite has no
+// row-level one).
+const membershipQueues = new Map(); // accountId -> tail of the queue
+function inMembershipQueue(accountId, task) {
+  const run = (membershipQueues.get(accountId) || Promise.resolve()).then(task);
+  const tail = run.then(() => {}, () => {});
+  membershipQueues.set(accountId, tail);
+  tail.then(() => { if (membershipQueues.get(accountId) === tail) membershipQueues.delete(accountId); });
+  return run;
+}
+
+// Long-transaction settings (no five-second cutoff, room to wait for the
+// connection) so a membership change made while a sync or a backup is busy
+// still goes through. Called with a transaction client already, it just runs.
+function inTransaction(prisma, fn) {
+  if (typeof prisma.$transaction !== 'function') return fn(prisma);
+  return require('../userMerge').runLongTransaction(prisma, fn);
+}
+
+// The member ids stored on a group row: [] when none, null when the stored
+// text is not a list (left alone rather than overwritten).
+function readMemberIds(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = Array.isArray(raw) ? raw : JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Assign a user to a group (removes from other groups first)
  */
@@ -290,48 +328,109 @@ async function assignUserToGroup(prisma, userId, groupId, req) {
   const accId = getAccountId(req);
   if (!accId) throw new Error('Account context required');
 
-  // First, remove user from all other groups
-  const allGroups = await prisma.group.findMany({
-    where: { accountId: accId },
-    select: { id: true, userIds: true }
-  });
-
-  for (const group of allGroups) {
-    if (group.userIds) {
-      const userIds = JSON.parse(group.userIds);
-      const updatedUserIds = userIds.filter(id => id !== userId);
-      if (updatedUserIds.length !== userIds.length) {
-        await prisma.group.update({
-          where: { id: group.id },
-          data: { userIds: JSON.stringify(updatedUserIds) }
-        });
-      }
-    }
-  }
-
-  // Then, add user to the target group
   // Validate groupId is a valid string
   if (!groupId || typeof groupId !== 'string' || groupId.trim() === '') {
     throw new Error(`Invalid groupId: ${groupId}`);
   }
 
-  const targetGroup = await prisma.group.findUnique({
-    where: { id: groupId, accountId: accId },
-    select: { id: true, userIds: true }
-  });
-
-  if (!targetGroup) {
-    throw new Error(`Target group not found: ${groupId} (accountId: ${accId})`);
-  }
-
-  const currentUserIds = targetGroup.userIds ? JSON.parse(targetGroup.userIds) : [];
-  if (!currentUserIds.includes(userId)) {
-    currentUserIds.push(userId);
-    await prisma.group.update({
-      where: { id: groupId },
-      data: { userIds: JSON.stringify(currentUserIds) }
+  await inMembershipQueue(accId, () => inTransaction(prisma, async (db) => {
+    const allGroups = await db.group.findMany({
+      where: { accountId: accId },
+      select: { id: true, userIds: true }
     });
-  }
+    if (!allGroups.some((group) => group.id === groupId)) {
+      throw new Error(`Target group not found: ${groupId} (accountId: ${accId})`);
+    }
+
+    for (const group of allGroups) {
+      const ids = readMemberIds(group.userIds);
+      if (ids === null) {
+        if (group.id === groupId) throw new Error(`Group ${groupId} has a member list that cannot be read`);
+        continue;
+      }
+      // In the target group they are added, in every other group removed.
+      const next = group.id === groupId
+        ? (ids.includes(userId) ? ids : [...ids, userId])
+        : ids.filter((id) => id !== userId);
+      if (next.length !== ids.length) {
+        await db.group.update({
+          where: { id: group.id },
+          data: { userIds: JSON.stringify(next) }
+        });
+      }
+    }
+  }));
+}
+
+/**
+ * Take a user out of one group.
+ */
+async function removeUserFromGroup(prisma, userId, groupId, req) {
+  const accId = getAccountId(req);
+  if (!accId) throw new Error('Account context required');
+
+  await inMembershipQueue(accId, () => inTransaction(prisma, async (db) => {
+    const group = await db.group.findFirst({
+      where: { id: groupId, accountId: accId },
+      select: { id: true, userIds: true }
+    });
+    if (!group) throw new Error(`Target group not found: ${groupId} (accountId: ${accId})`);
+    const ids = readMemberIds(group.userIds);
+    if (ids === null) throw new Error(`Group ${groupId} has a member list that cannot be read`);
+    const next = ids.filter((id) => id !== userId);
+    if (next.length !== ids.length) {
+      await db.group.update({ where: { id: groupId }, data: { userIds: JSON.stringify(next) } });
+    }
+  }));
+}
+
+/**
+ * Replace a group's members with the given people. The final list is worked
+ * out once and written once - not emptied and refilled one person at a time,
+ * which left the group short for as long as that took - and only ids that are
+ * real people of this account are kept. Everyone who ends up in the group is
+ * taken out of the account's other groups, as assigning one person does.
+ * Returns the ids that were kept.
+ */
+async function setGroupMembers(prisma, groupId, userIds, req) {
+  const accId = getAccountId(req);
+  if (!accId) throw new Error('Account context required');
+
+  const asked = [...new Set((Array.isArray(userIds) ? userIds : []).filter((id) => typeof id === 'string' && id.trim() !== ''))];
+
+  return inMembershipQueue(accId, () => inTransaction(prisma, async (db) => {
+    const allGroups = await db.group.findMany({
+      where: { accountId: accId },
+      select: { id: true, userIds: true }
+    });
+    if (!allGroups.some((group) => group.id === groupId)) {
+      throw new Error(`Target group not found: ${groupId} (accountId: ${accId})`);
+    }
+
+    const people = asked.length
+      ? await db.user.findMany({ where: { id: { in: asked }, accountId: accId }, select: { id: true } })
+      : [];
+    const real = new Set(people.map((person) => person.id));
+    const members = asked.filter((id) => real.has(id));
+    const kept = new Set(members);
+
+    for (const group of allGroups) {
+      if (group.id === groupId) {
+        const before = readMemberIds(group.userIds);
+        if (before === null || before.length !== members.length || before.some((id, i) => id !== members[i])) {
+          await db.group.update({ where: { id: groupId }, data: { userIds: JSON.stringify(members) } });
+        }
+        continue;
+      }
+      const ids = readMemberIds(group.userIds);
+      if (ids === null) continue;
+      const next = ids.filter((id) => !kept.has(id));
+      if (next.length !== ids.length) {
+        await db.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(next) } });
+      }
+    }
+    return members;
+  }));
 }
 
 /**
@@ -364,5 +463,7 @@ module.exports = {
   scopedWhere,
   getGroupAddons,
   assignUserToGroup,
+  removeUserFromGroup,
+  setGroupMembers,
   ensureEmailUniqueness
 };

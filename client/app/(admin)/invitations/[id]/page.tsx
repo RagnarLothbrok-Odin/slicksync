@@ -272,8 +272,9 @@ export default function InvitationDetailPage() {
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3 mb-2">
-                  <h1 className="text-2xl font-bold font-display text-default">{code}</h1>
+                {/* A long code is one unbroken word: let it wrap, and the badge drop under it, on a narrow screen. */}
+                <div className="flex flex-wrap items-center gap-3 mb-2">
+                  <h1 className="min-w-0 break-all text-2xl font-bold font-display text-default">{code}</h1>
                   {isExpired ? (
                     <Badge variant="error">Expired</Badge>
                   ) : isFull ? (

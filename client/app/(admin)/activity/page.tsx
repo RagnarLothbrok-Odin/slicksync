@@ -87,6 +87,7 @@ interface ActivityItem {
   profileLabel?: string; // Nuvio profile name this was watched under, if known
   userProvider?: string; // the person's own provider, for the "Watched on" filter
   userAvatarUrl?: string | null;
+  userUseGravatar?: boolean;
   debridService?: string; // e.g. "torbox" - only set when confidently detected via the AIOStreams proxy (see server/utils/debridDetection.js). Absent doesn't mean "not debrid".
   completed?: boolean | null; // real completion: true = finished, false = started/dropped, null/undefined = unknown
   rewatchCount?: number; // movies only: times watched to the end again after first completion (0 = first watch)
@@ -94,7 +95,7 @@ interface ActivityItem {
   // watched this SAME content on the SAME day, oldest first. Set only on the
   // most-recent activity for that content+day; the earlier ones are omitted
   // from the grid entirely (still present in list view/stats, unchanged).
-  additionalWatchers?: Array<{ userId: string; userName: string; userEmail?: string; userColorIndex?: number; userAvatarUrl?: string | null }>;
+  additionalWatchers?: Array<{ userId: string; userName: string; userEmail?: string; userColorIndex?: number; userAvatarUrl?: string | null; userUseGravatar?: boolean }>;
 }
 
 // Invite history types
@@ -131,7 +132,9 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
   // under the following day and fail to match the card it should dedupe with.
   const dayKeyOf = (d: Date) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const seenUserItemKeys = new Set<string>();
+  // The card each key produced, so a later entry for the same viewing can
+  // improve it rather than only being dropped.
+  const seenUserItemKeys = new Map<string, ActivityItem | null>();
 
   if (metrics.watchSessions && metrics.watchSessions.length > 0) {
     metrics.watchSessions.forEach((session) => {
@@ -144,8 +147,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
       // and would only show as a blank duplicate of the native card.
       if ((session.durationSeconds || 0) <= 0) return;
 
-      seenUserItemKeys.add(`${session.user.id}:${session.item.id}:${session.videoId || ''}:${dayKeyOf(new Date(session.startTime))}`);
-      activities.push({
+      const sessionCard: ActivityItem = {
         id: session.id,
         userId: session.user.id,
         userName: session.user.username,
@@ -165,7 +167,10 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         isSynthetic: false,
         poster: session.item.poster,
         userAvatarUrl: session.user.useGravatar ? null : (session.user.avatarUrl ?? null),
-      });
+        userUseGravatar: !!session.user.useGravatar,
+      };
+      seenUserItemKeys.set(`${session.user.id}:${session.item.id}:${session.videoId || ''}:${dayKeyOf(new Date(session.startTime))}`, sessionCard);
+      activities.push(sessionCard);
     });
   }
 
@@ -183,11 +188,21 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
       // the SHOW, so two episodes watched the same day would otherwise collide
       // and the second would be silently dropped.
       const key = `${entry.user.id}:${entry.item.id}:${entry.videoId || ''}:${dayKeyOf(new Date(entry.watchedAt))}`;
-      if (seenUserItemKeys.has(key)) return;
+      if (seenUserItemKeys.has(key)) {
+        // Same viewing, already on the page from its session - but a session
+        // only holds its latest sitting, while this entry carries the whole
+        // day's watched time. Keep the card and show the larger figure
+        // (never the sum: both describe the same viewing).
+        const shown = seenUserItemKeys.get(key);
+        if (shown && (entry.durationSeconds || 0) > (shown.durationSeconds || 0)) {
+          shown.durationSeconds = entry.durationSeconds;
+        }
+        return;
+      }
       // Recorded, not just tested: the feed can now legitimately carry several
       // entries for the same title on DIFFERENT days, so without adding each
       // key the same day could still slip through twice.
-      seenUserItemKeys.add(key);
+      seenUserItemKeys.set(key, null);
 
       activities.push({
         id: `activity-${entry.user.id}-${entry.item.id}-${entry.videoId || 'movie'}-${entry.watchedAtTimestamp}`,
@@ -216,6 +231,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         // AIOStreams, AIOMetadata) for the "Watched on" filter.
         userProvider: entry.user.providerType === 'jellyfin' ? ((entry.user as { jellyfinServerKind?: string | null }).jellyfinServerKind || 'jellyfin') : entry.user.providerType,
         userAvatarUrl: entry.user.useGravatar ? null : (entry.user.avatarUrl ?? null),
+        userUseGravatar: !!entry.user.useGravatar,
         debridService: entry.debridService,
       });
     });
@@ -426,6 +442,7 @@ function buildGridWatchers(activities: ActivityItem[]): ActivityItem[] {
         userEmail: a.userEmail,
         userColorIndex: a.userColorIndex,
         userAvatarUrl: a.userAvatarUrl,
+        userUseGravatar: a.userUseGravatar,
       });
     }
     result.push(others.length > 0 ? { ...primary, additionalWatchers: others } : primary);
@@ -528,7 +545,7 @@ const ActivityCard = memo(function ActivityCard({
 
       {/* User avatar */}
       <Link href={`/users/${activity.userId}`}>
-        <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} size="md" />
+        <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} useGravatar={activity.userUseGravatar} size="md" />
       </Link>
 
       {/* Activity details */}
@@ -725,7 +742,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
             spreading avatars across the art. */}
         {(() => {
           const watchers = [
-            { userId: activity.userId, userName: activity.userName, userEmail: activity.userEmail, userAvatarUrl: activity.userAvatarUrl },
+            { userId: activity.userId, userName: activity.userName, userEmail: activity.userEmail, userAvatarUrl: activity.userAvatarUrl, userUseGravatar: activity.userUseGravatar },
             ...(activity.additionalWatchers ?? []),
           ];
           const count = watchers.length;
@@ -760,7 +777,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
                   title={`${count} watched`}
                   aria-label={`${count} people watched — show who`}
                 >
-                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} size="sm" />
+                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} useGravatar={activity.userUseGravatar} size="sm" />
                   <span className="absolute -bottom-1 -right-1 min-w-4 h-4 px-1 rounded-full flex items-center justify-center text-[10px] font-bold bg-primary text-white ring-2 ring-slate-900">
                     {count}
                   </span>
@@ -771,7 +788,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
                   onClick={(e) => e.stopPropagation()}
                   className="block rounded-full shadow-md shadow-black/40"
                 >
-                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} size="sm" />
+                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} useGravatar={activity.userUseGravatar} size="sm" />
                 </Link>
               )}
 
@@ -789,7 +806,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
                         onClick={(e) => e.stopPropagation()}
                         className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-surface-hover transition-colors"
                       >
-                        <UserAvatar userId={w.userId} name={w.userName} email={w.userEmail} src={w.userAvatarUrl ?? undefined} size="xs" />
+                        <UserAvatar userId={w.userId} name={w.userName} email={w.userEmail} src={w.userAvatarUrl ?? undefined} useGravatar={w.userUseGravatar} size="xs" />
                         <span className="text-xs text-default truncate">
                           {w.userName}
                           {/* additionalWatchers carries no per-watcher profile
@@ -1345,7 +1362,7 @@ function NowPlayingItemBody({
       )}
       <div className="flex-1 min-w-0">
         <TVLink href={`/users/${np.user.id}`} className="flex items-center gap-2 mb-1">
-          <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} size="sm" />
+          <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} useGravatar={np.user.useGravatar} size="sm" />
           <span className="text-sm font-medium text-default truncate hover:text-primary transition-colors">
             {np.user.username}
           </span>

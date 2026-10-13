@@ -2,23 +2,35 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'slicksync-dev-secret-change-me';
+// The signing secret has one home, utils/config.js. It is read when a token is
+// signed or checked, not when this file loads: config.js brings in the key
+// manager, which writes data/server_secret.key on a fresh install, and this
+// file is also loaded by code that only wants the path matcher below.
+function jwtSecret() {
+  return require('./config').JWT_SECRET;
+}
 
 /**
  * Check if path is allowlisted for public access
+ *
+ * An entry that ends in '-' or '/' is a deliberate open-ended prefix
+ * ('/proxy/', '/api/auth/jellyfin-'). Any other entry matches that path and
+ * what sits below it ('/api/ext', '/api/ext/account'), but never a sibling
+ * that only starts the same way ('/api/auth/login-reset', '/invitexyz') - so
+ * a route added later with a similar name is not opened by accident.
  */
 function pathIsAllowlisted(path) {
   const AUTH_ALLOWLIST = [
     '/health',
     // Only the build stamp - open tabs check it to notice an update, signed in
-    // or not. The rest of /api/health is the admin Health page; this list
-    // matches by startsWith, so a bare '/api/health' opened all of it.
+    // or not. The rest of /api/health is the admin Health page; the bare
+    // '/api/health' is matched on its own, exactly, below.
     '/api/health/build',
     '/api/auth/login',
     '/api/auth/register',
     '/api/auth/generate-uuid',
     // NOT a bare '/api/public-auth' prefix - that used to sit here and,
-    // since this function matches by startsWith, silently allowlisted every
+    // since an entry covers everything under it, silently allowlisted every
     // OTHER route on this same router too ('/me', '/logout', '/config-export',
     // '/reset', '/account', ...), skipping req.appAccountId assignment for
     // all of them. That broke "stay signed in after register/login" - the
@@ -58,7 +70,6 @@ function pathIsAllowlisted(path) {
     '/api/auth/oidc/start',
     '/api/public-auth/oidc/callback', // Where the OIDC provider redirects back to - no session cookie exists yet
     '/api/auth/oidc/callback',
-    '/api/public-auth/suggest-uuid',
     '/api/qr', // QR-code rendering for TV Mode's Stremio/Nuvio OAuth linking - needed on the pre-login page too, and never carries anything sensitive (just re-renders a URL already shown/clickable elsewhere)
     '/api/ext', // External API uses API key auth (handled by externalApi router)
     // Cross-instance catalog subscription: the caller is another SlickSync
@@ -84,6 +95,16 @@ function pathIsAllowlisted(path) {
     // the query is the credential (see routes/migration.js). Narrow path -
     // offer/receive stay behind normal auth.
     '/api/migration/bundle',
+    // Playback links in proxied stream responses (routes/streamProxy.js): the
+    // caller is a Stremio or Nuvio app with no session, and the encrypted
+    // token in the URL is the credential - same model as '/proxy/' above.
+    // Trailing slash keeps it narrow.
+    '/stream/',
+    // The shareable "my stats" page (client/app/(public)/u/[slug]): a visitor
+    // has no session by design, and the unguessable slug in the URL is the
+    // credential (routes/users.js). Only this one read - the rest of
+    // /api/users stays behind a login, so no bare '/api/users'.
+    '/api/users/public-stats/',
     '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
     '/api/public-library', // Public library endpoints (OAuth-based access)
     // /api/superadmin runs its OWN completely separate auth (a distinct
@@ -97,11 +118,35 @@ function pathIsAllowlisted(path) {
     // Stremio helpers are NOT allowlisted; require auth
     // Note: addons endpoints are NOT allowlisted; they require auth/CSRF
   ];
+  if (typeof path !== 'string') return false;
   // Bare /api/health stays reachable for health checks people already point
   // at it - without a login it answers only "ok" (routes/health.js). Exact
   // match: /api/health/proxy-ignore and anything else under it stay gated.
   if (path === '/api/health' || path === '/api/health/') return true;
-  return AUTH_ALLOWLIST.some((prefix) => path.startsWith(prefix));
+  // One trailing slash names the same route to Express ('/api/auth/login/'),
+  // so it must not be what makes a login path look unlisted.
+  const trimmed = trimTrailingSlash(path);
+  return AUTH_ALLOWLIST.some((entry) => {
+    if (entry.endsWith('-') || entry.endsWith('/')) return path.startsWith(entry);
+    return trimmed === entry || trimmed.startsWith(entry + '/');
+  });
+}
+
+function trimTrailingSlash(path) {
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+}
+
+/**
+ * Paths that are open without a login but hand back an account's own data
+ * when a session comes with the request. For these the account behind the
+ * session has to still exist and be switched on. The sign-in paths are
+ * deliberately not here: a disabled household's stale cookie must never stop
+ * anyone signing in as someone else from the same browser.
+ */
+function pathNeedsLiveAccount(path) {
+  if (typeof path !== 'string') return false;
+  const trimmed = trimTrailingSlash(path);
+  return trimmed === '/api/health' || trimmed === '/api/ext' || trimmed.startsWith('/api/ext/');
 }
 
 /**
@@ -148,21 +193,40 @@ function cookieName(base) {
  * Issue access token
  */
 function issueAccessToken(appAccountId) {
-  return jwt.sign({ accId: appAccountId, typ: 'access' }, JWT_SECRET, { expiresIn: '30d' });
+  return jwt.sign({ accId: appAccountId, typ: 'access' }, jwtSecret(), { expiresIn: '30d' });
 }
 
 /**
  * Issue refresh token
  */
 function issueRefreshToken(appAccountId) {
-  return jwt.sign({ accId: appAccountId, typ: 'refresh' }, JWT_SECRET, { expiresIn: '365d' });
+  return jwt.sign({ accId: appAccountId, typ: 'refresh' }, jwtSecret(), { expiresIn: '365d' });
 }
 
 /**
- * Issue public token (kept for compatibility)
+ * Accept an already-verified token payload as an account token of one of the
+ * given kinds ('access', 'refresh'); throws otherwise. The same secret also
+ * signs the superadmin session and the user-portal sessions, and neither of
+ * those may ever pass for an account - they carry no accId, or a different
+ * typ. Tokens from before the type claim existed carry none and stay valid
+ * in either slot, as they always did.
  */
-function issuePublicToken(appAccountId) {
-  return jwt.sign({ accId: appAccountId }, JWT_SECRET, { expiresIn: '30d' });
+function checkAccountClaims(decoded, kinds = ['access', 'refresh']) {
+  if (!decoded || typeof decoded !== 'object') throw new Error('not an account token');
+  if (typeof decoded.accId !== 'string' || !decoded.accId) throw new Error('not an account token');
+  if (decoded.typ !== undefined && !kinds.includes(decoded.typ)) throw new Error('wrong token type');
+  return decoded;
+}
+
+/**
+ * Verify a session token and return its payload, or throw. `kinds` is which
+ * account token types the slot it came from accepts: ['access'] for the
+ * bearer header and the access cookie, ['refresh'] for the refresh cookie,
+ * both where the code takes whichever cookie is left. `secret` is for callers
+ * that were handed one.
+ */
+function verifyAccountToken(token, kinds = ['access', 'refresh'], secret = jwtSecret()) {
+  return checkAccountClaims(jwt.verify(token, secret), kinds);
 }
 
 /**
@@ -178,11 +242,13 @@ function randomCsrfToken() {
 
 module.exports = {
   pathIsAllowlisted,
+  pathNeedsLiveAccount,
   extractBearerToken,
   parseCookies,
   cookieName,
   issueAccessToken,
   issueRefreshToken,
-  issuePublicToken,
+  checkAccountClaims,
+  verifyAccountToken,
   randomCsrfToken
 }

@@ -126,6 +126,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 ### Watching
 
 - Watch history comes in, and what's playing shows in **Now Playing** with real watch time, straight from the server's sessions.
+- Now Playing only shows what is still being confirmed as playing: if AIOStreams signs SlickSync out or can't be reached, SlickSync signs in again by itself, and a title it can no longer vouch for comes off the screen instead of sitting there.
 - Watched marks, favourites and resume points are **written back** to the server.
 - **AIOStreams watch history** — turn it on per person and viewing in AIOStreams' own apps (Odin, Infuse, Swiftfin, the desktop app) becomes history and Now Playing; watched marks, the watchlist, drops and ratings flow back the other way. One link serves the whole household.
 - **Keep Jellyfin in step** — what someone finishes in Stremio, Nuvio or AIOStreams is marked played on their Jellyfin server, and what they stop part-way picks up at the same spot there. Switch it on per person and the household watchlist (as favourites) and ratings go there too.
@@ -142,6 +143,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 - **Age limit** — the highest rating someone may play. On a Jellyfin server it's the server's own age limit, enforced in every Jellyfin app; on Stremio, Nuvio and AIOMetadata SlickSync holds them to it - a title rated above it has nothing to play, while catalogs stay.
 - **Invites that make the account** — an invitation can create the person's Jellyfin account with a password they choose; it stays off until you accept them, and switches off again if they expire or are removed.
 - **AIOStreams and AIOMetadata household users** — add one, or set or remove their PIN, from the household card.
+- **Keep an AIOStreams household user separate** (AIOStreams 2.36) — they get a sign-in address of their own, see nobody else and stay off the picker. Copy the address from the household card, or replace it. Off unless you switch it on.
 - **Profile pictures both ways** — a picture changed in SlickSync can go to their Jellyfin, AIOStreams or AIOMetadata server too, and one changed on the server shows up here within minutes.
 
 ### Collections
@@ -157,6 +159,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 
 - A change made to an AIOStreams configuration outside SlickSync raises a bell and push notification. SlickSync writes there only for a profile's own collections setup, and — if you switch it on for a person — to swap a debrid key the Vault rotated or failed over.
 - Exports and Disaster Recovery Kits carry households, their sign-ins and their collections.
+- **Addresses are checked before SlickSync fetches them** — addons, backends, webhooks, pictures and imports, and anywhere they redirect. A shared instance never connects to its own network; your own install still reaches the servers on yours.
 - **AIOStreams history** — every version of a configuration is kept, with what changed from the one before; **Put back** restores an earlier one, keeping today's debrid services, household users and API keys unless you untick them.
 - **AIOStreams health** on a person's page — each addon's errors, empty answers and slow responses as AIOStreams itself reports them, and a one-off test search.
 - **Server versions** — Health shows each Jellyfin, AIOStreams and AIOMetadata server's version, and whether a newer stable release is out.
@@ -422,7 +425,7 @@ Everything beyond `JWT_SECRET`/`ENCRYPTION_KEY` has a sensible default — see `
 | `NUVIO_SUPABASE_URL` / `NUVIO_SUPABASE_ANON_KEY` | Override Nuvio's backend endpoint (also settable per account in Settings) | `https://api.nuvio.tv` / — |
 | `SIMKL_CLIENT_ID` | Instance-wide SIMKL app registration (each account can bring its own) | — |
 | `LUMIERE_DB_URL` | A [LumiereDB](https://github.com/cedya77/aiometadata/blob/dev/docs/lumiere-db.md) to use when none is set in Settings → External API Keys (e.g. `http://lumiere-db:8000` — the same one your AIOMetadata uses works). Self-hosted only: public mode doesn't offer LumiereDB, as IMDb's data is for personal use | — |
-| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI` | Enable "Continue with..." SSO login (all four required) | — |
+| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI` | Enable "Continue with..." SSO login (all four required). On a public instance, people must start the sign-in from the same address `OIDC_REDIRECT_URI` points at. | — |
 | `AUTH_RATE_LIMIT_WINDOW_MS` / `AUTH_RATE_LIMIT_MAX_REQUESTS` | Credential-endpoint rate limit | 20 / 15 min |
 | `POLL_RATE_LIMIT_MAX_REQUESTS` | OAuth device-flow poll limit | 60/min |
 | `VAULT_BACKUP_INTERVAL_HOURS` | Vault export interval | 24 |
@@ -439,6 +442,7 @@ Everything beyond `JWT_SECRET`/`ENCRYPTION_KEY` has a sensible default — see `
 - **Decryption errors after an update** (`Unsupported state or unable to authenticate data`): the running code is deriving a different key than what encrypted your data — check `data/server_secret.key` wasn't lost, and don't modify the key-derivation constants on a fork.
 - **"credentials may be invalid" on Sync, but library/history still updates fine**: a decrypt-key rotation split your data across key generations. Every read path falls back to the previous key automatically, but some secrets stay encrypted under the old one. Fix it permanently: `docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" <container> node scripts/consolidate-encryption-keys.js` (dry-run; add `--apply --sync-keyfile` to re-encrypt everything onto the current key).
 - **SlickTrax is enabled but never appears on the device, or a pause needs the app reopened**: open SlickSync once from the address your devices use so it learns it (or set `PUBLIC_APP_URL`). If a login gate sits in front of the instance, let `/trax/` through without a login. The Limits popup says which one it is.
+- **Proxied stream links or a shared stats page ask for a login**: SlickSync answers `/stream/` (links carry their own token) and `/api/users/public-stats/` without a login. If a login gate (Authelia, a forward-auth proxy) sits in front of the instance, let those two paths through as well.
 - **A Jellyfin or AIOStreams server on your home network won't sign in on a shared instance**: a public-mode SlickSync (like slicksync.vip) never connects to private-network addresses. Use the server's public address, or run your own instance.
 - **Jellyfin collections aren't renamed or don't get a cover**: Jellyfin only lets administrators do that. Without an administrator's sign-in, a renamed catalog's collection is made again under the new name instead.
 - **"Detected additional lockfiles" during build**: delete any stray `package-lock.json` — this project runs on `bun`.

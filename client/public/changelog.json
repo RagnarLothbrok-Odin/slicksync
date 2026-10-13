@@ -1,5 +1,28 @@
 [
   {
+    "version": "1.97.0",
+    "date": "2026-10-13",
+    "title": "1.97.0 - Now Playing you can trust, security fixes, and AIOStreams 2.36",
+    "features": [
+      "Security: shared instances should update. Every address SlickSync fetches for someone - an addon, a backend, a webhook, a picture, an import - is checked, and so is anywhere it redirects; a shared instance never connects to its own network, while your own install still reaches the servers on yours. People's own pages check the key belongs to that person. On a shared instance one household can no longer take over another's Jellyfin sign-in. Signing out ends the session on the server, and too many wrong passwords are cut off.",
+      "Now Playing keeps up: a title no longer sits there after it stopped - including when AIOStreams signs SlickSync out or can't be reached - and it updates right away instead of every few minutes. The dashboard card shows how long someone has been watching, where they last were and the resume links, the same as Activity, with several people side by side.",
+      "Watch time adds up: a film watched in several sittings on one day shows the whole time, a new title's first sitting counts, and short stretches are no longer dropped.",
+      "AIOStreams 2.36: keep a household user separate from the household card - they get a sign-in address of their own, see nobody else, and stay off the picker. Copy the address or replace it. Off unless you switch it on.",
+      "A profile picture from Gravatar is only looked up for someone who turned Gravatar on."
+    ],
+    "bugFixes": [
+      "A sequel no longer takes the original's name and poster in Now Playing, and episodes match their show under more release names.",
+      "Sessions renew by themselves instead of asking you to sign in again after a month.",
+      "A shared stats link and an invite link stay open for someone who isn't signed in.",
+      "Deploying a snapshot never leaves someone with an empty addon list, and says which addons it left out.",
+      "Two invites accepted at the same moment both end up in the group.",
+      "Nuvio addon lists are written one at a time per person and held back while Nuvio is failing.",
+      "Checking a Stremio person's status never changes their account.",
+      "Without JWT_SECRET, sessions are signed with a key of the install's own - such an install asks everyone to sign in once after updating.",
+      "Updated Next.js, Express and other dependencies."
+    ]
+  },
+  {
     "version": "1.96.0",
     "date": "2026-10-08",
     "title": "1.96.0 - Security fixes, LumiereDB, and new Smart Catalog rules",

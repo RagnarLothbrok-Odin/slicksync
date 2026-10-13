@@ -20,20 +20,35 @@ function isValidPassword(password) {
 
 /**
  * Sanitize and normalize URL
+ *
+ * Returns null for anything that is not a web address once stremio:// is
+ * mapped to https:// - an addon address is only ever fetched over http(s), and
+ * letting file:, data: or other schemes through meant the caller's fetch was
+ * the only thing deciding what they did. The string itself is returned
+ * exactly as it was typed (trimmed), so nothing already stored changes.
  */
 function sanitizeUrl(url) {
   if (!url || typeof url !== 'string') return null;
-  
+
   let sanitized = String(url).trim();
-  
+
   // Remove leading @ symbols
   sanitized = sanitized.replace(/^@+/, '');
-  
+
   // Convert stremio:// scheme to https://
   if (sanitized.toLowerCase().startsWith('stremio://')) {
     sanitized = sanitized.replace(/^stremio:\/\//i, 'https://');
   }
-  
+
+  // Parsed rather than pattern-matched, so a form such as "https:/host/x"
+  // is judged the way fetch will read it.
+  try {
+    const { protocol } = new URL(sanitized);
+    if (protocol !== 'http:' && protocol !== 'https:') return null;
+  } catch {
+    return null;
+  }
+
   return sanitized;
 }
 

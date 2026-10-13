@@ -46,20 +46,27 @@ function userIdFor(uuid, userId) {
 }
 
 async function request(url, { method = 'GET', body } = {}) {
-  if (restrictsPrivateAddresses()) {
+  const strict = restrictsPrivateAddresses()
+  if (strict) {
     const { assertSafeUrl } = require('./safeUrl')
     await assertSafeUrl(url)
   }
   let res
   try {
-    res = await fetch(url, {
+    const init = {
       method,
       headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
+    }
+    // The check above vouches for the first address only; on an instance
+    // serving strangers a redirect is held to the same rule, hop by hop.
+    res = strict
+      ? await require('./safeUrl').safeFetch(url, init, { allowPrivate: false })
+      : await fetch(url, init)
   } catch (e) {
-    throw fail(`Could not reach AIOMetadata: ${e?.cause?.code || e?.message || 'network error'}`, 502)
+    const refused = /^(blocked host|unsupported protocol|invalid url|too many redirects)$/.test(e?.message || '')
+    throw fail(refused ? 'AIOMetadata sent this server to an address it does not connect to' : `Could not reach AIOMetadata: ${e?.cause?.code || e?.message || 'network error'}`, 502)
   }
   const data = await res.json().catch(() => null)
   if (!res.ok) throw fail(data?.error || `AIOMetadata answered ${res.status}`, res.status === 401 ? 409 : res.status >= 500 ? 502 : 400)
@@ -119,7 +126,7 @@ async function hasPins(owner) {
 async function signInOnce(prisma, encrypt, owner, { jellyfinUserId, name }, password, pin) {
   const profiles = require('./jellyfinProfiles')
   const secret = pin ? `${password}/${pin}` : password
-  const signed = await profiles.signInAs(owner.jellyfinServerUrl, [name], jellyfinUserId, secret).catch(() => ({ token: null }))
+  const signed = await profiles.signInAs(owner.jellyfinServerUrl, [name], jellyfinUserId, secret, profiles.handToHolders(prisma, encrypt, owner.jellyfinServerUrl)).catch(() => ({ token: null }))
   await profiles.saveHousehold(prisma, encrypt, owner, [{
     jellyfinUserId,
     name,

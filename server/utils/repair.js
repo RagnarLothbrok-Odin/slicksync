@@ -1,3 +1,4 @@
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const { buildAddonDbData } = require('./stremio')
 const { decrypt, encrypt } = require('./encryption')
 
@@ -57,7 +58,7 @@ async function repairAddonsList({
       // Fetch latest manifest only if necessary
       if (!originalManifestObj || needsId || needsIcon || isEmptyResources) {
         try {
-          const resp = await fetch(transportUrl)
+          const resp = await safeFetch(transportUrl, {}, instancePolicy())
           if (resp.ok) {
             originalManifestObj = await resp.json()
           }

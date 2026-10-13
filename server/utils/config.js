@@ -1,5 +1,6 @@
 // Configuration constants and variables
 const path = require('path');
+const crypto = require('crypto');
 
 // Instance type configuration
 const INSTANCE_TYPE = process.env.INSTANCE_TYPE || process.env.INSTANCE || 'private';
@@ -7,7 +8,6 @@ if (INSTANCE_TYPE !== 'public' && INSTANCE_TYPE !== 'private') {
   throw new Error(`Invalid INSTANCE_TYPE: ${INSTANCE_TYPE}. Must be 'public' or 'private'`);
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'slicksync-dev-secret-change-me';
 const DEFAULT_ACCOUNT_ID = 'default';
 const DEFAULT_ACCOUNT_UUID = '00000000-0000-4000-8000-000000000000';
 
@@ -52,33 +52,55 @@ const defaultAddons = {
   ]
 };
 
-// Auth allowlist for public endpoints
-const AUTH_ALLOWLIST = [
-  '/health',
-  // Only the build stamp - open tabs check it to notice an update, signed in
-  // or not. The rest of /api/health is the admin Health page; this list
-  // matches by startsWith, so a bare '/api/health' opened all of it.
-  '/api/health/build',
-  '/api/public-auth/login',
-  '/api/public-auth/register',
-  '/api/public-auth/generate-uuid',
-  '/api/public-auth/suggest-uuid',
-  '/api/public-auth/private-login', // Private instance username/password login
-  '/invite', // Public invitation endpoints (request submission, status check, OAuth completion)
-  '/proxy', // Addon proxy routes (UUID serves as bearer token)
-  // Stremio endpoints require auth now (no allowlist)
-];
-
 // Backup configuration
 const BACKUP_DIR = path.join(process.cwd(), 'data', 'backup');
 const BACKUP_CFG = path.join(BACKUP_DIR, 'schedule.json');
 
-// Encryption/hashing pepper
-const PEPPER = process.env.HASH_PEPPER || process.env.ENCRYPTION_KEY || 'slicksync-pepper';
-
 // Encryption key — auto-generated and persisted if unset, with decrypt fallback
 // support if the env key changes later. See utils/keyManager.js.
 const { ENCRYPTION_KEY, ENCRYPTION_KEY_FALLBACKS } = require('./keyManager');
+
+// What sessions are signed with. This is the ONE place that decides; every
+// signer and verifier takes it from here (utils/auth.js reads it lazily, and
+// index.js hands it to the routers that sign their own tokens).
+//
+// The placeholder below used to be the fallback when JWT_SECRET was unset. It
+// is public in the source repository, so signing with it lets anyone mint a
+// session for any account (or the superadmin panel) on an install that never
+// set its own. An install without a usable JWT_SECRET now gets one derived
+// from its own ENCRYPTION_KEY instead: stable across restarts, different on
+// every install. An install that sets its own JWT_SECRET is untouched, so the
+// sessions it has issued stay valid.
+const PUBLIC_PLACEHOLDER_SECRET = 'slicksync-dev-secret-change-me';
+
+function resolveJwtSecret({ envSecret, encryptionKey }) {
+  const own = typeof envSecret === 'string' ? envSecret : '';
+  const trimmed = own.trim();
+  if (trimmed && trimmed !== PUBLIC_PLACEHOLDER_SECRET) return { secret: own, source: 'env' };
+  const why = trimmed ? 'placeholder' : 'unset';
+  if (Buffer.isBuffer(encryptionKey) && encryptionKey.length > 0) {
+    const secret = crypto.createHmac('sha256', encryptionKey).update('slicksync-jwt-secret-v1').digest('hex');
+    return { secret, source: 'derived', why };
+  }
+  // No key to derive from at all - this run only, so nothing guessable is
+  // ever used. Sessions do not survive a restart in this case.
+  return { secret: crypto.randomBytes(48).toString('hex'), source: 'random', why };
+}
+
+const jwtSecretChoice = resolveJwtSecret({ envSecret: process.env.JWT_SECRET, encryptionKey: ENCRYPTION_KEY });
+const JWT_SECRET = jwtSecretChoice.secret;
+if (jwtSecretChoice.source === 'derived') {
+  console.log(
+    `[auth] JWT_SECRET is ${jwtSecretChoice.why === 'unset' ? 'not set' : 'still the placeholder from the source code'} - ` +
+    "signing sessions with a key derived from this install's ENCRYPTION_KEY. Set JWT_SECRET to choose your own; " +
+    'changing ENCRYPTION_KEY signs everyone out.'
+  );
+} else if (jwtSecretChoice.source === 'random') {
+  console.warn(
+    '[auth] JWT_SECRET is not set and there is no encryption key to derive one from - signing sessions with a ' +
+    'random key for this run only. Everyone is signed out on restart; set JWT_SECRET to keep sessions.'
+  );
+}
 
 // CORS allowed origins
 // Allow localhost on any port for development (more permissive for local dev)
@@ -115,13 +137,12 @@ module.exports = {
   OIDC_DISPLAY_NAME,
   OIDC_ALLOWED_EMAILS,
   JWT_SECRET,
+  resolveJwtSecret,
   DEFAULT_ACCOUNT_ID,
   DEFAULT_ACCOUNT_UUID,
   defaultAddons,
-  AUTH_ALLOWLIST,
   BACKUP_DIR,
   BACKUP_CFG,
-  PEPPER,
   ENCRYPTION_KEY,
   ENCRYPTION_KEY_FALLBACKS,
   allowedOrigins,

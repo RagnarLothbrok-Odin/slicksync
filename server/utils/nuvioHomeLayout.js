@@ -18,6 +18,7 @@
 //     is written to every bucket that exists plus the shared one, so it
 //     lands wherever a given device happens to look.
 
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const PLATFORMS = ['home_catalog_shared', 'mobile', 'desktop']
 
 function parseBlob(raw) {
@@ -73,7 +74,7 @@ async function fetchManifest(transportUrl, opts) {
   if (hit && Date.now() - hit.at < MANIFEST_TTL_MS) return hit.value
   const url = transportUrl.endsWith('.json') ? transportUrl : `${transportUrl.replace(/\/$/, '')}/manifest.json`
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
+    const res = await safeFetch(url, { signal: AbortSignal.timeout(6000) }, instancePolicy())
     if (!res.ok) return null
     const json = await res.json()
     // Bounded: one entry per addon address ever seen, and these were never

@@ -42,6 +42,36 @@ async function jellyfinAuthPost(path: string, body: unknown) {
   return data;
 }
 
+// The answer of an admin sign-in route as an object. A rate limit or a proxy in
+// front of the server can answer an error with plain text or a page of HTML,
+// and that must not read as "cannot reach the server" - the status already says
+// what happened (see failureLine). A success that is not JSON is another
+// matter: it is not a sign-in at all, so it still counts as unreachable.
+async function readAuthAnswer(response: Response): Promise<any> {
+  const data = await response.json().catch(() => undefined);
+  if (data && typeof data === 'object') return data;
+  if (response.ok) throw new Error('Failed to connect to server');
+  return {};
+}
+
+// What to tell the person when a sign-in step failed: the server's own words
+// when it gave some, otherwise a line chosen by the status.
+function failureLine(response: Response, data: any, fallback: string): string {
+  if (typeof data?.message === 'string' && data.message) return data.message;
+  if (response.status === 429) return 'Too many sign-in attempts. Please wait a few minutes and try again.';
+  if (response.status >= 500) return 'The server ran into a problem. Please try again in a moment.';
+  return fallback;
+}
+
+// Where an admin sign-in that went through the cookies lands. A bearer token
+// left in storage by an earlier session is sent with every request and
+// outranks the cookies the new sign-in just set, so signing in as another
+// account would keep showing the previous one - it is dropped first.
+function startAdminSession(token?: string) {
+  api.clearToken();
+  if (token) localStorage.setItem('slicksync-admin-token', token);
+}
+
 function LoginContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -103,7 +133,7 @@ function LoginContent() {
   };
   const handleAdminJellyfin = async (credentials: JellyfinCredentials) => {
     const data = await jellyfinAuthPost('/api/public-auth/jellyfin-login', credentials);
-    if (data?.token) localStorage.setItem('slicksync-admin-token', data.token);
+    startAdminSession(data?.token);
     router.push('/');
   };
   const [checkingAuth, setCheckingAuth] = useState(INSTANCE_TYPE !== 'public');
@@ -174,6 +204,9 @@ function LoginContent() {
   }, []);
 
   const handleStartOidc = () => {
+    // The sign-in finishes on the server and lands straight on the app, so
+    // this is the last point where the old token can be dropped.
+    api.clearToken();
     window.location.href = '/api/auth/oidc/start';
   };
 
@@ -561,18 +594,18 @@ function LoginContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ challengeId: optionsData.challengeId, credential }),
       });
-      const data = await verifyRes.json();
+      const data = await readAuthAnswer(verifyRes);
       if (verifyRes.ok && data.requiresTwoFactor && data.pendingToken) {
         setTwoFactorPendingToken(data.pendingToken);
         setTwoFactorCode('');
         return;
       }
       if (verifyRes.ok && (data.token || data.account)) {
-        if (data.token) localStorage.setItem('slicksync-admin-token', data.token);
+        startAdminSession(data.token);
         router.push('/');
         return;
       }
-      setAdminError(data.message || 'That passkey was not accepted');
+      setAdminError(failureLine(verifyRes, data, 'That passkey was not accepted'));
     } catch (e: any) {
       // Cancelling the browser prompt is a choice, not an error.
       if (e?.name === 'NotAllowedError' || /cancel|abort/i.test(e?.message || '')) return;
@@ -603,7 +636,7 @@ function LoginContent() {
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const data = await readAuthAnswer(response);
 
       if (response.ok && data.requiresTwoFactor && data.pendingToken) {
         setTwoFactorPendingToken(data.pendingToken);
@@ -612,12 +645,10 @@ function LoginContent() {
         // Store admin token and redirect
         // Backend returns token in different fields depending on route
         const token = data.token || response.headers.get('set-cookie');
-        if (data.token) {
-          localStorage.setItem('slicksync-admin-token', data.token);
-        }
+        startAdminSession(data.token);
         router.push('/');
       } else {
-        setAdminError(data.message || 'Invalid credentials');
+        setAdminError(failureLine(response, data, 'Invalid credentials'));
       }
     } catch (err) {
       setAdminError('Failed to connect to server');
@@ -638,14 +669,12 @@ function LoginContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pendingToken: twoFactorPendingToken, code: twoFactorCode.trim() }),
       });
-      const data = await response.json();
+      const data = await readAuthAnswer(response);
       if (response.ok && (data.token || data.account)) {
-        if (data.token) {
-          localStorage.setItem('slicksync-admin-token', data.token);
-        }
+        startAdminSession(data.token);
         router.push('/');
       } else {
-        setAdminError(data.message || 'Incorrect code');
+        setAdminError(failureLine(response, data, 'Incorrect code'));
         // An expired/consumed pendingToken can't be retried - back to the
         // password step rather than looping on a dead token.
         if (response.status === 401) {

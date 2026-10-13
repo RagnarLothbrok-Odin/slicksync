@@ -57,3 +57,29 @@ test('a change to the catalog order is named as one, not "other settings"', () =
   delete old.catalogOrder
   assert.deepEqual(describeChanges(old, summarize(moved)), ['changed other settings'])
 })
+
+test('account: a personal address names a person, so only a typed configuration UUID counts', () => {
+  const personal = 'https://aio.example.com/jellyfin/p/k3j9x0q7ab'
+  assert.equal(configAccountFrom(personal, 'Sam'), null)
+  assert.equal(configAccountFrom(`${personal}/`, 'Sam'), null)
+  assert.equal(configAccountFrom(personal, ''), null)
+  assert.equal(configAccountFrom(personal, UUID), UUID)
+  assert.equal(configAccountFrom(personal, `${UUID}/Sam`), UUID)
+  assert.equal(configAccountFrom(personal, 'family/Sam'), null)
+  assert.equal(configAccountFrom('https://example.com/aio/jellyfin/p/k3j9x0q7ab', 'Sam'), null)
+  assert.equal(instanceBase(personal), 'https://aio.example.com')
+})
+
+test('changes: keeping a household user separate, stopping, and a new address are named', () => {
+  const persona = (extra) => summarize({ jellyfin: { personas: [{ id: 'mia', name: 'Mia', ...extra }, { id: 'leo', name: 'Leo' }] } })
+  const plain = persona({})
+  const apart = persona({ hidden: true, address: 'k3j9x0q7ab' })
+  const renewed = persona({ hidden: true, address: 'zz11yy22xx' })
+  assert.equal(JSON.stringify(apart).includes('k3j9x0q7ab'), false, 'the address itself is not kept')
+  assert.deepEqual(describeChanges(plain, apart), ['kept household user Mia separate'])
+  assert.deepEqual(describeChanges(apart, plain), ['stopped keeping household user Mia separate'])
+  assert.deepEqual(describeChanges(apart, renewed), ['gave household user Mia a new sign-in address'])
+  const old = { ...plain }
+  delete old.apart
+  assert.deepEqual(describeChanges(old, apart), ['changed other settings'])
+})

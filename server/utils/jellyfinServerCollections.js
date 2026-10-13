@@ -190,12 +190,17 @@ async function readCover(url) {
     return { bytes, type }
   }
   if (!/^https?:\/\//i.test(String(url || ''))) return null
-  if (restrictsPrivateAddresses()) {
+  const strict = restrictsPrivateAddresses()
+  if (strict) {
     const { assertSafeUrl } = require('./safeUrl')
     try { await assertSafeUrl(url) } catch { return null }
   }
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(20000), redirect: 'follow' })
+    const init = { signal: AbortSignal.timeout(20000), redirect: 'follow' }
+    // When the address is checked, so is every redirect it meets.
+    const res = strict
+      ? await require('./safeUrl').safeFetch(url, init, { allowPrivate: false })
+      : await fetch(url, init)
     const type = String(res.headers.get('content-type') || '').split(';')[0].trim()
     if (!res.ok || !type.startsWith('image/')) return null
     const bytes = Buffer.from(await res.arrayBuffer())

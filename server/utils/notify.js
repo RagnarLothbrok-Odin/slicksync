@@ -3,10 +3,21 @@ const { getUserAvatarUrl } = require('./avatarUtils')
 const { fetchKitsuMetadata } = require('./kitsuUtils')
 const { fetchOmdbRatings } = require('./omdb')
 
+// A webhook or ntfy address is typed in by whoever set the notification up,
+// so before anything is sent it gets the same check as every other address
+// the server contacts for someone (see safeUrl.js): a household's install
+// may post to a server on its own network, an instance serving strangers
+// may not be made to post into its own.
+async function mayContact(address) {
+  const { assertSafeUrl, instancePolicy } = require('./safeUrl')
+  await assertSafeUrl(address, instancePolicy())
+}
+
 async function postDiscord(webhookUrl, content, options = {}) {
   try {
     if (!webhookUrl) return
     const url = new URL(webhookUrl)
+    await mayContact(webhookUrl)
     
     // If embeds are provided, use embeds format, otherwise use content
     let payload
@@ -718,7 +729,8 @@ async function postDiscordFile(webhookUrl, buffer, filename, content) {
     const form = new FormData()
     if (content) form.append('payload_json', JSON.stringify({ content }))
     form.append('files[0]', new Blob([buffer], { type: 'image/png' }), filename)
-    const res = await fetch(webhookUrl, { method: 'POST', body: form })
+    await mayContact(webhookUrl)
+    const res = await fetch(webhookUrl, { method: 'POST', body: form, redirect: 'error' })
     return res.ok
   } catch {
     return false
@@ -734,7 +746,7 @@ async function postNtfy(ntfyUrl, topic, { title, message, priority = 'default', 
     if (title) headers['Title'] = title
     if (priority) headers['Priority'] = priority
     if (Array.isArray(tags) && tags.length) headers['Tags'] = tags.join(',')
-    await fetch(url, { method: 'POST', headers, body: message || '' })
+    await require('./safeUrl').safeFetch(url, { method: 'POST', headers, body: message || '' }, require('./safeUrl').instancePolicy())
   } catch {}
 }
 

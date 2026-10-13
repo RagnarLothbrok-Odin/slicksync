@@ -962,7 +962,9 @@ export default function TasksPage() {
     setIsDeploying(true);
     try {
       const result = await api.deploySnapshot(deployingSnapshot.id, deployTargetUserId);
-      toast.success(`Deployed ${result.deployed} addon${result.deployed !== 1 ? 's' : ''}${result.failed ? `, ${result.failed} failed` : ''}`);
+      // Say which ones did not make it, not just how many.
+      const leftOut = result.leftOut?.length ? `, left out: ${result.leftOut.join(', ')}` : (result.failed ? `, ${result.failed} failed` : '');
+      toast.success(`Deployed ${result.deployed} addon${result.deployed !== 1 ? 's' : ''}${leftOut}`);
       setDeployingSnapshot(null);
       setDeployTargetUserId('');
     } catch (e: any) {
@@ -1389,7 +1391,7 @@ export default function TasksPage() {
               if (!user) return null;
               return (
                 <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border border-default bg-subtle">
-                  <UserAvatar userId={user.id} name={user.name || user.email || 'U'} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} size="sm" />
+                  <UserAvatar userId={user.id} name={user.name || user.email || 'U'} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} useGravatar={user.useGravatar} size="sm" />
                   <div className="flex-1 min-w-0 flex items-center gap-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-default truncate">{user.name || displayEmail(user.email) || user.id}</p>
@@ -1471,7 +1473,7 @@ export default function TasksPage() {
               if (!user) return null;
               return (
                 <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border border-default bg-subtle">
-                  <UserAvatar userId={user.id} name={user.name || user.email || 'U'} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} size="sm" />
+                  <UserAvatar userId={user.id} name={user.name || user.email || 'U'} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} useGravatar={user.useGravatar} size="sm" />
                   <div className="flex-1 min-w-0 flex items-center gap-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-default truncate">{user.name || displayEmail(user.email) || user.id}</p>

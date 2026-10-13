@@ -17,6 +17,7 @@
 // limits first (GET /api/v1/status), and AIOStreams' own refusal (an addon
 // limit it doesn't publish) is passed on in plain words.
 
+const { safeFetch, instancePolicy } = require('./safeUrl')
 const { summarize, describeChanges, readConfig, writeConfig, rebaseline, noteOutsideChanges, instanceBase } = require('./aiostreamsConfig')
 
 const KEEP_PER_CONFIG = 20
@@ -91,7 +92,7 @@ async function historyFor(prisma, accountId, userId) {
 
 async function limitsOf(base) {
   try {
-    const res = await fetch(`${base}/api/v1/status`, { signal: AbortSignal.timeout(15000) })
+    const res = await safeFetch(`${base}/api/v1/status`, { signal: AbortSignal.timeout(15000) }, instancePolicy())
     const s = (await res.json())?.data?.settings || {}
     return { variants: Number(s.variants?.max) || 0, personas: Number(s.jellyfin?.maxPersonas) || 0 }
   } catch {

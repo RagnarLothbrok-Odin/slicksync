@@ -1221,7 +1221,8 @@ export default function UserDetailPage() {
                           name={user.username || user.name || 'User'} 
                           email={user.email}
                           src={user.avatarUrl}
-                          size="2xl" 
+                          useGravatar={user.useGravatar}
+                          size="2xl"
                           showRing 
                           colorIndex={user.colorIndex || 0}
                           className="w-16 h-16 md:w-24 md:h-24 rounded-xl md:rounded-2xl shadow-lg ring-2 md:ring-4 ring-[var(--color-bg)]"
@@ -1675,6 +1676,7 @@ export default function UserDetailPage() {
                         name={mergeInfo.donorUsername || undefined}
                         email={mergeInfo.donorEmail || undefined}
                         src={mergeInfo.donorAvatarUrl ?? undefined}
+                        useGravatar={mergeInfo.donorUseGravatar}
                         colorIndex={mergeInfo.donorColorIndex ?? undefined}
                         size="md"
                       />
@@ -2397,6 +2399,7 @@ export default function UserDetailPage() {
                     name={u.username || u.name}
                     email={u.email}
                     src={u.avatarUrl ?? undefined}
+                    useGravatar={u.useGravatar}
                     colorIndex={u.colorIndex ?? undefined}
                     size="sm"
                   />

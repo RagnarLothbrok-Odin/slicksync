@@ -29,27 +29,8 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient, createProvi
     const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
     const collection = await apiClient.request('addonCollectionGet', {})
 
-    // CRITICAL FIX: If collection.addons is null (corrupted account), repair it immediately
-    // Stremio expects addons to always be an array, never null
-    if (collection && collection.addons === null) {
-      console.warn('⚠️ Detected corrupted addon collection (addons: null), repairing...')
-      try {
-        // Repair by clearing addons
-        const { clearAddons } = require('./addonHelpers')
-        await clearAddons(apiClient)
-        // Re-fetch to get the repaired collection
-        const repairedCollection = await apiClient.request('addonCollectionGet', {})
-        if (repairedCollection && repairedCollection.addons !== null) {
-          console.log('✅ Successfully repaired corrupted addon collection')
-          // Use the repaired collection
-          Object.assign(collection, repairedCollection)
-        }
-      } catch (repairError) {
-        console.error('❌ Failed to repair corrupted addon collection:', repairError)
-        // Continue with null handling below
-      }
-    }
-
+    // Reading never writes to the account: addons: null (an empty account, or
+    // a degraded answer from Stremio) is treated as "no addons" below.
     // Handle the case where collection.addons might be null (empty account) or not an array
     // Use the same logic as /stremio-addons endpoint: try collection.addons first, then fall back to collection itself
     const rawAddons = collection?.addons !== undefined ? collection.addons : collection
@@ -608,7 +589,7 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
   // Nothing to plan for a server with no addon list (see computeUserSyncStatus).
   if (user?.providerType === 'jellyfin') return { success: true, unsupported: true, alreadySynced: true, current: [], desired: [] }
   
-  // 1) Current - getUserAddons already has repair logic built in
+  // 1) Current - getUserAddons only reads, and treats a null addon list as empty
   const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
   if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
   const current = currentRes.addons?.addons || currentRes.addons || []

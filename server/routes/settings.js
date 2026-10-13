@@ -338,8 +338,16 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const plainFields = ['username', 'email', 'isActive', 'expiresAt', 'colorIndex', 'avatarUrl', 'providerType', 'discordWebhookUrl', 'discordUserId', 'notifyOnWatch', 'activityVisibility', 'apiKey', 'protectedAddons', 'jellyfinServerUrl', 'jellyfinServerId', 'jellyfinServerKind', 'jellyfinUserId', 'jellyfinUserName', 'aioConfigId']
         const updates = {}
         const changedFields = []
+        // On an instance serving strangers an uploaded file is not proof of
+        // who someone is on a server: a row carrying another household's
+        // server address and user id would be handed that person's next
+        // sign-in. Which provider and which server identity a person has are
+        // left as they are there; they change by signing in (Reconnect).
+        const identityFromFile = INSTANCE_TYPE !== 'public'
+        const identityFields = new Set(['providerType', 'jellyfinServerUrl', 'jellyfinServerId', 'jellyfinServerKind', 'jellyfinUserId', 'jellyfinUserName', 'jellyfinToken'])
         for (const f of plainFields) {
           if (!(f in bUser)) continue
+          if (!identityFromFile && identityFields.has(f)) continue
           const bVal = f === 'expiresAt' && bUser[f] ? new Date(bUser[f]) : bUser[f]
           const differs = f === 'expiresAt'
             ? String(current[f] || '') !== String(bVal || '')
@@ -355,6 +363,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         // report only that the connection changes, never any value.
         for (const [field, label] of [['stremioAuthKey', 'Stremio connection'], ['nuvioRefreshToken', 'Nuvio connection'], ['jellyfinToken', 'Jellyfin connection'], ['aioConfigPassword', 'AIOStreams configuration access']]) {
           if (!(field in bUser)) continue
+          if (!identityFromFile && identityFields.has(field)) continue
           let currentPlain = null
           try { currentPlain = current[field] ? decrypt(current[field], req) : null } catch {}
           const bVal = bUser[field] || null
@@ -477,27 +486,25 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         if (!parsed) return res.status(400).json({ message: 'That is not a migration code' })
         const accountId = getAccountId(req) || 'default'
 
-        // The address inside the code is fetched by this server. On an
-        // instance serving other households, a code must not point it at the
-        // server's own network.
-        if (INSTANCE_TYPE === 'public') {
-          try {
-            await require('../utils/safeUrl').assertSafeUrl(parsed.u)
-          } catch {
-            return res.status(400).json({ message: 'That migration code points at an address this instance can’t use' })
-          }
-        }
-
+        // The address inside the code is fetched by this server, and so is
+        // wherever that sends it on to. On an instance serving other
+        // households, a code must not point it at the server's own network; a
+        // household's own install may use its LAN (utils/safeUrl.js).
         let bundle
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 30000)
         try {
-          const controller = new AbortController()
-          const timer = setTimeout(() => controller.abort(), 30000)
-          const rsp = await fetch(`${parsed.u.replace(/\/+$/, '')}/api/migration/bundle?token=${encodeURIComponent(parsed.t)}`, { signal: controller.signal })
+          const { safeFetch, instancePolicy } = require('../utils/safeUrl')
+          const rsp = await safeFetch(`${parsed.u.replace(/\/+$/, '')}/api/migration/bundle?token=${encodeURIComponent(parsed.t)}`, { signal: controller.signal }, instancePolicy())
           clearTimeout(timer)
           const body = await rsp.json().catch(() => ({}))
           if (!rsp.ok) return res.status(502).json({ message: body?.error || `The old instance answered ${rsp.status}` })
           bundle = body?.kit
         } catch (e) {
+          clearTimeout(timer)
+          if (['blocked host', 'unsupported protocol', 'invalid url'].includes(e?.message)) {
+            return res.status(400).json({ message: 'That migration code points at an address this instance can’t use' })
+          }
           return res.status(502).json({ message: `Could not reach the old instance at ${parsed.u} - both servers must be able to see each other. (${e?.message || 'network error'})` })
         }
         if (!bundle) return res.status(502).json({ message: 'The old instance returned no bundle' })
@@ -1133,6 +1140,13 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { enabled, frequency, mode, unsafe, safe, webhookUrl, useCustomFields, useCustomNames, notifyOnActivity, notifyOnSync, notifyOnInvite, notifyOnVault, notifyOnAddonHealth, notifyOnBackup, notifyOnProxyHealth, notifyOnConnectionHealth, notifyOnUpdateAvailable, notifyOnRecoveryKitStale, notifyOnMosaic, notifyOnAutomation, notifyDigestEnabled, notifyDigestFrequency, accountTimezone, vaultCurrency, enableWatchlist, enableWatchedIndicators, enableWatchTogether, enableRecommendations, enableAutoplayTrailer, autoplayTrailerStartMuted, enablePosterRatings, enableReactions, enableWatchProviders, enableAutoThemedCatalogs, tmdbApiKey, mdblistApiKey, rpdbApiKey, omdbApiKey, simklClientId, traktClientId, malClientId, publicBaseUrl, tmdbApiKeyBackup, mdblistApiKeyBackup, rpdbApiKeyBackup, omdbApiKeyBackup, nuvioServerUrl, nuvioAnonKey, lumiereDbUrl } = req.body || {}
       // Support both useCustomFields (new) and useCustomNames (old) for backward compatibility
       const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : useCustomNames
+      // The server sends the person's Nuvio sign-in to this address on every
+      // sync, so an address it may not reach is refused here rather than saved.
+      // Clearing it (an empty value) is always allowed.
+      if (typeof nuvioServerUrl === 'string' && nuvioServerUrl.trim()) {
+        const problem = await require('../providers/supabase').backendAddressProblem(nuvioServerUrl)
+        if (problem) return res.status(400).json({ message: problem })
+      }
       if (INSTANCE_TYPE !== 'public') {
         await ensureDefaultAccount()
         const safeMinutes = (() => {
@@ -1473,6 +1487,9 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       if (!url) return res.status(400).json({ ok: false, error: 'Enter the backend URL first' })
       const { discoverNuvioBackend } = require('../providers/supabase')
       const result = await discoverNuvioBackend(url)
+      // An address this server is not allowed to reach is a bad request, not
+      // a backend that failed to answer. `message` is what the page shows.
+      if (result?.refused) return res.status(400).json({ ...result, message: result.error })
       return res.json(result)
     } catch (error) {
       console.error('Error discovering Nuvio backend:', error)
@@ -1717,10 +1734,10 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const timeoutId = setTimeout(() => controller.abort(), 8000)
       let response
       try {
-        response = await fetch(`${effectiveBaseUrl}/models`, {
-          headers: { Authorization: `Bearer ${effectiveKey}` },
-          signal: controller.signal,
-        })
+        // Same address check as the chat calls and the Vault key check; a
+        // refusal comes back as a plain message through the catch below.
+        const { fetchAiModels } = require('../utils/vaultCheckers')
+        response = await fetchAiModels(effectiveBaseUrl, effectiveKey, controller.signal)
       } finally {
         clearTimeout(timeoutId)
       }

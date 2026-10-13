@@ -24,8 +24,16 @@ const DEBRID_LABELS = {
   torbox: 'TorBox',
 }
 
-function normalizeTitle(name) {
-  return (name || '').toLowerCase().replace(/\(\d{4}\)/g, '').replace(/[^a-z0-9]+/g, ' ').trim()
+// Same title or not - the shared rule (titleMatch.js). This used to accept a
+// proxy name that merely STARTED with the wanted title, so a play of "The
+// Godfather Part II" counted as proof that "The Godfather" was watched and
+// could put the wrong debrid label on it.
+const { sameTitle } = require('./titleMatch')
+
+/** Whether a proxy row is for `title`, by its parsed name or its matched title's own name. */
+function rowIsFor(candidate, title, series = false) {
+  return [candidate.displayName || candidate.filename, candidate.metadataName]
+    .some((name) => name && sameTitle(name, title, { series }))
 }
 
 // Only confirmed URL shapes are recognized - verified against real
@@ -46,8 +54,8 @@ function detectDebridService(url) {
 }
 
 // Looks for a ProxyStreamSession that plausibly corresponds to the watch
-// about to be recorded. Matches on normalized title text (exact, or the
-// proxy's own longer filename-derived title starting with it) within a
+// about to be recorded. Matches on the title (the same title, with an
+// episode marker allowed after a show's name - see titleMatch.js) within a
 // wide time window, confirmed against the SAME user via
 // resolveUserForActiveConnection - a title match alone isn't enough, since
 // two users could plausibly watch the same title within the window.
@@ -55,7 +63,7 @@ function detectDebridService(url) {
 // ProxyStreamSession.metadataItemId comes from a fuzzy Cinemeta title
 // search (see proxyStreamMonitor.js's attemptPosterLookup), not a verified
 // match to the native pipeline's own item ID, so it isn't trustworthy here.
-async function findDebridServiceForWatch(prisma, { accountId, userId, title, watchedAt, users }) {
+async function findDebridServiceForWatch(prisma, { accountId, userId, title, watchedAt, users, type }) {
   if (!title || !watchedAt || !Array.isArray(users) || users.length === 0) return null
   try {
     const windowStart = new Date(watchedAt.getTime() - CORRELATION_WINDOW_MS)
@@ -66,18 +74,12 @@ async function findDebridServiceForWatch(prisma, { accountId, userId, title, wat
         lastSeenAt: { gte: windowStart },
         startTime: { lte: windowEnd },
       },
-      select: { aiostreamsUser: true, url: true, displayName: true, filename: true },
+      select: { aiostreamsUser: true, url: true, displayName: true, filename: true, metadataName: true },
     })
     if (candidates.length === 0) return null
 
-    const wantTitle = normalizeTitle(title)
-    if (!wantTitle) return null
-
     for (const candidate of candidates) {
-      const candidateTitle = normalizeTitle(candidate.displayName || candidate.filename)
-      if (!candidateTitle) continue
-      const isMatch = candidateTitle === wantTitle || candidateTitle.startsWith(`${wantTitle} `)
-      if (!isMatch) continue
+      if (!rowIsFor(candidate, title, type === 'series')) continue
 
       const resolvedUser = resolveUserForActiveConnection(users, candidate.aiostreamsUser)
       if (!resolvedUser || resolvedUser.id !== userId) continue
@@ -107,7 +109,7 @@ async function findDebridServiceForWatch(prisma, { accountId, userId, title, wat
 // from native's own position data exactly as before).
 const MIN_CONFIRMED_CONNECTION_MS = 90 * 1000
 
-async function hasConfirmedProxyPlayback(prisma, { accountId, userId, title, watchedAt, users }) {
+async function hasConfirmedProxyPlayback(prisma, { accountId, userId, title, watchedAt, users, type }) {
   if (!title || !watchedAt || !Array.isArray(users) || users.length === 0) return false
   try {
     const windowStart = new Date(watchedAt.getTime() - CORRELATION_WINDOW_MS)
@@ -118,18 +120,12 @@ async function hasConfirmedProxyPlayback(prisma, { accountId, userId, title, wat
         lastSeenAt: { gte: windowStart },
         startTime: { lte: windowEnd },
       },
-      select: { aiostreamsUser: true, displayName: true, filename: true, startTime: true, lastSeenAt: true },
+      select: { aiostreamsUser: true, displayName: true, filename: true, metadataName: true, startTime: true, lastSeenAt: true },
     })
     if (candidates.length === 0) return false
 
-    const wantTitle = normalizeTitle(title)
-    if (!wantTitle) return false
-
     for (const candidate of candidates) {
-      const candidateTitle = normalizeTitle(candidate.displayName || candidate.filename)
-      if (!candidateTitle) continue
-      const isMatch = candidateTitle === wantTitle || candidateTitle.startsWith(`${wantTitle} `)
-      if (!isMatch) continue
+      if (!rowIsFor(candidate, title, type === 'series')) continue
 
       const resolvedUser = resolveUserForActiveConnection(users, candidate.aiostreamsUser)
       if (!resolvedUser || resolvedUser.id !== userId) continue

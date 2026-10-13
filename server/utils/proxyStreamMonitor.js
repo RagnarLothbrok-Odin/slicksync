@@ -95,9 +95,50 @@ let cachedCookie = null
 // module has no other exposed "is the proxy actually reachable right now"
 // signal; everything else here is fire-and-forget into a debug log file.
 let lastPollStatus = { ok: null, at: null, error: null }
+// When a poll last succeeded, how many have failed in a row since, and which
+// account this process polls for. Now Playing reads these (through
+// isProxyMonitorConfirming) so a "live" row is only shown while something is
+// still confirming it.
+let lastOkAt = 0
+let consecutiveFailures = 0
+let failingSince = null
+let closedRowsThisOutage = false
+let monitoredAccountId = null
 
 function getProxyMonitorStatus() {
-  return { ...lastPollStatus }
+  return {
+    ...lastPollStatus,
+    lastOkAt: lastOkAt ? new Date(lastOkAt) : null,
+    failingSince,
+    consecutiveFailures,
+  }
+}
+
+// A poll counts as recent for a few intervals - one slow answer must not
+// blank Now Playing.
+const CONFIRM_WINDOW_MS = CHECK_INTERVAL_MS * 4
+// While AIOStreams has told us to back off we are not polling on purpose;
+// rows are still believed for this long, never indefinitely.
+const RATE_LIMIT_TRUST_MS = 20 * 60 * 1000
+// Failures in a row (about three minutes) before live rows are closed.
+const FAILURES_BEFORE_CLOSE = 6
+
+/**
+ * Whether the proxy's "this is playing right now" rows can be believed for
+ * this account. A row is only as fresh as the last successful poll: when
+ * polling stops working (AIOStreams down, sign-in refused, the process
+ * stuck), whatever was live at that moment would otherwise stay on screen as
+ * "playing" - confirmed in the wild as one film shown playing for two and a
+ * half days. With no poller in this process at all there is nothing to
+ * judge by, so rows are taken as they are.
+ */
+function isProxyMonitorConfirming(accountId, now = Date.now()) {
+  if (!monitoredAccountId) return true
+  if (accountId && accountId !== monitoredAccountId) return false
+  if (!lastOkAt) return false
+  const age = now - lastOkAt
+  if (age <= CONFIRM_WINDOW_MS) return true
+  return rateLimitedUntil > now && age <= RATE_LIMIT_TRUST_MS
 }
 
 function heartbeat(event, data = {}) {
@@ -109,12 +150,23 @@ function heartbeat(event, data = {}) {
 }
 
 function clearProxyStreamMonitor() {
+  monitoredAccountId = null
+  lastOkAt = 0
+  consecutiveFailures = 0
+  failingSince = null
+  closedRowsThisOutage = false
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
   }
   cachedCookie = null
 }
+
+// Where a release name's own tags begin. Only unmistakable ones - a word that
+// can also be part of a title ("WEB", "Extended") would cut real titles short.
+const FIRST_RELEASE_TAG = /(?<![a-z0-9])(?:2160p|1080[pi]|720p|576p|480p|4K|HDR|WEB-?DL|WEBRip|Blu-?Ray|BRRip|BDRip|DVDRip|HDTV|HEVC|x26[45]|H[.\s]?26[45]|DDP?5[.\s]?1|AAC|AC3|REMUX)(?![a-z0-9])/i
+// Nothing but edition wording after a second year-like number.
+const EDITION_WORDS_ONLY = /^(?:[.\s]*(?:the|remaster(?:ed)?|restor(?:ed|ation)|extended|unrated|uncut|theatrical|imax|redux|criterion|ultimate|(?:directors?|final|extended|theatrical)[.\s]cut|(?:special|anniversary|collectors?|ultimate|extended)[.\s]edition))+[.\s]*$/i
 
 function parseDisplayName(filename) {
   if (!filename) return null
@@ -127,31 +179,132 @@ function parseDisplayName(filename) {
   // untouched). Anchored to the start only, never strips mid-filename text.
   const withoutSiteTag = filename.replace(/^\s*www\.[a-z0-9-]+\.[a-z]{2,6}\s*[-_]\s*/i, '')
 
-  const withoutExt = withoutSiteTag.replace(/\.[a-zA-Z0-9]{2,4}$/, '')
-  // Year may or may not be parenthesized in the release name (e.g. both
-  // "Send.Help.2026.WEB-DL" and "Send.Help.(2026).VU.Blu-ray" occur) -
-  // accept an optional paren on either side so both forms match, and so
-  // everything after the year (quality/release tags) gets dropped below
-  // regardless of what they contain.
-  const yearMatch = withoutExt.match(/^(.*?)[.\s]\(?(\d{4})\)?(?:[.\s]|$)/)
+  // An extension has a letter in it. Without that, a name with no extension
+  // that ends in its year ("Some.Film.2020") lost the year here.
+  const withoutExt = withoutSiteTag.replace(/\.(?=[a-zA-Z0-9]{2,4}$)(?=\d*[a-zA-Z])[a-zA-Z0-9]+$/, '')
 
-  if (yearMatch) {
-    let title = yearMatch[1].replace(/\./g, ' ').trim()
+  // The release year is looked for only in the part before the release's own
+  // tags, and it is the LAST number there that can be a year. The first one
+  // used to win, which read a number in the title as the year: "Blade.Runner.
+  // 2049.2017" became "Blade Runner (2049)" - no poster, and the wrong name.
+  // A number above next year is not a release year at all, so "Blade.Runner.
+  // 2049.1080p" keeps its full title rather than gaining a year.
+  // The year may or may not be parenthesized (both "Send.Help.2026.WEB-DL"
+  // and "Send.Help.(2026).VU.Blu-ray" occur).
+  // A tag at the very start is part of the title ("4K.Kings.2019", "HDR.
+  // Hunters.2020"), so only a tag after the first character counts.
+  let tagAt = -1
+  for (const m of withoutExt.matchAll(new RegExp(FIRST_RELEASE_TAG.source, 'gi'))) {
+    if (m.index > 0) { tagAt = m.index; break }
+  }
+  const beforeTags = tagAt === -1 ? withoutExt : withoutExt.slice(0, tagAt)
+  const latestYear = new Date().getFullYear() + 1
+  const years = []
+  for (const m of beforeTags.matchAll(/[.\s]\(?(\d{4})\)?(?=[.\s]|$)/g)) {
+    const y = Number(m[1])
+    if (y >= 1880 && y <= latestYear) years.push({ at: m.index, end: m.index + m[0].length, year: m[1] })
+  }
+  // "Film.1999.Remastered.2021": the second number dates the edition.
+  let pick = years.length - 1
+  // ...and so does a second number with only edition wording after it
+  // ("Film.1979.2024.Remaster"). Two numbers with nothing after the second
+  // are a title and its year ("Wonder.Woman.1984.2020").
+  // PROPER and REPACK are scene tags, not edition wording, so they do not
+  // count here: "Wonder.Woman.1984.2020.PROPER" is still a title and its year.
+  if (pick > 0 && EDITION_WORDS_ONLY.test(beforeTags.slice(years[pick].end).replace(/(?<![a-z0-9])(?:proper|repack|rerip)(?![a-z0-9])/gi, ' '))) pick -= 1
+  // Any words between two year-like numbers mean the second one dates a
+  // re-release ("Casablanca.1942.70th.Anniversary.2012"); a closed list of
+  // that wording can never be complete. Nothing between them is a title that
+  // has a year in it, followed by its release year.
+  while (pick > 0 && /[a-z]/i.test(beforeTags.slice(years[pick - 1].end, years[pick].at))) pick -= 1
+
+  if (pick >= 0) {
+    let title = beforeTags.slice(0, years[pick].at).replace(/\./g, ' ').trim()
     // Strip numeric-junk parenthetical groups (e.g. a literal "(1.23.45)"
     // timestamp/version marker from the release name) that survive the
     // dot-to-space cleanup untouched, since only dots get replaced there -
     // not the parentheses. This kind of content is never real title text.
     title = title.replace(/\(\s*[\d\s:.-]+\s*\)/g, '').replace(/\s+/g, ' ').trim()
-    const year = yearMatch[2]
-    return `${title} (${year})`
+    if (title) return `${title} (${years[pick].year})`
   }
 
-  const cleaned = withoutExt
-    .replace(/[._]/g, ' ')
-    .replace(/\b(1080p|2160p|720p|480p|4K|HDR|WEB-?DL|WEBRip|BluRay|BRRip|HDTV|x264|x265|H\s?264|H\s?265|DD5\s?1|DDP5\s?1|AAC|AC3|REMUX)\b.*$/i, '')
-    .trim()
+  const cleaned = beforeTags.replace(/[._]/g, ' ').trim()
 
   return cleaned || withoutExt.replace(/[._]/g, ' ').trim()
+}
+
+// Signing in again and again against a wrong password, or a login page that
+// is not AIOStreams' own, is what trips its login limiter. After a failed
+// sign-in the next one waits, longer each time.
+const LOGIN_RETRY_BASE_MS = 60 * 1000
+const LOGIN_RETRY_MAX_MS = 15 * 60 * 1000
+let loginBlockedUntil = 0
+let consecutiveLoginFailures = 0
+
+function noteLoginFailed() {
+  consecutiveLoginFailures += 1
+  const wait = Math.min(LOGIN_RETRY_BASE_MS * Math.pow(2, consecutiveLoginFailures - 1), LOGIN_RETRY_MAX_MS)
+  loginBlockedUntil = Date.now() + wait
+  heartbeat('login_failed_backing_off', { waitMs: wait, consecutive: consecutiveLoginFailures })
+}
+
+function authError(message) {
+  const err = new Error(message)
+  err.authFailed = true
+  return err
+}
+
+// A sign-in that worked this poll, followed by an answer that cannot be used,
+// drops the cookie. Done on every poll that signs in a new session each time,
+// about 120 logins an hour. After a few rounds in a row it backs off like a
+// refused sign-in. A cookie that merely expired (not issued this poll) is
+// never counted: that recovers on the next poll.
+const FRESH_REJECTIONS_BEFORE_BACKOFF = 3
+let consecutiveFreshRejections = 0
+
+function noteFreshCookieRejected(fresh) {
+  if (!fresh) return
+  consecutiveFreshRejections += 1
+  if (consecutiveFreshRejections >= FRESH_REJECTIONS_BEFORE_BACKOFF) noteLoginFailed()
+}
+
+const isWebPage = (res) => /html/i.test(res.headers.get('content-type') || '')
+
+// An expired sign-in. AIOStreams used to answer 401; newer builds redirect to
+// their login page instead, which fetch follows - so what arrives is a web
+// page with status 200. Reading that as JSON threw on every poll, nothing
+// ever signed in again, and the monitor stayed dead until the next restart.
+// Judged by what arrived, not by whether a redirect happened on the way: an
+// address that redirects http to https and then answers properly is fine.
+function sessionExpired(res) {
+  if (res.status === 401) return true
+  if (res.status >= 300 && res.status < 400) return true
+  return res.ok && isWebPage(res)
+}
+
+async function signIn(baseUrl, username, password) {
+  if (Date.now() < loginBlockedUntil) {
+    throw authError('Waiting before signing in to AIOStreams again')
+  }
+  try {
+    cachedCookie = await loginToAiostreams(baseUrl, username, password)
+  } catch (e) {
+    cachedCookie = null
+    // Only an answer that says "no" backs off. A server that is not up yet
+    // (connection refused, a 5xx while it starts) is simply tried again on
+    // the next poll - backing off there kept polling stopped for minutes
+    // after AIOStreams had come back, long enough for live rows to be closed.
+    if (e?.refused) noteLoginFailed()
+    const err = authError(e.message)
+    // A rate-limited sign-in is AIOStreams asking for a slower pace, not an
+    // outage: the caller pauses polling and keeps the live rows.
+    if (e?.rateLimited) {
+      err.rateLimited = true
+      err.retryAfterSeconds = e.retryAfterSeconds
+    }
+    throw err
+  }
+  heartbeat('fetchLiveStreams:logged_in')
 }
 
 async function loginToAiostreams(baseUrl, username, password) {
@@ -162,7 +315,14 @@ async function loginToAiostreams(baseUrl, username, password) {
   })
 
   if (!res.ok) {
-    throw new Error(`AIOStreams login failed: ${res.status} ${res.statusText}`)
+    const err = new Error(`AIOStreams login failed: ${res.status} ${res.statusText}`)
+    err.refused = res.status >= 400 && res.status < 500
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('retry-after') || '', 10)
+      err.rateLimited = true
+      err.retryAfterSeconds = Number.isFinite(retryAfter) ? retryAfter : null
+    }
+    throw err
   }
 
   // AIOStreams' login can set more than one cookie (session + a separate
@@ -178,7 +338,9 @@ async function loginToAiostreams(baseUrl, username, password) {
     ? res.headers.getSetCookie()
     : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')] : [])
   if (setCookies.length === 0) {
-    throw new Error('AIOStreams login succeeded but no Set-Cookie header returned')
+    const err = new Error('AIOStreams login succeeded but no Set-Cookie header returned')
+    err.refused = true
+    throw err
   }
 
   return setCookies.map((c) => c.split(';')[0]).join('; ')
@@ -193,21 +355,34 @@ async function loginToAiostreams(baseUrl, username, password) {
 // either) instead of losing the feature outright on a version this module
 // hasn't caught up to yet.
 async function fetchLiveStreams(baseUrl, username, password) {
+  // Whether this poll made the sign-in it is using.
+  let fresh = false
   if (!cachedCookie) {
-    cachedCookie = await loginToAiostreams(baseUrl, username, password)
-    heartbeat('fetchLiveStreams:logged_in')
+    await signIn(baseUrl, username, password)
+    fresh = true
   }
 
-  let res = await fetch(`${baseUrl}/api/v1/dashboard/streams/live`, {
-    headers: { Cookie: cachedCookie },
+  const ask = () => fetch(`${baseUrl}/api/v1/dashboard/streams/live`, {
+    headers: { Cookie: cachedCookie, Accept: 'application/json' },
   })
+  let res = await ask()
 
-  if (res.status === 401) {
-    heartbeat('fetchLiveStreams:session_expired_relogging_in')
-    cachedCookie = await loginToAiostreams(baseUrl, username, password)
-    res = await fetch(`${baseUrl}/api/v1/dashboard/streams/live`, {
-      headers: { Cookie: cachedCookie },
-    })
+  // 404 is checked before this on purpose: an AIOStreams without the route
+  // answers 404 with a web page too, and that is the legacy fallback below,
+  // not an expired sign-in.
+  if (res.status !== 404 && res.status !== 429 && sessionExpired(res)) {
+    heartbeat('fetchLiveStreams:session_expired_relogging_in', { status: res.status, redirected: !!res.redirected })
+    cachedCookie = null
+    await signIn(baseUrl, username, password)
+    fresh = true
+    res = await ask()
+    if (res.status !== 404 && res.status !== 429 && sessionExpired(res)) {
+      // Signed in and still no data: whatever answers at this address is not
+      // handing out AIOStreams' stream list. Back off like a failed sign-in.
+      cachedCookie = null
+      noteLoginFailed()
+      throw authError(`AIOStreams did not return its stream list after signing in (status ${res.status})`)
+    }
   }
 
   // Rate limited. Surfaced as a typed error so the caller can back off
@@ -223,14 +398,26 @@ async function fetchLiveStreams(baseUrl, username, password) {
 
   if (res.status === 404) {
     heartbeat('fetchLiveStreams:falling_back_to_legacy_proxy_stats')
-    return fetchLegacyProxyStats(baseUrl)
+    return fetchLegacyProxyStats(baseUrl, fresh)
   }
 
   if (!res.ok) {
     throw new Error(`AIOStreams /dashboard/streams/live failed: ${res.status} ${res.statusText}`)
   }
 
-  const json = await res.json()
+  let json
+  try {
+    json = await res.json()
+  } catch {
+    // Not JSON after all - sign in afresh next time rather than repeating this.
+    cachedCookie = null
+    noteFreshCookieRejected(fresh)
+    throw authError('AIOStreams answered with something that is not its stream list')
+  }
+  // Real data: the sign-in works, so any back-off is over.
+  consecutiveFreshRejections = 0
+  consecutiveLoginFailures = 0
+  loginBlockedUntil = 0
   const streams = json?.data?.streams ?? json?.streams ?? []
   // Normalize the legacy shape's fields onto the new one so pollOnce only
   // ever has to handle one row shape, regardless of which branch produced it.
@@ -251,14 +438,32 @@ async function fetchLiveStreams(baseUrl, username, password) {
 // exposed usenet sessions). Reshaped into the same flat row shape
 // fetchLiveStreams returns from the new endpoint, so pollOnce below never
 // needs to know which branch it came from.
-async function fetchLegacyProxyStats(baseUrl) {
+async function fetchLegacyProxyStats(baseUrl, fresh = false) {
   const res = await fetch(`${baseUrl}/api/v1/proxy/stats`, {
-    headers: { Cookie: cachedCookie },
+    headers: { Cookie: cachedCookie, Accept: 'application/json' },
   })
+  // Same expiry handling as the newer route: drop the sign-in so the next
+  // poll makes a fresh one, instead of failing the same way forever.
+  if (sessionExpired(res)) {
+    cachedCookie = null
+    noteFreshCookieRejected(fresh)
+    throw authError(`AIOStreams sign-in expired (status ${res.status}) - signing in again on the next poll`)
+  }
   if (!res.ok) {
     throw new Error(`AIOStreams /proxy/stats failed: ${res.status} ${res.statusText}`)
   }
-  const stats = await res.json()
+  let stats
+  try {
+    stats = await res.json()
+  } catch {
+    cachedCookie = null
+    noteFreshCookieRejected(fresh)
+    throw authError('AIOStreams answered with something that is not its proxy stats')
+  }
+  // Real data: the sign-in works, so any back-off is over.
+  consecutiveFreshRejections = 0
+  consecutiveLoginFailures = 0
+  loginBlockedUntil = 0
   const rows = []
   for (const user of stats.users ?? []) {
     for (const conn of user.active ?? []) {
@@ -333,10 +538,13 @@ async function attemptPosterLookup(prisma, rowId, displayName) {
     // never matches. The candidates are tried longest first: the full title,
     // then the part before the first dash or colon; each under the guessed
     // type, then the other. Every attempt still demands an exact title and
-    // year, so a shorter candidate cannot land on the wrong film.
+    // year, so a shorter candidate cannot land on the wrong film - which is
+    // why the shorter one is only tried when there IS a year to demand.
+    // Without one, "Dexter - New Blood" fell back to "Dexter" and took the
+    // original show's poster, name and id.
     const candidates = [parsed.searchTitle]
     const cut = parsed.searchTitle.split(/\s+[-–—:]\s+/)[0].trim()
-    if (cut && cut !== parsed.searchTitle && cut.length >= 3) candidates.push(cut)
+    if (parsed.year && cut && cut !== parsed.searchTitle && cut.length >= 3) candidates.push(cut)
     const otherType = parsed.type === 'series' ? 'movie' : 'series'
     let result = null
     for (const candidate of candidates) {
@@ -580,6 +788,28 @@ async function notifyProxyHealthChange(prisma, accountId, isOk, errorMessage) {
   } catch {}
 }
 
+/**
+ * Marks every live row no longer live - used when polling has failed for a
+ * while. No end time is written: nothing was seen to end. A row with an end
+ * time is one the proxy watched stop, and the Now Playing merge drops the
+ * native entry for that title as a stale echo - which here would hide
+ * someone who is still watching for as long as that window lasts.
+ */
+async function closeUnconfirmedRows(prisma, accountId) {
+  try {
+    const closed = await prisma.proxyStreamSession.updateMany({
+      where: { accountId, isActive: true },
+      data: { isActive: false, endTime: null },
+    })
+    if (closed?.count > 0) {
+      heartbeat('closed_unconfirmed_rows', { count: closed.count })
+      try { require('./liveEvents').emitLive(accountId, 'nowplaying') } catch {}
+    }
+  } catch (e) {
+    heartbeat('close_unconfirmed_rows_failed', { message: e.message })
+  }
+}
+
 async function pollOnce(prisma, accountId, config) {
   heartbeat('pollOnce:start', { accountId })
   const wasOk = lastPollStatus.ok
@@ -755,12 +985,34 @@ async function pollOnce(prisma, accountId, config) {
       closed: toClose.length,
     })
     lastPollStatus = { ok: true, at: now, error: null }
+    if (consecutiveFailures > 0) {
+      console.log(`[ProxyStreamMonitor] Polling AIOStreams works again after ${consecutiveFailures} failed poll(s)`)
+    }
+    lastOkAt = now.getTime()
+    consecutiveFailures = 0
+    failingSince = null
+    closedRowsThisOutage = false
     if (wasOk === false) await notifyProxyHealthChange(prisma, accountId, true, null)
   } catch (error) {
     heartbeat('pollOnce:error', { message: error.message, stack: error.stack })
-    console.warn('[ProxyStreamMonitor] pollOnce failed:', error.message)
+    consecutiveFailures += 1
+    if (!failingSince) failingSince = new Date()
+    // Said once when it starts and then every ten minutes - not every 30
+    // seconds, which buried it.
+    if (consecutiveFailures === 1 || consecutiveFailures % 20 === 0) {
+      console.warn(`[ProxyStreamMonitor] Polling AIOStreams is failing (${consecutiveFailures} in a row since ${failingSince.toISOString()}): ${error.message}`)
+    }
     lastPollStatus = { ok: false, at: new Date(), error: error.message }
-    if (wasOk !== false) await notifyProxyHealthChange(prisma, accountId, false, error.message)
+    // Not for a rate limit: AIOStreams is up and only asked for a slower pace.
+    if (wasOk !== false && !error?.rateLimited) await notifyProxyHealthChange(prisma, accountId, false, error.message)
+    // Nothing has confirmed the live rows for about three minutes: close
+    // them, once per outage. A stream that is really still playing comes
+    // back as a quiet reactivation on the first poll that works. Not while
+    // AIOStreams is only asking us to slow down - that is not an outage.
+    if (consecutiveFailures >= FAILURES_BEFORE_CLOSE && !closedRowsThisOutage && !error?.rateLimited) {
+      closedRowsThisOutage = true
+      await closeUnconfirmedRows(prisma, accountId)
+    }
     // Everything else stays swallowed - a failed poll should not take the
     // scheduler down - but a rate limit has to reach the caller, which is
     // what decides how long to back off. Swallowing it here would leave the
@@ -775,8 +1027,12 @@ function scheduleProxyStreamMonitor(prisma, accountId, config) {
 
   if (!config.baseUrl || !config.username || !config.password) {
     console.warn('[ProxyStreamMonitor] Missing AIOStreams config - not starting poller')
+    // No poller means nothing will ever close a row left live by an earlier
+    // setup, so it would show as playing for good.
+    closeUnconfirmedRows(prisma, accountId).catch(() => {})
     return
   }
+  monitoredAccountId = accountId
 
   const guardedPoll = async () => {
     // Still working on the previous tick - skip entirely rather than
@@ -812,5 +1068,28 @@ module.exports = {
   parseDisplayName,
   resolveUserForActiveConnection,
   getProxyMonitorStatus,
+  isProxyMonitorConfirming,
   CHECK_INTERVAL_MS,
+  // For tests: the fetch against AIOStreams, one poll, and the module state.
+  _test: {
+    fetchLiveStreams,
+    pollOnce,
+    attemptPosterLookup,
+    reset() {
+      cachedCookie = null
+      loginBlockedUntil = 0
+      consecutiveLoginFailures = 0
+      consecutiveFreshRejections = 0
+      lastOkAt = 0
+      consecutiveFailures = 0
+      failingSince = null
+      closedRowsThisOutage = false
+      rateLimitedUntil = 0
+      monitoredAccountId = null
+      lastPollStatus = { ok: null, at: null, error: null }
+    },
+    setMonitored(accountId) { monitoredAccountId = accountId },
+    setLastOk(ms) { lastOkAt = ms },
+    setRateLimitedUntil(ms) { rateLimitedUntil = ms },
+  },
 }

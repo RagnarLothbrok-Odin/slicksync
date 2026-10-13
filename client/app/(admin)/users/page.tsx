@@ -63,6 +63,7 @@ interface UserDisplay {
   secondaryProviderType?: 'stremio' | 'nuvio' | 'jellyfin' | null;
   providerConnectionError?: string | null;
   avatarUrl?: string | null;
+  useGravatar?: boolean;
   status: 'active' | 'expired' | 'pending';
   watchTime: number;
   groups: string[];
@@ -234,6 +235,7 @@ export default function UsersPage() {
         secondaryProviderType: (user as any).secondaryProviderType || null,
         providerConnectionError: (user as any).providerConnectionError || null,
         avatarUrl: (user as any).avatarUrl,
+        useGravatar: user.useGravatar,
         status,
         watchTime: (user as any).watchTime || 0, // Use watchTime from API
         groups: userGroups,
@@ -762,7 +764,7 @@ export default function UsersPage() {
                                   className="flex items-center gap-3 group"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} size="sm" />
+                                  <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} useGravatar={user.useGravatar} size="sm" />
                                   <div>
                                     <div className="flex items-center gap-2">
                                       <p className="font-medium transition-colors group-hover:text-primary text-default truncate">
@@ -1225,7 +1227,7 @@ function UserCard({
             </div>
           )}
           {/* Avatar */}
-          <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} size="lg" />
+          <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} useGravatar={user.useGravatar} size="lg" />
 
           {/* Main content - stats moved here */}
           <div className="flex-1 min-w-0">

@@ -109,22 +109,39 @@ const QUERY_SCHEMA_HINT = `Return ONLY a JSON object, no prose, no markdown fenc
 - "maxRuntimeMinutes": only set from an explicit runtime constraint ("under 2 hours" -> 120). null otherwise.
 - "keywords": any other meaningful descriptive words (mood, setting, theme) not captured above, for a general-purpose search fallback. Ignore filler like "nobody has seen" or "that we haven't watched" - unwatched is already guaranteed elsewhere, not something to search for.`
 
+// The AI Services address is whatever the account entered (any OpenAI-
+// compatible endpoint), so it goes through the same check as every other
+// address the server fetches for someone: a household's install may point it
+// at a model on its own network, an instance serving strangers may not be
+// pointed at its own.
+async function postChat(creds, payload, signal) {
+  const { safeFetch, instancePolicy } = require('./safeUrl')
+  try {
+    return await safeFetch(`${creds.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
+      body: JSON.stringify(payload),
+      signal,
+    }, instancePolicy())
+  } catch (err) {
+    if (/^(blocked host|unsupported protocol|invalid url|unresolvable host|too many redirects)$/.test(err?.message || '')) {
+      throw new Error('The AI Services address cannot be used from this server - check it under Settings -> External API Keys')
+    }
+    throw err
+  }
+}
+
 async function callAi(description, creds) {
   const { signal, cancel } = timeoutSignal(FETCH_TIMEOUT_MS)
   try {
-    const res = await fetch(`${creds.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
-      body: JSON.stringify({
+    const res = await postChat(creds, {
         model: creds.model,
         messages: [
           { role: 'system', content: QUERY_SCHEMA_HINT },
           { role: 'user', content: description },
         ],
         temperature: 0.2,
-      }),
-      signal,
-    })
+      }, signal)
     cancel()
     if (!res.ok) {
       // Include the provider's own error body when there is one (wrong
@@ -522,17 +539,12 @@ async function generateCatalogFromDescription(prisma, accountId, decrypt, descri
 async function callAiText(prompt, creds, { maxTokens = 60, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
   const { signal, cancel } = timeoutSignal(timeoutMs)
   try {
-    const res = await fetch(`${creds.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
-      body: JSON.stringify({
-        model: creds.model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.5,
-        max_tokens: maxTokens,
-      }),
-      signal,
-    })
+    const res = await postChat(creds, {
+      model: creds.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.5,
+      max_tokens: maxTokens,
+    }, signal)
     cancel()
     if (!res.ok) throw new Error(`AI provider returned ${res.status}`)
     const data = await res.json()
@@ -547,6 +559,7 @@ async function callAiText(prompt, creds, { maxTokens = 60, timeoutMs = FETCH_TIM
 
 module.exports = {
   resolveAiCredentials,
+  postChat,
   parseDescription,
   parseDescriptionFallback,
   discoverFromQuery,

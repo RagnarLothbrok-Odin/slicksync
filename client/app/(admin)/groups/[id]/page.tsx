@@ -1057,7 +1057,7 @@ export default function GroupDetailPage() {
                 {/* Avatar stack - show on mobile too */}
                 <div className="flex items-start shrink-0 mt-4 md:mt-0">
                   <AvatarGroup
-                    users={groupUsers.map(u => ({ name: u.name || u.username || 'Unknown', email: u.email, id: u.id, src: u.avatarUrl ?? undefined }))}
+                    users={groupUsers.map(u => ({ name: u.name || u.username || 'Unknown', email: u.email, id: u.id, src: u.avatarUrl ?? undefined, useGravatar: u.useGravatar }))}
                     max={5}
                     size="md"
                   />
@@ -1116,7 +1116,7 @@ export default function GroupDetailPage() {
                         whileHover={{ x: 4 }}
                         className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface transition-colors group overflow-hidden"
                       >
-                        <UserAvatar userId={user.id} name={displayName} email={user.email} src={user.avatarUrl ?? undefined} colorIndex={user.colorIndex} size="md" />
+                        <UserAvatar userId={user.id} name={displayName} email={user.email} src={user.avatarUrl ?? undefined} useGravatar={user.useGravatar} colorIndex={user.colorIndex} size="md" />
 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
@@ -1585,7 +1585,7 @@ function AddMemberForm({ groupId, existingUserIds, onClose, onUsersChanged }: {
                 checked={isSelected}
                 onChange={() => toggleUser(user.id)}
               />
-              <UserAvatar userId={user.id} name={displayName} email={user.email} src={user.avatarUrl ?? undefined} colorIndex={user.colorIndex} size="sm" />
+              <UserAvatar userId={user.id} name={displayName} email={user.email} src={user.avatarUrl ?? undefined} useGravatar={user.useGravatar} colorIndex={user.colorIndex} size="sm" />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-default truncate">{displayName}</p>
                 <p className="text-sm text-muted truncate">{displayEmail(user.email)}</p>

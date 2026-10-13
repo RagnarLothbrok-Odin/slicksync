@@ -6,6 +6,7 @@ const { handleDatabaseError, sendError } = require('../utils/handlers');
 const { findGroupById } = require('../utils/helpers');
 const { responseUtils, dbUtils } = require('../utils/routeUtils');
 const { createdAtFromCuid } = require('../utils/dateUtils');
+const { removeUserFromGroup, setGroupMembers } = require('../utils/helpers/database');
 
 // Export a function that returns the router, allowing dependency injection
 module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt, createProvider }) => {
@@ -234,7 +235,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
         description: group.description,
           users: activeMemberCount,
           addons: uniqActiveAddonIds.size,
-        restrictions: 'none', // TODO: Implement restrictions logic
         isActive: group.isActive,
         // Expose color index for UI
           colorIndex: group.colorIndex ?? 0,
@@ -289,7 +289,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
         description: newGroup.description,
         users: 0,
         addons: 0,
-        restrictions: 'none',
         isActive: newGroup.isActive,
         colorIndex: newGroup.colorIndex ?? 0,
         avatarUrl: newGroup.avatarUrl ?? null,
@@ -357,7 +356,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
           description: clonedGroup.description,
           users: 0,
           addons: originalGroup.addons?.length || 0,
-          restrictions: 'none',
           isActive: clonedGroup.isActive,
           colorIndex: clonedGroup.colorIndex ?? 0,
           avatarUrl: clonedGroup.avatarUrl ?? null,
@@ -442,7 +440,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
         description: group.description,
         users: 0,
         addons: 0,
-        restrictions: 'none',
         isActive: group.isActive,
         colorIndex: group.colorIndex ?? 0,
         avatarUrl: group.avatarUrl,
@@ -521,7 +518,6 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
         // the migration date. See createdAtFromCuid.
         createdAt: createdAtFromCuid(group.id),
         lastSyncedAt,
-        restrictions: 'none',
         isActive: group.isActive,
         colorIndex: group.colorIndex ?? 0,
         avatarUrl: group.avatarUrl,
@@ -686,19 +682,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
         }
       }
 
-      // Sync users only if userIds is explicitly provided (SQLite approach)
+      // Sync users only if userIds is explicitly provided (SQLite approach).
+      // The final list is worked out once and written once (see
+      // setGroupMembers): emptying the group and adding people back one at a
+      // time left it short in between, and let anyone added or removed in that
+      // gap be lost. Ids that are not people of this account are dropped.
       if (userIds !== undefined) {
-        const desiredUserIds = Array.isArray(userIds) ? userIds : []
-        
-        // First, remove all users from this group
-        await prisma.group.update({
-          where: { id },
-          data: { userIds: JSON.stringify([]) }
-        })
-        
-        // Then, assign each user to this group (which will remove them from other groups)
-        for (const userId of desiredUserIds) {
-          await assignUserToGroup(prisma, userId, id, req)
+        const kept = await setGroupMembers(prisma, id, userIds, req)
+        const asked = Array.isArray(userIds) ? new Set(userIds.filter((u) => typeof u === 'string' && u.trim() !== '')).size : 0
+        if (kept.length < asked) {
+          console.warn(`[groups] ${asked - kept.length} id(s) in the member list of group ${id} are not people of this account and were left out`)
         }
       }
 
@@ -795,10 +788,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
         await require('../utils/trash').archiveMembershipRemoval(prisma, getAccountId(req), groupId, userId)
       }
 
-      await prisma.group.update({
-        where: { id: groupId },
-        data: { userIds: JSON.stringify(updatedUserIds) }
-      })
+      // Removed from the list as it is when the write happens, not the copy
+      // read above, so someone added in between is not lost with it.
+      await removeUserFromGroup(prisma, userId, groupId, req)
 
       res.json({ message: 'User removed from group successfully' })
     } catch (error) {

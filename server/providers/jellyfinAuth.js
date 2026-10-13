@@ -12,6 +12,10 @@ const crypto = require('crypto')
 const CLIENT_NAME = 'SlickSync'
 const REQUEST_TIMEOUT_MS = 15000
 
+// What utils/safeUrl.js throws when an address (or a redirect) is not one this
+// instance may reach, as opposed to a network failure on the way.
+const ADDRESS_REFUSALS = new Set(['invalid url', 'unsupported protocol', 'blocked host', 'unresolvable host', 'too many redirects'])
+
 let appVersion = '1.0.0'
 try { appVersion = require('../../package.json').version || appVersion } catch {}
 
@@ -42,9 +46,49 @@ function normalizeServerUrl(raw) {
   return `${url.origin}${path}`
 }
 
+/**
+ * The code of an AIOStreams personal sign-in address
+ * (`<instance>/jellyfin/p/<code>`, one per household user that is kept
+ * separate), or null for any other address. Such an address names a person,
+ * not a configuration, and it dies when its code is renewed.
+ */
+function personalAddressCode(serverUrl) {
+  try {
+    const m = /\/jellyfin\/p\/([a-z0-9]{10,32})\/?$/i.exec(new URL(serverUrl).pathname)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Which address to keep for someone who just signed in at `usedUrl` while
+ * `storedUrl` is what they were added with. A household address is never
+ * swapped for a personal one (it would die with the next new code) and a
+ * personal one is never swapped for a household one; any other difference
+ * (scheme, spelling) still follows what was just used.
+ */
+function addressToKeep(storedUrl, usedUrl) {
+  if (!storedUrl) return usedUrl
+  if (!!personalAddressCode(storedUrl) !== !!personalAddressCode(usedUrl)) return storedUrl
+  return usedUrl
+}
+
 /** A device id that stays the same for one person, so a reconnect replaces their old sign-in instead of piling up new ones. */
 function deviceIdFor(...parts) {
   return 'slicksync-' + crypto.createHash('sha256').update(parts.map((p) => String(p || '').toLowerCase()).join('|')).digest('hex').slice(0, 24)
+}
+
+/**
+ * The device a name-and-password sign-in presents: one per server address and
+ * user name, on every kind of install. A server retires a user's previous
+ * token for a device the moment that device signs in again, so everyone who
+ * holds that token has to be handed the new one (jellyfinConnect.rememberSignIn)
+ * - and keeping the device the same is what leaves every token stored before
+ * an update working.
+ */
+function signInDeviceId(serverUrl, username) {
+  return deviceIdFor(serverUrl, username)
 }
 
 function authorizationHeader({ token, deviceId } = {}) {
@@ -59,24 +103,27 @@ function authorizationHeader({ token, deviceId } = {}) {
  */
 async function jfRequest(baseUrl, path, { method = 'GET', token, deviceId, body, timeoutMs = REQUEST_TIMEOUT_MS, checkAddress = restrictsPrivateAddresses() } = {}) {
   if (!baseUrl) throw Object.assign(new Error('No server address'), { status: 400 })
-  if (checkAddress) {
-    const { assertSafeUrl } = require('../utils/safeUrl')
-    try { await assertSafeUrl(baseUrl) } catch (e) {
-      throw Object.assign(new Error(e.message === 'blocked host' ? 'That address is on a private network, which this instance cannot reach' : `Server address not usable: ${e.message}`), { status: 400 })
-    }
-  }
   const headers = { Authorization: authorizationHeader({ token, deviceId }), Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const init = {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: 'follow',
+  }
   let res
   try {
-    res = await fetch(`${baseUrl}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: 'follow',
-    })
+    // Where the address has to be a public one, so does every place the
+    // server sends the request on to: a public address can answer with a
+    // redirect to the network behind this one.
+    res = checkAddress
+      ? await require('../utils/safeUrl').safeFetch(`${baseUrl}${path}`, init, { allowPrivate: false })
+      : await fetch(`${baseUrl}${path}`, init)
   } catch (e) {
+    if (checkAddress && ADDRESS_REFUSALS.has(e?.message)) {
+      throw Object.assign(new Error(e.message === 'blocked host' ? 'That address is on a private network, which this instance cannot reach' : `Server address not usable: ${e.message}`), { status: 400 })
+    }
     const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError'
     throw Object.assign(new Error(timedOut ? 'The server did not answer in time' : `Could not reach the server: ${e?.cause?.code || e?.message || 'network error'}`), { status: 502, unreachable: true })
   }
@@ -265,8 +312,8 @@ async function quickConnectAuthenticate(baseUrl, secret, { deviceId } = {}) {
 }
 
 /** Whether a stored sign-in still works, and who it belongs to. */
-async function currentUser(baseUrl, token, { deviceId } = {}) {
-  const me = await jfRequest(baseUrl, '/Users/Me', { token, deviceId })
+async function currentUser(baseUrl, token, { deviceId, timeoutMs, checkAddress } = {}) {
+  const me = await jfRequest(baseUrl, '/Users/Me', { token, deviceId, timeoutMs, checkAddress })
   if (!me?.Id) throw Object.assign(new Error('Signed out'), { status: 401 })
   return { userId: String(me.Id).replace(/-/g, '').toLowerCase(), userName: me.Name || '' }
 }
@@ -301,7 +348,8 @@ async function signOut(baseUrl, token, { deviceId } = {}) {
 function displayServer(serverUrl) {
   try {
     const url = new URL(serverUrl)
-    const parts = url.pathname.split('/').filter(Boolean)
+    // A personal sign-in address is its code; the code stays out of sight.
+    const parts = url.pathname.split('/').filter(Boolean).filter((p, i, all) => !(i === 2 && all[1]?.toLowerCase() === 'p' && personalAddressCode(serverUrl)))
     const safe = parts.filter((p) => p.length <= 40).slice(0, 3)
     return `${url.host}${safe.length ? '/' + safe.join('/') : ''}`
   } catch {
@@ -323,7 +371,10 @@ function identityEmail(serverUrl, userId) {
 module.exports = {
   CLIENT_NAME,
   normalizeServerUrl,
+  personalAddressCode,
+  addressToKeep,
   deviceIdFor,
+  signInDeviceId,
   authorizationHeader,
   jfRequest,
   serverKindOf,

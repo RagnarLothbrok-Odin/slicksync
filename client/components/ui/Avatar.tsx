@@ -13,6 +13,8 @@ interface AvatarProps {
   name: string;
   src?: string;
   email?: string;
+  /** Look the email up on Gravatar. Only for a person who switched that on - the lookup sends a hash of their email to Gravatar. */
+  useGravatar?: boolean;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showRing?: boolean;
   status?: 'online' | 'offline' | 'away';
@@ -200,7 +202,7 @@ function getGravatarUrl(email: string | null | undefined, size: number = 128): s
   return `https://www.gravatar.com/avatar/${hash}?s=${size}&d=404`;
 }
 
-export function Avatar({ name, src, email, size = 'md', showRing = false, status, colorIndex, fallbackIcon, className, imgClassName, avatarClassName }: AvatarProps) {
+export function Avatar({ name, src, email, useGravatar = false, size = 'md', showRing = false, status, colorIndex, fallbackIcon, className, imgClassName, avatarClassName }: AvatarProps) {
   const initials = getInitials(name);
   const style = styleFor(colorIndex !== undefined && colorIndex !== null ? colorIndex : getStyleIndex(name));
 
@@ -208,7 +210,8 @@ export function Avatar({ name, src, email, size = 'md', showRing = false, status
   const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
-    if (!email) {
+    // Without the person's say-so nothing is sent to Gravatar at all.
+    if (!email || !useGravatar) {
       setGravatarSrc(undefined);
       return;
     }
@@ -216,7 +219,7 @@ export function Avatar({ name, src, email, size = 'md', showRing = false, status
     // Generate gravatar URL
     const url = getGravatarUrl(email, 128);
     setGravatarSrc(url || undefined);
-  }, [email]);
+  }, [email, useGravatar]);
 
   // Small sizes render a static, resized copy - see avatarThumbUrl.
   const finalSrc = src ? avatarThumbUrl(src, size) : gravatarSrc;
@@ -293,7 +296,7 @@ export function Avatar({ name, src, email, size = 'md', showRing = false, status
 
 // Avatar group for stacking
 interface AvatarGroupProps {
-  users: { name: string; id: string; src?: string; email?: string }[];
+  users: { name: string; id: string; src?: string; email?: string; useGravatar?: boolean }[];
   max?: number;
   size?: 'xs' | 'sm' | 'md';
 }
@@ -313,7 +316,7 @@ export function AvatarGroup({ users, max = 4, size = 'sm' }: AvatarGroupProps) {
           className="relative"
           style={{ zIndex: displayed.length - i }}
         >
-          <UserAvatar userId={user.id} name={user.name} src={user.src} email={user.email} size={size} showRing />
+          <UserAvatar userId={user.id} name={user.name} src={user.src} email={user.email} useGravatar={user.useGravatar} size={size} showRing />
         </motion.div>
       ))}
       {remaining > 0 && (

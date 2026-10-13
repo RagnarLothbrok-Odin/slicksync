@@ -8,14 +8,14 @@
 // 2FA-enabled account, the login route must NOT issue real session tokens
 // yet. It's tempting to jwt.sign() a short-lived "pending" token with the
 // same JWT_SECRET the real access/refresh tokens use - DON'T: middleware/
-// auth.js's authGate accepts ANY valid JWT signed with JWT_SECRET that
-// carries an accId claim as a full session (it never checks a `typ` claim,
-// confirmed by reading it directly), so a pending-2FA token in that shape
-// would BE a full session bypass, not a checkpoint. Instead this uses an
-// opaque random token in an in-memory Map (same pattern as encryption.js's
-// accountDekStore) that authGate's jwt.verify() will simply fail to parse -
-// it can never be replayed as a session token, by construction rather than
-// by convention.
+// auth.js's authGate accepts any valid JWT signed with JWT_SECRET that
+// carries an accId claim and a session `typ` (or none) as a full session, and
+// a pending-2FA token needs an accId to say whose challenge it is, so one
+// slip in that shape would BE a full session bypass, not a checkpoint.
+// Instead this uses an opaque random token in an in-memory Map (same pattern
+// as encryption.js's accountDekStore) that authGate's jwt.verify() will
+// simply fail to parse - it can never be replayed as a session token, by
+// construction rather than by convention.
 const crypto = require('crypto')
 const bcrypt = require('bcryptjs')
 const { authenticator } = require('otplib')

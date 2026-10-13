@@ -5,6 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const { getServerKey, scryptKey, deriveDek, setAccountDek, clearAccountDek } = require('../utils/encryption')
 const { validate, registerSchema, loginSchema, changePasswordSchema } = require('../middleware/validation');
 const { authenticateToken } = require('../middleware/auth');
+const { JWT_SECRET } = require('../utils/config');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -57,7 +58,7 @@ router.post('/register', validate(registerSchema), async (req, res, next) => {
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -98,7 +99,7 @@ router.post('/login', validate(loginSchema), async (req, res, next) => {
     // Generate JWT token
     const token = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -191,7 +192,7 @@ router.post('/refresh', authenticateToken, async (req, res, next) => {
     // Generate new JWT token
     const token = jwt.sign(
       { userId: req.user.id },
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 

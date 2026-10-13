@@ -1,24 +1,71 @@
 const express = require('express');
 const { logProxyRequest } = require('../utils/proxyLogger');
 const streamProxyFactory = require('./streamProxy');
+const { safeFetch, instancePolicy } = require('../utils/safeUrl');
 
-// In-memory cache for proxied responses (60s TTL)
-const _proxyCache = new Map(); // key: cacheKey, value: { data, contentType, ts }
+// In-memory cache for proxied responses (60s TTL).
+//
+// The key carries the whole request path and an entry used to leave only when
+// that exact path was asked for again after it expired, so every distinct
+// catalog, meta or stream path stayed in memory for good - and anyone holding
+// a proxy link could ask for paths without end. It is bounded three ways: how
+// many entries, how many bytes in all, and how big one body may be. When it is
+// full the oldest entries go first, and a timer drops the expired ones.
+const _proxyCache = new Map(); // key: cacheKey, value: { data, contentType, ts, size }
 const CACHE_TTL_MS = 60 * 1000;
+const CACHE_MAX_ENTRIES = 500;
+const CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const CACHE_MAX_ENTRY_BYTES = 2 * 1024 * 1024;
+const CACHE_SWEEP_MS = 60 * 1000;
+let _cacheBytes = 0;
+
+function sizeOf(data) {
+  return Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data));
+}
+
+function dropCached(key) {
+  const rec = _proxyCache.get(key);
+  if (!rec) return;
+  _proxyCache.delete(key);
+  _cacheBytes -= rec.size;
+}
 
 function getCachedProxy(key) {
   const rec = _proxyCache.get(key);
   if (!rec) return null;
   if (Date.now() - rec.ts > CACHE_TTL_MS) {
-    _proxyCache.delete(key);
+    dropCached(key);
     return null;
   }
   return rec;
 }
 
 function setCachedProxy(key, data, contentType) {
-  _proxyCache.set(key, { data, contentType, ts: Date.now() });
+  // Re-adding a key must not leave the old copy counted, nor keep its place
+  // in the eviction order.
+  dropCached(key);
+  const size = sizeOf(data);
+  if (size > CACHE_MAX_ENTRY_BYTES) return false;
+  // Map iterates in insertion order, so the first key is the oldest entry.
+  while (_proxyCache.size > 0 && (_proxyCache.size >= CACHE_MAX_ENTRIES || _cacheBytes + size > CACHE_MAX_BYTES)) {
+    dropCached(_proxyCache.keys().next().value);
+  }
+  _proxyCache.set(key, { data, contentType, ts: Date.now(), size });
+  _cacheBytes += size;
+  return true;
 }
+
+// Entries are added in time order, so everything past the first one that is
+// still fresh is fresh too.
+function sweepProxyCache(now = Date.now()) {
+  for (const [key, rec] of _proxyCache) {
+    if (now - rec.ts <= CACHE_TTL_MS) break;
+    dropCached(key);
+  }
+}
+
+// unref: a cache sweeper must never be what keeps the process from exiting.
+setInterval(sweepProxyCache, CACHE_SWEEP_MS).unref();
 
 /**
  * Get the base URL from a manifest URL
@@ -324,15 +371,24 @@ module.exports = ({ prisma, decrypt, getAccountId, getServerKey }) => {
       // Fetch from upstream
       let upstreamResponse;
       try {
-        upstreamResponse = await fetch(upstreamUrl, {
+        // The saved address is whatever the addon's owner typed, and this
+        // route answers anyone holding the link, so the fetch (and every
+        // redirect it meets) goes through the same address check as the rest
+        // of the server: an instance serving strangers never reaches its own
+        // network, and no install reaches link-local.
+        upstreamResponse = await safeFetch(upstreamUrl, {
           method: req.method,
           headers: {
             'User-Agent': 'SlickSync-Proxy/1.0',
             'Accept': req.get('Accept') || '*/*'
           }
-        });
+        }, instancePolicy());
       } catch (e) {
         console.error('Error fetching from upstream:', e);
+        if (['blocked host', 'unsupported protocol', 'invalid url'].includes(e?.message)) {
+          errorMessage = 'Upstream address is not allowed';
+          return res.status(403).json({ error: errorMessage });
+        }
         errorMessage = 'Failed to fetch from upstream addon';
         return res.status(502).json({ error: errorMessage });
       }
@@ -346,9 +402,13 @@ module.exports = ({ prisma, decrypt, getAccountId, getServerKey }) => {
 
       const contentType = upstreamResponse.headers.get('content-type') || 'application/octet-stream';
       let responseData;
+      // Catalogs, metas and stream lists are what repeat; a binary body is the
+      // kind that is big and is not asked for twice in a minute.
+      let cacheable = false;
 
       // Only rewrite URLs for JSON and text content types
       if (contentType.includes('json') || contentType.includes('text')) {
+        cacheable = true;
         const text = await upstreamResponse.text();
         let processedData = rewriteUrls(text, originalBaseUrl, proxyBaseUrl, uuid);
         
@@ -372,7 +432,7 @@ module.exports = ({ prisma, decrypt, getAccountId, getServerKey }) => {
       }
 
       // Cache the response (only for GET requests)
-      if (req.method === 'GET') {
+      if (req.method === 'GET' && cacheable) {
         setCachedProxy(cacheKey, responseData, contentType);
       }
 
@@ -387,4 +447,17 @@ module.exports = ({ prisma, decrypt, getAccountId, getServerKey }) => {
   });
 
   return router;
+};
+
+// Exposed for tests.
+module.exports._test = {
+  getCachedProxy,
+  setCachedProxy,
+  sweepProxyCache,
+  cacheStats: () => ({ entries: _proxyCache.size, bytes: _cacheBytes }),
+  clearCache: () => { _proxyCache.clear(); _cacheBytes = 0; },
+  CACHE_MAX_ENTRIES,
+  CACHE_MAX_BYTES,
+  CACHE_MAX_ENTRY_BYTES,
+  CACHE_TTL_MS,
 };

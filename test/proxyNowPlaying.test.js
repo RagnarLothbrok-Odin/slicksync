@@ -120,3 +120,53 @@ test('mergeProxyNowPlaying: keeps a native entry the proxy never carried (usenet
   assert.equal(result.length, 1)
   assert.equal(result[0].item.name, 'Eastbound & Down')
 })
+
+// --- a live row is only shown while the monitor is still confirming it ------
+
+test('mergeProxyNowPlaying: a live row the monitor has stopped confirming is not shown as playing (the day-old card)', async () => {
+  const users = [{ id: 'user-1', username: 'alice', email: 'alice@example.com' }]
+  // What the database still says days after polling broke: one row, active.
+  const stuck = makeProxyRow({ filename: 'Hercules.1997.mkv', displayName: 'Hercules (1997)', isActive: true })
+  const native = { user: { id: 'user-1', username: 'alice' }, item: { id: 'tt15325794', name: 'Fall 2', type: 'movie' } }
+
+  const shown = await mergeProxyNowPlaying(makeSplitPrisma([stuck], []), 'acct-1', users, [native], { isConfirming: () => true })
+  assert.deepEqual(shown.map((r) => r.item.name).sort(), ['Fall 2', 'Hercules (1997)'])
+
+  const hidden = await mergeProxyNowPlaying(makeSplitPrisma([stuck], []), 'acct-1', users, [native], { isConfirming: () => false })
+  assert.deepEqual(hidden.map((r) => r.item.name), ['Fall 2'], 'only what is really playing is left')
+})
+
+test('mergeProxyNowPlaying: a stream the proxy saw end still clears its native echo while the monitor is not confirming', async () => {
+  const users = [{ id: 'user-1', username: 'alice', email: 'alice@example.com' }]
+  const staleNative = { user: { id: 'user-1', username: 'alice' }, item: { id: 'tt1', name: 'The Rock' } }
+  const closedProxyRow = { ...makeProxyRow(), isActive: false, endTime: new Date() }
+  const result = await mergeProxyNowPlaying(makeSplitPrisma([], [closedProxyRow]), 'acct-1', users, [staleNative], { isConfirming: () => false })
+  assert.equal(result.length, 0)
+})
+
+// --- a sequel is not its original -------------------------------------------
+
+test('mergeProxyNowPlaying: a sequel being streamed does not take the name and poster of the original still open in the library', async () => {
+  const users = [{ id: 'user-1', username: 'alice', email: 'alice@example.com' }]
+  const sequel = makeProxyRow({ filename: 'Fall.2.2025.mkv', displayName: 'Fall 2 (2025)' })
+  const original = {
+    user: { id: 'user-1', username: 'alice' },
+    item: { id: 'tt15325794', name: 'Fall', type: 'movie', poster: 'https://posters/fall.jpg' },
+    videoId: null,
+  }
+  const result = await mergeProxyNowPlaying(makeSplitPrisma([sequel], []), 'acct-1', users, [original], { isConfirming: () => true })
+  const proxyCard = result.find((r) => r.source === 'aiostreams-proxy')
+  assert.ok(proxyCard, 'the stream has its own card')
+  assert.equal(proxyCard.item.name, 'Fall 2 (2025)')
+  assert.notEqual(proxyCard.item.poster, 'https://posters/fall.jpg')
+  assert.ok(result.some((r) => r.item.name === 'Fall'), 'the original is not hidden by it')
+})
+
+test('mergeProxyNowPlaying: ids decide over names - a matched stream never borrows a different title that shares its name', async () => {
+  const users = [{ id: 'user-1', username: 'alice', email: 'alice@example.com' }]
+  const remake = makeProxyRow({ filename: 'It.2017.mkv', displayName: 'It (2017)', metadataItemId: 'tt1396484', metadataName: 'It' })
+  const older = { user: { id: 'user-1', username: 'alice' }, item: { id: 'tt0099864', name: 'It', type: 'series' }, videoId: null }
+  const result = await mergeProxyNowPlaying(makeSplitPrisma([remake], []), 'acct-1', users, [older], { isConfirming: () => true })
+  assert.equal(result.length, 2)
+  assert.notEqual(result.find((r) => r.source === 'aiostreams-proxy').item.id, 'tt0099864')
+})

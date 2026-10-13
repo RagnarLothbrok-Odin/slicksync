@@ -3,6 +3,14 @@
 // SlickSync's own variants as they are now (server/utils/aioConfigHistory.js).
 const test = require('node:test')
 const assert = require('node:assert/strict')
+
+// The addresses in these tests are made up. The server now looks an address
+// up before fetching it (server/utils/safeUrl.js), so the lookup is answered
+// here rather than by the network; fetch itself is stubbed per test.
+const dns = require('node:dns').promises
+const realLookup = dns.lookup
+dns.lookup = async () => [{ address: '203.0.113.10', family: 4 }]
+test.after(() => { dns.lookup = realLookup })
 const { pauseScript } = require('../server/utils/aioPause')
 const { merge } = require('../server/utils/aioConfigHistory')
 

@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { safeEqual } = require('../utils/safeEqual');
 
 // Superadmin panel: operator-only, cross-account visibility for public
 // multi-tenant mode. Deliberately NOT tied to any tenant AppAccount - see
@@ -54,7 +55,8 @@ module.exports = ({ prisma, JWT_SECRET, isProdEnv, cookieName, parseCookies }) =
         return res.status(503).json({ message: 'Superadmin panel is not configured on this instance (set SUPERADMIN_PASSWORD)' });
       }
       const { password } = req.body || {};
-      if (!password || String(password) !== configured) {
+      // Constant-time, like the other places a shared secret is checked.
+      if (!password || !safeEqual(String(password), configured)) {
         return res.status(401).json({ message: 'Incorrect password' });
       }
       res.cookie(COOKIE, issueSuperAdminToken(), cookieOpts);

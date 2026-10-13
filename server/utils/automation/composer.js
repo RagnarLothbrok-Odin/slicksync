@@ -95,19 +95,14 @@ async function composeRule(prisma, accountId, text, decrypt, callModel = null) {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 20000)
     try {
-      const res = await fetch(`${creds.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
-        body: JSON.stringify({
-          model: creds.model,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT() },
-            { role: 'user', content: String(text).slice(0, 500) },
-          ],
-          temperature: 0.2,
-        }),
-        signal: controller.signal,
-      })
+      const res = await require('../nlCatalog').postChat(creds, {
+        model: creds.model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT() },
+          { role: 'user', content: String(text).slice(0, 500) },
+        ],
+        temperature: 0.2,
+      }, controller.signal)
       if (!res.ok) {
         let detail = ''
         try { const b = await res.json(); detail = b?.error?.message || b?.message || '' } catch {}

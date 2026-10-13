@@ -56,6 +56,8 @@ export interface UserInfo {
   username: string;
   email: string;
   colorIndex?: number;
+  /** They switched Gravatar on, so their avatar may look their email up there. */
+  useGravatar?: boolean;
   activityVisibility: 'public' | 'private';
   groupName?: string;
   groupId?: string;
@@ -861,6 +863,14 @@ export const userPush = {
     return request('/public-library/push/unsubscribe', { method: 'POST', authKey, body: JSON.stringify({ userId, endpoint }) });
   },
 };
+
+/**
+ * The person's own API key. Their sign-in goes in the header like every other
+ * call here - never the address, which ends up in access logs and history.
+ */
+export async function getUserApiKey(userId: string, authKey: string): Promise<{ hasKey: boolean; apiKey: string | null }> {
+  return request(`/public-library/user-api-key?${new URLSearchParams({ userId })}`, { authKey });
+}
 
 // Convenience export
 export const userApi = {

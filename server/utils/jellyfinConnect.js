@@ -42,8 +42,8 @@ async function signInFromBody(body = {}) {
   } else {
     const username = String(body.jellyfinUsername ?? body.loginName ?? '').trim()
     if (!username) throw httpError(400, 'Enter the user name to sign in as')
-    deviceId = jfAuth.deviceIdFor(probe.serverUrl, username)
-    login = await jfAuth.authenticateByName(probe.serverUrl, username, String(body.password ?? ''))
+    deviceId = jfAuth.signInDeviceId(probe.serverUrl, username)
+    login = await jfAuth.authenticateByName(probe.serverUrl, username, String(body.password ?? ''), { deviceId })
   }
   // Before signing in, the kind is a guess from the server's name; signed in,
   // the server says which software it is, and that wins.
@@ -66,20 +66,58 @@ function jellyfinFields(probe, login, encrypt, req) {
 }
 
 /**
- * A server retires a user's previous token for a device the moment that
- * device signs in again, and SlickSync signs a server user in from one
- * device (see jellyfinAuth.deviceIdFor). So after any successful sign-in,
- * every SlickSync row holding that same server user - in any account, a
- * merged-in login, a pending invite request - must take the fresh token, or
- * the one it holds has just stopped working. Found the hard way: a second
- * Add User for someone already added signed them out.
+ * Which stored sign-ins are on the server just signed in to. A household's
+ * install may reach one server by several names (a LAN address, a hostname),
+ * so the id the server reports counts there as well as the address. On an
+ * instance serving strangers only the address the person was added with
+ * counts: the id is whatever the server at a typed-in address says it is, and
+ * trusting it would let anyone run a server that claims another household's.
+ * Stored addresses are the normalised ones a probe produced, and so is
+ * probe.serverUrl, so that is a comparison of normalised addresses - under
+ * either scheme, so a person who types the other one is still found.
  */
-async function rememberSignIn(prisma, encrypt, probe, login) {
+function serverMatch(probe, login) {
+  if (jfAuth.restrictsPrivateAddresses()) {
+    const rest = /^https?:\/\/(.+)$/i.exec(String(probe.serverUrl || ''))?.[1]
+    if (!rest) return { jellyfinServerUrl: probe.serverUrl }
+    // The device a sign-in presents ignores the case of the address (see
+    // jellyfinAuth.deviceIdFor), so a path typed in another case is the same
+    // device, and its sign-in just retired the token stored under the
+    // spelling it was added with. Those rows are the ones to refresh.
+    const spellings = [...new Set([rest, rest.toLowerCase()])]
+    return { OR: spellings.flatMap((r) => [{ jellyfinServerUrl: `https://${r}` }, { jellyfinServerUrl: `http://${r}` }]) }
+  }
   const servers = [{ jellyfinServerUrl: probe.serverUrl }]
   if (login.serverId) servers.unshift({ jellyfinServerId: login.serverId })
-  const where = { jellyfinUserId: login.userId, OR: servers }
+  return { OR: servers }
+}
+
+/**
+ * A server retires a user's previous token for a device the moment that
+ * device signs in again, and SlickSync signs a server user in from one
+ * device (see jellyfinAuth.signInDeviceId). So after any successful sign-in,
+ * every SlickSync row holding the same server user - in any household, a
+ * merged-in login, a pending invite request, a household profile - must take
+ * the fresh token, or the one it holds has just stopped working. Found the
+ * hard way: a second Add User for someone already added signed them out.
+ *
+ * Call it the moment the sign-in succeeds, before anything that can turn the
+ * person away: the server has retired the old token whatever happens next.
+ *
+ * Which rows are "the same server user" is serverMatch's to say, and that is
+ * what keeps this safe: the sign-in comes from a server the caller named, and
+ * what it says about itself (its id, the ids in its reply) is whatever it
+ * likes. Each row is sealed for its own household.
+ */
+async function rememberSignIn(prisma, encrypt, probe, login) {
   const sealed = (accountId) => encrypt(login.token, { appAccountId: accountId || 'default' })
   try {
+    const match = serverMatch(probe, login)
+    // On an instance serving strangers, a row that never held a sign-in has
+    // nothing the server could have retired, and nothing proves its address
+    // and user id were ever signed in to - so it is not handed one.
+    const held = jfAuth.restrictsPrivateAddresses() ? { jellyfinToken: { not: null } } : {}
+    const where = { jellyfinUserId: login.userId, ...match, ...held }
     const users = await prisma.user.findMany({
       where: { providerType: 'jellyfin', ...where },
       select: { id: true, accountId: true, username: true, providerType: true, jellyfinServerUrl: true, jellyfinServerKind: true, providerConnectionError: true, providerConnectionErrorAt: true },
@@ -96,20 +134,25 @@ async function rememberSignIn(prisma, encrypt, probe, login) {
         await require('./connectionAlerts').onConnectionRecovered(prisma, u.accountId || 'default', u).catch(() => {})
       }
     }
+    // A stored credential has no household column; whose it is follows from
+    // the person it belongs to.
     const credentials = await prisma.userProviderCredential.findMany({ where: { providerType: 'jellyfin', ...where }, select: { id: true, userId: true } })
-    for (const c of credentials) {
-      const owner = await prisma.user.findUnique({ where: { id: c.userId }, select: { accountId: true } })
-      await prisma.userProviderCredential.update({ where: { id: c.id }, data: { jellyfinToken: sealed(owner?.accountId) } })
+    if (credentials.length) {
+      const owners = await prisma.user.findMany({ where: { id: { in: credentials.map((c) => c.userId) } }, select: { id: true, accountId: true } })
+      const household = new Map(owners.map((o) => [o.id, o.accountId]))
+      for (const c of credentials) {
+        await prisma.userProviderCredential.update({ where: { id: c.id }, data: { jellyfinToken: sealed(household.get(c.userId)) } })
+      }
     }
     const requests = await prisma.inviteRequest.findMany({ where: { providerType: 'jellyfin', status: 'pending', ...where }, select: { id: true, accountId: true } })
     for (const r of requests) {
       await prisma.inviteRequest.update({ where: { id: r.id }, data: { jellyfinToken: sealed(r.accountId) } })
     }
     // A household profile of someone on the same server (utils/jellyfinProfiles.js).
-    const owners = await prisma.user.findMany({ where: { providerType: 'jellyfin', OR: servers }, select: { id: true } })
+    const owners = await prisma.user.findMany({ where: { providerType: 'jellyfin', ...match, ...held }, select: { id: true } })
     if (owners.length) {
       const profiles = await prisma.jellyfinProfile.findMany({
-        where: { ownerUserId: { in: owners.map((o) => o.id) }, jellyfinUserId: login.userId },
+        where: { ownerUserId: { in: owners.map((o) => o.id) }, jellyfinUserId: login.userId, ...(jfAuth.restrictsPrivateAddresses() ? { token: { not: null } } : {}) },
         select: { id: true, accountId: true },
       })
       for (const p of profiles) {
@@ -121,13 +164,87 @@ async function rememberSignIn(prisma, encrypt, probe, login) {
   }
 }
 
+/**
+ * Whether a token really is this server user's on this server: the server
+ * itself, reached the way any address on an instance serving strangers is
+ * (public addresses only, redirects included), says whose it is.
+ */
+async function signInProven(serverUrl, token, userId, { timeoutMs = 8000 } = {}) {
+  const url = jfAuth.normalizeServerUrl(serverUrl)
+  if (!url || typeof token !== 'string' || !token || !userId) return false
+  try {
+    const me = await jfAuth.currentUser(url, token, { timeoutMs, checkAddress: true })
+    return me.userId === String(userId).replace(/-/g, '').toLowerCase()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * What an imported file says about Jellyfin sign-ins is only kept once the
+ * server vouches for it (an import onto an instance serving strangers). A
+ * file can claim any address and user id; a token that the server at that
+ * address says belongs to that user is the one thing it cannot make up.
+ *
+ * `users` are the file's people, as decrypted by the export. Returns, per
+ * person, the normalised address when the person's sign-in is proven (else
+ * null), and per household profile whether its own token is proven against
+ * its owner's address. At most `max` servers are asked, `limit` at a time;
+ * anything past that counts as unproven and the person reconnects.
+ */
+async function proveImportedSignIns(users, { limit = 4, max = 200 } = {}) {
+  const list = Array.isArray(users) ? users : []
+  const personUrl = new Map()
+  const profileProven = new Map()
+  let budget = max
+  const jobs = []
+  const queue = (job) => {
+    if (budget <= 0) return
+    budget -= 1
+    jobs.push(job)
+  }
+  for (const u of list) {
+    if (!u || typeof u !== 'object') continue
+    personUrl.set(u, null)
+    queue(async () => {
+      if (await signInProven(u.jellyfinServerUrl, u.jellyfinToken, u.jellyfinUserId)) {
+        personUrl.set(u, jfAuth.normalizeServerUrl(u.jellyfinServerUrl))
+      }
+    })
+  }
+  const run = async () => {
+    let next = 0
+    const worker = async () => {
+      while (next < jobs.length) {
+        const job = jobs[next++]
+        try { await job() } catch {}
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker))
+    jobs.length = 0
+    next = 0
+  }
+  await run()
+  for (const u of list) {
+    const profiles = u && typeof u === 'object' && u.jellyfinHousehold && Array.isArray(u.jellyfinHousehold.profiles) ? u.jellyfinHousehold.profiles : []
+    const ownerUrl = personUrl.get(u)
+    for (const p of profiles) {
+      if (!p || typeof p !== 'object') continue
+      profileProven.set(p, false)
+      if (!ownerUrl || !p.token) continue
+      queue(async () => {
+        if (await signInProven(ownerUrl, String(p.token), p.jellyfinUserId)) profileProven.set(p, true)
+      })
+    }
+  }
+  await run()
+  return { personUrl, profileProven }
+}
+
 /** The SlickSync user already holding this server user, in one account. */
 async function findJellyfinUser(prisma, accountId, login, probe) {
-  const ors = []
-  if (login.serverId) ors.push({ jellyfinServerId: login.serverId })
-  ors.push({ jellyfinServerUrl: probe.serverUrl })
   return prisma.user.findFirst({
-    where: { accountId, providerType: 'jellyfin', jellyfinUserId: login.userId, OR: ors },
+    where: { accountId, providerType: 'jellyfin', jellyfinUserId: login.userId, ...serverMatch(probe, login) },
   })
 }
 
@@ -185,4 +302,4 @@ function mountSignInSteps(router, prefix = '') {
   })
 }
 
-module.exports = { signInFromBody, rememberSignIn, jellyfinFields, findJellyfinUser, describeProbe, mountSignInSteps, sendError, httpError }
+module.exports = { signInFromBody, rememberSignIn, serverMatch, signInProven, proveImportedSignIns, jellyfinFields, findJellyfinUser, describeProbe, mountSignInSteps, sendError, httpError }

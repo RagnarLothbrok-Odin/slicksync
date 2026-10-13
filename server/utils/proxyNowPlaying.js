@@ -30,6 +30,9 @@
 // Kept at the same ~5min margin above that window as before (was 20 vs 15).
 const RECENTLY_CLOSED_MS = 23 * 60 * 1000
 const { proxyDisplayTitle } = require('./proxyTitle')
+// Same title or not - by IMDb id where both sides have one, else by the
+// tidied name. See titleMatch.js for why "contains" was not good enough.
+const { normalizeTitle, pairMatches } = require('./titleMatch')
 // Only connections that have shown they are playing - a source warmed up or
 // checked by an app is one request and then nothing (proxyPlaying.js).
 const { isPlayingConnection } = require('./proxyPlaying')
@@ -56,7 +59,13 @@ const { isPlayingConnection } = require('./proxyPlaying')
 // hint below, never to hide a still-`isActive` row.
 const PAUSED_STALE_MS = 3 * 60 * 1000
 
-async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPlaying) {
+// Addresses already announced as a new device by this process.
+const announcedDevices = new Set()
+
+/** How a proxy row is known, for comparing against a library title. */
+const describe = (row) => ({ id: row.metadataItemId || null, titles: [proxyDisplayTitle(row), row.displayName].filter(Boolean) })
+
+async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPlaying, { isConfirming } = {}) {
   let proxySessions
   let recentlyClosedSessions
   try {
@@ -87,6 +96,16 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
     console.warn('[ProxyNowPlaying] Failed to fetch proxy sessions:', error.message)
     return watchSessionNowPlaying
   }
+
+  // A "live" row is only as fresh as the last poll that worked. When the
+  // monitor has not confirmed anything lately (AIOStreams unreachable, its
+  // sign-in refused), those rows are not shown as playing - they would
+  // otherwise sit there until the monitor recovered. Streams the proxy saw
+  // end still count: that knowledge does not go stale.
+  const confirming = typeof isConfirming === 'function'
+    ? isConfirming(accountId)
+    : require('./proxyStreamMonitor').isProxyMonitorConfirming(accountId)
+  if (!confirming) proxySessions = []
 
   if (proxySessions.length === 0 && recentlyClosedSessions.length === 0) {
     return watchSessionNowPlaying
@@ -122,9 +141,15 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
       .filter((u) => u.email && u.email.includes('@'))
       .map((u) => [u.email.split('@')[0].toLowerCase(), u])
   )
-  const watchSessionByUserId = new Map(
-    watchSessionNowPlaying.filter((np) => np.user && np.user.id).map((np) => [np.user.id, np])
-  )
+  // Every native entry a person has, not just one: someone can have the film
+  // they just finished and the one they started both open, and the stream
+  // has to be compared against each.
+  const watchSessionsByUserId = new Map()
+  for (const np of watchSessionNowPlaying) {
+    if (!np.user || !np.user.id) continue
+    if (!watchSessionsByUserId.has(np.user.id)) watchSessionsByUserId.set(np.user.id, [])
+    watchSessionsByUserId.get(np.user.id).push(np)
+  }
 
   const result = []
   // Tracks, per user, the normalized titles of proxy-covered streams - NOT
@@ -135,10 +160,10 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
   // the same user (e.g. a usenet stream that never routes through the
   // proxy at all) - only the specific title the proxy is covering should
   // be suppressed from the WatchSession pass below.
-  const coveredTitlesByUser = new Map()
+  const coveredByUser = new Map()
   // Same idea, but for titles the proxy recently FINISHED carrying - used only
   // to suppress a native entry that's a stale echo of an already-ended stream.
-  const recentlyClosedTitlesByUser = new Map()
+  const recentlyClosedByUser = new Map()
 
   // Fallback: AIOStreams only has one login username, but a single person
   // can have multiple per-provider SlickSync profiles (e.g. one Stremio
@@ -153,41 +178,12 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
     .filter(Boolean)
   const usersById = new Map(users.map((u) => [u.id, u]))
 
-  // Normalizes a title for loose comparison: lowercase, strip year/parens,
-  // collapse whitespace. Good enough to tell "Obsession" vs "Obsession
-  // (2025)" apart from something unrelated, not meant to be exact.
-  function normalizeTitle(name) {
-    return (name || '')
-      .toLowerCase()
-      .replace(/\(\d{4}\)/g, '')
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim()
-  }
-
-  // When multiple SlickSync profiles match one AIOStreams login (this
-  // login has no way to say which actual client/profile made the
-  // request), pick a single one instead of showing the stream duplicated
-  // under all of them. Prefers whichever candidate has an existing active
-  // WatchSession entry whose title matches the proxy's parsed name; falls
-  // back to the first candidate if no title match narrows it down.
-  // Substring containment, not exact equality - the proxy's parsed
-  // displayName includes episode info from the filename (e.g. "Man on
-  // Fire S01E01"), while WatchSession's itemName is just the show title
-  // ("Man on Fire"). These are the same show but never match via strict
-  // equality, which silently broke disambiguation (confirmed with real
-  // data: a correct WatchSession match existed but wasn't recognized,
-  // causing a fallback to the wrong candidate).
-  function titlesMatch(a, b) {
-    if (!a || !b) return false
-    return a.includes(b) || b.includes(a)
-  }
-
   // Returns { user, confident }. `confident` means this resolution came from
   // real evidence (a unique match, or a title match against a live native
   // session) rather than a guess - only confident resolutions get written
   // back into ipAffinityByIp, so a guess can never reinforce itself into a
   // permanent wrong answer.
-  function disambiguateMatch(candidates, proxyDisplayName, clientIp, confidentIfUnique) {
+  function disambiguateMatch(candidates, proxyRow, clientIp, confidentIfUnique) {
     if (candidates.length <= 1) return { user: candidates[0] || null, confident: confidentIfUnique }
 
     // Device claim first: a human said outright whose device this is, which
@@ -202,14 +198,10 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
       }
     }
 
-    const proxyTitle = normalizeTitle(proxyDisplayName)
-    if (proxyTitle) {
-      const titleMatch = candidates.find((u) => {
-        const existing = watchSessionByUserId.get(u.id)
-        return existing && titlesMatch(normalizeTitle(existing.item?.name), proxyTitle)
-      })
-      if (titleMatch) return { user: titleMatch, confident: true }
-    }
+    const described = describe(proxyRow)
+    const titleMatch = candidates.find((u) =>
+      (watchSessionsByUserId.get(u.id) || []).some((np) => pairMatches(described, np.item)))
+    if (titleMatch) return { user: titleMatch, confident: true }
 
     // No title-match signal available (common while a stream is mid-playback
     // and native hasn't checkpointed yet - native only writes a session at
@@ -314,7 +306,7 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
 
     if (candidates.length === 0) continue // no direct match and no usable fallback - skip rather than guess
 
-    const { user, confident } = disambiguateMatch(candidates, proxyDisplayTitle(representative), representative.clientIp, candidatesAreRealMatch)
+    const { user, confident } = disambiguateMatch(candidates, representative, representative.clientIp, candidatesAreRealMatch)
     if (!user) continue
 
     // Learn from this resolution for next time - only when it's real
@@ -329,7 +321,13 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
       // IP later in the same poll doesn't fire twice.
       if (!ipAffinityByIp.has(representative.clientIp)) {
         ipAffinityByIp.set(representative.clientIp, user.id)
-        notifyNewDevice(prisma, accountId, user, representative.clientIp).catch(() => {})
+        // Two requests building this list at once both read the address as
+        // unknown; say it once.
+        const announceKey = `${accountId}:${representative.clientIp}`
+        if (!announcedDevices.has(announceKey)) {
+          announcedDevices.add(announceKey)
+          notifyNewDevice(prisma, accountId, user, representative.clientIp).catch(() => {})
+        }
       }
       prisma.proxyUserIpAffinity.upsert({
         where: { accountId_clientIp: { accountId, clientIp: representative.clientIp } },
@@ -338,23 +336,21 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
       }).catch(() => {}) // best-effort, never blocks building the Now Playing list
     }
 
-    if (!coveredTitlesByUser.has(user.id)) coveredTitlesByUser.set(user.id, new Set())
-    // Both names cover: the native pipeline knows the title by its real name.
-    coveredTitlesByUser.get(user.id).add(normalizeTitle(proxyDisplayTitle(representative)))
-    coveredTitlesByUser.get(user.id).add(normalizeTitle(representative.displayName))
-    const existing = watchSessionByUserId.get(user.id)
-    // Only borrow the existing WatchSession's item/videoId if it's actually
-    // about the same title the proxy detected - an existing session for
-    // this user that's about something else entirely (a real, unrelated,
-    // still-active session) must not be shown as if it were the proxied
-    // content. User identity (avatar/username/email) is unaffected by this
-    // check - that's about the person, not the content.
-    const existingTitleMatches = existing && (
-      titlesMatch(normalizeTitle(existing.item?.name), normalizeTitle(proxyDisplayTitle(representative))) ||
-      titlesMatch(normalizeTitle(existing.item?.name), normalizeTitle(representative.displayName)))
+    const described = describe(representative)
+    if (!coveredByUser.has(user.id)) coveredByUser.set(user.id, [])
+    coveredByUser.get(user.id).push(described)
+    const theirSessions = watchSessionsByUserId.get(user.id) || []
+    // Only borrow a WatchSession's item/videoId if it is about the same
+    // title the proxy detected - a session of theirs about something else
+    // (the film they just finished, a sequel's original) must not be shown
+    // as if it were the proxied content. User identity (avatar/username/
+    // email) is about the person, not the content, so any of their entries
+    // can supply it.
+    const existing = theirSessions.find((np) => pairMatches(described, np.item)) || null
+    const existingTitleMatches = !!existing
 
     result.push({
-      user: existing?.user ?? {
+      user: theirSessions[0]?.user ?? {
         id: user.id,
         username: user.username || user.email,
         email: user.email,
@@ -463,23 +459,20 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
     // That's deliberate: it only ever suppresses a native entry for THAT
     // exact title, which the proxy has confirmed ended.
     for (const candidate of candidates) {
-      if (!recentlyClosedTitlesByUser.has(candidate.id)) recentlyClosedTitlesByUser.set(candidate.id, new Set())
-      recentlyClosedTitlesByUser.get(candidate.id).add(normalizeTitle(closed.displayName))
-      recentlyClosedTitlesByUser.get(candidate.id).add(normalizeTitle(proxyDisplayTitle(closed)))
+      if (!recentlyClosedByUser.has(candidate.id)) recentlyClosedByUser.set(candidate.id, [])
+      recentlyClosedByUser.get(candidate.id).push(describe(closed))
     }
   }
 
   for (const np of watchSessionNowPlaying) {
     const uid = np.user && np.user.id
-    const npTitle = normalizeTitle(np.item?.name)
-    const activeTitles = uid ? coveredTitlesByUser.get(uid) : null
-    const endedTitles = uid ? recentlyClosedTitlesByUser.get(uid) : null
+    const active = uid ? coveredByUser.get(uid) : null
+    const ended = uid ? recentlyClosedByUser.get(uid) : null
 
     // Superseded when the proxy is currently carrying this title (the proxy
     // entry above replaces it), or recently finished carrying it (stale echo).
-    const matches = (titles) =>
-      !!titles && !!npTitle && Array.from(titles).some((t) => titlesMatch(t, npTitle))
-    const isSuperseded = matches(activeTitles) || matches(endedTitles)
+    const matches = (streams) => !!streams && streams.some((d) => pairMatches(d, np.item))
+    const isSuperseded = matches(active) || matches(ended)
     if (!isSuperseded) result.push(np)
   }
 

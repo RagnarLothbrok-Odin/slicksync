@@ -26,6 +26,7 @@
  * outside what this app should depend on.
  */
 const { resolveSinglePoster } = require('./libraryHelpers')
+const { safeFetch, instancePolicy } = require('./safeUrl')
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w342'
 // Real lists are almost always well under this; it exists purely as a
@@ -158,8 +159,16 @@ async function importFromSlickSync(url) {
   const timeoutId = setTimeout(() => controller.abort(), 15000)
   let res
   try {
-    res = await fetch(url, { signal: controller.signal, headers: { Accept: 'application/json' } })
+    // The host is whatever the share link names, so it is held to the same
+    // rule as every other address typed in somewhere (utils/safeUrl.js): an
+    // instance serving strangers may not be pointed at its own network, a
+    // household's install may reach another SlickSync on its LAN, and
+    // redirects are checked hop by hop.
+    res = await safeFetch(url, { signal: controller.signal, headers: { Accept: 'application/json' } }, instancePolicy())
   } catch (e) {
+    if (/^(blocked host|unsupported protocol|invalid url)$/.test(e?.message || '')) {
+      throw new Error('That address cannot be used from this server - check the share link')
+    }
     throw new Error(e?.name === 'AbortError'
       ? 'That instance took too long to respond'
       : 'Could not reach that instance - check the URL and that it is publicly reachable')

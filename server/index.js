@@ -48,13 +48,13 @@ const postersRouter = require('./routes/posters');
 const { makeCreateProvider } = require('./providers');
 
 // Import configuration constants
-const { INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, AUTH_ALLOWLIST, BACKUP_DIR, BACKUP_CFG, PEPPER, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
+const { INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, BACKUP_DIR, BACKUP_CFG, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
 
 // Import utility modules
 const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, normalizeUrl, isProdEnv, filterManifestByResources, filterManifestByCatalogs } = require('./utils/validation');
-const { sha256Hex, hmacHex, manifestUrlHash, manifestUrlHmac, getAccountHmacKey, normalizeManifestObject, manifestHash, manifestHmac } = require('./utils/hashing');
+const { sha256Hex, hmacHex, manifestUrlHmac, getAccountHmacKey, normalizeManifestObject, manifestHash, manifestHmac } = require('./utils/hashing');
 const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = require('./utils/stremio');
-const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, issuePublicToken, randomCsrfToken } = require('./utils/auth');
+const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, verifyAccountToken, randomCsrfToken } = require('./utils/auth');
 const { getAccountId: getAccountIdHelper, scopedWhere, assignUserToGroup } = require('./utils/helpers');
 const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
 
@@ -214,12 +214,14 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // Stricter limiter for credential-handling endpoints (login/OAuth/token exchange)
+// The sign-in forms read a JSON body and show its `message`; a plain-text
+// answer failed to parse and was reported as "Failed to connect to server".
 const authLimiter = rateLimit({
   windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000'),
   max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '20'),
   standardHeaders: true,
   legacyHeaders: false,
-  message: 'Too many authentication attempts from this IP, please try again later.',
+  message: { message: 'Too many sign-in attempts from this address. Please wait a few minutes and try again.' },
 });
 app.use('/api/nuvio/validate', authLimiter);
 app.use('/api/nuvio/connect', authLimiter);
@@ -262,6 +264,23 @@ app.use('/api/auth/verify-2fa', authLimiter);
 app.use('/api/auth/passkey/verify', authLimiter);
 app.use('/api/public-auth/passkey/verify', authLimiter);
 app.use('/api/public-auth/verify-2fa', authLimiter);
+// Private-instance login: one shared username and password from the
+// environment, and the one credential a stranger can sit and guess at. It gets
+// its own counter rather than sharing authLimiter's, and only FAILED attempts
+// count against it - behind a second proxy every visitor can arrive from one
+// address, and counting good logins too would let a household lock itself out
+// of its own instance. Same window and ceiling as every other credential
+// route (AUTH_RATE_LIMIT_*).
+const privateLoginLimiter = rateLimit({
+  windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000'),
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '20'),
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many sign-in attempts from this address. Please wait a few minutes and try again.' },
+});
+app.use('/api/auth/private-login', privateLoginLimiter);
+app.use('/api/public-auth/private-login', privateLoginLimiter);
 
 // Higher-frequency limiter for OAuth polling (device-code flow polls every few seconds)
 const pollLimiter = rateLimit({
@@ -282,6 +301,51 @@ app.use('/api/public-auth/nuvio-poll-oauth', pollLimiter);
 app.use('/api/public-library/generate-oauth-nuvio', authLimiter);
 app.use('/api/public-library/authenticate-nuvio', authLimiter);
 app.use('/api/public-library/poll-oauth-nuvio', pollLimiter);
+
+// The shareable stats page (/u/<slug>) is read with no login at all, so the
+// only thing to count against is the visitor's address.
+const publicStatsLimiter = rateLimit({
+  windowMs: 60000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests, please slow down.',
+});
+app.use('/api/users/public-stats', publicStatsLimiter);
+
+// Invitation links (/invite/...) are opened by people with no account yet, so
+// nothing else throttles them: no login to count against, and they sit outside
+// /api and its limiter. Several of them reach other servers on the visitor's
+// behalf (Stremio's link service, Nuvio, a Jellyfin server), so a flood from
+// one address is also a flood at those.
+//
+// The numbers leave plenty of room. Joining takes a dozen or so requests, so
+// ten people joining together from one address use a fraction of the first
+// limit. Waiting for approval is different: the page asks "has it been
+// approved yet" every three seconds for as long as it is open, which would
+// eat any ordinary ceiling alone, so the three polling routes have their own
+// per-minute limit (a pending page sends 20 a minute) and are left out of the
+// first. The address counted is the visitor's own when a reverse proxy sets
+// X-Forwarded-For: Next's rewrite passes that header through unchanged, and
+// `trust proxy` (set at the top) reads it.
+const INVITE_POLL_PATH = /^\/[^/]+\/(status|nuvio\/poll|jellyfin\/quick-connect-status)\/?$/;
+const inviteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  skip: (req) => INVITE_POLL_PATH.test(req.path),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this address, please try again in a few minutes.' },
+});
+const invitePollLimiter = rateLimit({
+  windowMs: 60000,
+  max: 600,
+  skip: (req) => !INVITE_POLL_PATH.test(req.path),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this address, please try again in a moment.' },
+});
+app.use('/invite', inviteLimiter, invitePollLimiter);
 
 // Multer - use centralized configuration
 const { standardUpload, imageUpload } = require('./utils/helpers');
@@ -321,7 +385,11 @@ app.get('/health', async (req, res) => {
     await prisma.$queryRaw`SELECT 1`
     res.status(200).json({ status: 'ok', database: 'up' })
   } catch (e) {
-    res.status(503).json({ status: 'degraded', database: 'down', error: e?.message?.slice(0, 200) })
+    // The driver's message names the database host and port, and this route
+    // answers anyone who can reach it - the log has it, the response only the
+    // status a probe acts on.
+    console.error('Health check: the database did not answer:', e?.message)
+    res.status(503).json({ status: 'degraded', database: 'down' })
   }
 })
 
@@ -377,7 +445,12 @@ if (INSTANCE_TYPE === 'public') {
 const { createAccountScopingMiddleware } = require('./middleware/accountScoping');
 const accountScopingMiddleware = createAccountScopingMiddleware();
 app.use('/api/groups', accountScopingMiddleware);
-app.use('/api/users', accountScopingMiddleware);
+// The shareable stats page is read by visitors with no account at all (it is
+// on the auth allowlist for that reason), so on a public instance this would
+// turn every one of them away. Every other /api/users route needs an account.
+app.use('/api/users', (req, res, next) => (
+  req.path.startsWith('/public-stats/') ? next() : accountScopingMiddleware(req, res, next)
+));
 app.use('/api/addons', accountScopingMiddleware);
 app.use('/api/stremio', accountScopingMiddleware);
 app.use('/api/nuvio', accountScopingMiddleware);
@@ -388,7 +461,7 @@ app.use('/api/automation', accountScopingMiddleware);
 app.use('/api/watch-together', accountScopingMiddleware);
 
 // Mount routers
-const publicAuthRouterInstance = publicAuthRouter({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET });
+const publicAuthRouterInstance = publicAuthRouter({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET, verifyAccountToken });
 app.use('/api/auth', publicAuthRouterInstance);
 app.use('/api/public-auth', publicAuthRouterInstance);
 app.use('/api/addons', addonsRouter({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, INSTANCE_TYPE, manifestHash, filterManifestByResources, filterManifestByCatalogs, manifestUrlHmac }));
@@ -480,7 +553,7 @@ app.get('/api/docs', (req, res) => {
   res.send(swaggerUi.generateHTML(openapiSpec, { customSiteTitle: 'SlickSync API' }));
 });
 app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assignUserToGroup }));
-app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt }));
+app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }));
 // Public library router (no auth required)
 const { getCachedLibrary, setCachedLibrary } = require('./utils/libraryCache');
 app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET }));
@@ -501,9 +574,21 @@ app.use('/api/migration', require('./routes/migration')({ prisma, decrypt }));
 app.use('/stream', streamProxyRouter({ getServerKey }).router);
 
 // Error handling
+//
+// What reaches here is whatever a route or a parser threw. A 4xx status on it
+// is a judgement already made about the request (a body that is too large, a
+// bad request) and keeps its status and words. Anything else is a failure on
+// our side, and its message can carry what the person asking has no business
+// seeing - a database error spells out the query, the email in it and the
+// host it could not reach - so the caller gets a fixed line and the real
+// error stays in the server log.
 app.use((error, req, res, next) => {
+  const status = Number(error && (error.status || error.statusCode));
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ message: error.message || 'Bad request' });
+  }
   console.error('Unhandled error:', error);
-  res.status(500).json({ message: 'Internal server error', error: error.message });
+  res.status(500).json({ message: 'Internal server error' });
 });
 
 // The listening server, captured so the shutdown below can close it.
