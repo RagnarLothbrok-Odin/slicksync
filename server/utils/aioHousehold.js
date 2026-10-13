@@ -22,6 +22,11 @@
 // not something to lean on). Once, never retried: five wrong PINs pause a
 // household user for 15 minutes.
 //
+// A household user can be kept separate (AIOStreams 2.36): hidden from the
+// sign-in picker and everyone else's list, with a sign-in address of their own
+// (<instance>/jellyfin/p/<code>). Both live on the persona, so SlickSync only
+// sets or removes those two fields, the same way as a PIN.
+//
 // Not the main user's own PIN: that is SlickSync's sign-in to the whole
 // configuration.
 
@@ -100,8 +105,55 @@ async function signInOnce(prisma, encrypt, owner, { jellyfinUserId, name }, pass
   return !!signed.token
 }
 
+const ADDRESS_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
+
+/**
+ * A personal sign-in address code: 10 random letters and digits (what
+ * AIOStreams' own page makes), different from every one already in use in
+ * this configuration.
+ */
+function newAddress(personas) {
+  const used = new Set(personas.map((p) => p?.address).filter(Boolean))
+  for (;;) {
+    let code = ''
+    for (let i = 0; i < 10; i++) code += ADDRESS_CHARS[crypto.randomInt(ADDRESS_CHARS.length)]
+    if (!used.has(code)) return code
+  }
+}
+
+function personalInfo(owner, persona) {
+  const separate = persona.hidden === true
+  const address = separate && persona.address ? String(persona.address) : null
+  return { separate, address, url: address ? `${instanceBase(owner.jellyfinServerUrl)}/jellyfin/p/${address}` : null }
+}
+
+/**
+ * For each household user SlickSync holds a profile for: whether they are
+ * kept separate and where their personal address is. Read from the
+ * configuration, because a separate user does not show in the server's user
+ * list. Returns { [profileId]: { separate, address, url } }, or null when the
+ * configuration can't be read or SlickSync has no access to it.
+ */
+async function personalSettings(decrypt, owner, profiles) {
+  if (!canManage(owner)) return null
+  try {
+    const config = await readConfig(accessFor(owner, decrypt))
+    const uuid = config.uuid || owner.aioConfigId
+    const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : []
+    const out = {}
+    for (const profile of profiles) {
+      const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId)
+      if (persona) out[profile.id] = personalInfo(owner, persona)
+    }
+    return out
+  } catch (e) {
+    console.warn('[AioHousehold] could not read personal addresses:', e?.message)
+    return null
+  }
+}
+
 /** Add a household user. Returns { tracked } - whether it is tracked already. */
-async function addPersona(prisma, decrypt, encrypt, owner, { name, pin, history }) {
+async function addPersona(prisma, decrypt, encrypt, owner, { name, pin, history, separate }) {
   const access = accessFor(owner, decrypt)
   const clean = String(name || '').trim()
   if (!clean || clean.length > 32) throw fail('A name is 1 to 32 characters')
@@ -121,12 +173,44 @@ async function addPersona(prisma, decrypt, encrypt, owner, { name, pin, history 
   let id = clean.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'user'
   if (!ID.test(id) || personas.some((p) => p.id === id)) id = `${id.slice(0, 20)}-${crypto.randomBytes(3).toString('hex')}`.replace(/^-+/, '')
   // Never trackers on a shared one: it uses the main user's.
-  const persona = { id, name: clean, history: mode, ...(lock ? { lock } : {}) }
+  const persona = { id, name: clean, history: mode, ...(lock ? { lock } : {}), ...(separate === true ? { hidden: true, address: newAddress(personas) } : {}) }
   config.jellyfin.personas = [...personas, persona]
   await save(prisma, owner, access, config)
 
   const tracked = await signInOnce(prisma, encrypt, owner, { jellyfinUserId: personaUserId(uuid, id), name: clean }, access.password, lock)
-  return { tracked }
+  return { tracked, ...(persona.hidden ? { personal: personalInfo(owner, persona) } : {}) }
+}
+
+/**
+ * Keep a household user separate (own sign-in address, seen by nobody else),
+ * stop, or give them a new address - mode 'on', 'off' or 'renew'. Only that
+ * user's hidden and address change; the rest goes back as it was read. The
+ * old address stops answering with a renewal or with 'off'. SlickSync's own
+ * sign-in for them is a token, which keeps working. Returns the user's
+ * { separate, address, url }.
+ */
+async function setPersonaSeparation(prisma, decrypt, owner, profile, mode) {
+  if (!['on', 'off', 'renew'].includes(mode)) throw fail('Choose on, off or renew')
+  const access = accessFor(owner, decrypt)
+  const config = await readConfig(access)
+  const uuid = config.uuid || owner.aioConfigId
+  const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : []
+  const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId)
+  if (!persona) throw fail(`${profile.name} isn't a household user in this AIOStreams configuration any more.`, 409)
+  if (mode === 'renew' && persona.hidden !== true) throw fail(`${persona.name} isn't kept separate, so there is no address to renew.`, 409)
+
+  const already = persona.hidden === true && !!persona.address
+  if (mode === 'on' && already) return personalInfo(owner, persona)
+  if (mode === 'off' && persona.hidden !== true && !persona.address) return personalInfo(owner, persona)
+  if (mode === 'off') {
+    delete persona.hidden
+    delete persona.address
+  } else {
+    persona.hidden = true
+    persona.address = newAddress(personas)
+  }
+  await save(prisma, owner, access, config)
+  return personalInfo(owner, persona)
 }
 
 /** Change a household user's PIN, or remove it (pin null). Returns { tracked }. */
@@ -153,4 +237,4 @@ async function setPersonaPin(prisma, decrypt, encrypt, owner, profile, pin) {
   return { tracked }
 }
 
-module.exports = { addPersona, setPersonaPin, personaUserId, canManage }
+module.exports = { addPersona, setPersonaPin, setPersonaSeparation, personalSettings, personaUserId, canManage }

@@ -33,7 +33,9 @@ function isPlainAddress(serverUrl) {
  * its main user signs in as the configuration UUID (or alias) alone, everyone
  * else as "<uuid>/Sam". Which one is the main user is not marked anywhere, so
  * both are tried and the one that signs in as that very user is kept. On a
- * sign-in picker address, and on AIOMetadata, the plain name is enough.
+ * sign-in picker address, and on AIOMetadata, the plain name is enough. So is
+ * it at a personal address (/jellyfin/p/<code>), which is not a plain address
+ * and lists only that one person.
  */
 function loginNamesFor(kind, serverUrl, account, user) {
   if (kind !== 'aiostreams' || !isPlainAddress(serverUrl)) return [user.name]

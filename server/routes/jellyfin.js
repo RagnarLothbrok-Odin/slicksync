@@ -600,7 +600,11 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
       const aiom = require('../utils/aiometadataHousehold');
       const canManage = require('../utils/aioHousehold').canManage(full) || aiom.canManage(full);
       const canPin = canManage && (full.jellyfinServerKind !== 'aiometadata' || await aiom.hasPins(full));
-      res.json({ profiles, partOf, kind: person.jellyfinServerKind || null, canManage, canPin });
+      // Who is kept separate, with their own sign-in address (AIOStreams only).
+      const personal = full.jellyfinServerKind === 'aiostreams' && profiles.length
+        ? await require('../utils/aioHousehold').personalSettings(decrypt, { ...full, accountId }, profiles)
+        : null;
+      res.json({ profiles, partOf, kind: person.jellyfinServerKind || null, canManage, canPin, personal });
     } catch (error) {
       sendError(res, error, 'Could not read the household');
     }
@@ -614,7 +618,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
       const result = owner.jellyfinServerKind === 'aiometadata'
         ? await require('../utils/aiometadataHousehold').addUser(prisma, decrypt, encrypt, owner, { name: req.body?.name, pin: req.body?.pin ?? null })
         : await require('../utils/aioHousehold').addPersona(prisma, decrypt, encrypt, owner, {
-          name: req.body?.name, pin: req.body?.pin ?? null, history: req.body?.history,
+          name: req.body?.name, pin: req.body?.pin ?? null, history: req.body?.history, separate: req.body?.separate === true,
         });
       res.json({ success: true, ...result, profiles: await household.describeHousehold(prisma, owner.id) });
     } catch (error) {
@@ -633,6 +637,20 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
       res.json({ success: true, ...result, profiles: await household.describeHousehold(prisma, found.owner.id) });
     } catch (error) {
       sendError(res, error, 'Could not change the PIN');
+    }
+  });
+
+  // Keep a household user separate with a sign-in address of their own, stop,
+  // or give them a new address: body { mode: 'on' | 'off' | 'renew' }.
+  router.post('/household/:profileId/personal-address', async (req, res) => {
+    try {
+      const found = await loadProfile(req, res);
+      if (!found) return;
+      if (found.owner.jellyfinServerKind !== 'aiostreams') return res.status(400).json({ error: 'Only AIOStreams household users can be kept separate' });
+      const personal = await require('../utils/aioHousehold').setPersonaSeparation(prisma, decrypt, found.owner, found.profile, String(req.body?.mode || ''));
+      res.json({ success: true, personal, profiles: await household.describeHousehold(prisma, found.owner.id) });
+    } catch (error) {
+      sendError(res, error, 'Could not change that sign-in address');
     }
   });
 

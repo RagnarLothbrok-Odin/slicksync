@@ -302,7 +302,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   // before signing in here.
   async function getPublicUserJellyfin(probe, login) {
     const { serverMatch } = require('../utils/jellyfinConnect');
-    const { restrictsPrivateAddresses } = require('../providers/jellyfinAuth');
+    const { restrictsPrivateAddresses, addressToKeep } = require('../providers/jellyfinAuth');
     const personSelect = { id: true, username: true, email: true, accountId: true, isActive: true, colorIndex: true, createdAt: true, expiresAt: true };
     // The same server user can be a person in more than one household (a
     // relative in two families), and the session is for one of them. The
@@ -355,13 +355,17 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     if (user.viaProfile) return user;
     const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
     await healedBySignIn(user.id);
+    // Someone added under their household's address who signs in once at
+    // their personal one (or the other way round) keeps the address they were
+    // added with: a personal address dies when its code is renewed.
+    const stored = restrictsPrivateAddresses() ? null : (await prisma.user.findUnique({ where: { id: user.id }, select: { jellyfinServerUrl: true } }))?.jellyfinServerUrl;
     await prisma.user.update({
       where: { id: user.id },
       data: {
         jellyfinToken: encrypt(login.token, mockReq),
         // Where strangers sign in, the address stays as the admin added it,
         // even when the person typed the other scheme for it.
-        ...(restrictsPrivateAddresses() ? {} : { jellyfinServerUrl: probe.serverUrl }),
+        ...(restrictsPrivateAddresses() ? {} : { jellyfinServerUrl: addressToKeep(stored, probe.serverUrl) }),
         jellyfinServerKind: probe.kind,
         ...(login.serverId ? { jellyfinServerId: login.serverId } : {}),
         providerConnectionError: null,

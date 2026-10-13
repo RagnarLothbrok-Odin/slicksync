@@ -46,6 +46,34 @@ function normalizeServerUrl(raw) {
   return `${url.origin}${path}`
 }
 
+/**
+ * The code of an AIOStreams personal sign-in address
+ * (`<instance>/jellyfin/p/<code>`, one per household user that is kept
+ * separate), or null for any other address. Such an address names a person,
+ * not a configuration, and it dies when its code is renewed.
+ */
+function personalAddressCode(serverUrl) {
+  try {
+    const m = /\/jellyfin\/p\/([a-z0-9]{10,32})\/?$/i.exec(new URL(serverUrl).pathname)
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Which address to keep for someone who just signed in at `usedUrl` while
+ * `storedUrl` is what they were added with. A household address is never
+ * swapped for a personal one (it would die with the next new code) and a
+ * personal one is never swapped for a household one; any other difference
+ * (scheme, spelling) still follows what was just used.
+ */
+function addressToKeep(storedUrl, usedUrl) {
+  if (!storedUrl) return usedUrl
+  if (!!personalAddressCode(storedUrl) !== !!personalAddressCode(usedUrl)) return storedUrl
+  return usedUrl
+}
+
 /** A device id that stays the same for one person, so a reconnect replaces their old sign-in instead of piling up new ones. */
 function deviceIdFor(...parts) {
   return 'slicksync-' + crypto.createHash('sha256').update(parts.map((p) => String(p || '').toLowerCase()).join('|')).digest('hex').slice(0, 24)
@@ -320,7 +348,8 @@ async function signOut(baseUrl, token, { deviceId } = {}) {
 function displayServer(serverUrl) {
   try {
     const url = new URL(serverUrl)
-    const parts = url.pathname.split('/').filter(Boolean)
+    // A personal sign-in address is its code; the code stays out of sight.
+    const parts = url.pathname.split('/').filter(Boolean).filter((p, i, all) => !(i === 2 && all[1]?.toLowerCase() === 'p' && personalAddressCode(serverUrl)))
     const safe = parts.filter((p) => p.length <= 40).slice(0, 3)
     return `${url.host}${safe.length ? '/' + safe.join('/') : ''}`
   } catch {
@@ -342,6 +371,8 @@ function identityEmail(serverUrl, userId) {
 module.exports = {
   CLIENT_NAME,
   normalizeServerUrl,
+  personalAddressCode,
+  addressToKeep,
   deviceIdFor,
   signInDeviceId,
   authorizationHeader,

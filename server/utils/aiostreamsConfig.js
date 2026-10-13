@@ -27,7 +27,9 @@
 // Nothing else in a configuration is touched.
 
 const crypto = require('crypto')
+const { personalAddressCode } = require('../providers/jellyfinAuth')
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 20000
 
@@ -70,9 +72,17 @@ function instanceBase(serverUrl) {
  * Which configuration a sign-in was to. A sign-in picker address names it in
  * its path (/jellyfin/u/<alias>, or /jellyfin/<uuid>/<key>); on the plain
  * address it is the first part of the user name ("<uuid>" or "<uuid>/Sam").
+ * A personal sign-in address (/jellyfin/p/<code>) names a person, not a
+ * configuration: there a typed name is just the person's name, and only a
+ * typed configuration UUID is an account.
  */
 function configAccountFrom(serverUrl, typedLogin) {
   try {
+    if (personalAddressCode(serverUrl)) {
+      const typedAccount = String(typedLogin || '').trim()
+      const first = typedAccount.includes('/') ? typedAccount.slice(0, typedAccount.indexOf('/')) : typedAccount
+      return UUID_RE.test(first) ? first : null
+    }
     const path = new URL(serverUrl).pathname
     const alias = /\/jellyfin\/u\/([^/]+)\/?$/i.exec(path)
     if (alias) return decodeURIComponent(alias[1])
@@ -196,13 +206,21 @@ function summarize(config) {
     keyHash: crypto.createHash('sha256').update(stableJson(s.credentials || {})).digest('hex').slice(0, 12),
   }))
   const users = (Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : []).map((p) => String(p.name || p.id || ''))
+  // Which household users are kept separate, and a fingerprint of their
+  // personal address (never the address itself).
+  const apart = {}
+  for (const p of (Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : [])) {
+    apart[String(p.name || p.id || '')] = p.hidden === true
+      ? (p.address ? crypto.createHash('sha256').update(String(p.address)).digest('hex').slice(0, 8) : 'none')
+      : null
+  }
   // Which catalogs show, and in what order - the order also decides which make
   // AIOStreams' library limit.
   const catalogOrder = crypto.createHash('sha256')
     .update(stableJson((Array.isArray(config?.catalogModifications) ? config.catalogModifications : []).map((m) => [m?.id, m?.type, m?.enabled !== false])))
     .digest('hex').slice(0, 12)
   const hash = crypto.createHash('sha256').update(stableJson(config || {})).digest('hex').slice(0, 16)
-  return { addons, services, users, catalogOrder, hash }
+  return { addons, services, users, apart, catalogOrder, hash }
 }
 
 const SERVICE_NAMES = {
@@ -237,6 +255,17 @@ function describeChanges(before, after) {
   const afterUsers = new Set(after.users || [])
   for (const u of afterUsers) if (!beforeUsers.has(u)) out.push(`added household user ${u}`)
   for (const u of beforeUsers) if (!afterUsers.has(u)) out.push(`removed household user ${u}`)
+  // Looks taken before this was recorded carry no `apart`; nothing to compare.
+  if (before.apart && after.apart) {
+    for (const u of afterUsers) {
+      if (!beforeUsers.has(u)) continue
+      const was = before.apart[u] ?? null
+      const now = after.apart[u] ?? null
+      if (was === null && now !== null) out.push(`kept household user ${u} separate`)
+      else if (was !== null && now === null) out.push(`stopped keeping household user ${u} separate`)
+      else if (was !== null && was !== now) out.push(`gave household user ${u} a new sign-in address`)
+    }
+  }
   // Looks taken before catalogOrder existed carry none; nothing to compare.
   if (before.catalogOrder && after.catalogOrder && before.catalogOrder !== after.catalogOrder) out.push('changed the catalog order')
   if (!out.length && before.hash !== after.hash) out.push('changed other settings')

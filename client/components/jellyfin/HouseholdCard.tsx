@@ -12,12 +12,13 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import {
   ChevronDownIcon, UserPlusIcon, EyeSlashIcon, EyeIcon, KeyIcon,
-  QuestionMarkCircleIcon, ArrowTopRightOnSquareIcon, ArrowsPointingInIcon, PlusIcon, LockClosedIcon,
+  QuestionMarkCircleIcon, ArrowTopRightOnSquareIcon, ArrowsPointingInIcon, PlusIcon, LockClosedIcon, LinkIcon,
 } from '@heroicons/react/24/outline';
-import { api, type HouseholdProfile, type LimitsSummary } from '@/lib/api';
+import { api, type HouseholdPersonal, type HouseholdProfile, type LimitsSummary } from '@/lib/api';
 import { LimitsButton } from '@/components/user/LimitsButton';
 import { avatarThumbUrl } from '@/lib/posterUrl';
-import { Badge, Button, Card, ConfirmModal, Modal } from '@/components/ui';
+import { copyToClipboard } from '@/lib/clipboard';
+import { Badge, Button, Card, ConfirmModal, Modal, ToggleSwitch } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { MENU_ITEM, POPOVER_WIDTH, placeUnder, type Placement } from '@/components/user/ProfilesCard';
 
@@ -27,6 +28,8 @@ interface PendingAction {
   confirmText: string;
   variant?: 'default' | 'warning' | 'danger';
   run: () => Promise<void>;
+  /** Where to go back to when it is cancelled. */
+  back?: () => void;
 }
 
 const STATUS_TEXT: Record<HouseholdProfile['status'], string> = {
@@ -111,6 +114,11 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
   const [newHistory, setNewHistory] = useState<'own' | 'shared'>('own');
   const [pinFor, setPinFor] = useState<HouseholdProfile | null>(null);
   const [changedPin, setChangedPin] = useState('');
+  // Household users kept separate, each with a sign-in address of their own
+  // (AIOStreams only), by profile id.
+  const [personal, setPersonal] = useState<Record<string, HouseholdPersonal>>({});
+  const [newSeparate, setNewSeparate] = useState(false);
+  const [addressFor, setAddressFor] = useState<HouseholdProfile | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => { setSelected(null); setPlacement(null); }, []);
 
@@ -121,8 +129,11 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
       setCanManage(!!h.canManage);
       setCanPin(!!h.canPin);
       setServerKind(h.kind);
+      setPersonal(h.personal || {});
+      return h;
     } catch {
       setProfiles(null);
+      return null;
     }
   }, [userId]);
   useEffect(() => { if (profiles) onProfilesChanged?.(profiles); }, [profiles, onProfilesChanged]);
@@ -213,13 +224,22 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
   const submitAdd = async () => {
     setBusy(true);
     try {
-      const next = await api.addHouseholdUser(userId, { name: newName.trim(), pin: newPin.trim() || null, history: newHistory });
+      const name = newName.trim();
+      const separateNow = newSeparate && serverKind !== 'aiometadata';
+      const next = await api.addHouseholdUser(userId, { name, pin: newPin.trim() || null, history: newHistory, ...(separateNow ? { separate: true } : {}) });
       setProfiles(next.profiles);
-      toast.success(next.tracked ? `${newName.trim()} added and tracked` : `${newName.trim()} added - sign them in to track them`);
+      toast.success(next.tracked ? `${name} added and tracked` : `${name} added - sign them in to track them`);
       setAdding(false);
       setNewName('');
       setNewPin('');
       setNewHistory('own');
+      setNewSeparate(false);
+      // Their address is what they need next: show it.
+      if (separateNow) {
+        const h = await load();
+        const added = h?.profiles.find((p) => p.name === name);
+        if (added) setAddressFor(added);
+      }
     } catch (e: any) {
       toast.error(e?.message || 'Could not add them');
     } finally {
@@ -244,7 +264,52 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
     }
   };
 
+  // Keep someone separate, stop, or renew their address. The address window
+  // comes back afterwards, showing what it is now.
+  const changeAddress = async (p: HouseholdProfile, mode: 'on' | 'off' | 'renew') => {
+    setBusy(true);
+    try {
+      const next = await api.setHouseholdPersonalAddress(p.id, mode);
+      setProfiles(next.profiles);
+      setPersonal((prev) => ({ ...prev, [p.id]: next.personal }));
+      toast.success(mode === 'off' ? `${p.name} is no longer kept separate` : mode === 'renew' ? `${p.name} has a new address` : `${p.name} is kept separate`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not change that');
+    } finally {
+      setBusy(false);
+      setPending(null);
+      setAddressFor(p);
+    }
+  };
+
+  const askAddress = (p: HouseholdProfile, mode: 'off' | 'renew') => {
+    setAddressFor(null);
+    setPending(mode === 'off' ? {
+      title: `Stop keeping ${p.name} separate?`,
+      description: `${p.name} shows up with everyone else again, and their own sign-in address stops working. Anyone using it has to sign in at the usual address instead.`,
+      confirmText: 'Stop keeping separate',
+      variant: 'warning',
+      run: () => changeAddress(p, 'off'),
+      back: () => setAddressFor(p),
+    } : {
+      title: `Give ${p.name} a new address?`,
+      description: `${p.name} gets a new sign-in address. The old one stops working, so give them the new one and they have to sign in again with it.`,
+      confirmText: 'New address',
+      variant: 'warning',
+      run: () => changeAddress(p, 'renew'),
+      back: () => setAddressFor(p),
+    });
+  };
+
+  const copyAddress = async (url: string) => {
+    if (await copyToClipboard(url)) toast.success('Address copied');
+    else toast.error('Could not copy - select the address and copy it by hand');
+  };
+
   if (!profiles || (profiles.length === 0 && !canManage)) return null;
+  // Only AIOStreams has personal addresses; the sign-in must give SlickSync the configuration.
+  const canSeparate = canManage && serverKind !== 'aiometadata';
+  const addressInfo = addressFor ? personal[addressFor.id] : undefined;
 
   const sel = profiles.find((p) => p.id === selected) || null;
   const tracked = profiles.filter((p) => p.status === 'tracked').length;
@@ -364,7 +429,7 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
           />
           <div className="px-3 pt-2 pb-2 mb-1 border-b border-default">
             <p className="text-sm font-semibold text-default truncate">{sel.name}</p>
-            <p className="text-xs text-muted mt-0.5">{STATUS_TEXT[sel.status]}</p>
+            <p className="text-xs text-muted mt-0.5">{STATUS_TEXT[sel.status]}{personal[sel.id]?.separate ? ' · Kept separate' : ''}</p>
           </div>
           {sel.status === 'tracked' && (
             <button autoFocus className={MENU_ITEM} onClick={() => { closeMenu(); separate(sel); }}>
@@ -396,6 +461,11 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
               <LockClosedIcon className="w-4 h-4 text-muted" /> Change PIN
             </button>
           )}
+          {canSeparate && (
+            <button className={MENU_ITEM} onClick={() => { closeMenu(); setAddressFor(sel); }}>
+              <LinkIcon className="w-4 h-4 text-muted" /> Own sign-in address
+            </button>
+          )}
           {sel.status === 'own' && sel.person && (
             <Link href={`/users/${sel.person.id}`} className={MENU_ITEM} onClick={closeMenu}>
               <ArrowTopRightOnSquareIcon className="w-4 h-4 text-muted" /> Open {sel.person.username}
@@ -407,7 +477,7 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
 
       <ConfirmModal
         isOpen={!!pending}
-        onClose={() => { if (!busy) setPending(null); }}
+        onClose={() => { if (!busy) { pending?.back?.(); setPending(null); } }}
         onConfirm={() => { pending?.run(); }}
         title={pending?.title || ''}
         description={pending?.description || ''}
@@ -442,6 +512,15 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
             ))}
           </div>
           )}
+          {serverKind !== 'aiometadata' && (
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-default">Keep this person separate</p>
+              <p className="text-xs text-muted mt-0.5">They get a sign-in address of their own and see nobody else. Others don&apos;t see them either.</p>
+            </div>
+            <ToggleSwitch checked={newSeparate} onChange={() => setNewSeparate((v) => !v)} title="Keep this person separate" disabled={busy} className="shrink-0 mt-0.5" />
+          </div>
+          )}
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" type="button" onClick={() => setAdding(false)} disabled={busy}>Cancel</Button>
             <Button variant="primary" type="submit" isLoading={busy} disabled={!newName.trim()}>Add</Button>
@@ -465,6 +544,48 @@ export function HouseholdCard({ userId, personName, kindLabel, onPeopleChanged, 
             </div>
           </div>
         </form>
+      </Modal>
+
+      <Modal isOpen={!!addressFor} onClose={() => { if (!busy) setAddressFor(null); }} title={addressFor ? `${addressFor.name}'s own sign-in address` : ''}>
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-default">Keep this person separate</p>
+              <p className="text-xs text-muted mt-0.5">{addressFor?.name} gets a sign-in address of their own and sees nobody else in their apps. Nobody else sees them either.</p>
+            </div>
+            <ToggleSwitch
+              checked={!!addressInfo?.separate}
+              onChange={() => { if (addressFor) { if (addressInfo?.separate) askAddress(addressFor, 'off'); else changeAddress(addressFor, 'on'); } }}
+              title="Keep this person separate"
+              disabled={busy}
+              className="shrink-0 mt-0.5"
+            />
+          </div>
+          {addressInfo?.separate && addressInfo.url && (
+            <div className="space-y-2">
+              <label htmlFor="household-own-address" className="block text-sm font-medium text-default">Their address</label>
+              <input id="household-own-address" readOnly value={addressInfo.url} onFocus={(e) => e.currentTarget.select()}
+                className="w-full px-4 py-3 rounded-xl text-sm" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-surface-border)', color: 'var(--color-text)' }} />
+              <div className="flex gap-3 flex-wrap">
+                <Button variant="secondary" type="button" onClick={() => copyAddress(addressInfo.url!)} disabled={busy}>Copy</Button>
+                <Button variant="ghost" type="button" onClick={() => addressFor && askAddress(addressFor, 'renew')} disabled={busy}>New address</Button>
+              </div>
+            </div>
+          )}
+          {addressInfo?.separate && !addressInfo.url && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted">They are kept separate in AIOStreams but have no address of their own yet.</p>
+              <Button variant="secondary" type="button" onClick={() => addressFor && changeAddress(addressFor, 'renew')} isLoading={busy}>Give them an address</Button>
+            </div>
+          )}
+          <p className="text-xs text-muted">
+            At their address they still sign in with the setup&apos;s password. If this AIOStreams allows PIN sign-in and their PIN has 6 or more digits, the PIN alone is enough.
+            A new address, or switching this off, stops the old address working.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" type="button" onClick={() => setAddressFor(null)} disabled={busy}>Done</Button>
+          </div>
+        </div>
       </Modal>
 
       <Modal isOpen={!!signingIn} onClose={() => { if (!busy) setSigningIn(null); }} title={signingIn ? `Sign in ${signingIn.name}` : ''}>

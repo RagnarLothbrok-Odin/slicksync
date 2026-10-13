@@ -2564,9 +2564,18 @@ class ApiClient {
   }
 
   async getHousehold(userId: string) {
-    return this.fetch<{ profiles: HouseholdProfile[]; partOf: { profileId: string; name: string; owner: { id: string; username: string } } | null; kind: string | null; canManage?: boolean; canPin?: boolean }>(
+    return this.fetch<{ profiles: HouseholdProfile[]; partOf: { profileId: string; name: string; owner: { id: string; username: string } } | null; kind: string | null; canManage?: boolean; canPin?: boolean; personal?: Record<string, HouseholdPersonal> | null }>(
       `/jellyfin/users/${encodeURIComponent(userId)}/household`
     );
+  }
+
+  // Keep an AIOStreams household user separate with a sign-in address of
+  // their own, stop, or give them a new address (server/utils/aioHousehold.js).
+  async setHouseholdPersonalAddress(profileId: string, mode: 'on' | 'off' | 'renew') {
+    return this.fetch<{ profiles: HouseholdProfile[]; personal: HouseholdPersonal }>(`/jellyfin/household/${encodeURIComponent(profileId)}/personal-address`, {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    });
   }
 
   async trackHouseholdProfile(profileId: string, tracked: boolean) {
@@ -2577,8 +2586,8 @@ class ApiClient {
   }
 
   // Add an AIOStreams household user (server/utils/aioHousehold.js).
-  async addHouseholdUser(userId: string, data: { name: string; pin?: string | null; history: 'own' | 'shared' }) {
-    return this.fetch<{ profiles: HouseholdProfile[]; tracked: boolean }>(`/jellyfin/users/${encodeURIComponent(userId)}/household`, {
+  async addHouseholdUser(userId: string, data: { name: string; pin?: string | null; history: 'own' | 'shared'; separate?: boolean }) {
+    return this.fetch<{ profiles: HouseholdProfile[]; tracked: boolean; personal?: HouseholdPersonal }>(`/jellyfin/users/${encodeURIComponent(userId)}/household`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -3782,6 +3791,14 @@ export interface HouseholdProfile {
   avatarUrl?: string | null;
   /** Whose limits its Limits pill opens: its own person's id, or its own as a merged household user. */
   limitId?: string;
+}
+
+/** An AIOStreams household user kept separate: their own sign-in address. */
+export interface HouseholdPersonal {
+  separate: boolean;
+  address: string | null;
+  /** The full sign-in address to hand to them. */
+  url: string | null;
 }
 
 export interface User {
