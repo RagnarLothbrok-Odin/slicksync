@@ -126,6 +126,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 ### Watching
 
 - Watch history comes in, and what's playing shows in **Now Playing** with real watch time, straight from the server's sessions.
+- Now Playing only shows what is still being confirmed as playing: if AIOStreams signs SlickSync out or can't be reached, SlickSync signs in again by itself, and a title it can no longer vouch for comes off the screen instead of sitting there.
 - Watched marks, favourites and resume points are **written back** to the server.
 - **AIOStreams watch history** — turn it on per person and viewing in AIOStreams' own apps (Odin, Infuse, Swiftfin, the desktop app) becomes history and Now Playing; watched marks, the watchlist, drops and ratings flow back the other way. One link serves the whole household.
 - **Keep Jellyfin in step** — what someone finishes in Stremio, Nuvio or AIOStreams is marked played on their Jellyfin server, and what they stop part-way picks up at the same spot there. Switch it on per person and the household watchlist (as favourites) and ratings go there too.
@@ -142,6 +143,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 - **Age limit** — the highest rating someone may play. On a Jellyfin server it's the server's own age limit, enforced in every Jellyfin app; on Stremio, Nuvio and AIOMetadata SlickSync holds them to it - a title rated above it has nothing to play, while catalogs stay.
 - **Invites that make the account** — an invitation can create the person's Jellyfin account with a password they choose; it stays off until you accept them, and switches off again if they expire or are removed.
 - **AIOStreams and AIOMetadata household users** — add one, or set or remove their PIN, from the household card.
+- **Keep an AIOStreams household user separate** (AIOStreams 2.36) — they get a sign-in address of their own, see nobody else and stay off the picker. Copy the address from the household card, or replace it. Off unless you switch it on.
 - **Profile pictures both ways** — a picture changed in SlickSync can go to their Jellyfin, AIOStreams or AIOMetadata server too, and one changed on the server shows up here within minutes.
 
 ### Collections
@@ -157,6 +159,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 
 - A change made to an AIOStreams configuration outside SlickSync raises a bell and push notification. SlickSync writes there only for a profile's own collections setup, and — if you switch it on for a person — to swap a debrid key the Vault rotated or failed over.
 - Exports and Disaster Recovery Kits carry households, their sign-ins and their collections.
+- **Addresses are checked before SlickSync fetches them** — addons, backends, webhooks, pictures and imports, and anywhere they redirect. A shared instance never connects to its own network; your own install still reaches the servers on yours.
 - **AIOStreams history** — every version of a configuration is kept, with what changed from the one before; **Put back** restores an earlier one, keeping today's debrid services, household users and API keys unless you untick them.
 - **AIOStreams health** on a person's page — each addon's errors, empty answers and slow responses as AIOStreams itself reports them, and a one-off test search.
 - **Server versions** — Health shows each Jellyfin, AIOStreams and AIOMetadata server's version, and whether a newer stable release is out.
