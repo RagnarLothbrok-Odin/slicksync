@@ -367,13 +367,14 @@ Frontend and API are both served through `:3000` — only that port needs a mapp
 > Older copies of `docker-compose.private.yml` declared no volume, so your database lives inside the container. Switching to the current file without moving it first starts SlickSync empty. Copy it out while the old setup is running, switch, then copy it back:
 >
 > ```bash
-> docker compose -f docker-compose.private.yml cp slicksync:/app/data ./slicksync-data
-> docker compose -f docker-compose.private.yml down
+> export COMPOSE_FILE=docker-compose.private.yml
+> docker compose cp slicksync:/app/data ./slicksync-data
+> docker compose down
 > git pull
-> docker compose -f docker-compose.private.yml up -d
-> docker compose -f docker-compose.private.yml cp ./slicksync-data/. slicksync:/app/data
-> docker compose -f docker-compose.private.yml exec -u root slicksync chown -R 1001:1001 /app/data
-> docker compose -f docker-compose.private.yml restart
+> docker compose up -d
+> docker compose cp ./slicksync-data/. slicksync:/app/data
+> docker compose exec -u root slicksync chown -R 1001:1001 /app/data
+> docker compose restart
 > ```
 >
 > Keep `./slicksync-data` until you've checked everything is there. If your compose file already mounts a volume at `/app/data`, none of this applies. Full details in the [1.88.0 release notes](https://github.com/slicknsliding/slicksync/releases/tag/v1.88.0).
