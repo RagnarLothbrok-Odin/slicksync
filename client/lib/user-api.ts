@@ -56,6 +56,8 @@ export interface UserInfo {
   username: string;
   email: string;
   colorIndex?: number;
+  /** They switched Gravatar on, so their avatar may look their email up there. */
+  useGravatar?: boolean;
   activityVisibility: 'public' | 'private';
   groupName?: string;
   groupId?: string;

@@ -187,7 +187,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
       const accountId = getAccountId(req);
       const people = await prisma.user.findMany({
         where: { accountId, isActive: true, providerType: 'jellyfin', jellyfinServerKind: 'aiostreams' },
-        select: { id: true, username: true, email: true, avatarUrl: true, colorIndex: true, watchStateEnabled: true, traxToken: true, aioConfigPassword: true },
+        select: { id: true, username: true, email: true, avatarUrl: true, useGravatar: true, colorIndex: true, watchStateEnabled: true, traxToken: true, aioConfigPassword: true },
         orderBy: { username: 'asc' },
       });
       const profiles = people.length
@@ -200,6 +200,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
           name: p.username,
           email: p.email || null,
           avatarUrl: p.avatarUrl || null,
+          useGravatar: p.useGravatar === true,
           colorIndex: p.colorIndex ?? null,
           linked: !!(p.watchStateEnabled && p.traxToken),
           // Giving a profile its own collections means a change in AIOStreams,

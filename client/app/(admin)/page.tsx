@@ -942,7 +942,7 @@ export default function DashboardPage() {
                         aria-label={`Open ${np.user.username}'s profile`}
                         className="shrink-0 rounded-full transition-transform hover:scale-105"
                       >
-                        <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} size="sm" />
+                        <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} useGravatar={np.user.useGravatar} size="sm" />
                       </TVLink>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm truncate text-muted">
@@ -996,7 +996,7 @@ export default function DashboardPage() {
                           style={{ background: 'linear-gradient(180deg, var(--color-primary), var(--color-secondary))' }}
                         />
                         <div className="relative shrink-0">
-                          <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} size="sm" />
+                          <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="sm" />
                           <div
                             className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold"
                             style={{
@@ -1280,7 +1280,7 @@ export default function DashboardPage() {
                         aria-label={`Open ${np.user.username}'s profile`}
                         className="shrink-0 rounded-full transition-transform hover:scale-105"
                       >
-                        <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} size="sm" />
+                        <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} useGravatar={np.user.useGravatar} size="sm" />
                       </Link>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate text-muted">
@@ -1344,7 +1344,7 @@ export default function DashboardPage() {
                         className="flex items-center gap-3 p-3 rounded-lg transition-colors bg-surface-hover hover:bg-surface cursor-pointer"
                       >
                         <div className="relative">
-                          <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} size="md" />
+                          <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="md" />
                           <div 
                             className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
                             style={{ 

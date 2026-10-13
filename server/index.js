@@ -553,7 +553,7 @@ app.get('/api/docs', (req, res) => {
   res.send(swaggerUi.generateHTML(openapiSpec, { customSiteTitle: 'SlickSync API' }));
 });
 app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assignUserToGroup }));
-app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt }));
+app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }));
 // Public library router (no auth required)
 const { getCachedLibrary, setCachedLibrary } = require('./utils/libraryCache');
 app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET }));

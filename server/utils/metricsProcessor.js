@@ -571,6 +571,26 @@ const WALL_CLOCK_MIN_DELTA_SECONDS = 10
 // How recently a title must have been played for a too-small advance to be
 // carried to the next pass rather than let go (see processLibraryItem).
 const HOLD_BASELINE_WINDOW_MS = 5 * 60 * 1000
+// How recently a title seen for the first time must have been played for the
+// progress already on it to count (see processLibraryItem).
+const FIRST_SIGHTING_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Seconds to credit for a title on its first sighting: its position in the
+ * video, bounded by the lifetime figure and by the runtime. Zero unless the
+ * runtime is known and it was played within the last day.
+ */
+function firstSightingSeconds(state, lastWatched) {
+  const playedAt = lastWatched instanceof Date ? lastWatched.getTime() : NaN
+  if (!Number.isFinite(playedAt) || Math.abs(Date.now() - playedAt) > FIRST_SIGHTING_WINDOW_MS) return 0
+  const runtimeMs = Number(state?.duration ?? NaN)
+  const overallMs = Number(state?.overallTimeWatched ?? NaN)
+  if (!(runtimeMs > 0) || !(overallMs > 0)) return 0
+  const positionMs = Number(state?.timeOffset ?? NaN)
+  const bounds = [overallMs, runtimeMs]
+  if (positionMs > 0) bounds.push(positionMs)
+  return Math.floor(Math.min(...bounds) / 1000)
+}
 
 // Ratio of runtime a movie's position must drop below to count as "restarted".
 const REWATCH_ARM_RATIO = 0.15
@@ -876,6 +896,20 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
         // baseline with zero delta here; real incremental watching gets
         // captured correctly starting from the next observation onward.
         totalDeltaSeconds = 0
+        // One exception, tightly bounded: a title seen for the very first
+        // time that was played within the last day. A provider that only
+        // writes progress at pause or stop shows a new title with its first
+        // sitting already on it, and counting none of that left every new
+        // title short (a 98-minute film watched in one evening totalled 72).
+        // What counts is where playback stands in THIS video, never the
+        // lifetime figure, and never more than its runtime - so a library
+        // entry from long ago, or a series with hours behind it, still adds
+        // nothing. Not for a new episode of a known show (flipping between
+        // two episodes would count each again), and not for providers whose
+        // position can jump without anyone watching.
+        if (!oldSnapshotValue && !item.state?.wallClockCapped) {
+          totalDeltaSeconds = firstSightingSeconds(item.state, current.lastWatched)
+        }
       }
 
       // Get the most recent activity for this item to see when we last recorded

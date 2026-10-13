@@ -629,7 +629,7 @@ export default function MetricsPage() {
                             {index + 1}
                           </span>
                         )}
-                        <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} size="sm" className="shrink-0" />
+                        <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="sm" className="shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-default truncate leading-tight">{user.name}</p>
                           <div className="flex items-center gap-3 text-xs text-muted mt-0.5">
@@ -706,7 +706,7 @@ export default function MetricsPage() {
                       return (
                         <div key={p.user.id} className="p-4 rounded-xl bg-surface-hover flex flex-col gap-3">
                           <div className="flex items-center gap-3">
-                            <UserAvatar userId={p.user.id} name={p.user.username} email={p.user.email} src={p.user.useGravatar ? undefined : (p.user.avatarUrl ?? undefined)} size="md" />
+                            <UserAvatar userId={p.user.id} name={p.user.username} email={p.user.email} src={p.user.useGravatar ? undefined : (p.user.avatarUrl ?? undefined)} useGravatar={p.user.useGravatar} size="md" />
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-default truncate">{p.user.username}</p>
                               <p className="text-xs text-muted">{timeLabel} · {p.movieCount} movies · {p.seriesCount} series</p>
@@ -737,7 +737,7 @@ export default function MetricsPage() {
                           {p.tasteTwin && (
                             <div className="flex items-center gap-2 pt-1 border-t border-default/50 mt-auto">
                               <span className="text-xs text-muted">Closest match:</span>
-                              <UserAvatar userId={p.tasteTwin.user.id} name={p.tasteTwin.user.username} email={p.tasteTwin.user.email} src={p.tasteTwin.user.useGravatar ? undefined : (p.tasteTwin.user.avatarUrl ?? undefined)} size="xs" />
+                              <UserAvatar userId={p.tasteTwin.user.id} name={p.tasteTwin.user.username} email={p.tasteTwin.user.email} src={p.tasteTwin.user.useGravatar ? undefined : (p.tasteTwin.user.avatarUrl ?? undefined)} useGravatar={p.tasteTwin.user.useGravatar} size="xs" />
                               <span className="text-xs font-medium text-default truncate">{p.tasteTwin.user.username}</span>
                               <Badge variant="primary" size="sm">{p.tasteTwin.similarity}%</Badge>
                             </div>
@@ -767,11 +767,11 @@ export default function MetricsPage() {
                     {tasteOverlap.map((pair) => (
                       <div key={`${pair.userA.id}-${pair.userB.id}`} className="p-4 rounded-xl bg-surface-hover">
                         <div className="flex items-center gap-3 mb-3">
-                          <UserAvatar userId={pair.userA.id} name={pair.userA.username} email={pair.userA.email} src={pair.userA.useGravatar ? undefined : (pair.userA.avatarUrl ?? undefined)} size="sm" />
+                          <UserAvatar userId={pair.userA.id} name={pair.userA.username} email={pair.userA.email} src={pair.userA.useGravatar ? undefined : (pair.userA.avatarUrl ?? undefined)} useGravatar={pair.userA.useGravatar} size="sm" />
                           <span className="text-sm font-medium text-default truncate">{pair.userA.username}</span>
                           <Badge variant="primary">{pair.similarity}% overlap</Badge>
                           <span className="text-sm font-medium text-default truncate">{pair.userB.username}</span>
-                          <UserAvatar userId={pair.userB.id} name={pair.userB.username} email={pair.userB.email} src={pair.userB.useGravatar ? undefined : (pair.userB.avatarUrl ?? undefined)} size="sm" />
+                          <UserAvatar userId={pair.userB.id} name={pair.userB.username} email={pair.userB.email} src={pair.userB.useGravatar ? undefined : (pair.userB.avatarUrl ?? undefined)} useGravatar={pair.userB.useGravatar} size="sm" />
                         </div>
                         <ScrollRow className="flex gap-2 pb-1">
                           {pair.shared.map((item) => (

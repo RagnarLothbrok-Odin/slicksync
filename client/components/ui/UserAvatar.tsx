@@ -9,6 +9,7 @@ interface UserAvatarProps {
   name?: string;
   email?: string;
   src?: string;
+  useGravatar?: boolean;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showRing?: boolean;
   status?: 'online' | 'offline' | 'away';
@@ -22,8 +23,9 @@ export function UserAvatar({
   userId, 
   name, 
   email: providedEmail, 
-  src, 
-  size = 'md', 
+  src,
+  useGravatar,
+  size = 'md',
   showRing = false, 
   status,
   colorIndex: providedColorIndex,
@@ -84,7 +86,8 @@ export function UserAvatar({
       name={displayName} 
       email={email} 
       src={src}
-      size={size} 
+      useGravatar={useGravatar}
+      size={size}
       showRing={showRing}
       status={status}
       colorIndex={colorIdx}

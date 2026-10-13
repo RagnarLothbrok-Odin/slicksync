@@ -135,8 +135,26 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
     loadStoredAuth();
   }, []);
 
+  // The sign-in answers carry only the basics, so right after one the saved
+  // info has no Gravatar choice yet and the person's own avatar would show
+  // initials until the next page load. Fetch the full info once, quietly.
+  const fillInfoAfterSignIn = useCallback(async (signedInId: string, signedInProvider: Provider, key: string) => {
+    try {
+      const freshInfo = await userAuth.getUserInfo(signedInId, key);
+      setUserInfo(freshInfo);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        userId: signedInId,
+        provider: signedInProvider,
+        authKey: key,
+        userInfo: freshInfo,
+      }));
+    } catch {
+      // Keep the basics from the sign-in; the next load fills the rest.
+    }
+  }, []);
+
   // Login with Stremio auth key
-  const login = useCallback(async (newAuthKey: string): Promise<{ success: boolean; error?: string }> => {
+  const login =useCallback(async (newAuthKey: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
     setError(null);
     setErrorCode(null);
@@ -157,6 +175,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
           authKey: newAuthKey,
           userInfo: result.userInfo,
         }));
+        void fillInfoAfterSignIn(result.userId, 'stremio', newAuthKey);
 
         return { success: true };
       } else {
@@ -177,7 +196,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fillInfoAfterSignIn]);
 
   // Login with a completed Nuvio device-code exchange. The exchange result
   // proves identity to the SERVER, which issues a SlickSync session token
@@ -204,6 +223,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
           authKey: result.sessionToken,
           userInfo: result.userInfo,
         }));
+        void fillInfoAfterSignIn(result.userId, 'nuvio', result.sessionToken);
 
         return { success: true };
       } else {
@@ -224,7 +244,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fillInfoAfterSignIn]);
 
   // Login through a Jellyfin-compatible server. Same session model as
   // Nuvio: the server signs in, and the browser keeps only the SlickSync
@@ -245,6 +265,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
           authKey: result.sessionToken,
           userInfo: result.userInfo,
         }));
+        void fillInfoAfterSignIn(result.userId, 'jellyfin', result.sessionToken);
         return { success: true };
       }
       const errorMsg = result.error || 'Authentication failed';
@@ -254,7 +275,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
       const errorMsg = err instanceof UserApiError ? err.message : 'Authentication failed';
       return { success: false, error: errorMsg };
     }
-  }, []);
+  }, [fillInfoAfterSignIn]);
 
   // Logout
   const logout = useCallback(() => {

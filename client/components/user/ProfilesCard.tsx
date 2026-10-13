@@ -336,7 +336,7 @@ export function ProfilesCard({ userId, loginLabel, onPeopleChanged, limits }: {
                   <span className={`text-sm font-medium max-w-full truncate ${tracked ? 'text-default' : 'text-muted'}`}>{profileName(profile)}</span>
                   {tracked && owner ? (
                     <span className="inline-flex items-center gap-1.5 max-w-full rounded-full pl-0.5 pr-2 py-0.5 bg-surface-hover">
-                      <UserAvatar userId={owner.id} name={owner.username} email={owner.email || undefined} src={owner.avatarUrl || undefined} colorIndex={owner.colorIndex} size="xs" />
+                      <UserAvatar userId={owner.id} name={owner.username} email={owner.email || undefined} src={owner.avatarUrl || undefined} useGravatar={owner.useGravatar} colorIndex={owner.colorIndex} size="xs" />
                       <span className="text-[11px] text-default truncate">{owner.username}</span>
                     </span>
                   ) : (

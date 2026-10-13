@@ -203,7 +203,7 @@ export default function AiostreamsCollectionsPage() {
                         onClick={() => pick(a.id)}
                         className="flex items-center gap-3 p-3 rounded-xl border border-default hover:border-primary/50 bg-subtle hover:bg-surface-hover transition-colors text-left"
                       >
-                        <Avatar name={a.name} email={a.email || undefined} src={a.avatarUrl || undefined} colorIndex={a.colorIndex ?? undefined} size="md" />
+                        <Avatar name={a.name} email={a.email || undefined} src={a.avatarUrl || undefined} useGravatar={a.useGravatar} colorIndex={a.colorIndex ?? undefined} size="md" />
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-default truncate">{a.name}</p>
                           {a.profiles.length > 0 && <p className="text-xs text-subtle truncate">{a.profiles.map((p) => p.name).join(', ')}</p>}
@@ -223,7 +223,7 @@ export default function AiostreamsCollectionsPage() {
                     className="flex items-center gap-3 pr-3 rounded-xl hover:bg-surface-hover transition-colors text-left"
                     title={choices > 1 ? 'Switch account' : undefined}
                   >
-                    <Avatar name={selected.name} email={selected.email || undefined} src={selected.avatarUrl || undefined} colorIndex={selected.colorIndex ?? undefined} size="md" />
+                    <Avatar name={selected.name} email={selected.email || undefined} src={selected.avatarUrl || undefined} useGravatar={selected.useGravatar} colorIndex={selected.colorIndex ?? undefined} size="md" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 min-w-0">
                         <p className="text-sm font-medium text-default truncate">{selected.name}</p>

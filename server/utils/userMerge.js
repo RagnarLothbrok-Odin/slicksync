@@ -99,6 +99,8 @@ async function getUndoInfo(prisma, survivorId, { dataDir = path.join(process.cwd
     donorUsername: donor?.username || null,
     donorEmail: donor?.email || null,
     donorAvatarUrl: donor?.avatarUrl || null,
+    // The archive holds the donor's whole row, so its Gravatar choice is in there.
+    donorUseGravatar: donor?.useGravatar === true,
     donorColorIndex: donor?.colorIndex ?? null,
     undoable: !!(credential.donorId && archiveFullPath && fs.existsSync(archiveFullPath)),
   }

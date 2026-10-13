@@ -808,8 +808,18 @@ module.exports.INVITE_CODE_LENGTH = INVITE_CODE_LENGTH
 
 // Public invite routes (no auth required)
 // These routes are mounted at /invite/:inviteCode/*
-module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decrypt }) => {
+module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }) => {
   const publicRouter = express.Router()
+
+  // The household signed in on this request, or null. The whole /invite tree
+  // is open to strangers, but the gate still sets req.appAccountId when a
+  // valid session cookie comes along, so the few routes here that are for a
+  // household's admin can tell who is calling. A household install with no
+  // login has exactly one household, and it is always the caller.
+  const config = require('../utils/config')
+  const instanceType = INSTANCE_TYPE ?? config.INSTANCE_TYPE
+  const loginRequired = instanceType === 'public' || !!(PRIVATE_AUTH_ENABLED ?? config.PRIVATE_AUTH_ENABLED)
+  const callerAccountId = (req) => (loginRequired ? req.appAccountId || null : (DEFAULT_ACCOUNT_ID ?? config.DEFAULT_ACCOUNT_ID))
 
   // --- Nuvio device login, for someone joining by invite ---
   //
@@ -935,6 +945,10 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
   // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
   publicRouter.post('/generate-oauth', async (req, res) => {
     try {
+      // Only a signed-in admin: it spends a call to Stremio's link service
+      // and has no business being open to anonymous traffic.
+      if (!callerAccountId(req)) return res.status(401).json({ error: 'Unauthorized' })
+
       // Always generate fresh oauth link
       let oauthCode = null
       let oauthLink = null
@@ -1358,6 +1372,12 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
 
   publicRouter.post('/:inviteCode/generate-oauth', async (req, res) => {
     try {
+      // An invite code plus a request's email and username must not be enough
+      // to replace the stored link code: only a signed-in admin of the
+      // household that owns the invitation may.
+      const accountId = callerAccountId(req)
+      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+
       const { inviteCode } = req.params
       const { email, username } = req.body
 
@@ -1369,7 +1389,9 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
         where: { inviteCode }
       })
 
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
+      // Another household's invitation answers exactly like one that does
+      // not exist, so a code cannot be probed from a different account.
+      if (!invitation || invitation.accountId !== accountId) return res.status(404).json({ error: 'Invitation not found' })
       if (!invitation.isActive) return res.status(400).json({ error: 'Invitation is not active' })
 
       const request = await prisma.inviteRequest.findFirst({

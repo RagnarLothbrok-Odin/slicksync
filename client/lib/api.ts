@@ -3754,6 +3754,7 @@ export interface AioCollectionAccount {
   name: string;
   email: string | null;
   avatarUrl: string | null;
+  useGravatar?: boolean;
   colorIndex: number | null;
   linked: boolean;
   /** Whether SlickSync can set up a profile's own collections in AIOStreams (it kept the configuration password). */
@@ -3823,6 +3824,8 @@ export interface User {
   simklConnectedAt?: string | null;
   colorIndex?: number;
   avatarUrl?: string | null;
+  /** They switched Gravatar on, so an avatar of them may look their email up there. */
+  useGravatar?: boolean;
   inviteCode?: string;
   // When this user's addons were last successfully synced, and the state of
   // that sync. Null until the first sync completes - these columns existed
@@ -3871,6 +3874,7 @@ export interface MergeInfo {
   donorUsername: string | null;
   donorEmail: string | null;
   donorAvatarUrl: string | null;
+  donorUseGravatar?: boolean;
   donorColorIndex: number | null;
   undoable: boolean;
 }
@@ -5351,6 +5355,7 @@ export interface TopItemWithUsers {
     username: string;
     email?: string;
     avatarUrl?: string | null;
+    useGravatar?: boolean;
     colorIndex?: number;
     watchTimeSeconds: number;
     watchTimeHours: number;

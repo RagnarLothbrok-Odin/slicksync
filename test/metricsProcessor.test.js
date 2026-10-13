@@ -186,3 +186,42 @@ test('processLibraryItem: Jellyfin progress just under a minute is still recorde
   const activity = prisma.calls.transactions[0].find((o) => o.__op === 'watchActivity.create')
   assert.equal(activity.args.data.watchTimeSeconds, 58)
 })
+
+// --- a title seen for the first time ---------------------------------------
+
+function firstSeen(state) {
+  return { _id: 'tt7654300', type: 'movie', name: 'New Film', state }
+}
+const HOUR = 60 * 60 * 1000
+
+test('processLibraryItem: a new title played today counts where playback stands, up to its runtime', async () => {
+  const prisma = makeMockPrisma()
+  // First sighting, 26 minutes in, of a 98-minute film played a few minutes ago.
+  const item = firstSeen({ overallTimeWatched: String(26 * 60000), timeOffset: String(26 * 60000), duration: String(98 * 60000), lastWatched: new Date(Date.now() - 5 * 60000).toISOString() })
+  const result = await processLibraryItem(prisma, 'acct-1', 'user-1', item, new Date())
+  assert.equal(result.activityCreated, true)
+  const activity = prisma.calls.transactions[0].find((o) => o.__op === 'watchActivity.create')
+  assert.equal(activity.args.data.watchTimeSeconds, 26 * 60)
+})
+
+test('processLibraryItem: a new title never counts a lifetime figure, an old entry, or an unknown runtime', async () => {
+  const cases = {
+    // Hours of lifetime watching behind a series: only the position in this video counts.
+    lifetime: [{ overallTimeWatched: String(16 * HOUR), timeOffset: String(10 * 60000), duration: String(45 * 60000), lastWatched: new Date().toISOString() }, 10 * 60],
+    // A position past the runtime is held to the runtime.
+    overRuntime: [{ overallTimeWatched: String(5 * HOUR), timeOffset: String(5 * HOUR), duration: String(90 * 60000), lastWatched: new Date().toISOString() }, 90 * 60],
+    // Watched last week: nothing.
+    old: [{ overallTimeWatched: String(60 * 60000), timeOffset: String(60 * 60000), duration: String(98 * 60000), lastWatched: new Date(Date.now() - 7 * 24 * HOUR).toISOString() }, null],
+    // No runtime to bound it by: nothing.
+    noRuntime: [{ overallTimeWatched: String(60 * 60000), timeOffset: String(60 * 60000), lastWatched: new Date().toISOString() }, null],
+    // A server whose position can jump without anyone watching: nothing.
+    jumpy: [{ overallTimeWatched: String(60 * 60000), timeOffset: String(60 * 60000), duration: String(98 * 60000), lastWatched: new Date().toISOString(), wallClockCapped: true }, null],
+  }
+  for (const [name, [state, want]] of Object.entries(cases)) {
+    const prisma = makeMockPrisma()
+    await processLibraryItem(prisma, 'acct-1', 'user-1', firstSeen(state), new Date())
+    const activity = prisma.calls.transactions[0].find((o) => o.__op === 'watchActivity.create')
+    assert.equal(activity ? activity.args.data.watchTimeSeconds : null, want, name)
+    assert.ok(prisma.calls.transactions[0].some((o) => o.__op === 'watchSnapshot.upsert'), `${name}: the baseline is still set`)
+  }
+})

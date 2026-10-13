@@ -87,6 +87,7 @@ interface ActivityItem {
   profileLabel?: string; // Nuvio profile name this was watched under, if known
   userProvider?: string; // the person's own provider, for the "Watched on" filter
   userAvatarUrl?: string | null;
+  userUseGravatar?: boolean;
   debridService?: string; // e.g. "torbox" - only set when confidently detected via the AIOStreams proxy (see server/utils/debridDetection.js). Absent doesn't mean "not debrid".
   completed?: boolean | null; // real completion: true = finished, false = started/dropped, null/undefined = unknown
   rewatchCount?: number; // movies only: times watched to the end again after first completion (0 = first watch)
@@ -94,7 +95,7 @@ interface ActivityItem {
   // watched this SAME content on the SAME day, oldest first. Set only on the
   // most-recent activity for that content+day; the earlier ones are omitted
   // from the grid entirely (still present in list view/stats, unchanged).
-  additionalWatchers?: Array<{ userId: string; userName: string; userEmail?: string; userColorIndex?: number; userAvatarUrl?: string | null }>;
+  additionalWatchers?: Array<{ userId: string; userName: string; userEmail?: string; userColorIndex?: number; userAvatarUrl?: string | null; userUseGravatar?: boolean }>;
 }
 
 // Invite history types
@@ -166,6 +167,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         isSynthetic: false,
         poster: session.item.poster,
         userAvatarUrl: session.user.useGravatar ? null : (session.user.avatarUrl ?? null),
+        userUseGravatar: !!session.user.useGravatar,
       };
       seenUserItemKeys.set(`${session.user.id}:${session.item.id}:${session.videoId || ''}:${dayKeyOf(new Date(session.startTime))}`, sessionCard);
       activities.push(sessionCard);
@@ -229,6 +231,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         // AIOStreams, AIOMetadata) for the "Watched on" filter.
         userProvider: entry.user.providerType === 'jellyfin' ? ((entry.user as { jellyfinServerKind?: string | null }).jellyfinServerKind || 'jellyfin') : entry.user.providerType,
         userAvatarUrl: entry.user.useGravatar ? null : (entry.user.avatarUrl ?? null),
+        userUseGravatar: !!entry.user.useGravatar,
         debridService: entry.debridService,
       });
     });
@@ -439,6 +442,7 @@ function buildGridWatchers(activities: ActivityItem[]): ActivityItem[] {
         userEmail: a.userEmail,
         userColorIndex: a.userColorIndex,
         userAvatarUrl: a.userAvatarUrl,
+        userUseGravatar: a.userUseGravatar,
       });
     }
     result.push(others.length > 0 ? { ...primary, additionalWatchers: others } : primary);
@@ -541,7 +545,7 @@ const ActivityCard = memo(function ActivityCard({
 
       {/* User avatar */}
       <Link href={`/users/${activity.userId}`}>
-        <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} size="md" />
+        <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} useGravatar={activity.userUseGravatar} size="md" />
       </Link>
 
       {/* Activity details */}
@@ -738,7 +742,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
             spreading avatars across the art. */}
         {(() => {
           const watchers = [
-            { userId: activity.userId, userName: activity.userName, userEmail: activity.userEmail, userAvatarUrl: activity.userAvatarUrl },
+            { userId: activity.userId, userName: activity.userName, userEmail: activity.userEmail, userAvatarUrl: activity.userAvatarUrl, userUseGravatar: activity.userUseGravatar },
             ...(activity.additionalWatchers ?? []),
           ];
           const count = watchers.length;
@@ -773,7 +777,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
                   title={`${count} watched`}
                   aria-label={`${count} people watched — show who`}
                 >
-                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} size="sm" />
+                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} useGravatar={activity.userUseGravatar} size="sm" />
                   <span className="absolute -bottom-1 -right-1 min-w-4 h-4 px-1 rounded-full flex items-center justify-center text-[10px] font-bold bg-primary text-white ring-2 ring-slate-900">
                     {count}
                   </span>
@@ -784,7 +788,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
                   onClick={(e) => e.stopPropagation()}
                   className="block rounded-full shadow-md shadow-black/40"
                 >
-                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} size="sm" />
+                  <UserAvatar userId={activity.userId} name={activity.userName} email={activity.userEmail} src={activity.userAvatarUrl ?? undefined} useGravatar={activity.userUseGravatar} size="sm" />
                 </Link>
               )}
 
@@ -802,7 +806,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
                         onClick={(e) => e.stopPropagation()}
                         className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-surface-hover transition-colors"
                       >
-                        <UserAvatar userId={w.userId} name={w.userName} email={w.userEmail} src={w.userAvatarUrl ?? undefined} size="xs" />
+                        <UserAvatar userId={w.userId} name={w.userName} email={w.userEmail} src={w.userAvatarUrl ?? undefined} useGravatar={w.userUseGravatar} size="xs" />
                         <span className="text-xs text-default truncate">
                           {w.userName}
                           {/* additionalWatchers carries no per-watcher profile
@@ -1358,7 +1362,7 @@ function NowPlayingItemBody({
       )}
       <div className="flex-1 min-w-0">
         <TVLink href={`/users/${np.user.id}`} className="flex items-center gap-2 mb-1">
-          <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} size="sm" />
+          <UserAvatar userId={np.user.id} name={np.user.username} email={np.user.email} src={np.user.useGravatar ? undefined : (np.user.avatarUrl ?? undefined)} useGravatar={np.user.useGravatar} size="sm" />
           <span className="text-sm font-medium text-default truncate hover:text-primary transition-colors">
             {np.user.username}
           </span>

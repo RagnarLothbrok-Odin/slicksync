@@ -46,6 +46,7 @@ function calculateTopItemsWithUsers(watchSessions, allUsers) {
         username: session.user.username,
         email: userInfo?.email,
         avatarUrl: userInfo?.avatarUrl ?? null,
+        useGravatar: userInfo?.useGravatar === true,
         colorIndex: userInfo?.colorIndex,
         watchTimeSeconds: 0,
         watchTimeHours: 0,

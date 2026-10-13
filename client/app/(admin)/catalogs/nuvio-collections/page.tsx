@@ -1287,7 +1287,7 @@ export default function NuvioCollectionsPage() {
                       onClick={() => handleSelectUser(u.id)}
                       className="flex items-center gap-3 p-3 rounded-xl border border-default hover:border-primary/50 bg-subtle hover:bg-surface-hover transition-colors text-left"
                     >
-                      <Avatar name={u.name || u.email || u.id} email={u.email} src={u.avatarUrl || undefined} colorIndex={u.colorIndex} size="md" />
+                      <Avatar name={u.name || u.email || u.id} email={u.email} src={u.avatarUrl || undefined} useGravatar={u.useGravatar} colorIndex={u.colorIndex} size="md" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-default truncate">{u.name || u.email || u.id}</p>
                         {u.email && u.name && <p className="text-xs text-subtle truncate">{u.email}</p>}
@@ -1307,7 +1307,7 @@ export default function NuvioCollectionsPage() {
                   className="flex items-center gap-3 pr-3 rounded-xl hover:bg-surface-hover transition-colors text-left"
                   title="Switch account"
                 >
-                  <Avatar name={selectedUser?.name || selectedUser?.email || selectedUserId} email={selectedUser?.email} src={selectedUser?.avatarUrl || undefined} colorIndex={selectedUser?.colorIndex} size="md" />
+                  <Avatar name={selectedUser?.name || selectedUser?.email || selectedUserId} email={selectedUser?.email} src={selectedUser?.avatarUrl || undefined} useGravatar={selectedUser?.useGravatar} colorIndex={selectedUser?.colorIndex} size="md" />
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-default truncate">{selectedUser?.name || selectedUser?.email || selectedUserId}</p>
                     <p className="text-xs text-primary">Switch account</p>

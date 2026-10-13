@@ -94,6 +94,7 @@ export function NowPlayingSection({ items, now, fetchedAt }: NowPlayingSectionPr
               name={item.user.username}
               email={item.user.email}
               src={item.user.useGravatar ? undefined : (item.user.avatarUrl ?? undefined)}
+              useGravatar={item.user.useGravatar}
               colorIndex={item.user.colorIndex}
               size="md"
             />

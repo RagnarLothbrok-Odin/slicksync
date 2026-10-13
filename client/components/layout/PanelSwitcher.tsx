@@ -29,6 +29,8 @@ interface PanelSwitcherProps {
     uuid?: string | null;
     linkedProvider?: 'stremio' | 'nuvio' | null;
     avatarUrl?: string | null;
+    /** Only a signed-in person has this (an admin account has no Gravatar switch). */
+    useGravatar?: boolean;
   } | null;
   /** Called when logout is clicked */
   onLogout?: () => void;
@@ -201,6 +203,7 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
               <Avatar
                 name={userInfo.username || 'U'}
                 email={userInfo.email || undefined}
+                useGravatar={userInfo.useGravatar}
                 colorIndex={userInfo.colorIndex || 0}
                 size="sm"
                 className="w-8 h-8"

@@ -285,6 +285,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           protectedAddons: protectedAddons,
           colorIndex: user.colorIndex,
           avatarUrl: user.avatarUrl,
+          // Whether this person switched Gravatar on, for every avatar of them.
+          useGravatar: user.useGravatar === true,
           inviteCode: user.inviteCode,
           watchTime: totalWatchTimeMinutes,
           // The Users list has always had a "Last sync" column; until now it
@@ -3022,6 +3024,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         protectedAddons: protectedAddons,
         colorIndex: user.colorIndex,
         avatarUrl: user.avatarUrl,
+        useGravatar: user.useGravatar === true,
         expiresAt: user.expiresAt,
         inviteCode: user.inviteCode,
         createdAt: user.createdAt,

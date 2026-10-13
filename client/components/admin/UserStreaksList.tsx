@@ -103,7 +103,7 @@ export function UserStreaksList({ users }: UserStreaksListProps) {
           className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover overflow-hidden"
         >
           <div className="flex-shrink-0">
-            <UserAvatar userId={user.userId} name={user.username} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} size="md" />
+            <UserAvatar userId={user.userId} name={user.username} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="md" />
           </div>
           
           <div className="flex-1 min-w-0">
