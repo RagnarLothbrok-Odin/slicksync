@@ -30,6 +30,16 @@ interface NowPlayingItem {
   // raw wall-clock (see server/utils/proxyNowPlaying.js). Prefer this over
   // watchedAtTimestamp whenever present.
   elapsedSeconds?: number;
+  /** True once the proxy has stopped reconfirming the stream - the figure
+   *  above is then final and must not be counted past. */
+  elapsedFrozen?: boolean;
+  // Where playback stood at the provider's last checkpoint, and the links
+  // that open the title in each app - the same fields the Activity page's
+  // card shows, so the two read the same.
+  lastPosition?: number | null;
+  totalDuration?: number | null;
+  stremioAppUrl?: string | null;
+  nuvioAppUrl?: string | null;
   device?: { name: string | null; client: string | null } | null;
 }
 
@@ -48,8 +58,7 @@ interface NowPlayingSectionProps {
   fetchedAt?: number;
 }
 
-export function NowPlayingSection({ items, now, fetchedAt }: NowPlayingSectionProps) {
-  const sinceFetch = now && fetchedAt ? Math.max(0, (now - fetchedAt) / 1000) : 0;
+export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
   if (items.length === 0) {
     return (
       <div className="text-center py-8 text-sm text-muted">
@@ -58,15 +67,26 @@ export function NowPlayingSection({ items, now, fetchedAt }: NowPlayingSectionPr
     );
   }
 
-  const formatTimeAgo = (timestamp: number) => {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const minutes = Math.floor(diff / 60000);
+  // 3725 -> "1:02:05", 48 -> "0:48"
+  const formatClock = (totalSeconds: number) => {
+    const t = Math.max(0, Math.floor(totalSeconds));
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const sec = String(t % 60).padStart(2, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+  };
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h ago`;
+  // How long this has been playing, worked out the way the Activity page
+  // does: a stream the proxy is still confirming counts up from when it
+  // started; once it stops confirming, the server's last figure stands.
+  const watchingFor = (item: NowPlayingItem): string | null => {
+    const startMs = typeof item.watchedAtTimestamp === 'number' ? item.watchedAtTimestamp : null;
+    if (item.source === 'aiostreams-proxy' && typeof item.elapsedSeconds === 'number') {
+      const live = !item.elapsedFrozen && startMs && now ? Math.max(0, Math.floor((now - startMs) / 1000)) : item.elapsedSeconds;
+      return formatElapsed(Math.max(live, 0));
+    }
+    if (startMs && now) return formatElapsed(Math.max(0, Math.floor((now - startMs) / 1000)));
+    return null;
   };
 
   const formatElapsed = (seconds: number) => {
@@ -85,7 +105,7 @@ export function NowPlayingSection({ items, now, fetchedAt }: NowPlayingSectionPr
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: index * 0.1 }}
-          className="flex items-center gap-4 p-3 rounded-xl bg-surface-hover"
+          className="flex items-start gap-4 p-3 rounded-xl bg-surface-hover"
         >
           {/* User Avatar */}
           <div className="flex-shrink-0">
@@ -136,18 +156,48 @@ export function NowPlayingSection({ items, now, fetchedAt }: NowPlayingSectionPr
                 <span className="truncate" title={`Playing on ${deviceLabel(item.device)}`}>• {deviceLabel(item.device)}</span>
               )}
             </div>
+            {watchingFor(item) && (
+              <p className="text-xs text-subtle mt-0.5">Watching for {watchingFor(item)}</p>
+            )}
+            {typeof item.lastPosition === 'number' && typeof item.totalDuration === 'number' && item.totalDuration > 0 && (item.stremioAppUrl || item.nuvioAppUrl) && (
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <span className="text-xs text-subtle">
+                  {/* The position is the provider's last checkpoint, written
+                      at pause or stop - while the proxy shows the stream
+                      live it is where playback last stood, not a pause. */}
+                  {item.source === 'aiostreams-proxy' ? 'Last known position' : 'Paused at'}{' '}
+                  {formatClock(item.lastPosition / 1000)} of {formatClock(item.totalDuration / 1000)}
+                  {' '}({Math.round((item.lastPosition / item.totalDuration) * 100)}%)
+                </span>
+                {item.stremioAppUrl && (
+                  <a
+                    href={item.stremioAppUrl}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium transition-colors"
+                    style={{ background: 'rgba(167, 139, 250, 0.15)', color: 'rgb(196, 181, 253)', border: '1px solid rgba(167, 139, 250, 0.25)' }}
+                  >
+                    <PlayIcon className="w-3 h-3" />
+                    Resume in Stremio
+                  </a>
+                )}
+                {item.nuvioAppUrl && (
+                  <a
+                    href={item.nuvioAppUrl}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium transition-colors"
+                    style={{
+                      background: 'linear-gradient(115deg, rgba(56, 89, 158, 0.22) 0%, rgba(56, 89, 158, 0.22) 50%, rgba(255, 152, 0, 0.10) 50%, rgba(255, 152, 0, 0.10) 100%)',
+                      color: 'rgb(186, 208, 240)', border: '1px solid rgba(255, 152, 0, 0.18)',
+                    }}
+                  >
+                    <PlayIcon className="w-3 h-3" />
+                    Resume in Nuvio
+                  </a>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Live indicator and Time Ago */}
-          <div className="flex-shrink-0 text-right flex items-center gap-3">
-            <div className="flex items-center gap-1 text-sm text-muted">
-              <PlayIcon className="w-4 h-4 text-success" />
-              {item.source === 'aiostreams-proxy' && typeof item.elapsedSeconds === 'number'
-                ? formatElapsed(item.elapsedSeconds + sinceFetch)
-                : item.watchedAtTimestamp
-                  ? formatTimeAgo(item.watchedAtTimestamp)
-                  : 'Active'}
-            </div>
+          <div className="flex-shrink-0 self-center">
             <div className="w-2 h-2 rounded-full bg-secondary animate-pulse" />
           </div>
         </motion.div>
