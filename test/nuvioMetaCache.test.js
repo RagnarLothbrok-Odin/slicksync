@@ -78,6 +78,10 @@ test('lookups run a few at a time', async (t) => {
 })
 
 test('a lookup that hangs times out, leaves the names as they were and does not fail the library', async (t) => {
+  // The time-out is a timer that does not keep the process alive on its own,
+  // and here nothing else is pending while it runs - so something has to.
+  const awake = setInterval(() => {}, 5)
+  t.after(() => clearInterval(awake))
   const hang = (path, init) => new Promise((_, reject) => {
     init.signal.addEventListener('abort', () => reject(init.signal.reason))
   })
