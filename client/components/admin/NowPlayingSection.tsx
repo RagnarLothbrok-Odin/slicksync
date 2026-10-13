@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Badge, UserAvatar } from '@/components/ui';
 import { PlayIcon, FilmIcon, TvIcon } from '@heroicons/react/24/outline';
@@ -47,6 +48,9 @@ interface NowPlayingItem {
 function deviceLabel(device?: { name: string | null; client: string | null } | null) {
   return device ? [device.name, device.client].filter(Boolean).join(' · ') : '';
 }
+
+// How many people's cards the dashboard shows before pointing at Activity.
+const MAX_SHOWN = 8;
 
 interface NowPlayingSectionProps {
   items: NowPlayingItem[];
@@ -98,10 +102,14 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
   };
 
   return (
-    <div className="space-y-3">
-      {items.slice(0, 5).map((item, index) => (
+    // One card per person watching. With several people they sit side by
+    // side on a wide screen instead of pushing the rest of the page down, and
+    // past a screenful the rest are a tap away on the Activity page rather
+    // than silently missing.
+    <div className={items.length > 1 ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-3'}>
+      {items.slice(0, MAX_SHOWN).map((item, index) => (
         <motion.div
-          key={`${item.user.id}-${item.item.id}`}
+          key={`${item.user.id}-${item.item.id}-${item.item.season ?? ''}-${item.item.episode ?? ''}-${index}`}
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: index * 0.1 }}
@@ -202,6 +210,11 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
           </div>
         </motion.div>
       ))}
+      {items.length > MAX_SHOWN && (
+        <Link href="/activity" className="text-sm text-muted hover:text-default transition-colors lg:col-span-2 text-center py-1">
+          +{items.length - MAX_SHOWN} more watching - see Activity
+        </Link>
+      )}
     </div>
   );
 }
