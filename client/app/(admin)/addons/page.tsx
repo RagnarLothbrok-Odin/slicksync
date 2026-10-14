@@ -706,6 +706,7 @@ export default function AddonsPage() {
             // through to reorder logic against a mismatched id.
             enableDropTargets: true,
             dropTargetPrefix: 'addon-filter-',
+            fill: true,
           }}
           primaryAction={(() => {
             const btn = (
