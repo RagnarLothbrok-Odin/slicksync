@@ -121,28 +121,10 @@ async function deleteExpiredUsers(prisma, decrypt, StremioAPIClient, createProvi
             }
           }
 
-          // Remove user from all groups first
-          const groups = await prisma.group.findMany({
-            where: {
-              accountId: accountId === 'default' ? null : accountId,
-              userIds: {
-                contains: user.id
-              }
-            }
-          })
-
-          for (const group of groups) {
-            if (group.userIds) {
-              const userIds = JSON.parse(group.userIds)
-              const updatedUserIds = userIds.filter(id => id !== user.id)
-              if (updatedUserIds.length !== userIds.length) {
-                await prisma.group.update({
-                  where: { id: group.id },
-                  data: { userIds: JSON.stringify(updatedUserIds) }
-                })
-              }
-            }
-          }
+          // Remove user from all groups first. By the user's own household
+          // id: looking under an empty id found no groups on a
+          // single-household install, leaving the deleted person listed.
+          await require('./helpers/database').removeUserFromAllGroups(prisma, user.id, user.accountId)
 
           // Automation rules fire BEFORE the delete below, so the user row
           // still exists for any action that resolves it (and the payload is

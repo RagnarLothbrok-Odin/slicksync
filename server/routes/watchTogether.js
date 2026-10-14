@@ -1,5 +1,6 @@
 // Watch-ahead protection - "watching together" pacts (see utils/watchTogether.js).
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 
 module.exports = function watchTogetherRouter({ prisma, getAccountId }) {
   const router = express.Router()
@@ -9,7 +10,7 @@ module.exports = function watchTogetherRouter({ prisma, getAccountId }) {
     try {
       res.json(await wt.listPacts(prisma, getAccountId(req)))
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to list' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to list') })
     }
   })
 
@@ -19,7 +20,7 @@ module.exports = function watchTogetherRouter({ prisma, getAccountId }) {
       await wt.upsertPact(prisma, getAccountId(req), { showId, showName, userIds })
       res.json({ success: true })
     } catch (e) {
-      res.status(400).json({ error: e?.message || 'Failed to save' })
+      res.status(400).json({ error: publicMessage(e, 'Failed to save') })
     }
   })
 
@@ -28,7 +29,7 @@ module.exports = function watchTogetherRouter({ prisma, getAccountId }) {
       await wt.deletePact(prisma, getAccountId(req), req.params.showId)
       res.json({ success: true })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to delete' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to delete') })
     }
   })
 

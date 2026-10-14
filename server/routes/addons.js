@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { StremioAPIClient } = require('stremio-api-client');
 const { handleDatabaseError, sendError, createRouteHandler, DatabaseTransactions } = require('../utils/handlers');
 const { findAddonById, sanitizeUrl, validateAccountContext } = require('../utils/helpers');
@@ -1385,7 +1386,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         // If unique constraint (likely manifestUrl) tripped, return a friendly conflict
         return res.status(409).json({ message: 'Addon already exists.' })
       }
-      res.status(500).json({ message: 'Failed to create addon', error: error?.message });
+      res.status(500).json({ message: 'Failed to create addon', error: publicMessage(error, 'Failed to create addon') });
     }
   });
 
@@ -1623,7 +1624,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       });
     } catch (error) {
       console.error('Error cloning addon:', error);
-      res.status(500).json({ message: 'Failed to clone addon', error: error?.message });
+      res.status(500).json({ message: 'Failed to clone addon', error: publicMessage(error, 'Failed to clone addon') });
     }
   });
 
@@ -2016,7 +2017,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       });
     } catch (error) {
       console.error('Error linking backup:', error);
-      res.status(500).json({ error: error.message || 'Failed to link backup' });
+      res.status(500).json({ error: publicMessage(error, 'Failed to link backup') });
     }
   });
 
@@ -2046,7 +2047,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       res.json({ message: 'Backup unlinked successfully' });
     } catch (error) {
       console.error('Error unlinking backup:', error);
-      res.status(500).json({ error: error.message || 'Failed to unlink backup' });
+      res.status(500).json({ error: publicMessage(error, 'Failed to unlink backup') });
     }
   });
 
@@ -2459,7 +2460,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       });
     } catch (error) {
       console.error('Error updating addon:', error);
-      res.status(500).json({ error: 'Failed to update addon', details: error?.message });
+      res.status(500).json({ error: 'Failed to update addon', details: publicMessage(error, 'Failed to update addon') });
     }
   });
 
@@ -2513,7 +2514,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       });
     } catch (error) {
       console.error('Error reloading all addons:', error);
-      res.status(500).json({ message: 'Failed to reload all addons', error: error?.message });
+      res.status(500).json({ message: 'Failed to reload all addons', error: publicMessage(error, 'Failed to reload all addons') });
     }
   });
 

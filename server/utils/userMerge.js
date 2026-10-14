@@ -22,6 +22,13 @@ const path = require('path')
 // year of history ran out of time, the transaction rolled back and the merge
 // failed every time. These get the room they need.
 const LONG_TRANSACTION = { timeout: 10 * 60 * 1000, maxWait: 30 * 1000 }
+// A long transaction that also changes group members: it holds the
+// household's membership queue (helpers/database.js) for its whole length,
+// so no other membership change reads the list before this one commits.
+function runMembershipTransaction(prisma, accountId, fn) {
+  return require('./helpers/database').withMembershipLock(accountId, () => runLongTransaction(prisma, fn))
+}
+
 function runLongTransaction(prisma, fn) {
   return prisma.$transaction(fn, LONG_TRANSACTION)
 }
@@ -188,7 +195,7 @@ async function mergeUsers(prisma, survivorId, donorId, { dataDir = path.join(pro
   // this IS the recovery data undoMerge() reads back, not just a debug log.
   const archive = { donorRows: {}, overwrittenSurvivorRows: {}, donorGroupIds: [] }
 
-  await runLongTransaction(prisma, async (tx) => {
+  await runMembershipTransaction(prisma, donorFull.accountId, async (tx) => {
     // 1. Absorb the donor's credentials as a secondary provider on the survivor.
     await tx.userProviderCredential.create({
       data: {
@@ -247,16 +254,7 @@ async function mergeUsers(prisma, survivorId, donorId, { dataDir = path.join(pro
     // 5. Remove the donor from whatever group it belonged to - deliberately
     // NOT adding the survivor to that group too, see getMergePreview's
     // groupsDiffer comment.
-    const donorGroups = await tx.group.findMany({ where: { accountId: donorFull.accountId, userIds: { contains: donorId } } })
-    archive.donorGroupIds = donorGroups.map((g) => g.id)
-    for (const group of donorGroups) {
-      let ids = []
-      try { ids = JSON.parse(group.userIds || '[]') } catch { ids = [] }
-      const nextIds = ids.filter((id) => id !== donorId)
-      if (nextIds.length !== ids.length) {
-        await tx.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(nextIds) } })
-      }
-    }
+    archive.donorGroupIds = await require('./helpers/database').dropFromAllGroups(tx, donorFull.accountId, donorId)
 
     // 6. The donor row itself is retired - its full state is captured in
     // `donor` below, written to the archive file right after this commits.
@@ -308,7 +306,7 @@ async function undoMerge(prisma, survivorId, { dataDir = path.join(process.cwd()
     throw new Error('A user with the original donor id already exists - cannot undo safely')
   }
 
-  await runLongTransaction(prisma, async (tx) => {
+  await runMembershipTransaction(prisma, donor.accountId, async (tx) => {
     // 1. Recreate the donor's own User row exactly as it was.
     const { id: _donorId, ...donorFields } = donor
     await tx.user.create({ data: { id: donorId, ...donorFields } })
@@ -357,15 +355,9 @@ async function undoMerge(prisma, survivorId, { dataDir = path.join(process.cwd()
     }
 
     // 5. Re-add the donor to whichever group(s) it originally belonged to.
-    if (donorGroupIds.length) {
-      const groups = await tx.group.findMany({ where: { id: { in: donorGroupIds } } })
-      for (const group of groups) {
-        let ids = []
-        try { ids = JSON.parse(group.userIds || '[]') } catch { ids = [] }
-        if (!ids.includes(donorId)) {
-          await tx.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify([...ids, donorId]) } })
-        }
-      }
+    // One group per person: back into the first of them still there.
+    for (const groupId of donorGroupIds) {
+      if (await require('./helpers/database').moveIntoGroup(tx, donor.accountId, donorId, groupId)) break
     }
 
     // 6. The survivor no longer has this provider absorbed.
@@ -380,6 +372,7 @@ async function undoMerge(prisma, survivorId, { dataDir = path.join(process.cwd()
 }
 
 module.exports = {
+  runMembershipTransaction,
   getMergePreview, getUndoInfo, mergeUsers, undoMerge,
   // Shared with nuvioProfiles.js, which merges profile people the same way.
   pickSurvivorRow, migrateTable, runLongTransaction, NATURAL_KEY,

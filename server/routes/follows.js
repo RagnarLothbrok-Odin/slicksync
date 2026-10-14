@@ -1,4 +1,5 @@
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 
 // Follow / mute for the two alert feeds (see utils/followWatch.js): people
 // whose new work should ping you, and shows whose renewal or cancellation
@@ -38,7 +39,7 @@ module.exports = ({ prisma, getAccountId }) => {
       })
       res.json(row)
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to follow' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to follow') })
     }
   })
 
@@ -78,7 +79,7 @@ module.exports = ({ prisma, getAccountId }) => {
       await runFollowSweep(prisma, { resolveTmdbKeyForAccount })
       res.json({ success: true })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Check failed' })
+      res.status(500).json({ error: publicMessage(e, 'Check failed') })
     }
   })
 

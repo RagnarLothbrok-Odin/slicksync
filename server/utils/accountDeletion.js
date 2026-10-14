@@ -76,6 +76,7 @@ async function deleteUserCascade(prisma, userId) {
   // Group membership lives as a JSON-string userIds array on Group, not a
   // relational FK - strip this user out of every group in their account
   // before deleting them, so no group is left pointing at a dangling id.
+  await require('./helpers/database').withMembershipLock(existing.accountId, async () => {
   const groups = await prisma.group.findMany({
     where: { accountId: existing.accountId },
     select: { id: true, userIds: true }
@@ -110,6 +111,7 @@ async function deleteUserCascade(prisma, userId) {
     prisma.userProviderCredential.deleteMany({ where }),
     prisma.user.delete({ where: { id: userId } }),
   ])
+  })
   await require('./jellyfinProfiles').forgetPersonHousehold(prisma, userId)
   return existing
 }

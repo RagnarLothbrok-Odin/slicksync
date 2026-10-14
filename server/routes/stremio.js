@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { StremioAPIStore, StremioAPIClient } = require('stremio-api-client');
 const { handleStremioError, handleDatabaseError, StremioAPIUtils } = require('../utils/handlers');
 const { validateStremioAuthKey } = require('../utils/stremio');
@@ -524,9 +525,9 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
         userInfo = await getStremioUserInfo(authKey, username, email)
       } catch (e) {
         if (e.message === 'Invalid or expired Stremio auth key') {
-          return res.status(401).json({ message: e.message })
+          return res.status(401).json({ message: publicMessage(e, 'Something went wrong') })
         }
-        return res.status(400).json({ message: e.message || 'Could not validate auth key' })
+        return res.status(400).json({ message: publicMessage(e, 'Could not validate auth key') })
       }
 
       // Get addons data if needed (for create flow)

@@ -2523,6 +2523,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       }
 
       // 3b. Update groups.userIds with new user IDs (from usernames only)
+      await require('../utils/helpers/database').withMembershipLock(accountId, async () => {
       for (const g of importedGroups) {
         let newUserIds = []
         if (Array.isArray(g.users) && g.users.length > 0) {
@@ -2540,6 +2541,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
           }
         }
       }
+      })
 
       // Build quick-lookup map by NAME ONLY for linking between exported and imported addons
       const exportAddonNameToNewId = new Map(); // map: addon.name -> dbAddon.id

@@ -294,6 +294,9 @@ async function getGroupAddons(prisma, groupId, req) {
 // row-level one).
 const membershipQueues = new Map(); // accountId -> tail of the queue
 function inMembershipQueue(accountId, task) {
+  // One queue per household whichever way its id is spelled: a
+  // single-household install's rows can say 'default' or nothing at all.
+  accountId = accountId || require('../config').DEFAULT_ACCOUNT_ID;
   const run = (membershipQueues.get(accountId) || Promise.resolve()).then(task);
   const tail = run.then(() => {}, () => {});
   membershipQueues.set(accountId, tail);
@@ -334,32 +337,77 @@ async function assignUserToGroup(prisma, userId, groupId, req) {
   }
 
   await inMembershipQueue(accId, () => inTransaction(prisma, async (db) => {
-    const allGroups = await db.group.findMany({
-      where: { accountId: accId },
-      select: { id: true, userIds: true }
-    });
-    if (!allGroups.some((group) => group.id === groupId)) {
+    if (!(await moveIntoGroup(db, accId, userId, groupId))) {
       throw new Error(`Target group not found: ${groupId} (accountId: ${accId})`);
     }
-
-    for (const group of allGroups) {
-      const ids = readMemberIds(group.userIds);
-      if (ids === null) {
-        if (group.id === groupId) throw new Error(`Group ${groupId} has a member list that cannot be read`);
-        continue;
-      }
-      // In the target group they are added, in every other group removed.
-      const next = group.id === groupId
-        ? (ids.includes(userId) ? ids : [...ids, userId])
-        : ids.filter((id) => id !== userId);
-      if (next.length !== ids.length) {
-        await db.group.update({
-          where: { id: group.id },
-          data: { userIds: JSON.stringify(next) }
-        });
-      }
-    }
   }));
+}
+
+// Put someone in a group and take them out of the household's others. For
+// callers already inside withMembershipLock. False when the group is gone.
+async function moveIntoGroup(db, accountId, userId, groupId) {
+  const allGroups = await db.group.findMany({
+    where: { accountId },
+    select: { id: true, userIds: true }
+  });
+  if (!allGroups.some((group) => group.id === groupId)) return false;
+
+  for (const group of allGroups) {
+    const ids = readMemberIds(group.userIds);
+    if (ids === null) {
+      if (group.id === groupId) throw new Error(`Group ${groupId} has a member list that cannot be read`);
+      continue;
+    }
+    // In the target group they are added, in every other group removed.
+    const next = group.id === groupId
+      ? (ids.includes(userId) ? ids : [...ids, userId])
+      : ids.filter((id) => id !== userId);
+    if (next.length !== ids.length) {
+      await db.group.update({
+        where: { id: group.id },
+        data: { userIds: JSON.stringify(next) }
+      });
+    }
+  }
+  return true;
+}
+
+// Take someone out of every group of their household. For callers already
+// inside withMembershipLock (a merge, a delete that is one transaction).
+async function dropFromAllGroups(db, accountId, userId) {
+  const groups = await db.group.findMany({
+    where: { accountId, userIds: { contains: userId } },
+    select: { id: true, userIds: true }
+  });
+  const left = [];
+  for (const group of groups) {
+    const ids = readMemberIds(group.userIds);
+    if (ids === null) continue;
+    const next = ids.filter((id) => id !== userId);
+    if (next.length !== ids.length) {
+      await db.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(next) } });
+      left.push(group.id);
+    }
+  }
+  return left;
+}
+
+/**
+ * Take someone out of every group of their household, one membership change
+ * at a time like the rest. Returns the ids of the groups they left.
+ */
+async function removeUserFromAllGroups(prisma, userId, accountId) {
+  return inMembershipQueue(accountId, () => inTransaction(prisma, (db) => dropFromAllGroups(db, accountId, userId)));
+}
+
+/**
+ * Run work that changes group members - a merge, a restore, a delete -
+ * while no other membership change in the household runs, so neither one
+ * writes over the other. The work must not call the helpers above (they
+ * wait for this same queue); it uses moveIntoGroup / dropFromAllGroups.
+ */
+function withMembershipLock(accountId, task) {
+  return inMembershipQueue(accountId, task);
 }
 
 /**
@@ -465,5 +513,9 @@ module.exports = {
   assignUserToGroup,
   removeUserFromGroup,
   setGroupMembers,
+  removeUserFromAllGroups,
+  withMembershipLock,
+  moveIntoGroup,
+  dropFromAllGroups,
   ensureEmailUniqueness
 };

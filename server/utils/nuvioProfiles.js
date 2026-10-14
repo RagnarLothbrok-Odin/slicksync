@@ -16,7 +16,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { migrateTable, runLongTransaction, NATURAL_KEY } = require('./userMerge')
+const { migrateTable, runLongTransaction, runMembershipTransaction, NATURAL_KEY } = require('./userMerge')
 
 const PERSON_SELECT = {
   id: true, username: true, email: true, nuvioProfileId: true, isActive: true,
@@ -207,7 +207,7 @@ async function mergeProfilePerson(prisma, { accountId, survivorId, donorId, prof
   const archiveFilename = `profile-${donorId}-${Date.now()}.json`
   const archive = { donorRows: {}, overwrittenSurvivorRows: {}, donorGroupIds: [], viewerLinks: {}, routeBefore: null }
 
-  await runLongTransaction(prisma, async (tx) => {
+  await runMembershipTransaction(prisma, accountId, async (tx) => {
     const key = { accountId_nuvioUserId_profileIndex: { accountId, nuvioUserId: donorFull.nuvioUserId, profileIndex } }
     archive.routeBefore = await tx.nuvioProfileRoute.findUnique({ where: key })
     await tx.nuvioProfileRoute.upsert({
@@ -238,14 +238,7 @@ async function mergeProfilePerson(prisma, { accountId, survivorId, donorId, prof
     await tx.watchStateEvent.deleteMany({ where: { userId: donorId } })
     archive.viewerLinks = await repointViewerLinks(tx, accountId, donorId, survivorId)
 
-    const groups = await tx.group.findMany({ where: { accountId, userIds: { contains: donorId } } })
-    archive.donorGroupIds = groups.map((g) => g.id)
-    for (const group of groups) {
-      let ids = []
-      try { ids = JSON.parse(group.userIds || '[]') } catch { ids = [] }
-      const next = ids.filter((id) => id !== donorId)
-      if (next.length !== ids.length) await tx.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(next) } })
-    }
+    archive.donorGroupIds = await require('./helpers/database').dropFromAllGroups(tx, accountId, donorId)
 
     await tx.user.delete({ where: { id: donorId } })
     await tx.profileMerge.create({
@@ -280,7 +273,7 @@ async function unmergeProfilePerson(prisma, { accountId, mergeId, dataDir = path
   const survivorId = record.survivorId
 
   let carried = { movies: 0, episodes: 0, activity: 0 }
-  await runLongTransaction(prisma, async (tx) => {
+  await runMembershipTransaction(prisma, accountId, async (tx) => {
     const { id: _id, ...fields } = donor
     await tx.user.create({ data: { id: donorId, ...fields } })
 
@@ -317,13 +310,9 @@ async function unmergeProfilePerson(prisma, { accountId, mergeId, dataDir = path
       since: mergedAt ? new Date(mergedAt) : record.createdAt,
     })
 
-    if (donorGroupIds.length) {
-      const groups = await tx.group.findMany({ where: { id: { in: donorGroupIds } } })
-      for (const group of groups) {
-        let ids = []
-        try { ids = JSON.parse(group.userIds || '[]') } catch { ids = [] }
-        if (!ids.includes(donorId)) await tx.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify([...ids, donorId]) } })
-      }
+    // One group per person: back into the first of them still there.
+    for (const groupId of donorGroupIds) {
+      if (await require('./helpers/database').moveIntoGroup(tx, accountId, donorId, groupId)) break
     }
     for (const [ownerId, viewers] of Object.entries(viewerLinks)) {
       const owner = await tx.user.findUnique({ where: { id: ownerId }, select: { watchStateViewers: true } })

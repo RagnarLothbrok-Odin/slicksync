@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { validateNuvioCredentials, refreshNuvioToken, parseJwtPayload, startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin } = require('../providers/nuvioAuth');
 const { createNuvioProvider } = require('../providers/nuvio');
 const { resolveServerConfigForAccount } = require('../providers/supabase');
@@ -132,7 +133,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
     } catch (error) {
       console.error('Nuvio connect error:', error.message);
       if (error.status && error.status >= 400 && error.status < 500) {
-        return res.status(error.status).json({ error: error.message });
+        return res.status(error.status).json({ error: publicMessage(error, 'Something went wrong') });
       }
       res.status(500).json({ error: 'Failed to connect to Nuvio' });
     }
@@ -215,7 +216,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
           })
           profiles = await probe.getProfiles()
         } catch (e) {
-          return res.status(502).json({ error: `Could not read this account's profiles: ${e?.message || 'unknown error'}` })
+          return res.status(502).json({ error: `Could not read this account's profiles: ${publicMessage(e, 'unknown error')}` })
         }
         const match = (profiles || []).find((pr) => Number(pr.profile_index ?? pr.profileIndex) === profileIndex)
         if (!match) {
@@ -265,14 +266,10 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
         }
       });
 
-      // Add to group if specified
+      // Add to group if specified - only a group of this household.
       if (groupId) {
-        const group = await prisma.group.findUnique({ where: { id: groupId }, select: { userIds: true } });
-        const currentIds = typeof group?.userIds === 'string' ? JSON.parse(group.userIds) : (group?.userIds || []);
-        if (!currentIds.includes(newUser.id)) {
-          currentIds.push(newUser.id);
-          await prisma.group.update({ where: { id: groupId }, data: { userIds: JSON.stringify(currentIds) } });
-        }
+        const members = require('../utils/helpers/database');
+        await members.withMembershipLock(accountId, () => members.moveIntoGroup(prisma, accountId, newUser.id, groupId));
       }
 
       res.json({
@@ -285,7 +282,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
     } catch (error) {
       console.error('Nuvio connect-authkey error:', error.message);
       if (error.status && error.status >= 400 && error.status < 500) {
-        return res.status(error.status).json({ error: error.message });
+        return res.status(error.status).json({ error: publicMessage(error, 'Something went wrong') });
       }
       res.status(500).json({ error: 'Failed to validate Nuvio credentials' });
     }

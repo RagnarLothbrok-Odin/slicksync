@@ -334,16 +334,15 @@ async function restoreExtendedKind(prisma, accountIdValue, item, payload) {
     for (const cred of (credentials || [])) {
       await prisma.userProviderCredential.create({ data: cred }).catch(() => {})
     }
-    for (const gid of (groupIds || [])) {
-      try {
-        const g = await prisma.group.findFirst({ where: { id: gid, accountId: accountIdValue }, select: { userIds: true } })
-        if (!g) continue
-        const ids = JSON.parse(g.userIds || '[]')
-        if (!ids.includes(user.id)) {
-          await prisma.group.update({ where: { id: gid }, data: { userIds: JSON.stringify([...ids, user.id]) } })
-        }
-      } catch { /* a vanished group must not block the user coming back */ }
-    }
+    // Back into their group - one group per person, so the first still there.
+    const members = require('./helpers/database')
+    await members.withMembershipLock(accountIdValue, async () => {
+      for (const gid of (groupIds || [])) {
+        try {
+          if (await members.moveIntoGroup(prisma, accountIdValue, user.id, gid)) break
+        } catch { /* a vanished group must not block the user coming back */ }
+      }
+    })
     return { kind: 'user', label: item.label }
   }
 
@@ -357,6 +356,7 @@ async function restoreExtendedKind(prisma, accountIdValue, item, payload) {
     const { id, accountId: _a, ...fields } = user
     await prisma.user.update({ where: { id: user.id }, data: fields })
     const wanted = new Set(groupIds || [])
+    await require('./helpers/database').withMembershipLock(accountIdValue, async () => {
     const groups = await prisma.group.findMany({ where: { accountId: accountIdValue } })
     for (const g of groups) {
       let ids = []
@@ -369,6 +369,7 @@ async function restoreExtendedKind(prisma, accountIdValue, item, payload) {
         await prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify(ids.filter((i) => i !== user.id)) } }).catch(() => {})
       }
     }
+    })
     return { kind: 'userstate', label: item.label }
   }
 
@@ -392,10 +393,9 @@ async function restoreExtendedKind(prisma, accountIdValue, item, payload) {
     ])
     if (!group) throw new Error('That group no longer exists')
     if (!user) throw new Error('That user no longer exists')
-    const ids = JSON.parse(group.userIds || '[]')
-    if (!ids.includes(userId)) {
-      await prisma.group.update({ where: { id: groupId }, data: { userIds: JSON.stringify([...ids, userId]) } })
-    }
+    // Back into the group, and out of any they joined since: one group each.
+    const members = require('./helpers/database')
+    await members.withMembershipLock(accountIdValue, () => members.moveIntoGroup(prisma, accountIdValue, userId, groupId))
     return { kind: 'membership', label: item.label }
   }
 

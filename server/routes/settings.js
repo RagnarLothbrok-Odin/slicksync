@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs')
@@ -72,7 +73,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       }
       return res.json(account)
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to load account info', error: e?.message })
+      return res.status(500).json({ message: 'Failed to load account info', error: publicMessage(e, 'Failed to load account info') })
     }
   })
 
@@ -88,7 +89,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       await prisma.appAccount.update({ where: { id: accountId }, data: { avatarUrl: avatarUrl || null } })
       return res.json({ avatarUrl: avatarUrl || null })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to update avatar', error: e?.message })
+      return res.status(500).json({ message: 'Failed to update avatar', error: publicMessage(e, 'Failed to update avatar') })
     }
   })
 
@@ -107,7 +108,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       await prisma.appAccount.update({ where: { id: accountId }, data: { displayName: trimmed } })
       return res.json({ displayName: trimmed })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to update display name', error: e?.message })
+      return res.status(500).json({ message: 'Failed to update display name', error: publicMessage(e, 'Failed to update display name') })
     }
   })
 
@@ -153,7 +154,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         }).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         return res.json(backups)
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to list backups', error: e?.message })
+        return res.status(500).json({ message: 'Failed to list backups', error: publicMessage(e, 'Failed to list backups') })
       }
     })
 
@@ -165,7 +166,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const report = await getDbSizeReport(prisma, getAccountId(req) || DEFAULT_ACCOUNT_ID)
         return res.json(report)
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to get DB size report', error: e?.message })
+        return res.status(500).json({ message: 'Failed to get DB size report', error: publicMessage(e, 'Failed to get DB size report') })
       }
     })
 
@@ -179,7 +180,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Backup not found' })
         return res.download(filePath, req.params.filename)
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to download backup', error: e?.message })
+        return res.status(500).json({ message: 'Failed to download backup', error: publicMessage(e, 'Failed to download backup') })
       }
     })
 
@@ -255,7 +256,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
           counts: { backup: { addons: bAddons.length, users: bUsers.length, groups: bGroups.length }, current: { addons: curAddons.length, users: curUsers.length, groups: curGroups.length } },
         })
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to diff backup', error: e?.message })
+        return res.status(500).json({ message: 'Failed to diff backup', error: publicMessage(e, 'Failed to diff backup') })
       }
     })
 
@@ -280,7 +281,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         }
         return res.json(result)
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to restore backup', error: e?.message })
+        return res.status(500).json({ message: 'Failed to restore backup', error: publicMessage(e, 'Failed to restore backup') })
       }
     })
 
@@ -399,7 +400,6 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const curGroups = await prisma.group.findMany({ where: { accountId } })
         const groupsJoin = []
         const groupsLeave = []
-        const membershipWrites = []
         for (const g of curGroups) {
           let ids = []
           try { ids = JSON.parse(g.userIds || '[]') } catch {}
@@ -407,10 +407,8 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
           const shouldBe = backupMemberKeys.has(g.id) || backupMemberKeys.has(norm(g.name))
           if (shouldBe && !isMember) {
             groupsJoin.push(g.name)
-            membershipWrites.push(prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify([...ids, userId]) } }))
           } else if (!shouldBe && isMember) {
             groupsLeave.push(g.name)
-            membershipWrites.push(prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify(ids.filter((i) => i !== userId)) } }))
           }
         }
         const missingGroups = bGroups
@@ -443,16 +441,31 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
             },
           })
         } catch (e) {
-          return res.status(500).json({ message: `Could not archive the current state first - restore aborted (${e?.message})` })
+          return res.status(500).json({ message: `Could not archive the current state first - restore aborted (${publicMessage(e, 'unknown error')})` })
         }
 
         if (Object.keys(updates).length > 0) {
           await prisma.user.update({ where: { id: userId }, data: updates })
         }
-        for (const write of membershipWrites) await write
+        // Membership is read again and written under the household's
+        // membership queue: the lists read above may have changed since.
+        await require('../utils/helpers/database').withMembershipLock(accountId, async () => {
+          for (const g of await prisma.group.findMany({ where: { accountId } })) {
+            let ids
+            try { ids = JSON.parse(g.userIds || '[]') } catch { continue }
+            if (!Array.isArray(ids)) continue
+            const isMember = ids.includes(userId)
+            const shouldBe = backupMemberKeys.has(g.id) || backupMemberKeys.has(norm(g.name))
+            if (shouldBe && !isMember) {
+              await prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify([...ids, userId]) } })
+            } else if (!shouldBe && isMember) {
+              await prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify(ids.filter((i) => i !== userId)) } })
+            }
+          }
+        })
         return res.json({ applied: true, ...summary })
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to restore user', error: e?.message })
+        return res.status(500).json({ message: 'Failed to restore user', error: publicMessage(e, 'Failed to restore user') })
       }
     })
 
@@ -472,7 +485,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const { token, passphrase } = mintOffer(accountId)
         return res.json({ code: encodeCode(base, token, passphrase), expiresInMinutes: 15 })
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to create migration code', error: e?.message })
+        return res.status(500).json({ message: 'Failed to create migration code', error: publicMessage(e, 'Failed to create migration code') })
       }
     })
 
@@ -505,7 +518,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
           if (['blocked host', 'unsupported protocol', 'invalid url'].includes(e?.message)) {
             return res.status(400).json({ message: 'That migration code points at an address this instance can’t use' })
           }
-          return res.status(502).json({ message: `Could not reach the old instance at ${parsed.u} - both servers must be able to see each other. (${e?.message || 'network error'})` })
+          return res.status(502).json({ message: `Could not reach the old instance at ${parsed.u} - both servers must be able to see each other. (${publicMessage(e, 'network error')})` })
         }
         if (!bundle) return res.status(502).json({ message: 'The old instance returned no bundle' })
 
@@ -515,7 +528,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         return res.json(result)
       } catch (e) {
         console.error('[Migration] receive failed:', e?.message)
-        return res.status(500).json({ message: e?.message || 'Migration failed' })
+        return res.status(500).json({ message: publicMessage(e, 'Migration failed') })
       }
     })
 
@@ -549,7 +562,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         res.setHeader('Content-Disposition', `attachment; filename="slicksync-recovery-kit-${new Date().toISOString().split('T')[0]}.json"`)
         return res.json(kit)
       } catch (e) {
-        return res.status(400).json({ message: e?.message || 'Failed to build recovery kit' })
+        return res.status(400).json({ message: publicMessage(e, 'Failed to build recovery kit') })
       }
     })
 
@@ -565,7 +578,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const result = await restoreKit(prisma, accountId, passphrase, kit, req, { encrypt })
         return res.json(result)
       } catch (e) {
-        return res.status(400).json({ message: e?.message || 'Failed to restore recovery kit' })
+        return res.status(400).json({ message: publicMessage(e, 'Failed to restore recovery kit') })
       }
     })
 
@@ -595,7 +608,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const result = await generateAndPostMosaic(prisma, accountId, cfg.webhookUrl, month, timeZone)
         return res.json(result)
       } catch (e) {
-        return res.status(500).json({ message: e?.message || 'Failed to generate mosaic' })
+        return res.status(500).json({ message: publicMessage(e, 'Failed to generate mosaic') })
       }
     })
 
@@ -614,7 +627,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         } catch {}
         return res.json({ success: true })
       } catch (e) {
-        return res.status(500).json({ message: 'Failed to delete backup', error: e?.message })
+        return res.status(500).json({ message: 'Failed to delete backup', error: publicMessage(e, 'Failed to delete backup') })
       }
     })
 
@@ -654,7 +667,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { performRollback } = require('../utils/selfUpdate')
       return res.json(await performRollback())
     } catch (e) {
-      return res.status(e?.status || 500).json({ message: e?.message || 'Rollback failed' })
+      return res.status(e?.status || 500).json({ message: publicMessage(e, 'Rollback failed') })
     }
   })
 
@@ -764,7 +777,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const result = await testTarget(getSettings())
       return res.json(result)
     } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || 'Test failed' })
+      return res.status(500).json({ ok: false, error: publicMessage(e, 'Test failed') })
     }
   })
 
@@ -821,7 +834,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       if (!result) return res.status(400).json({ message: 'Not applicable on this instance' })
       return res.json(result)
     } catch (e) {
-      return res.status(500).json({ message: e?.message || 'Snapshot failed' })
+      return res.status(500).json({ message: publicMessage(e, 'Snapshot failed') })
     }
   })
 
@@ -846,7 +859,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       require('fs').unlinkSync(full)
       return res.json({ success: true })
     } catch (e) {
-      return res.status(500).json({ message: e?.message || 'Delete failed' })
+      return res.status(500).json({ message: publicMessage(e, 'Delete failed') })
     }
   })
 
@@ -897,7 +910,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       if (action === 'pruneNotifications') return res.json(await pruneNotifications(prisma))
       return res.status(400).json({ message: 'action must be integrity, vacuum, prune, or pruneNotifications' })
     } catch (e) {
-      return res.status(500).json({ message: e?.message || 'Maintenance action failed' })
+      return res.status(500).json({ message: publicMessage(e, 'Maintenance action failed') })
     }
   })
 
@@ -907,7 +920,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { getUpdateCapability } = require('../utils/selfUpdate')
       return res.json(await getUpdateCapability())
     } catch (e) {
-      return res.status(500).json({ message: e?.message || 'Failed to check update capability' })
+      return res.status(500).json({ message: publicMessage(e, 'Failed to check update capability') })
     }
   })
 
@@ -918,7 +931,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const result = await performSelfUpdate(prisma, { backupOpts: { INSTANCE_TYPE } })
       return res.json(result)
     } catch (e) {
-      return res.status(e?.status || 500).json({ message: e?.message || 'Update failed' })
+      return res.status(e?.status || 500).json({ message: publicMessage(e, 'Update failed') })
     }
   })
 
@@ -1391,7 +1404,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       scheduleSyncs(1, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, true) // re-seed; minutes ignored in AUTH mode
       return res.json({ message: 'Account sync settings updated' })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to update account sync settings', error: e?.message })
+      return res.status(500).json({ message: 'Failed to update account sync settings', error: publicMessage(e, 'Failed to update account sync settings') })
     }
   })
 
@@ -1535,7 +1548,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       return res.json({ message: 'Test message sent' })
     } catch (e) {
       console.error('Failed to send webhook test:', e)
-      return res.status(500).json({ message: 'Failed to send test message', error: e?.message })
+      return res.status(500).json({ message: 'Failed to send test message', error: publicMessage(e, 'Failed to send test message') })
     }
   })
 
@@ -1581,7 +1594,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         totalGroups: groups.length
       });
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to start sync', error: e?.message })
+      return res.status(500).json({ message: 'Failed to start sync', error: publicMessage(e, 'Failed to start sync') })
     }
   })
 
@@ -1625,7 +1638,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       return res.json({ apiKey: key })
     } catch (e) {
       console.error('Error generating API key:', e)
-      return res.status(500).json({ message: 'Failed to generate API key', error: e?.message })
+      return res.status(500).json({ message: 'Failed to generate API key', error: publicMessage(e, 'Failed to generate API key') })
     }
   })
 
@@ -1756,7 +1769,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       return res.json({ models })
     } catch (e) {
       console.error('Error listing AI models:', e)
-      return res.status(400).json({ message: e?.message || 'Failed to list models' })
+      return res.status(400).json({ message: publicMessage(e, 'Failed to list models') })
     }
   })
 
@@ -1985,7 +1998,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
 
       return res.json({ message: 'Repair completed', ...result })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to repair addons', error: e?.message })
+      return res.status(500).json({ message: 'Failed to repair addons', error: publicMessage(e, 'Failed to repair addons') })
     }
   })
 
@@ -2032,7 +2045,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         enabled: parsed >= 1
       });
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to update health check settings', error: e?.message });
+      return res.status(500).json({ message: 'Failed to update health check settings', error: publicMessage(e, 'Failed to update health check settings') });
     }
   });
 
@@ -2045,7 +2058,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       
       return res.json({ message: 'Health check started' });
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to start health check', error: e?.message });
+      return res.status(500).json({ message: 'Failed to start health check', error: publicMessage(e, 'Failed to start health check') });
     }
   });
 
@@ -2109,7 +2122,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         timezone: { done: !!(typeof cfg.accountTimezone === 'string' && cfg.accountTimezone.trim()) },
       })
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'Failed to read setup status' })
+      return res.status(500).json({ error: publicMessage(e, 'Failed to read setup status') })
     }
   })
 
@@ -2123,7 +2136,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { listTrash } = require('../utils/trash')
       return res.json(await listTrash(prisma, accountId))
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'Failed to read trash' })
+      return res.status(500).json({ error: publicMessage(e, 'Failed to read trash') })
     }
   })
 
@@ -2134,7 +2147,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { restoreTrashItem } = require('../utils/trash')
       return res.json(await restoreTrashItem(prisma, accountId, req.params.id))
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'Restore failed' })
+      return res.status(500).json({ error: publicMessage(e, 'Restore failed') })
     }
   })
 
@@ -2148,7 +2161,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       await purgeTrashItem(prisma, accountId, req.params.id)
       return res.json({ success: true })
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'Failed to empty that item' })
+      return res.status(500).json({ error: publicMessage(e, 'Failed to empty that item') })
     }
   })
 
@@ -2161,7 +2174,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { scanHistory } = require('../utils/historyDoctor')
       return res.json(await scanHistory(prisma, accountId))
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'History scan failed' })
+      return res.status(500).json({ error: publicMessage(e, 'History scan failed') })
     }
   })
 
@@ -2176,7 +2189,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const kinds = Array.isArray(req.body?.kinds) ? req.body.kinds : null
       return res.json(await repairHistory(prisma, accountId, kinds))
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'History repair failed' })
+      return res.status(500).json({ error: publicMessage(e, 'History repair failed') })
     }
   })
 
@@ -2195,7 +2208,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       try { if (base) { const u = new URL(base); u.username = ''; u.password = ''; shown = u.toString().replace(/\/+$/, '') } } catch {}
       return res.json({ ...status, address: shown })
     } catch (e) {
-      return res.status(500).json({ error: e?.message || 'Could not check LumiereDB' })
+      return res.status(500).json({ error: publicMessage(e, 'Could not check LumiereDB') })
     }
   })
 
@@ -2221,7 +2234,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const keyHealth = await checkAndPersistAccountKeys(prisma, accountId, { notify: !only, only });
       return res.json({ keyHealth });
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to check keys', error: e?.message });
+      return res.status(500).json({ message: 'Failed to check keys', error: publicMessage(e, 'Failed to check keys') });
     }
   });
 

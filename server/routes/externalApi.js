@@ -1,4 +1,5 @@
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 const { parsePresentedKey } = require('../utils/apiKey')
 // Constant-time comparison, the same way routes/federation.js checks its own
 // token. A plain === returns as soon as two characters differ, so how long
@@ -308,7 +309,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
       }
       return res.json({ message: 'Addons reloaded', reloaded, total: addons.length, diffs: diffsByAddon })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to reload addon', error: e?.message })
+      return res.status(500).json({ message: 'Failed to reload addon', error: publicMessage(e, 'Failed to reload addon') })
     }
   })
 
@@ -489,7 +490,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
 
       return res.json({ message: 'Reload and sync completed', reloaded, groupsSynced, totalUsersSynced, diffs: diffsByAddon })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to reload and sync by stremioAddonId', error: e?.message })
+      return res.status(500).json({ message: 'Failed to reload and sync by stremioAddonId', error: publicMessage(e, 'Failed to reload and sync by stremioAddonId') })
     }
   })
 
@@ -624,7 +625,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
       const ok = Math.max(0, groups.length - totalFailed)
       return res.json({ message: 'Sync triggered', ok, fail: totalFailed, totalSynced, totalFailed })
     } catch (e) {
-      return res.status(500).json({ message: 'Failed to sync all groups', error: e?.message })
+      return res.status(500).json({ message: 'Failed to sync all groups', error: publicMessage(e, 'Failed to sync all groups') })
     }
   })
 

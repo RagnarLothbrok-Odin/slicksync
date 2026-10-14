@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { fetchCatalog } = require('../utils/discover');
 
 // AI-sharpened "why this matches" text for For You's rows that already have
@@ -711,7 +712,7 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
       res.json(row)
     } catch (error) {
       console.error('Error setting reaction:', error)
-      res.status(400).json({ error: error?.message || 'Failed to save reaction' })
+      res.status(400).json({ error: publicMessage(error, 'Failed to save reaction') })
     }
   })
 
@@ -761,7 +762,7 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
       res.json(row)
     } catch (error) {
       console.error('Error setting rating:', error)
-      res.status(400).json({ error: error?.message || 'Failed to save rating' })
+      res.status(400).json({ error: publicMessage(error, 'Failed to save rating') })
     }
   })
 
@@ -922,7 +923,7 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
       const result = await searchByDescription(prisma, accountId, decrypt, req.body?.description, tmdbKey)
       res.json(result)
     } catch (e) {
-      res.status(400).json({ error: e?.message || 'Could not search by description' })
+      res.status(400).json({ error: publicMessage(e, 'Could not search by description') })
     }
   })
 

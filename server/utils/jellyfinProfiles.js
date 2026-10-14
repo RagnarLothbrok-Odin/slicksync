@@ -14,7 +14,7 @@
 // with their own passwords, each added as their own person.
 
 const jfAuth = require('../providers/jellyfinAuth')
-const { migrateTable, runLongTransaction } = require('./userMerge')
+const { migrateTable, runMembershipTransaction } = require('./userMerge')
 const { moveProfileHistory } = require('./nuvioProfiles')
 
 const HOUSEHOLD_KINDS = new Set(['aiostreams', 'aiometadata'])
@@ -238,7 +238,7 @@ async function separateProfile(prisma, { profile, owner }) {
   }
   let created
   let moved = { movies: 0, episodes: 0, activity: 0 }
-  await runLongTransaction(prisma, async (tx) => {
+  await runMembershipTransaction(prisma, accountId, async (tx) => {
     created = await tx.user.create({
       data: {
         accountId,
@@ -256,14 +256,9 @@ async function separateProfile(prisma, { profile, owner }) {
       },
     })
     moved = await moveProfileHistory(tx, { accountId, fromUserId: owner.id, toUserId: created.id, profileLabel: profile.name })
-    const groups = await tx.group.findMany({ where: { accountId, userIds: { contains: owner.id } } })
-    for (const group of groups) {
-      let ids = []
-      try { ids = JSON.parse(group.userIds || '[]') } catch { ids = [] }
-      if (ids.includes(owner.id) && !ids.includes(created.id)) {
-        await tx.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify([...ids, created.id]) } })
-      }
-    }
+    // The new person joins the owner's group.
+    const ownerGroup = await tx.group.findFirst({ where: { accountId, userIds: { contains: owner.id } }, select: { id: true } })
+    if (ownerGroup) await require('./helpers/database').moveIntoGroup(tx, accountId, created.id, ownerGroup.id)
     await tx.jellyfinProfile.update({ where: { id: profile.id }, data: { ownUserId: created.id, skip: false } })
   })
   return { person: { id: created.id, username }, moved }
@@ -279,7 +274,7 @@ async function mergeProfileBack(prisma, { profile, owner }) {
   const accountId = owner.accountId || 'default'
   const person = profile.ownUserId ? await prisma.user.findFirst({ where: { id: profile.ownUserId, accountId } }) : null
   if (!person) throw Object.assign(new Error('That profile has no person of its own'), { status: 400 })
-  await runLongTransaction(prisma, async (tx) => {
+  await runMembershipTransaction(prisma, accountId, async (tx) => {
     // Label first, so the profile can take its viewing with it again later.
     await tx.watchActivity.updateMany({ where: { userId: person.id, profileLabel: null }, data: { profileLabel: profile.name } })
     await tx.movieWatchHistory.updateMany({ where: { userId: person.id, profileLabel: null }, data: { profileLabel: profile.name } })
@@ -294,13 +289,7 @@ async function mergeProfileBack(prisma, { profile, owner }) {
     await tx.watchSnapshot.deleteMany({ where: { userId: person.id } })
     await tx.watchSession.deleteMany({ where: { userId: person.id } })
     await tx.dismissedContinueWatching.deleteMany({ where: { userId: person.id } })
-    const groups = await tx.group.findMany({ where: { accountId, userIds: { contains: person.id } } })
-    for (const group of groups) {
-      let ids = []
-      try { ids = JSON.parse(group.userIds || '[]') } catch { ids = [] }
-      const next = ids.filter((id) => id !== person.id)
-      if (next.length !== ids.length) await tx.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(next) } })
-    }
+    await require('./helpers/database').dropFromAllGroups(tx, accountId, person.id)
     await tx.jellyfinProfile.update({
       where: { id: profile.id },
       data: { ownUserId: null, skip: false, ...(person.jellyfinToken ? { token: person.jellyfinToken, needsPin: false } : {}) },

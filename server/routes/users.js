@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { StremioAPIClient } = require('stremio-api-client');
 const crypto = require('crypto');
 const { handleStremioError } = require('../utils/handlers');
@@ -139,7 +140,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error checking user existence:', error)
-      return res.status(500).json({ error: error?.message || 'Failed to check user existence' })
+      return res.status(500).json({ error: publicMessage(error, 'Failed to check user existence') })
     }
   })
 
@@ -828,7 +829,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error importing history CSV:', error)
-      res.status(500).json({ error: error?.message || 'Failed to import history' })
+      res.status(500).json({ error: publicMessage(error, 'Failed to import history') })
     }
   })
 
@@ -1501,7 +1502,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const { getBuriedShows } = require('../utils/continueWatching')
       res.json(await getBuriedShows(prisma, accountId))
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to load the graveyard' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to load the graveyard') })
     }
   })
 
@@ -1517,7 +1518,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       await unburyShow(prisma, accountId, userId, showId)
       res.json({ success: true })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to unbury' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to unbury') })
     }
   })
 
@@ -1595,7 +1596,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       sagaCache.set(accountId, { at: Date.now(), value })
       res.json(value)
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to compute sagas' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to compute sagas') })
     }
   })
 
@@ -1649,7 +1650,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       }).sort((a, b) => new Date(b.lastSeenAt || 0).getTime() - new Date(a.lastSeenAt || 0).getTime())
       res.json({ devices, users: accountUsers })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to list devices' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to list devices') })
     }
   })
 
@@ -1668,7 +1669,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
       res.json({ success: true })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to save claim' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to save claim') })
     }
   })
 
@@ -1678,7 +1679,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       await prisma.proxyDeviceClaim.deleteMany({ where: { accountId, clientIp: req.params.clientIp } })
       res.json({ success: true })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to remove claim' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to remove claim') })
     }
   })
 
@@ -1695,7 +1696,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       if (!accepted) return res.status(400).json({ error: 'No external change is recorded for this user' })
       res.json({ success: true })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to accept change' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to accept change') })
     }
   })
 
@@ -1707,7 +1708,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const summary = await runGuardSweep(prisma, { decrypt, StremioAPIClient, createProvider }, { onlyAccountId: getAccountId(req) })
       res.json({ success: true, ...summary })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Sweep failed' })
+      res.status(500).json({ error: publicMessage(e, 'Sweep failed') })
     }
   })
 
@@ -1748,7 +1749,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       }
       res.json({ success: true, ...result, deviceRemoved })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to wipe' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to wipe') })
     }
   })
 
@@ -2414,7 +2415,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching watch time:', error)
-      res.status(500).json({ error: 'Failed to fetch watch time', message: error.message })
+      res.status(500).json({ error: 'Failed to fetch watch time', message: publicMessage(error, 'Failed to fetch watch time') })
     }
   })
 
@@ -2561,7 +2562,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching top items:', error)
-      res.status(500).json({ error: 'Failed to fetch top items', message: error.message })
+      res.status(500).json({ error: 'Failed to fetch top items', message: publicMessage(error, 'Failed to fetch top items') })
     }
   })
 
@@ -2719,7 +2720,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching streaks:', error)
-      res.status(500).json({ error: 'Failed to fetch streaks', message: error.message })
+      res.status(500).json({ error: 'Failed to fetch streaks', message: publicMessage(error, 'Failed to fetch streaks') })
     }
   })
 
@@ -2915,7 +2916,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching velocity:', error)
-      res.status(500).json({ error: 'Failed to fetch velocity', message: error.message })
+      res.status(500).json({ error: 'Failed to fetch velocity', message: publicMessage(error, 'Failed to fetch velocity') })
     }
   })
 
@@ -3071,7 +3072,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(preview)
     } catch (error) {
       console.error('Error building merge preview:', error)
-      res.status(400).json({ error: error.message || 'Failed to build merge preview' })
+      res.status(400).json({ error: publicMessage(error, 'Failed to build merge preview') })
     }
   });
 
@@ -3084,7 +3085,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ success: true, ...result })
     } catch (error) {
       console.error('Error merging users:', error)
-      res.status(400).json({ error: error.message || 'Failed to merge users' })
+      res.status(400).json({ error: publicMessage(error, 'Failed to merge users') })
     }
   });
 
@@ -3106,7 +3107,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ success: true, ...result })
     } catch (error) {
       console.error('Error undoing merge:', error)
-      res.status(400).json({ error: error.message || 'Failed to undo merge' })
+      res.status(400).json({ error: publicMessage(error, 'Failed to undo merge') })
     }
   });
 
@@ -3191,23 +3192,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         // Treat empty string as null (remove from all groups)
         if (groupId === null || groupId === '') {
           // Remove user from all groups
-          const allGroups = await prisma.group.findMany({
-            where: { accountId: getAccountId(req) },
-            select: { id: true, userIds: true }
-          });
-
-          for (const group of allGroups) {
-            if (group.userIds) {
-              const userIds = JSON.parse(group.userIds);
-              const updatedUserIds = userIds.filter(userId => userId !== id);
-              if (updatedUserIds.length !== userIds.length) {
-                await prisma.group.update({
-                  where: { id: group.id },
-                  data: { userIds: JSON.stringify(updatedUserIds) }
-                });
-              }
-            }
-          }
+          await require('../utils/helpers/database').removeUserFromAllGroups(prisma, id, getAccountId(req));
         } else {
           // Validate groupId is a valid string before calling assignUserToGroup
           if (typeof groupId === 'string' && groupId.trim() !== '') {
@@ -3285,7 +3270,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(transformedUser)
     } catch (error) {
       console.error('Error updating user:', error)
-      res.status(500).json({ error: 'Failed to update user', details: error?.message })
+      res.status(500).json({ error: 'Failed to update user', details: publicMessage(error, 'Failed to update user') })
     }
   });
 
@@ -3321,7 +3306,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       return res.json({ message: 'Test message sent' })
     } catch (error) {
       console.error('Failed to send user webhook test:', error)
-      return res.status(500).json({ message: 'Failed to send test message', error: error?.message })
+      return res.status(500).json({ message: 'Failed to send test message', error: publicMessage(error, 'Failed to send test message') })
     }
   });
 
@@ -3348,7 +3333,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(updatedUser)
     } catch (error) {
       console.error('Error enabling user:', error)
-      res.status(500).json({ error: 'Failed to enable user', details: error?.message })
+      res.status(500).json({ error: 'Failed to enable user', details: publicMessage(error, 'Failed to enable user') })
     }
   });
 
@@ -3375,7 +3360,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(updatedUser)
     } catch (error) {
       console.error('Error disabling user:', error)
-      res.status(500).json({ error: 'Failed to disable user', details: error?.message })
+      res.status(500).json({ error: 'Failed to disable user', details: publicMessage(error, 'Failed to disable user') })
     }
   });
 
@@ -3400,24 +3385,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       await require('../utils/trash').archiveUserDelete(prisma, getAccountId(req), id)
 
       // Remove user from all groups first (update userIds arrays)
-      const groups = await prisma.group.findMany({
-        where: {
-          accountId: getAccountId(req),
-          userIds: {
-            contains: id
-          }
-        }
-      })
-
-      // Update each group to remove the user from userIds array
-      for (const group of groups) {
-        const userIds = group.userIds ? JSON.parse(group.userIds) : []
-        const updatedUserIds = userIds.filter(userId => userId !== id)
-        await prisma.group.update({
-          where: { id: group.id },
-          data: { userIds: JSON.stringify(updatedUserIds) }
-        })
-      }
+      await require('../utils/helpers/database').removeUserFromAllGroups(prisma, id, getAccountId(req))
 
       // Delete related records first to avoid FK constraint errors
       await prisma.$transaction([
@@ -3576,7 +3544,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('[sync-plan] Error:', error.message, error.stack)
-      res.status(500).json({ message: 'Failed to get sync plan: ' + error.message })
+      res.status(500).json({ message: publicMessage(error, 'Failed to get sync plan') })
     }
   });
 
@@ -3657,7 +3625,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(addonsOut)
     } catch (error) {
       console.error('❌ Error fetching raw Stremio addons:', error)
-      res.status(500).json({ message: 'Failed to fetch raw Stremio addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch raw Stremio addons', error: publicMessage(error, 'Failed to fetch raw Stremio addons') })
     }
   });
 
@@ -3752,7 +3720,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
             return res.status(409).json({ message: `${user.username || 'This person'}'s ${app} sign-in has expired - reconnect them first (Reconnect, next to their name)`, reconnect: true })
           }
           const appName = user.providerType === 'nuvio' ? 'Nuvio' : user.providerType === 'jellyfin' ? 'their server' : 'Stremio'
-          return res.status(500).json({ message: `Couldn't read their addons from ${appName}`, error: error.message })
+          return res.status(500).json({ message: `Couldn't read their addons from ${appName}`, error: publicMessage(error, `Couldn't read their addons from ${appName}`) })
         }
       }
 
@@ -3816,7 +3784,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         if (/session does not exist|unauthorized|invalid auth| 401/i.test(String(error?.message || ''))) {
           return res.status(409).json({ message: `${user.username || 'This person'}'s Stremio sign-in has expired - reconnect them first (Reconnect, next to their name)`, reconnect: true })
         }
-        return res.status(500).json({ message: "Couldn't read their addons from Stremio", error: error.message })
+        return res.status(500).json({ message: "Couldn't read their addons from Stremio", error: publicMessage(error, "Couldn't read their addons from Stremio") })
       }
     } catch (error) {
       console.error('Error getting Stremio addons:', error)
@@ -3872,7 +3840,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ profiles: annotated })
     } catch (error) {
       console.error('Error fetching Nuvio profiles:', error)
-      res.status(500).json({ message: 'Failed to fetch Nuvio profiles', error: error.message })
+      res.status(500).json({ message: 'Failed to fetch Nuvio profiles', error: publicMessage(error, 'Failed to fetch Nuvio profiles') })
     }
   });
 
@@ -3957,7 +3925,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error adding a Nuvio profile as a user:', error)
-      res.status(500).json({ message: 'Failed to add that profile', error: error.message })
+      res.status(500).json({ message: 'Failed to add that profile', error: publicMessage(error, 'Failed to add that profile') })
     }
   });
 
@@ -4090,7 +4058,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(await profilesView(ctx))
     } catch (error) {
       console.error('Error reading profiles:', error)
-      res.status(500).json({ message: 'Failed to read profiles', error: error.message })
+      res.status(500).json({ message: 'Failed to read profiles', error: publicMessage(error, 'Failed to read profiles') })
     }
   })
 
@@ -4157,7 +4125,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ ...(await profilesView(next)), removedUserId })
     } catch (error) {
       console.error('Error changing a profile:', error)
-      res.status(error.status || 500).json({ message: error.message || 'Failed to change that profile' })
+      res.status(error.status || 500).json({ message: publicMessage(error, 'Failed to change that profile') })
     }
   })
 
@@ -4201,7 +4169,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.status(201).json({ ...(await profilesView(next)), person })
     } catch (error) {
       console.error('Error giving a profile its own person:', error)
-      res.status(error.status || 500).json({ message: error.message || 'Failed to give that profile its own person' })
+      res.status(error.status || 500).json({ message: publicMessage(error, 'Failed to give that profile its own person') })
     }
   })
 
@@ -4218,7 +4186,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ ...(await profilesView(ctx)), moved })
     } catch (error) {
       console.error('Error tidying profile history:', error)
-      res.status(500).json({ message: 'Failed to tidy that history', error: error.message })
+      res.status(500).json({ message: 'Failed to tidy that history', error: publicMessage(error, 'Failed to tidy that history') })
     }
   })
 
@@ -4239,7 +4207,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ collections })
     } catch (error) {
       console.error('Error fetching Nuvio collections:', error)
-      res.status(500).json({ message: 'Failed to fetch Nuvio collections', error: error.message })
+      res.status(500).json({ message: 'Failed to fetch Nuvio collections', error: publicMessage(error, 'Failed to fetch Nuvio collections') })
     }
   });
 
@@ -4271,7 +4239,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ success: true, collections })
     } catch (error) {
       console.error('Error saving Nuvio collections:', error)
-      res.status(500).json({ message: 'Failed to save Nuvio collections', error: error.message })
+      res.status(500).json({ message: 'Failed to save Nuvio collections', error: publicMessage(error, 'Failed to save Nuvio collections') })
     }
   });
 
@@ -4321,7 +4289,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         canReset: !!(state && state.original),
       })
     } catch (e) {
-      res.status(500).json({ message: e?.message || 'Failed to read Cinemeta state' })
+      res.status(500).json({ message: publicMessage(e, 'Failed to read Cinemeta state') })
     }
   })
 
@@ -4368,7 +4336,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       return res.json({ success: true, applied: patch, summary: describePatch(patch) })
     } catch (e) {
       console.error('Cinemeta patch failed:', e)
-      res.status(500).json({ message: e?.message || 'Failed to patch Cinemeta' })
+      res.status(500).json({ message: publicMessage(e, 'Failed to patch Cinemeta') })
     }
   })
 
@@ -4400,7 +4368,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       return res.json({ success: true })
     } catch (e) {
       console.error('Cinemeta reset failed:', e)
-      res.status(500).json({ message: e?.message || 'Failed to reset Cinemeta' })
+      res.status(500).json({ message: publicMessage(e, 'Failed to reset Cinemeta') })
     }
   })
 
@@ -4441,7 +4409,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         profileName: profileNameByKey.get(`${a.userId}:${a.profileId}`) || null,
       })) })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to read guard state' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to read guard state') })
     }
   })
 
@@ -4469,7 +4437,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         : await restoreSnapshot(prisma, getAccountId(req), userId, Number(profileId), r.provider)
       res.json({ success: true, ...result })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Restore failed' })
+      res.status(500).json({ error: publicMessage(e, 'Restore failed') })
     }
   })
 
@@ -4486,7 +4454,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         : await acceptCurrent(prisma, getAccountId(req), userId, Number(profileId), r.provider)
       res.json({ success: true, ...result })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Accept failed' })
+      res.status(500).json({ error: publicMessage(e, 'Accept failed') })
     }
   })
 
@@ -4509,7 +4477,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const result = await readLayoutForEdit(r.provider, Number(profileId), live?.addons, { prisma })
       res.json(result)
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to read the home layout' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to read the home layout') })
     }
   })
 
@@ -4531,7 +4499,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         .catch(() => {})
       res.json({ success: true, ...result })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to save the home layout' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to save the home layout') })
     }
   })
 
@@ -4550,7 +4518,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const result = await copyLayout(prisma, getAccountId(req), userId, Number(fromProfileId), Number(toProfileId), r.provider)
       res.json({ success: true, ...result })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Copy failed' })
+      res.status(500).json({ error: publicMessage(e, 'Copy failed') })
     }
   })
 
@@ -4582,7 +4550,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(data)
     } catch (error) {
       console.error('Error fetching Nuvio community covers:', error)
-      res.status(500).json({ message: 'Failed to fetch Nuvio community covers', error: error.message })
+      res.status(500).json({ message: 'Failed to fetch Nuvio community covers', error: publicMessage(error, 'Failed to fetch Nuvio community covers') })
     }
   });
 
@@ -4663,7 +4631,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching Nuvio catalog preview:', error)
-      res.status(500).json({ message: 'Failed to fetch catalog preview', error: error.message })
+      res.status(500).json({ message: 'Failed to fetch catalog preview', error: publicMessage(error, 'Failed to fetch catalog preview') })
     }
   });
 
@@ -4721,7 +4689,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ addons: result.addons })
     } catch (error) {
       console.error('❌ Error fetching desired addons:', error)
-      res.status(500).json({ message: 'Failed to fetch desired addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch desired addons', error: publicMessage(error, 'Failed to fetch desired addons') })
     }
   });
 
@@ -4756,7 +4724,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ addons: groupAddons })
     } catch (error) {
       console.error('❌ Error fetching group addons:', error)
-      res.status(500).json({ message: 'Failed to fetch group addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch group addons', error: publicMessage(error, 'Failed to fetch group addons') })
     }
   });
 
@@ -4872,7 +4840,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error in sync endpoint:', error)
-      return res.status(500).json({ message: 'Failed to sync user', error: error?.message })
+      return res.status(500).json({ message: 'Failed to sync user', error: publicMessage(error, 'Failed to sync user') })
     }
   });
 
@@ -4980,7 +4948,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error syncing all users:', error)
-      res.status(500).json({ message: 'Failed to sync all users', error: error?.message })
+      res.status(500).json({ message: 'Failed to sync all users', error: publicMessage(error, 'Failed to sync all users') })
     }
   });
 
@@ -5226,7 +5194,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error in reload addons endpoint:', error)
-      res.status(500).json({ message: 'Failed to reload user addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to reload user addons', error: publicMessage(error, 'Failed to reload user addons') })
     }
   })
 
@@ -5310,11 +5278,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         })
       } catch (error) {
         console.error('Error adding addons:', error)
-        res.status(500).json({ message: 'Failed to add addons', error: error?.message })
+        res.status(500).json({ message: 'Failed to add addons', error: publicMessage(error, 'Failed to add addons') })
       }
     } catch (error) {
       console.error('Error in add Stremio addons endpoint:', error)
-      res.status(500).json({ message: 'Failed to add addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to add addons', error: publicMessage(error, 'Failed to add addons') })
     }
   })
 
@@ -5514,7 +5482,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching combined library:', error)
-      res.status(500).json({ message: 'Failed to fetch combined library', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch combined library', error: publicMessage(error, 'Failed to fetch combined library') })
     }
   })
 
@@ -5655,7 +5623,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error fetching activity sessions:', error)
-      res.status(500).json({ message: 'Failed to fetch activity sessions', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch activity sessions', error: publicMessage(error, 'Failed to fetch activity sessions') })
     }
   })
 
@@ -5731,7 +5699,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(exportData)
     } catch (error) {
       console.error('Error exporting history:', error)
-      res.status(500).json({ message: 'Failed to export history', error: error?.message })
+      res.status(500).json({ message: 'Failed to export history', error: publicMessage(error, 'Failed to export history') })
     }
   })
 
@@ -5926,7 +5894,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error importing history:', error)
-      res.status(500).json({ message: 'Failed to import history', error: error?.message })
+      res.status(500).json({ message: 'Failed to import history', error: publicMessage(error, 'Failed to import history') })
     }
   })
 
@@ -5973,7 +5941,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error clearing history:', error)
-      res.status(500).json({ message: 'Failed to clear history', error: error?.message })
+      res.status(500).json({ message: 'Failed to clear history', error: publicMessage(error, 'Failed to clear history') })
     }
   })
 
@@ -6072,7 +6040,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error clearing library:', error)
-      res.status(500).json({ message: 'Failed to clear library', error: error?.message })
+      res.status(500).json({ message: 'Failed to clear library', error: publicMessage(error, 'Failed to clear library') })
     }
   })
 
@@ -6132,7 +6100,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ status: data.status || null })
     } catch (error) {
       console.error('Error getting like/love status:', error)
-      res.status(500).json({ message: 'Failed to get like/love status', error: error?.message })
+      res.status(500).json({ message: 'Failed to get like/love status', error: publicMessage(error, 'Failed to get like/love status') })
     }
   })
 
@@ -6201,7 +6169,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ success: true, data })
     } catch (error) {
       console.error('Error updating like/love status:', error)
-      res.status(500).json({ message: 'Failed to update like/love status', error: error?.message })
+      res.status(500).json({ message: 'Failed to update like/love status', error: publicMessage(error, 'Failed to update like/love status') })
     }
   })
 
@@ -6265,11 +6233,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         clearCache(accountId, userId)
         return res.status(500).json({
           error: 'Failed to toggle library items',
-          message: error?.message || String(error),
+          message: publicMessage(error, 'Something went wrong'),
           success: false,
           successCount: 0,
           errorCount: items.length,
-          results: items.map(item => ({ itemId: item.itemId, success: false, error: error?.message }))
+          results: items.map(item => ({ itemId: item.itemId, success: false, error: publicMessage(error, 'Something went wrong') }))
         })
       }
 
@@ -6322,7 +6290,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error toggling library items:', error)
-      res.status(500).json({ error: 'Failed to toggle library items', message: error?.message })
+      res.status(500).json({ error: 'Failed to toggle library items', message: publicMessage(error, 'Failed to toggle library items') })
     }
   })
 
@@ -6394,7 +6362,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error deleting library item:', error)
-      res.status(500).json({ error: 'Failed to delete library item', message: error?.message })
+      res.status(500).json({ error: 'Failed to delete library item', message: publicMessage(error, 'Failed to delete library item') })
     }
   })
 
@@ -6467,7 +6435,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(library)
     } catch (error) {
       console.error('Error backing up library:', error)
-      res.status(500).json({ error: 'Failed to backup library', message: error?.message })
+      res.status(500).json({ error: 'Failed to backup library', message: publicMessage(error, 'Failed to backup library') })
     }
   })
 
@@ -6603,11 +6571,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         })
       } catch (error) {
         console.error('Error fetching library items:', error)
-        res.status(500).json({ message: 'Failed to fetch library items', error: error?.message })
+        res.status(500).json({ message: 'Failed to fetch library items', error: publicMessage(error, 'Failed to fetch library items') })
       }
     } catch (error) {
       console.error('Error in get library endpoint:', error)
-      res.status(500).json({ message: 'Failed to fetch library items', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch library items', error: publicMessage(error, 'Failed to fetch library items') })
     }
   })
 
@@ -6655,11 +6623,11 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         })
       } catch (error) {
         console.error('Error clearing Stremio addons:', error)
-        res.status(500).json({ message: 'Failed to clear addons', error: error?.message })
+        res.status(500).json({ message: 'Failed to clear addons', error: publicMessage(error, 'Failed to clear addons') })
       }
     } catch (error) {
       console.error('Error in clear Stremio addons endpoint:', error)
-      res.status(500).json({ message: 'Failed to clear addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to clear addons', error: publicMessage(error, 'Failed to clear addons') })
     }
   })
 
@@ -6791,7 +6759,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       // When the provider could not write the list back, its own message says
       // the list may now be empty and to run a sync; a generic line hides that.
       const message = error?.code === 'ADDON_LIST_NOT_RESTORED' ? error.message : 'Failed to remove addon from Stremio'
-      return res.status(502).json({ message, error: error?.message })
+      return res.status(502).json({ message, error: publicMessage(error, 'Something went wrong') })
     }
   })
 
@@ -6833,7 +6801,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ message: 'Stremio connection established successfully' })
     } catch (error) {
       console.error('Error connecting user with auth key:', error)
-      res.status(500).json({ message: 'Failed to connect user', error: error?.message })
+      res.status(500).json({ message: 'Failed to connect user', error: publicMessage(error, 'Failed to connect user') })
     }
   })
 
@@ -6868,7 +6836,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ message: 'Stremio credentials cleared successfully' })
     } catch (error) {
       console.error('Error clearing Stremio credentials:', error)
-      res.status(500).json({ message: 'Failed to clear Stremio credentials', error: error?.message })
+      res.status(500).json({ message: 'Failed to clear Stremio credentials', error: publicMessage(error, 'Failed to clear Stremio credentials') })
     }
   })
 
@@ -6889,7 +6857,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(pin)
     } catch (error) {
       console.error('Error starting SIMKL authorization:', error)
-      res.status(error?.status || 500).json({ message: error?.message || 'Failed to start SIMKL authorization' })
+      res.status(error?.status || 500).json({ message: publicMessage(error, 'Failed to start SIMKL authorization') })
     }
   })
 
@@ -6918,7 +6886,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ status: 'authorized', username })
     } catch (error) {
       console.error('Error polling SIMKL authorization:', error)
-      res.status(error?.status || 500).json({ message: error?.message || 'Failed to poll SIMKL authorization' })
+      res.status(error?.status || 500).json({ message: publicMessage(error, 'Failed to poll SIMKL authorization') })
     }
   })
 
@@ -6939,7 +6907,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ message: 'SIMKL disconnected' })
     } catch (error) {
       console.error('Error disconnecting SIMKL:', error)
-      res.status(500).json({ message: 'Failed to disconnect SIMKL', error: error?.message })
+      res.status(500).json({ message: 'Failed to disconnect SIMKL', error: publicMessage(error, 'Failed to disconnect SIMKL') })
     }
   })
 
@@ -6981,7 +6949,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ message: 'Stremio connection established successfully' })
     } catch (error) {
       console.error('Error connecting user to Stremio:', error)
-      res.status(500).json({ message: 'Failed to connect user to Stremio', error: error?.message })
+      res.status(500).json({ message: 'Failed to connect user to Stremio', error: publicMessage(error, 'Failed to connect user to Stremio') })
     }
   })
 
@@ -7176,7 +7144,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error importing addons:', error)
-      res.status(500).json({ message: 'Failed to import addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to import addons', error: publicMessage(error, 'Failed to import addons') })
     }
   })
 
@@ -7256,7 +7224,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     } catch (error) {
       console.error('Error reordering Stremio addons:', error)
       const message = error?.code === 'ADDON_LIST_NOT_RESTORED' ? error.message : 'Failed to reorder addons'
-      res.status(500).json({ message, error: error?.message })
+      res.status(500).json({ message, error: publicMessage(error, 'Something went wrong') })
     }
   });
 
@@ -7430,7 +7398,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ message: 'Stremio credentials cleared successfully', userId: updatedUser.id });
     } catch (error) {
       console.error('Error clearing Stremio credentials:', error);
-      res.status(500).json({ message: 'Failed to clear Stremio credentials', error: error?.message });
+      res.status(500).json({ message: 'Failed to clear Stremio credentials', error: publicMessage(error, 'Failed to clear Stremio credentials') });
     }
   });
 
@@ -7614,7 +7582,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       console.error('Stremio connection error:', error);
       return res.status(500).json({
         message: 'Failed to connect to Stremio',
-        error: error?.message || 'Unknown error'
+        error: publicMessage(error, 'Unknown error')
       });
     }
   });
@@ -7959,7 +7927,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
 
     } catch (error) {
       console.error('❌ Import addons error:', error)
-      res.status(500).json({ message: 'Failed to import addons', error: error.message })
+      res.status(500).json({ message: 'Failed to import addons', error: publicMessage(error, 'Failed to import addons') })
     }
   });
 
@@ -8080,7 +8048,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       return res.json({ message: 'Webhook sent successfully', sent: true })
     } catch (error) {
       console.error('Failed to send invite webhook:', error)
-      return res.status(500).json({ message: 'Failed to send webhook', error: error?.message })
+      return res.status(500).json({ message: 'Failed to send webhook', error: publicMessage(error, 'Failed to send webhook') })
     }
   })
 
@@ -8125,7 +8093,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error('Error updating user activity visibility:', error)
-      res.status(500).json({ error: 'Failed to update activity visibility', details: error?.message })
+      res.status(500).json({ error: 'Failed to update activity visibility', details: publicMessage(error, 'Failed to update activity visibility') })
     }
   })
 
@@ -8157,7 +8125,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(shares)
     } catch (error) {
       console.error(`Failed to get shares for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to get shares', message: error?.message })
+      res.status(500).json({ error: 'Failed to get shares', message: publicMessage(error, 'Failed to get shares') })
     }
   })
 
@@ -8184,7 +8152,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ received: shares.received })
     } catch (error) {
       console.error(`Failed to get received shares for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to get received shares', message: error?.message })
+      res.status(500).json({ error: 'Failed to get received shares', message: publicMessage(error, 'Failed to get received shares') })
     }
   })
 
@@ -8211,7 +8179,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ members: groupMembers })
     } catch (error) {
       console.error(`Failed to get group members for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to get group members', message: error?.message })
+      res.status(500).json({ error: 'Failed to get group members', message: publicMessage(error, 'Failed to get group members') })
     }
   })
 
@@ -8378,7 +8346,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
               // Skip duplicates silently
               continue
             }
-            errors.push({ itemId: item.itemId, targetUserId, error: error.message })
+            errors.push({ itemId: item.itemId, targetUserId, error: publicMessage(error, 'Something went wrong') })
           }
         }
       }
@@ -8416,7 +8384,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       })
     } catch (error) {
       console.error(`Failed to share items for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to share items', message: error?.message })
+      res.status(500).json({ error: 'Failed to share items', message: publicMessage(error, 'Failed to share items') })
     }
   })
 
@@ -8447,7 +8415,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ success: true, message: 'Share removed' })
     } catch (error) {
       console.error(`Failed to remove share ${req.params.shareId} for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to remove share', message: error?.message })
+      res.status(500).json({ error: 'Failed to remove share', message: publicMessage(error, 'Failed to remove share') })
     }
   })
 
@@ -8478,7 +8446,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json({ success: true, message: 'Share marked as viewed' })
     } catch (error) {
       console.error(`Failed to mark share ${req.params.shareId} as viewed for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to mark share as viewed', message: error?.message })
+      res.status(500).json({ error: 'Failed to mark share as viewed', message: publicMessage(error, 'Failed to mark share as viewed') })
     }
   })
 
@@ -8501,7 +8469,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       res.json(decoded)
     } catch (error) {
       console.error('Error decoding watched bitfield:', error)
-      res.status(500).json({ error: 'Failed to decode watched field', message: error.message })
+      res.status(500).json({ error: 'Failed to decode watched field', message: publicMessage(error, 'Failed to decode watched field') })
     }
   })
 
@@ -8787,7 +8755,7 @@ async function syncCredentialsAddons(prismaClient, credentials, excludedManifest
     return { success: true, total: (plan.desired || []).length }
   } catch (e) {
     console.error('❌ Failed to apply sync plan:', e?.message)
-    return { success: false, error: e?.message || 'Failed to sync addons' }
+    return { success: false, error: publicMessage(e, 'Failed to sync addons') }
   }
 }
 
@@ -8940,6 +8908,6 @@ async function syncUserAddonsCore(prismaClient, userId, excludedManifestUrls = [
     return result
   } catch (error) {
     console.error('Error in syncUserAddons:', error)
-    return { success: false, error: error?.message || 'Unknown error' }
+    return { success: false, error: publicMessage(error, 'Unknown error') }
   }
 }

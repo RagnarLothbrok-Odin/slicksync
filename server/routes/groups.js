@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { decrypt } = require('../utils/encryption')
 const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl } = require('../utils/validation')
 const { StremioAPIClient } = require('stremio-api-client')
@@ -295,7 +296,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error creating group:', error);
-      res.status(500).json({ message: 'Failed to create group', error: error?.message });
+      res.status(500).json({ message: 'Failed to create group', error: publicMessage(error, 'Failed to create group') });
     }
   });
 
@@ -363,7 +364,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error cloning group:', error);
-      res.status(500).json({ message: 'Failed to clone group', error: error?.message });
+      res.status(500).json({ message: 'Failed to clone group', error: publicMessage(error, 'Failed to clone group') });
     }
   });
 
@@ -398,7 +399,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error reloading group addons:', error);
-      res.status(500).json({ message: 'Failed to reload group addons', error: error?.message });
+      res.status(500).json({ message: 'Failed to reload group addons', error: publicMessage(error, 'Failed to reload group addons') });
     }
   });
 
@@ -446,7 +447,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error finding or creating group:', error);
-      res.status(500).json({ message: 'Failed to find or create group', error: error?.message });
+      res.status(500).json({ message: 'Failed to find or create group', error: publicMessage(error, 'Failed to find or create group') });
     }
   });
 
@@ -526,7 +527,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error fetching group detail:', error);
-      res.status(500).json({ message: 'Failed to fetch group detail', error: error?.message });
+      res.status(500).json({ message: 'Failed to fetch group detail', error: publicMessage(error, 'Failed to fetch group detail') });
     }
   });
 
@@ -616,7 +617,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error building group dashboard:', error);
-      res.status(500).json({ message: 'Failed to build group dashboard', error: error?.message });
+      res.status(500).json({ message: 'Failed to build group dashboard', error: publicMessage(error, 'Failed to build group dashboard') });
     }
   });
 
@@ -720,7 +721,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Group updated successfully' })
     } catch (error) {
       console.error('Error updating group:', error)
-      res.status(500).json({ message: 'Failed to update group', error: error?.message })
+      res.status(500).json({ message: 'Failed to update group', error: publicMessage(error, 'Failed to update group') })
     }
   });
 
@@ -759,7 +760,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       if (error.code === 'P2025') {
         return responseUtils.notFound(res, 'Group')
       }
-      return res.status(500).json({ message: 'Failed to delete group', error: error?.message })
+      return res.status(500).json({ message: 'Failed to delete group', error: publicMessage(error, 'Failed to delete group') })
     }
   });
 
@@ -795,7 +796,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'User removed from group successfully' })
     } catch (error) {
       console.error('Error removing user from group:', error)
-      res.status(500).json({ message: 'Failed to remove user from group', error: error?.message })
+      res.status(500).json({ message: 'Failed to remove user from group', error: publicMessage(error, 'Failed to remove user from group') })
     }
   });
 
@@ -920,7 +921,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
 
     } catch (error) {
       console.error('Error fetching group watch time:', error)
-      res.status(500).json({ message: 'Failed to fetch group watch time', error: error.message })
+      res.status(500).json({ message: 'Failed to fetch group watch time', error: publicMessage(error, 'Failed to fetch group watch time') })
     }
   })
 
@@ -1030,7 +1031,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       const status = isNotFound ? 404 : 500
       
       return res.status(status).json({ 
-        message: error.message || 'Failed to reorder addons',
+        message: publicMessage(error, 'Failed to reorder addons'),
         error: error.code || 'INTERNAL_ERROR',
         details: {
           groupId,
@@ -1104,7 +1105,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Addons reordered successfully', groupId, reorderedCount: orderedIds.length })
     } catch (error) {
       console.error('[Reorder-Alias] Error reordering addons:', error.message)
-      res.status(500).json({ message: 'Failed to reorder addons', error: error.message })
+      res.status(500).json({ message: 'Failed to reorder addons', error: publicMessage(error, 'Failed to reorder addons') })
     }
   })
 
@@ -1129,7 +1130,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'User added to group successfully' })
     } catch (error) {
       console.error('Error adding user to group:', error)
-      res.status(500).json({ message: 'Failed to add user to group', error: error?.message })
+      res.status(500).json({ message: 'Failed to add user to group', error: publicMessage(error, 'Failed to add user to group') })
     }
   })
 
@@ -1195,7 +1196,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Addon added to group successfully' })
     } catch (error) {
       console.error('Error adding addon to group:', error)
-      res.status(500).json({ message: 'Failed to add addon to group', error: error?.message })
+      res.status(500).json({ message: 'Failed to add addon to group', error: publicMessage(error, 'Failed to add addon to group') })
     }
   });
 
@@ -1240,7 +1241,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Addon removed from group successfully' })
     } catch (error) {
       console.error('Error removing addon from group:', error)
-      res.status(500).json({ message: 'Failed to remove addon from group', error: error?.message })
+      res.status(500).json({ message: 'Failed to remove addon from group', error: publicMessage(error, 'Failed to remove addon from group') })
     }
   });
 
@@ -1271,7 +1272,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Group enabled successfully' })
     } catch (error) {
       console.error('Error enabling group:', error)
-      res.status(500).json({ message: 'Failed to enable group', error: error?.message })
+      res.status(500).json({ message: 'Failed to enable group', error: publicMessage(error, 'Failed to enable group') })
     }
   });
 
@@ -1302,7 +1303,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Group disabled successfully' })
     } catch (error) {
       console.error('Error disabling group:', error)
-      res.status(500).json({ message: 'Failed to disable group', error: error?.message })
+      res.status(500).json({ message: 'Failed to disable group', error: publicMessage(error, 'Failed to disable group') })
     }
   });
 
@@ -1315,7 +1316,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       return res.json(result)
     } catch (error) {
       console.error('Error syncing group:', error)
-      res.status(500).json({ message: 'Failed to sync group', error: error?.message })
+      res.status(500).json({ message: 'Failed to sync group', error: publicMessage(error, 'Failed to sync group') })
     }
   });
 
@@ -1411,7 +1412,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ message: 'Excluded addons updated successfully' })
     } catch (error) {
       console.error('Error updating excluded addons:', error)
-      res.status(500).json({ message: 'Failed to update excluded addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to update excluded addons', error: publicMessage(error, 'Failed to update excluded addons') })
     }
   });
 
@@ -1441,7 +1442,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json(updatedGroup)
     } catch (error) {
       console.error('Error toggling group status:', error)
-      res.status(500).json({ error: 'Failed to toggle group status', details: error?.message })
+      res.status(500).json({ error: 'Failed to toggle group status', details: publicMessage(error, 'Failed to toggle group status') })
     }
   });
 
@@ -1480,7 +1481,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       })
     } catch (error) {
       console.error('Error updating activity visibility:', error)
-      res.status(500).json({ error: 'Failed to update activity visibility', details: error?.message })
+      res.status(500).json({ error: 'Failed to update activity visibility', details: publicMessage(error, 'Failed to update activity visibility') })
     }
   });
 
@@ -1498,7 +1499,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       res.json({ addons: filteredAddonsSorted })
     } catch (error) {
       console.error('Error fetching group addons:', error)
-      res.status(500).json({ message: 'Failed to fetch group addons', error: error?.message })
+      res.status(500).json({ message: 'Failed to fetch group addons', error: publicMessage(error, 'Failed to fetch group addons') })
     }
   })
 
@@ -1551,7 +1552,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUser
       });
     } catch (error) {
       console.error('Error syncing all groups:', error);
-      res.status(500).json({ message: 'Failed to sync all groups', error: error?.message });
+      res.status(500).json({ message: 'Failed to sync all groups', error: publicMessage(error, 'Failed to sync all groups') });
     }
   });
   // Exportable helper to sync one group's users (used by scheduler)
