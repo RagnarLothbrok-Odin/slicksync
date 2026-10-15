@@ -1,4 +1,5 @@
 const { safeFetch, instancePolicy } = require('../utils/safeUrl');
+const { publicMessage } = require('../utils/publicError');
 const express = require('express');
 
 // Addon snapshots ("library"): save a named, portable copy of a user's or group's
@@ -252,7 +253,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, createProvider }) =>
       console.error('Error deploying snapshot:', error);
       // Their list may have been left empty, which the admin has to act on, so this
       // message goes through as it is.
-      if (error?.code === 'ADDON_LIST_NOT_RESTORED') return res.status(500).json({ error: error.message });
+      if (error?.code === 'ADDON_LIST_NOT_RESTORED') return res.status(500).json({ error: publicMessage(error, 'Something went wrong') });
       res.status(500).json({ error: 'Failed to deploy snapshot' });
     }
   });

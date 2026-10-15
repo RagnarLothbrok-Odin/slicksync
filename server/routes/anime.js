@@ -1,4 +1,5 @@
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 
 // Anime endpoints, backed by AniList (utils/anilist.js).
 //
@@ -91,7 +92,7 @@ module.exports = ({ getAccountId }) => {
         movies: order.movies.map(shape),
       })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to build a watch order' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to build a watch order') })
     }
   })
 

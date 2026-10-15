@@ -588,7 +588,9 @@ const ACTIONS = {
       if (!user) throw new Error('User not found on this account')
       const ids = parseIdList(group.userIds)
       if (ids.includes(userId)) return `${user.username} was already in "${group.name}"`
-      await prisma.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify([...ids, userId]) } })
+      // One group per person, as everywhere else: moved out of any other.
+      const members = require('../helpers/database')
+      await members.withMembershipLock(accountId, () => members.moveIntoGroup(prisma, accountId, userId, group.id))
       return `Added ${user.username} to "${group.name}"`
     },
   },
@@ -717,9 +719,15 @@ const ACTIONS = {
       ])
       if (!group) throw new Error('Group not found on this account')
       if (!user) throw new Error('User not found on this account')
-      const ids = parseIdList(group.userIds)
-      if (!ids.includes(userId)) return `${user.username} was not in "${group.name}"`
-      await prisma.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(ids.filter((i) => i !== userId)) } })
+      if (!parseIdList(group.userIds).includes(userId)) return `${user.username} was not in "${group.name}"`
+      // Read again inside the queue, so a change made meanwhile is kept.
+      await require('../helpers/database').withMembershipLock(accountId, async () => {
+        const fresh = await prisma.group.findFirst({ where: { id: group.id, accountId }, select: { userIds: true } })
+        const ids = parseIdList(fresh?.userIds)
+        if (ids.includes(userId)) {
+          await prisma.group.update({ where: { id: group.id }, data: { userIds: JSON.stringify(ids.filter((i) => i !== userId)) } })
+        }
+      })
       return `Removed ${user.username} from "${group.name}"`
     },
   },

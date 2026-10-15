@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 
 // Custom lists (roadmap #7): named, account-scoped collections of titles -
 // the tier above the single personal Watchlist (routes/watchlist.js). An admin
@@ -118,7 +119,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json(result);
     } catch (e) {
       console.error('Error previewing described catalog:', e);
-      res.status(400).json({ error: e.message || 'Failed to generate a preview' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to generate a preview') });
     }
   });
 
@@ -201,7 +202,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.status(201).json({ ...shape(list), truncated: !!result.truncated, totalAvailable: result.totalAvailable });
     } catch (e) {
       console.error('Error importing list:', e);
-      res.status(400).json({ error: e?.message || 'Failed to import list' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to import list') });
     }
   });
 
@@ -235,7 +236,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       })
       res.json({ success: true, rule, description: describeRule(rule) })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to save the rule' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to save the rule') })
     }
   })
 
@@ -254,7 +255,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       if (!result) return res.status(502).json({ error: `${why || 'Could not evaluate the rule just now'} - the catalog was left as it was` })
       res.json({ success: true, ...result })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Refresh failed' })
+      res.status(500).json({ error: publicMessage(e, 'Refresh failed') })
     }
   })
 
@@ -274,7 +275,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ ...shape(existing), added, removed, unchanged, applied: false });
     } catch (e) {
       console.error('Error refreshing list:', e);
-      res.status(400).json({ error: e?.message || 'Failed to refresh list from source' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to refresh list from source') });
     }
   });
 
@@ -588,7 +589,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ suggestions, query });
     } catch (e) {
       console.error('Error suggesting catalog titles:', e);
-      res.status(400).json({ error: e?.message || 'Failed to suggest titles' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to suggest titles') });
     }
   });
 
@@ -662,7 +663,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ counts, unknownCount, checked: items.length });
     } catch (e) {
       console.error('Error computing content rating breakdown:', e);
-      res.status(400).json({ error: e?.message || 'Failed to compute content rating breakdown' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to compute content rating breakdown') });
     }
   });
 
@@ -683,7 +684,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ keep, remove, unknown, checked: items.length });
     } catch (e) {
       console.error('Error previewing catalog content rating:', e);
-      res.status(e?.status || 400).json({ error: e?.message || 'Failed to preview content rating' });
+      res.status(e?.status || 400).json({ error: publicMessage(e, 'Failed to preview content rating') });
     }
   });
 
@@ -733,7 +734,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ ...shape(list), removedCount: remove.length });
     } catch (e) {
       console.error('Error applying catalog content rating:', e);
-      res.status(e?.status || 400).json({ error: e?.message || 'Failed to apply content rating' });
+      res.status(e?.status || 400).json({ error: publicMessage(e, 'Failed to apply content rating') });
     }
   });
 
@@ -800,7 +801,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ items });
     } catch (e) {
       console.error('Error fetching SIMKL discover row:', e);
-      res.status(400).json({ error: e?.message || 'Failed to fetch SIMKL discover row' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to fetch SIMKL discover row') });
     }
   });
 
@@ -827,7 +828,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.status(201).json({ ...shape(list), totalAvailable: result.totalAvailable });
     } catch (e) {
       console.error('Error importing SIMKL Plan to Watch:', e);
-      res.status(400).json({ error: e?.message || 'Failed to import from SIMKL' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to import from SIMKL') });
     }
   });
 
@@ -851,7 +852,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json({ ...result, username: linkedUser.username });
     } catch (e) {
       console.error('Error exporting list to SIMKL:', e);
-      res.status(400).json({ error: e?.message || 'Failed to export to SIMKL' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to export to SIMKL') });
     }
   });
 
@@ -873,7 +874,7 @@ module.exports = ({ prisma, getAccountId, decrypt }) => {
       res.json(result);
     } catch (e) {
       console.error('Error exporting list to MDBList:', e);
-      res.status(400).json({ error: e?.message || 'Failed to export to MDBList' });
+      res.status(400).json({ error: publicMessage(e, 'Failed to export to MDBList') });
     }
   });
 

@@ -11,6 +11,7 @@ import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button, Card, Badge, ResourceBadge, Modal, ConfirmModal, Input, ToggleSwitch, VersionBadge, InlineEdit, SyncBadge } from '@/components/ui';
 import { AddonConfigModal } from '@/components/addons/AddonConfigModal';
+import { sharedConfigPeers, configKindOf, type SharedPeer } from '@/lib/sharedConfig';
 import { AddonHealthSettings } from '@/components/addons/AddonHealthSettings';
 import { decodeAddonConfig } from '@/lib/addonConfig';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
@@ -424,6 +425,18 @@ export default function AddonDetailPage() {
 
   // Data state
   const [addon, setAddon] = useState<AddonWithGroups | null>(null);
+  // Other addons opening this addon's saved configuration (lib/sharedConfig.ts).
+  const [sharedPeers, setSharedPeers] = useState<SharedPeer[]>([]);
+  // The single-addon response names the address `url`; the list says manifestUrl.
+  const ownUrl = addon?.manifestUrl || (addon as { url?: string } | null)?.url || '';
+  useEffect(() => {
+    if (!ownUrl) { setSharedPeers([]); return; }
+    let cancelled = false;
+    api.getAddons()
+      .then((all) => { if (!cancelled) setSharedPeers(sharedConfigPeers(all).get(String(params.id)) || []); })
+      .catch(() => { if (!cancelled) setSharedPeers([]); });
+    return () => { cancelled = true; };
+  }, [params.id, ownUrl]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -1460,6 +1473,21 @@ export default function AddonDetailPage() {
         {/* Manifest URL Section */}
         <PageSection delay={0.1} className="mb-8">
           <Card padding="lg">
+            {sharedPeers.length > 0 && addon && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm text-default" style={{ borderColor: 'color-mix(in srgb, var(--color-warning) 45%, transparent)', background: 'color-mix(in srgb, var(--color-warning) 10%, transparent)' }}>
+                <LinkIcon className="w-4 h-4 mt-0.5 shrink-0 text-warning" />
+                <p>
+                  Same {configKindOf(ownUrl, addon.name) ? `${configKindOf(ownUrl, addon.name)} ` : ''}configuration as{' '}
+                  {sharedPeers.map((p, i) => (
+                    <span key={p.id}>
+                      {i > 0 && (i === sharedPeers.length - 1 ? ' and ' : ', ')}
+                      <Link href={`/addons/${p.id}`} className="font-medium text-primary hover:underline">{p.name}</Link>
+                    </span>
+                  ))}
+                  . Changing its settings changes {sharedPeers.length > 1 ? 'all of them' : 'both'}. To keep them apart, save it as a new configuration and paste the new link below.
+                </p>
+              </div>
+            )}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/20">

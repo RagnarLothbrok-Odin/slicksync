@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const { describeRegistry } = require('../utils/automation/registry');
 const { validateRule, runActions, samplePayloadFor } = require('../utils/automation/engine');
 
@@ -48,8 +49,8 @@ module.exports = ({ prisma, getAccountId }) => {
       const { rule, warnings } = await composeRule(prisma, accountId, text, decrypt);
       res.json({ rule, warnings });
     } catch (e) {
-      if (e?.notConfigured) return res.status(400).json({ error: e.message, notConfigured: true });
-      res.status(422).json({ error: e?.message || 'Could not draft a rule from that' });
+      if (e?.notConfigured) return res.status(400).json({ error: publicMessage(e, 'Something went wrong'), notConfigured: true });
+      res.status(422).json({ error: publicMessage(e, 'Could not draft a rule from that') });
     }
   });
 

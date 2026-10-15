@@ -1,4 +1,5 @@
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 const fs = require('fs')
 const path = require('path')
 
@@ -214,7 +215,7 @@ module.exports = () => {
     } catch (e) {
       const aborted = e?.name === 'AbortError'
       return res.status(aborted ? 504 : 502).json({
-        error: aborted ? 'Addon directory timed out' : (e?.message || 'Failed to load the addon directory'),
+        error: aborted ? 'Addon directory timed out' : publicMessage(e, 'Failed to load the addon directory'),
       })
     }
   })

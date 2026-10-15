@@ -10,6 +10,7 @@
  */
 
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 const { getLib, putChallenge, takeChallenge, rpFromRequest, RP_NAME } = require('../utils/webauthn')
 
 module.exports = ({ prisma, getAccountId }) => {
@@ -36,7 +37,7 @@ module.exports = ({ prisma, getAccountId }) => {
         currentRpId: rp?.rpID || null,
       })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to read passkeys' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to read passkeys') })
     }
   })
 
@@ -78,7 +79,7 @@ module.exports = ({ prisma, getAccountId }) => {
       putChallenge(`reg:${accountId}`, { challenge: options.challenge, rpID: rp.rpID, origin: rp.origin })
       res.json(options)
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to start passkey registration' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to start passkey registration') })
     }
   })
 
@@ -125,7 +126,7 @@ module.exports = ({ prisma, getAccountId }) => {
       if (/unique/i.test(e?.message || '')) {
         return res.status(409).json({ error: 'That device already has a passkey for this instance' })
       }
-      res.status(500).json({ error: e?.message || 'Failed to save that passkey' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to save that passkey') })
     }
   })
 
@@ -139,7 +140,7 @@ module.exports = ({ prisma, getAccountId }) => {
       const rows = await prisma.passkey.findMany({ where: { accountId }, orderBy: { createdAt: 'desc' } })
       res.json({ success: true, passkeys: rows.map(shape) })
     } catch (e) {
-      res.status(500).json({ error: e?.message || 'Failed to remove that passkey' })
+      res.status(500).json({ error: publicMessage(e, 'Failed to remove that passkey') })
     }
   })
 

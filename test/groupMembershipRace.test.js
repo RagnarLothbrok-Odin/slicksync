@@ -188,3 +188,33 @@ test('a group edit without a member list leaves the members alone', async () => 
   assert.equal(status, 200)
   assert.deepEqual(state.members('g1'), ['A'])
 })
+
+test('taking someone out of every group while another person is added keeps both changes', async () => {
+  const { removeUserFromAllGroups } = require('../server/utils/helpers/database')
+  const { prisma, state } = fakeDb({ groups: [{ id: 'g1', userIds: ['A', 'B'] }, { id: 'g2', userIds: [] }], users: ['A', 'B', 'C'] })
+  await Promise.all([removeUserFromAllGroups(prisma, 'A', ACCOUNT), assignUserToGroup(prisma, 'C', 'g1', req)])
+  assert.deepEqual(state.members('g1').sort(), ['B', 'C'])
+})
+
+test('a long change holding the lock (a merge, a restore) and an add both land', async () => {
+  const { withMembershipLock, moveIntoGroup, dropFromAllGroups } = require('../server/utils/helpers/database')
+  const { prisma, state } = fakeDb({ groups: [{ id: 'g1', userIds: ['A', 'D'] }, { id: 'g2', userIds: [] }], users: ['A', 'B', 'C', 'D'] })
+  const merge = withMembershipLock(ACCOUNT, async () => {
+    await dropFromAllGroups(prisma, ACCOUNT, 'D')
+    for (let i = 0; i < 5; i++) await tick() // a slow transaction
+    await moveIntoGroup(prisma, ACCOUNT, 'B', 'g2')
+  })
+  await Promise.all([merge, assignUserToGroup(prisma, 'C', 'g1', req)])
+  assert.deepEqual(state.members('g1').sort(), ['A', 'C'])
+  assert.deepEqual(state.members('g2'), ['B'])
+})
+
+test('a household spelled as nothing and as default shares one queue', async () => {
+  const { withMembershipLock } = require('../server/utils/helpers/database')
+  const order = []
+  await Promise.all([
+    withMembershipLock(null, async () => { order.push('a1'); await tick(); await tick(); order.push('a2') }),
+    withMembershipLock('default', async () => { order.push('b1') }),
+  ])
+  assert.deepEqual(order, ['a1', 'a2', 'b1'])
+})

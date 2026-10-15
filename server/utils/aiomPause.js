@@ -7,8 +7,8 @@
 // A pause points the person's users at SlickSync's "paused" addon
 // (/trax/paused, routes/traxAddon.js), which has nothing to play for any
 // title. Catalogs and browsing stay; the next thing they press play on finds
-// nothing. AIOMetadata keeps what it found for a minute, so a pause takes
-// hold within one.
+// nothing. AIOMetadata keeps what it found for up to three minutes (3.5+), so
+// a pause takes hold within that; lifting it is immediate.
 //
 // Pausing the main user changes the configuration's own address, which every
 // household user without one of their own also uses - so each of those is

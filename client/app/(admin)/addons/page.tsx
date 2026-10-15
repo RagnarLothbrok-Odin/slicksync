@@ -5,6 +5,8 @@ import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'rea
 import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
 import Link from 'next/link';
 import { useIsTV } from '@/lib/hooks/useIsTV';
+import { SharedConfigPill } from '@/components/addons/SharedConfigPill';
+import { sharedConfigPeers, configKindOf, type SharedPeer } from '@/lib/sharedConfig';
 import { useLastKnown } from '@/lib/hooks/useLastKnown';
 import { useLongPress } from '@/lib/hooks/useLongPress';
 import { TVPageProvider } from '@/components/tv/TVPageProvider';
@@ -210,6 +212,8 @@ export default function AddonsPage() {
 
   // Data state
   const [addons, setAddons] = useState<Addon[]>([]);
+  // Addons whose links open the same AIOStreams/AIOMetadata configuration.
+  const sharedPeers = useMemo(() => sharedConfigPeers(addons), [addons]);
   const [groups, setGroups] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -706,6 +710,7 @@ export default function AddonsPage() {
             // through to reorder logic against a mismatched id.
             enableDropTargets: true,
             dropTargetPrefix: 'addon-filter-',
+            fill: true,
           }}
           primaryAction={(() => {
             const btn = (
@@ -848,6 +853,7 @@ export default function AddonsPage() {
                                 onCreateLabel={(name) => handleCreateAndSetTag(addon, name)}
                                 focusable={isTV}
                                 dragHandleProps={dragHandleProps}
+                                sharedPeers={sharedPeers.get(addon.id)}
                               />
                             </StaggerItem>
                             )}
@@ -893,6 +899,7 @@ export default function AddonsPage() {
                                 onCreateLabel={(name) => handleCreateAndSetTag(addon, name)}
                                 focusable={isTV}
                                 dragHandleProps={dragHandleProps}
+                                sharedPeers={sharedPeers.get(addon.id)}
                               />
                             )}
                           </SortableAddonWrapper>
@@ -1206,6 +1213,7 @@ function AddonCard({
   focusable = false,
   dragHandleProps,
   layout = 'grid',
+  sharedPeers,
 }: {
   addon: AddonDisplay;
   isSelected: boolean;
@@ -1237,6 +1245,8 @@ function AddonCard({
    *  means no truncation is needed. Same underlying state/handlers/context
    *  menu either way - only the presentational JSX differs. */
   layout?: 'grid' | 'row';
+  /** Other addons opening the same saved configuration (lib/sharedConfig.ts). */
+  sharedPeers?: SharedPeer[];
 }) {
   const [isReloading, setIsReloading] = useState(false);
   const { isOpen, position, handleContextMenu, close } = useContextMenu();
@@ -1469,6 +1479,14 @@ function AddonCard({
                   {addon.customTag}
                 </span>
               )}
+              {sharedPeers && sharedPeers.length > 0 && (
+                <SharedConfigPill
+                  peers={sharedPeers}
+                  kind={configKindOf(addon.manifestUrl, addon.name)}
+                  isTV={focusable}
+                  className={addon.customTag ? 'mt-2 ml-1.5' : 'mt-2'}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1560,6 +1578,9 @@ function AddonCard({
                 <TagIcon className="w-3 h-3" />
                 {addon.customTag}
               </span>
+            )}
+            {sharedPeers && sharedPeers.length > 0 && (
+              <SharedConfigPill peers={sharedPeers} kind={configKindOf(addon.manifestUrl, addon.name)} isTV={focusable} />
             )}
             {/* Moved out of its old leading spot (before the drag handle,
                 crowding every row's start on mobile). A flex-basis:100%

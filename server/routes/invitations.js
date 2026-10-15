@@ -1,4 +1,5 @@
 const express = require('express')
+const { publicMessage } = require('../utils/publicError');
 const crypto = require('crypto')
 const { postDiscord } = require('../utils/notify')
 const { notifyPushForType } = require('../utils/pushNotifications')
@@ -987,7 +988,7 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
       } catch (error) {
         return res.status(500).json({
           error: 'Failed to generate OAuth link',
-          details: error?.message || 'Unknown error'
+          details: publicMessage(error, 'Unknown error')
         })
       }
 
@@ -1097,7 +1098,7 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
         }
       } catch (e) {
         console.error('❌ Failed to clear Stremio addons during user deletion:', {
-          message: e.message,
+          message: publicMessage(e, 'Something went wrong'),
           stack: e.stack,
           error: e,
           authKeyLength: authKey ? authKey.length : 0
@@ -1204,7 +1205,7 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
             : await signInFromBody(jellyfin)
         } catch (err) {
           const status = err?.status === 401 ? 401 : 400
-          return res.status(status).json({ error: err?.message || 'Could not sign in to the server', ...(err?.pinNeeded ? { pinNeeded: true } : {}) })
+          return res.status(status).json({ error: publicMessage(err, 'Could not sign in to the server'), ...(err?.pinNeeded ? { pinNeeded: true } : {}) })
         }
         await require('../utils/jellyfinConnect').rememberSignIn(prisma, encrypt, signedIn.probe, signedIn.login)
         const { providerType: _jfType, ...fields } = jellyfinFields(signedIn.probe, signedIn.login, encrypt, { appAccountId: invitation.accountId })
@@ -1236,7 +1237,7 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
           if (code === 1) {
             return res.status(401).json({ error: 'Invalid or expired Stremio session' })
           }
-          return res.status(400).json({ error: err?.message || 'Failed to validate Stremio auth key' })
+          return res.status(400).json({ error: publicMessage(err, 'Failed to validate Stremio auth key') })
         }
 
         email = String(stremioInfo?.user?.email || '').trim().toLowerCase()
@@ -1444,7 +1445,7 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
       } catch (error) {
         return res.status(500).json({
           error: 'Failed to generate OAuth link',
-          details: error?.message || 'Unknown error'
+          details: publicMessage(error, 'Unknown error')
         })
       }
 
@@ -1866,10 +1867,10 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
       })
     } catch (error) {
       if (error.message === 'Invalid or expired Stremio auth key') {
-        return res.status(401).json({ error: error.message })
+        return res.status(401).json({ error: publicMessage(error, 'Something went wrong') })
       }
       if (error.message === 'Could not validate auth key') {
-        return res.status(400).json({ error: error.message })
+        return res.status(400).json({ error: publicMessage(error, 'Something went wrong') })
       }
       console.error('Error verifying auth key:', error)
       res.status(500).json({ error: 'Failed to verify auth key' })

@@ -23,6 +23,8 @@ export interface PageToolbarSearchConfig {
 }
 
 export interface PageToolbarFilterConfig {
+  /** Stretch the tabs across the space between search and actions. */
+  fill?: boolean;
   options: FilterTabOption[];
   activeKey: string;
   onChange: (key: string) => void;
@@ -167,9 +169,9 @@ export function PageToolbar({
   // literally unreachable (verified at 375px: the Add button sat at x=389 on
   // a 375px viewport and failed hit-testing).
   const toolbarContent = (
-    <div className="relative flex flex-wrap items-center justify-between gap-3 min-h-[44px]">
+    <div className="relative flex flex-wrap items-center justify-between gap-3 md:gap-2 min-h-[44px]">
       {/* Left Section: Selection + Search */}
-      <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-none">
         {leftContent ? (
           leftContent
         ) : (
@@ -190,7 +192,7 @@ export function PageToolbar({
               />
             )}
             {searchConfig && (
-              <div className="h-11 w-40 md:w-48 lg:w-56 flex items-center">
+              <div className={`h-11 flex items-center ${filterTabs?.fill ? 'w-40' : 'w-40 md:w-48 lg:w-56'}`}>
                 <SearchInput
                   size="sm"
                   value={searchConfig.value}
@@ -219,8 +221,10 @@ export function PageToolbar({
         )}
       </div>
 
-      {/* Center Section: Primary Tabs + Filter Tabs - Absolutely centered on desktop */}
-      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3 hidden md:flex">
+      {/* Center Section: Primary Tabs + Filter Tabs. Fills the space between
+          the search and the actions, the same gap on each side; it used to
+          float centered over the row, which capped it at half the width. */}
+      <div className={`hidden md:flex items-center gap-3 flex-1 min-w-0 ${filterTabs?.fill ? '' : 'justify-center'}`}>
         {centerContent ? (
           centerContent
         ) : (
@@ -244,7 +248,7 @@ export function PageToolbar({
                   animate={{ opacity: 1, width: 'auto', marginLeft: primaryTabs ? 12 : 0 }}
                   exit={{ opacity: 0, width: 0, marginLeft: 0 }}
                   transition={{ duration: 0.2, ease: 'easeInOut' }}
-                  className="flex items-center gap-3 overflow-hidden"
+                  className={`flex items-center gap-3 overflow-hidden flex-1 min-w-0 ${filterTabs.fill ? '' : 'justify-center'}`}
                 >
                   {/* Subtle divider between primary and filter tabs */}
                   {primaryTabs && (
@@ -256,6 +260,7 @@ export function PageToolbar({
                     activeKey={filterTabs.activeKey}
                     onChange={filterTabs.onChange}
                     layoutId={filterTabs.layoutId || 'filter-tabs'}
+                    fill={filterTabs.fill}
                     size="sm"
                     enableDropTargets={filterTabs.enableDropTargets}
                     dropTargetPrefix={filterTabs.dropTargetPrefix}
@@ -271,6 +276,7 @@ export function PageToolbar({
                 activeKey={filterTabs.activeKey}
                 onChange={filterTabs.onChange}
                 layoutId={filterTabs.layoutId}
+                fill={filterTabs.fill}
                 size="sm"
                 enableDropTargets={filterTabs.enableDropTargets}
                 dropTargetPrefix={filterTabs.dropTargetPrefix}

@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const jwt = require('jsonwebtoken');
 const { safeEqual } = require('../utils/safeEqual');
 
@@ -196,7 +197,7 @@ module.exports = ({ prisma, JWT_SECRET, isProdEnv, cookieName, parseCookies }) =
     } catch (e) {
       if (e.notFound) return res.status(404).json({ message: 'Account not found' });
       console.error('[Superadmin] Failed to delete account:', e?.message);
-      res.status(500).json({ message: 'Failed to delete account', error: e?.message });
+      res.status(500).json({ message: 'Failed to delete account', error: publicMessage(e, 'Failed to delete account') });
     }
   });
 

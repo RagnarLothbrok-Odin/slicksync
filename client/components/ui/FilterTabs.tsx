@@ -9,13 +9,14 @@ import {
 } from '@heroicons/react/24/outline';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVFocusable } from '@/components/tv/TVFocusable';
+import { ScrollRow } from './ScrollRow';
 
 // Wraps a tab button to make it a dnd-kit drop target when enabled — kept as
 // its own component since useDroppable is a hook and can't be called
 // conditionally inside the options.map() loop.
 function DroppableTabButton({ id, enabled, isOver: isOverOverride, children }: { id: string; enabled: boolean; isOver?: boolean; children: (isOver: boolean) => React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: !enabled });
-  return <div ref={enabled ? setNodeRef : undefined} className="flex-1 min-w-0">{children(enabled ? isOver : false)}</div>;
+  return <div ref={enabled ? setNodeRef : undefined} className="grow shrink-0">{children(enabled ? isOver : false)}</div>;
 }
 
 export interface FilterTabOption {
@@ -30,6 +31,10 @@ export interface FilterTabOption {
 }
 
 export interface FilterTabsProps {
+  /** Stretch the box across the space it's given, the tabs sharing the
+   *  spare width. Off: the box is as wide as its tabs. Either way a row
+   *  that doesn't fit scrolls sideways instead of cutting names short. */
+  fill?: boolean;
   options: FilterTabOption[];
   activeKey: string;
   onChange: (key: string) => void;
@@ -56,6 +61,7 @@ export interface FilterTabsProps {
  * - Accessible with ARIA attributes
  */
 export function FilterTabs({
+  fill = false,
   options,
   activeKey,
   onChange,
@@ -105,6 +111,7 @@ export function FilterTabs({
     // Observe all tab buttons for size changes
     const buttons = containerRef.current.querySelectorAll('[data-tab-key]');
     buttons.forEach((button) => resizeObserver.observe(button));
+    resizeObserver.observe(containerRef.current);
 
     return () => resizeObserver.disconnect();
   }, [activeKey, options]);
@@ -113,12 +120,16 @@ export function FilterTabs({
   const sizeClasses = {
     sm: {
       container: 'gap-1 p-1',
+      gap: 'gap-1',
+      pad: 'p-1',
       button: 'px-4 py-1.5 text-sm',
       icon: 'w-4 h-4',
       badge: 'w-5 h-5 text-xs',
     },
     md: {
       container: 'gap-2 p-1.5',
+      gap: 'gap-2',
+      pad: 'p-1.5',
       button: 'px-5 py-2 text-sm',
       icon: 'w-5 h-5',
       badge: 'w-6 h-6 text-xs',
@@ -129,12 +140,17 @@ export function FilterTabs({
   const isTV = useIsTV();
 
   return (
-    <div
-      ref={containerRef}
-      className={`relative flex ${styles.container} rounded-xl bg-surface border border-default w-full sm:w-auto ${className}`}
+    // The box fills the space it's given. Every tab shows its full name and
+    // the tabs share any spare width; when they don't all fit, the row
+    // scrolls sideways (drag, swipe, wheel, or the small edge arrows).
+    <ScrollRow
+      arrows
+      wrapperClassName={`rounded-xl bg-surface border border-default ${fill ? 'w-full' : 'w-auto max-w-full'} ${className}`}
+      className={styles.pad}
       role="tablist"
       aria-label="Filter options"
     >
+    <div ref={containerRef} className={`relative flex ${styles.gap} w-max min-w-full`}>
       {/* Animated sliding indicator - only render when position is calculated */}
       {indicatorStyle && (
         <motion.div
@@ -172,7 +188,7 @@ export function FilterTabs({
                 aria-selected={isActive}
                 aria-controls={`panel-${option.key}`}
                 className={`
-                  relative z-10 flex items-center justify-center gap-2 w-full min-w-0 ${styles.button} rounded-lg font-medium
+                  relative z-10 flex items-center justify-center gap-2 w-full whitespace-nowrap ${styles.button} rounded-lg font-medium
                   transition-colors duration-150 ease-out
                   ${isActive
                     ? 'text-primary'
@@ -188,9 +204,8 @@ export function FilterTabs({
                 </span>
               )}
 
-              {/* Label - shortened with an ellipsis when the tab is too
-                  narrow for it, never spilling into the next tab. */}
-              <span className="truncate min-w-0" title={typeof option.label === 'string' ? option.label : undefined}>{option.label}</span>
+              {/* Label - always the full name; the row scrolls instead. */}
+              <span>{option.label}</span>
 
               {/* Count (inline, muted) */}
               {option.count !== undefined && (
@@ -227,6 +242,7 @@ export function FilterTabs({
         );
       })}
     </div>
+    </ScrollRow>
   );
 }
 
@@ -294,6 +310,7 @@ export function FilterTabsSimple({
  * Perfect for pages with many filter options that don't fit on mobile
  */
 export function FilterTabsResponsive({
+  fill = false,
   options,
   activeKey,
   onChange,
@@ -448,6 +465,7 @@ export function FilterTabsResponsive({
 
       <div className={many ? 'hidden lg:block' : 'hidden md:block'}>
         <FilterTabs
+          fill={fill}
           options={options}
           activeKey={activeKey}
           onChange={onChange}

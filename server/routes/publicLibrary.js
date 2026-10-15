@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicMessage } = require('../utils/publicError');
 const jwt = require('jsonwebtoken');
 const { StremioAPIClient } = require('stremio-api-client');
 const { validateStremioAuthKey } = require('../utils/stremio');
@@ -486,7 +487,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       } catch (error) {
         return res.status(500).json({
           error: 'Failed to generate OAuth link',
-          details: error?.message || 'Unknown error',
+          details: publicMessage(error, 'Unknown error'),
         });
       }
 
@@ -500,7 +501,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     } catch (error) {
       console.error('Error generating OAuth link:', error);
       res.setHeader('Content-Type', 'application/json');
-      res.status(500).json({ error: 'Failed to generate OAuth link', message: error?.message });
+      res.status(500).json({ error: 'Failed to generate OAuth link', message: publicMessage(error, 'Failed to generate OAuth link') });
     }
   });
 
@@ -552,12 +553,12 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         return res.json({
           success: false,
           authKey: null,
-          error: error?.message || 'Failed to poll OAuth status',
+          error: publicMessage(error, 'Failed to poll OAuth status'),
         });
       }
     } catch (error) {
       console.error('Error polling OAuth:', error);
-      res.json({ success: false, authKey: null, error: error?.message });
+      res.json({ success: false, authKey: null, error: publicMessage(error, 'Something went wrong') });
     }
   });
 
@@ -632,7 +633,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       
       res.status(401).json({ 
         error: 'Authentication failed', 
-        message: error?.message || 'Invalid Stremio auth key' 
+        message: publicMessage(error, 'Invalid Stremio auth key') 
       });
     }
   });
@@ -692,7 +693,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       
       res.status(401).json({
         error: 'Validation failed',
-        message: error?.message || 'Invalid user session'
+        message: publicMessage(error, 'Invalid user session')
       });
     }
   });
@@ -732,7 +733,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       res.json({ success: true, ...result })
     } catch (error) {
       console.error('Error generating Nuvio OAuth link:', error);
-      res.status(500).json({ error: 'Failed to generate Nuvio OAuth link', message: error?.message });
+      res.status(500).json({ error: 'Failed to generate Nuvio OAuth link', message: publicMessage(error, 'Failed to generate Nuvio OAuth link') });
     }
   });
 
@@ -746,7 +747,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       res.json({ success: true, ...result });
     } catch (error) {
       console.error('Error polling Nuvio OAuth:', error);
-      res.json({ success: false, error: error?.message || 'Failed to poll Nuvio login' });
+      res.json({ success: false, error: publicMessage(error, 'Failed to poll Nuvio login') });
     }
   });
 
@@ -761,7 +762,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         exchanged = await exchangeNuvioTvLogin(code, deviceNonce, anonToken);
       } catch (err) {
-        return res.status(401).json({ error: 'Authentication failed', message: err?.message || 'Nuvio approval failed or expired' });
+        return res.status(401).json({ error: 'Authentication failed', message: publicMessage(err, 'Nuvio approval failed or expired') });
       }
 
       const nuvioUserId = exchanged?.user?.id;
@@ -813,7 +814,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       res.status(401).json({
         error: 'Authentication failed',
-        message: error?.message || 'Invalid Nuvio session'
+        message: publicMessage(error, 'Invalid Nuvio session')
       });
     }
   });
@@ -895,7 +896,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       res.status(401).json({
         error: 'Validation failed',
-        message: error?.message || 'Invalid Nuvio session'
+        message: publicMessage(error, 'Invalid Nuvio session')
       });
     }
   });
@@ -919,7 +920,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         signedIn = await signInFromBody(req.body);
       } catch (err) {
         const status = err?.status === 401 ? 401 : 400;
-        return res.status(status).json({ error: 'Authentication failed', message: err?.message || 'Could not sign in to the server', ...(err?.pinNeeded ? { pinNeeded: true } : {}) });
+        return res.status(status).json({ error: 'Authentication failed', message: publicMessage(err, 'Could not sign in to the server'), ...(err?.pinNeeded ? { pinNeeded: true } : {}) });
       }
       // Whoever holds this login takes the fresh token before anything can
       // turn the person away - the server has already retired the old one.
@@ -939,7 +940,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       if (portalAuthErrors[error?.message]) {
-        return res.status(403).json({ error: error.message, message: portalAuthErrors[error.message] });
+        return res.status(403).json({ error: publicMessage(error, 'Something went wrong'), message: portalAuthErrors[error.message] });
       }
       console.error('Error authenticating with a Jellyfin server:', error?.message);
       res.status(401).json({ error: 'Authentication failed', message: 'Could not sign in' });
@@ -1038,7 +1039,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         try {
           await verifyProviderIdentity(foundUser, authKey, req);
         } catch (e) {
-          return res.status(401).json({ error: e?.message || 'Authentication required' });
+          return res.status(401).json({ error: publicMessage(e, 'Authentication required') });
         }
 
         // Check if user belongs to at least one active group
@@ -1093,7 +1094,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error getting user info:', error);
-      res.status(500).json({ error: 'Failed to get user info', message: error?.message });
+      res.status(500).json({ error: 'Failed to get user info', message: publicMessage(error, 'Failed to get user info') });
     }
   });
 
@@ -1162,7 +1163,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         });
       }
       
-      res.status(500).json({ error: 'Failed to update activity visibility', message: error?.message });
+      res.status(500).json({ error: 'Failed to update activity visibility', message: publicMessage(error, 'Failed to update activity visibility') });
     }
   });
 
@@ -1221,9 +1222,9 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     } catch (error) {
       console.error('Error updating user settings:', error);
       if (/Authentication required|Invalid auth key|USER_NOT_/.test(error?.message || '')) {
-        return res.status(401).json({ error: error.message, message: 'Please sign in again.' });
+        return res.status(401).json({ error: publicMessage(error, 'Please sign in again.'), message: 'Please sign in again.' });
       }
-      res.status(500).json({ error: 'Failed to update settings', message: error?.message });
+      res.status(500).json({ error: 'Failed to update settings', message: publicMessage(error, 'Failed to update settings') });
     }
   });
 
@@ -1263,7 +1264,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       if (error?.message === 'USER_NOT_FOUND') return res.status(403).json({ error: 'USER_NOT_FOUND', message: 'Your account is not registered with SlickSync.' });
       if (error?.message === 'USER_NOT_ACTIVE') return res.status(403).json({ error: 'USER_NOT_ACTIVE', message: 'Your account has been disabled.' });
       if (error?.message === 'USER_NOT_IN_GROUP') return res.status(403).json({ error: 'USER_NOT_IN_GROUP', message: 'Your account is not part of any SlickSync group.' });
-      res.status(500).json({ error: 'Failed to enable public stats', message: error?.message });
+      res.status(500).json({ error: 'Failed to enable public stats', message: publicMessage(error, 'Failed to enable public stats') });
     }
   });
 
@@ -1291,7 +1292,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       if (error?.message === 'USER_NOT_FOUND') return res.status(403).json({ error: 'USER_NOT_FOUND', message: 'Your account is not registered with SlickSync.' });
       if (error?.message === 'USER_NOT_ACTIVE') return res.status(403).json({ error: 'USER_NOT_ACTIVE', message: 'Your account has been disabled.' });
       if (error?.message === 'USER_NOT_IN_GROUP') return res.status(403).json({ error: 'USER_NOT_IN_GROUP', message: 'Your account is not part of any SlickSync group.' });
-      res.status(500).json({ error: 'Failed to disable public stats', message: error?.message });
+      res.status(500).json({ error: 'Failed to disable public stats', message: publicMessage(error, 'Failed to disable public stats') });
     }
   });
 
@@ -1553,7 +1554,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error fetching library:', error);
-      res.status(500).json({ error: 'Failed to fetch library', message: error?.message });
+      res.status(500).json({ error: 'Failed to fetch library', message: publicMessage(error, 'Failed to fetch library') });
     }
   });
 
@@ -1941,7 +1942,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error fetching addons:', error);
-      res.status(500).json({ error: 'Failed to fetch addons', message: error?.message });
+      res.status(500).json({ error: 'Failed to fetch addons', message: publicMessage(error, 'Failed to fetch addons') });
     }
   });
 
@@ -1997,7 +1998,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error excluding addon:', error);
-      res.status(500).json({ error: 'Failed to exclude addon', message: error?.message });
+      res.status(500).json({ error: 'Failed to exclude addon', message: publicMessage(error, 'Failed to exclude addon') });
     }
   });
 
@@ -2051,7 +2052,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error including addon:', error);
-      res.status(500).json({ error: 'Failed to include addon', message: error?.message });
+      res.status(500).json({ error: 'Failed to include addon', message: publicMessage(error, 'Failed to include addon') });
     }
   });
 
@@ -2142,7 +2143,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error deleting library item:', error);
-      res.status(500).json({ error: 'Failed to delete library item', message: error?.message });
+      res.status(500).json({ error: 'Failed to delete library item', message: publicMessage(error, 'Failed to delete library item') });
     }
   });
 
@@ -2221,7 +2222,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error toggling protect addon:', error);
-      res.status(500).json({ error: 'Failed to toggle protect addon', message: error?.message });
+      res.status(500).json({ error: 'Failed to toggle protect addon', message: publicMessage(error, 'Failed to toggle protect addon') });
     }
   });
 
@@ -2316,7 +2317,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       res.json({ message: `Addon removed from ${isNuvio ? 'Nuvio' : 'Stremio'} account successfully` });
     } catch (error) {
       console.error('Error removing addon:', error);
-      res.status(500).json({ error: 'Failed to remove addon', message: error?.message });
+      res.status(500).json({ error: 'Failed to remove addon', message: publicMessage(error, 'Failed to remove addon') });
     }
   });
 
@@ -2355,7 +2356,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e.message });
+        return res.status(401).json({ error: publicMessage(e, 'Something went wrong') });
       }
 
       // Encrypt using user-specific key (userId + server key) - same pattern as account API keys
@@ -2388,7 +2389,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       res.json({ apiKey: key });
     } catch (error) {
       console.error('Error generating user API key:', error);
-      res.status(500).json({ error: 'Failed to generate API key', message: error?.message });
+      res.status(500).json({ error: 'Failed to generate API key', message: publicMessage(error, 'Failed to generate API key') });
     }
   });
 
@@ -2423,7 +2424,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e.message });
+        return res.status(401).json({ error: publicMessage(e, 'Something went wrong') });
       }
 
       if (!user.apiKey) {
@@ -2445,7 +2446,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       }
     } catch (error) {
       console.error('Error getting user API key:', error);
-      res.status(500).json({ error: 'Failed to get API key', message: error?.message });
+      res.status(500).json({ error: 'Failed to get API key', message: publicMessage(error, 'Failed to get API key') });
     }
   });
 
@@ -2480,13 +2481,13 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e.message });
+        return res.status(401).json({ error: publicMessage(e, 'Something went wrong') });
       }
 
       res.json({ hasKey: !!user.apiKey });
     } catch (error) {
       console.error('Error checking user API key status:', error);
-      res.status(500).json({ error: 'Failed to check API key status', message: error?.message });
+      res.status(500).json({ error: 'Failed to check API key status', message: publicMessage(error, 'Failed to check API key status') });
     }
   });
 
@@ -2530,7 +2531,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e?.message || 'Invalid auth key' });
+        return res.status(401).json({ error: publicMessage(e, 'Invalid auth key') });
       }
 
       // Fetch watch activity for this user (using WatchActivity table like old slicksync)
@@ -2971,7 +2972,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error fetching user activity:', error);
-      res.status(500).json({ error: 'Failed to fetch activity', message: error?.message });
+      res.status(500).json({ error: 'Failed to fetch activity', message: publicMessage(error, 'Failed to fetch activity') });
     }
   });
 
@@ -3000,7 +3001,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e.message });
+        return res.status(401).json({ error: publicMessage(e, 'Something went wrong') });
       }
 
       const accountId = user.accountId || DEFAULT_ACCOUNT_ID;
@@ -3036,7 +3037,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error exporting user data:', error);
-      res.status(500).json({ error: 'Failed to export data', message: error?.message });
+      res.status(500).json({ error: 'Failed to export data', message: publicMessage(error, 'Failed to export data') });
     }
   });
 
@@ -3068,7 +3069,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       res.json({ message: 'API key revoked' });
     } catch (error) {
       console.error('Error revoking user API key:', error);
-      res.status(500).json({ error: 'Failed to revoke API key', message: error?.message });
+      res.status(500).json({ error: 'Failed to revoke API key', message: publicMessage(error, 'Failed to revoke API key') });
     }
   });
 
@@ -3140,7 +3141,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     } catch (error) {
       if (error?.notFound) return res.status(404).json({ error: 'User not found', message: 'User not found' })
       console.error('Error deleting user account:', error)
-      res.status(500).json({ error: 'Failed to delete account', message: error?.message || 'Failed to delete account' })
+      res.status(500).json({ error: 'Failed to delete account', message: publicMessage(error, 'Failed to delete account') })
     }
   })
 
@@ -3196,7 +3197,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       }
     } catch (error) {
       console.error('Error syncing user:', error);
-      res.status(500).json({ error: 'Failed to sync', message: error?.message });
+      res.status(500).json({ error: 'Failed to sync', message: publicMessage(error, 'Failed to sync') });
     }
   });
 
@@ -3270,7 +3271,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       });
     } catch (error) {
       console.error('Error checking at-risk status:', error);
-      res.status(500).json({ error: 'Failed to check status', message: error?.message });
+      res.status(500).json({ error: 'Failed to check status', message: publicMessage(error, 'Failed to check status') });
     }
   });
 
@@ -3297,14 +3298,14 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e.message });
+        return res.status(401).json({ error: publicMessage(e, 'Something went wrong') });
       }
 
       const shares = getShares(user.accountId, userId);
       res.json(shares);
     } catch (error) {
       console.error(`Failed to get shares for user ${req.query.userId}:`, error);
-      res.status(500).json({ error: 'Failed to get shares', message: error?.message });
+      res.status(500).json({ error: 'Failed to get shares', message: publicMessage(error, 'Failed to get shares') });
     }
   });
 
@@ -3331,14 +3332,14 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       try {
         await verifyProviderIdentity(user, authKey, req);
       } catch (e) {
-        return res.status(401).json({ error: e.message });
+        return res.status(401).json({ error: publicMessage(e, 'Something went wrong') });
       }
 
       const groupMembers = await getGroupMembers(prisma, user.accountId, userId);
       res.json({ members: groupMembers });
     } catch (error) {
       console.error(`Failed to get group members for user ${req.query.userId}:`, error);
-      res.status(500).json({ error: 'Failed to get group members', message: error?.message });
+      res.status(500).json({ error: 'Failed to get group members', message: publicMessage(error, 'Failed to get group members') });
     }
   });
 
@@ -3358,7 +3359,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       return await personAsking(req, userId)
     } catch (e) {
       const status = e?.status || 401
-      res.status(status).json({ error: e.message, message: e.message })
+      res.status(status).json({ error: publicMessage(e, 'Something went wrong'), message: publicMessage(e, 'Something went wrong') })
       return null
     }
   }
