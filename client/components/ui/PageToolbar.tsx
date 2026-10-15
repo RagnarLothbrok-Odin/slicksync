@@ -1,7 +1,7 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { FilterTabs, FilterTabsResponsive, FilterTabOption } from './FilterTabs';
+import { FilterTabs, FilterTabOption } from './FilterTabs';
 import { SearchInput } from './Input';
 import { SelectAllCheckbox } from './SelectAllCheckbox';
 import { Card } from './Card';
@@ -163,12 +163,12 @@ export function PageToolbar({
   // Determine if filter tabs should be visible
   const showFilterTabs = filterTabs && filterTabs.visible !== false;
 
-  // Pages that ask for full-width tabs (fill) get the same sliding row on a
-  // phone too, on its own line under the search and actions, instead of the
-  // drop-down. Only one row is ever mounted, so drop targets on the tabs
-  // (Addons' Protected) exist once.
+  // On a phone every page's tabs are the same sliding row - full names,
+  // dragged, swiped or moved with the edge arrow - on a line of their own
+  // under the search and actions, instead of a drop-down. Only one row is
+  // ever mounted, so drop targets on the tabs (Addons' Protected) exist once.
   const isMobile = useIsMobile();
-  const rowOnPhone = !!filterTabs?.fill;
+  const rowOnPhone = !!filterTabs;
   const phoneRow = rowOnPhone && isMobile;
 
   // flex-wrap so the actions drop to their own line rather than overflowing
@@ -214,21 +214,6 @@ export function PageToolbar({
           </>
         )}
       </div>
-
-      {/* Mobile Filter Dropdown - right aligned */}
-      {!rowOnPhone && <div className="md:hidden flex items-center shrink-0 ml-auto">
-        {filterTabs && (
-          <FilterTabsResponsive
-            options={filterTabs.options}
-            activeKey={filterTabs.activeKey}
-            onChange={filterTabs.onChange}
-            layoutId={filterTabs.layoutId}
-            size="sm"
-            enableDropTargets={filterTabs.enableDropTargets}
-            dropTargetPrefix={filterTabs.dropTargetPrefix}
-          />
-        )}
-      </div>}
 
       {/* Center Section: Primary Tabs + Filter Tabs. Fills the space between
           the search and the actions, the same gap on each side; it used to
