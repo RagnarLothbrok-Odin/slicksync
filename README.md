@@ -162,6 +162,7 @@ A third kind of account, next to Nuvio and Stremio. Sign in to a **Jellyfin**, *
 - **Addresses are checked before SlickSync fetches them** — addons, backends, webhooks, pictures and imports, and anywhere they redirect. A shared instance never connects to its own network; your own install still reaches the servers on yours.
 - **AIOStreams history** — every version of a configuration is kept, with what changed from the one before; **Put back** restores an earlier one, keeping today's debrid services, household users and API keys unless you untick them.
 - **AIOStreams health** on a person's page — each addon's errors, empty answers and slow responses as AIOStreams itself reports them, and a one-off test search.
+- **Shared settings** — two AIOStreams or AIOMetadata addons whose install links open the same configuration are marked on both, so a change made for one never surprises you on the other.
 - **Server versions** — Health shows each Jellyfin, AIOStreams and AIOMetadata server's version, and whether a newer stable release is out.
 
 ---

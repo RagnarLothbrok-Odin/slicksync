@@ -1,5 +1,22 @@
 [
   {
+    "version": "1.98.0",
+    "date": "2026-10-15",
+    "title": "1.98.0 - Full tab names, shared-settings warnings, and safer group changes",
+    "features": [
+      "Tabs show their whole name: on Addons, Vault and every page with filter tabs, a name is never cut short. When they don't all fit, the row slides sideways - drag it, swipe it, or click the small arrow at the edge. On Addons the tabs fill the space between the search box and Browse.",
+      "Shared settings: two AIOStreams or AIOMetadata addons whose install links open the same configuration now say so - a pill on each addon, and a note on the addon's page naming the others. Changing that configuration's settings changes all of them; to keep them apart, save a new configuration and paste its link under Manifest URL."
+    ],
+    "bugFixes": [
+      "When something goes wrong, the message says what happened in plain words instead of passing on the server's own error, which could include internal details or an addon's address.",
+      "Group changes made at the same moment no longer undo each other - editing or deleting someone, merges and their undo, Jellyfin and Nuvio profiles, restores, imports and automations all take their turn.",
+      "Someone restored from the Trash, or brought back by undoing a merge, goes back into their group only, never into two.",
+      "Expired people are taken out of their group on single-household installs too.",
+      "Adding a Nuvio person to a group only accepts a group of your own household.",
+      "The guide's AIOMetadata pause timing: a pause can take up to about three minutes to reach a title opened just before; lifting it is immediate."
+    ]
+  },
+  {
     "version": "1.97.0",
     "date": "2026-10-13",
     "title": "1.97.0 - Now Playing you can trust, security fixes, and AIOStreams 2.36",
