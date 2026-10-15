@@ -51,11 +51,13 @@ function resolveTo(t, table) {
   t.after(() => { dns.lookup = original })
 }
 
-// Replaces the server's outgoing fetch; requests to the test's own app go through.
+// Replaces the server's outgoing fetch; requests to the test's own app go
+// through, and so does anything that isn't a web address - the WebP encoder
+// loads its own .wasm file with fetch(file://...) the first time it runs.
 function stubUpstream(t, handler) {
   const calls = []
   global.fetch = (url, init) => {
-    if (String(url).startsWith(ownBase)) return realFetch(url, init)
+    if (String(url).startsWith(ownBase) || !/^https?:/i.test(String(url))) return realFetch(url, init)
     calls.push(String(url))
     return Promise.resolve(handler(String(url), init))
   }

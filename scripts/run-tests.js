@@ -1,15 +1,22 @@
 // Runs the test suite, and runs it once more if the first run failed.
 //
-// Node's test runner now and then fails a whole file before any of its tests
-// start ("Unable to deserialize cloned data") - a different file each time,
-// and the same file passes when run again. That turned the release checks red
-// for no reason. A test that is really broken fails both runs, so nothing is
-// hidden; a run that only tripped over the runner passes the second time.
+// Node's test runner used to fail a whole file now and then before any of its
+// tests started ("Unable to deserialize cloned data") - a different file each
+// time. The cause: each file's results reach the runner as binary messages on
+// that file's stdout, and the server's console logging, which tests trigger
+// constantly, went down the same pipe and sometimes landed inside a message.
+// console-to-stderr-for-tests.js, loaded into every file's process, moves console
+// output to stderr, which the runner never parses. The second run stays as a
+// safety net: a test that is really broken fails both runs, so nothing is
+// hidden.
 
+const path = require('path')
 const { spawnSync } = require('child_process')
 
+const quietStdout = path.join(__dirname, 'console-to-stderr-for-tests.js')
+
 function run() {
-  return spawnSync(process.execPath, ['--test', ...process.argv.slice(2)], { stdio: 'inherit' }).status
+  return spawnSync(process.execPath, ['--require', quietStdout, '--test', ...process.argv.slice(2)], { stdio: 'inherit' }).status
 }
 
 let status = run()
