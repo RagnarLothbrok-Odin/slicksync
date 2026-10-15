@@ -1693,6 +1693,25 @@ export const HELP_ENTRIES: HelpEntry[] = [
     linkLabel: 'Open Changelog',
   },
   {
+    id: 'addon-shared-settings',
+    title: 'Why changing one addon changed another (Shared settings)',
+    category: 'Addons',
+    keywords: ['shared settings', 'same configuration', 'changed both addons', 'aiostreams changed other addon', 'aiometadata shared', 'split configuration', 'separate stremio and nuvio'],
+    answer: 'AIOStreams and AIOMetadata keep each configuration on their own server. Two install links can look different and still open the very same configuration, so saving its settings changes every addon using it. SlickSync marks those addons with a Shared settings pill, and the addon’s page names the others.',
+    steps: [
+      'On Addons, click the Shared settings pill to see which addons share the configuration.',
+      'To keep one apart, open its settings on AIOStreams or AIOMetadata and save it as a new configuration.',
+      'Copy the new install link, open that addon in SlickSync and paste the link under Manifest URL.',
+    ],
+    details: [
+      'The configuration id is part of every install link. SlickSync compares that id (on the same server), not the whole link, since each install gets its own encrypted part.',
+      'Reload All and Sync don’t change AIOStreams or AIOMetadata settings - only the addon lists on Stremio and Nuvio.',
+    ],
+    related: ['addon-configure-in-place'],
+    href: '/addons',
+    linkLabel: 'Open Addons',
+  },
+  {
     id: 'addon-configure-in-place',
     title: 'Editing an addon\'s configuration in place',
     category: 'Addons',
