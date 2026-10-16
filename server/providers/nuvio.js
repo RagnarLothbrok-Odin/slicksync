@@ -314,6 +314,29 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
         refuseWhileBackendIsDown(serverConfig)
         const accessToken = await ensureAuth()
         const wanted = dedupeAddonsByUrl(addons)
+
+        // The whole list in one call, the way Nuvio's own apps write it
+        // (sync_push_addons, AddonRepository.pushToServer in NuvioMobile):
+        // the backend swaps it over in one step, so the list is never empty
+        // in between and a failure leaves the old list whole. p_addons is
+        // the raw array - a JSON string would be stored double-encoded (see
+        // setCollections). A backend without that call - an older
+        // self-hosted one answers 404 - gets the delete-and-insert below.
+        try {
+          await supabaseRpc('sync_push_addons', {
+            p_profile_id: addonProfileId,
+            p_addons: wanted.map((addon, i) => ({
+              url: addon.transportUrl,
+              name: addon.manifest?.name || addon.transportName || addon.name || '',
+              enabled: true,
+              sort_order: i,
+            })),
+          }, accessToken, serverConfig)
+          return
+        } catch (pushErr) {
+          if (pushErr?.status !== 404) throw pushErr
+        }
+
         // Snapshot current addons before delete for rollback on failure
         const snapshot = await supabaseGet('addons', {
           user_id: `eq.${userId}`,

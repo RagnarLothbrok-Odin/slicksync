@@ -1,4 +1,6 @@
-// Replacing a Nuvio addon list is delete-then-insert, so what keeps a person's
+// A Nuvio addon list is written in one call (sync_push_addons) where the
+// backend has it. Most tests here run against a backend without it (it
+// answers 404), where replacing the list is delete-then-insert, so what keeps a person's
 // list from being left empty is what happens around it: one write at a time
 // per list, no start while the backend is being held back, no duplicate
 // addresses in what is inserted, and, once the old list is gone, an insert that
@@ -33,12 +35,27 @@ function backend(t, rows = []) {
     holdDelete: null,    // { profile, promise } - a delete for that profile waits
     onSnapshot: null,    // runs while a read of the addons table is being answered
     afterDelete: null,   // runs once a delete has been done, before it is answered
+    pushSupported: false, // sync_push_addons exists (an up-to-date backend)
+    pushes: [],          // { profile, addons } for each sync_push_addons
+    pushStatus: null,    // the next sync_push_addons answers this status instead
   }
   global.fetch = async (url, init = {}) => {
     const u = new URL(String(url))
     const method = init.method || 'GET'
     if (u.pathname === '/auth/v1/token') { state.signIns++; return json({ access_token: jwt(), refresh_token: 'next' }) }
     if (u.pathname === '/rest/v1/probe') { state.other.push(method); return json({}, 429) }
+    if (u.pathname === '/rest/v1/rpc/sync_push_addons') {
+      const { p_profile_id: profile, p_addons: list } = JSON.parse(init.body)
+      state.pushes.push({ profile, addons: list })
+      await tick()
+      if (!state.pushSupported) return json({ code: 'PGRST202', message: 'Could not find the function' }, 404)
+      if (state.pushStatus) { const status = state.pushStatus; state.pushStatus = null; return json({}, status) }
+      // Swapped over in one step, as the real function does in one transaction.
+      const user = state.pushUser || 'u1'
+      state.rows = state.rows.filter((r) => !(r.user_id === user && r.profile_id === profile))
+        .concat(list.map((a) => row(user, profile, a.url, a.sort_order)))
+      return new Response(null, { status: 204 })
+    }
     assert.equal(u.pathname, '/rest/v1/addons', `unexpected request to ${u.pathname}`)
     const user = (u.searchParams.get('user_id') || '').replace(/^eq\./, '')
     const profile = (u.searchParams.get('profile_id') || '').replace(/^eq\./, '')
@@ -441,4 +458,57 @@ test('a person on a backend of their own is held back by that backend, not by th
   await assert.rejects(onOwn().setAddons([addon('https://b.example/manifest.json')]), (e) => e.status === 503)
   await provider('u-std', 1).setAddons([addon('https://b.example/manifest.json')])
   assert.deepEqual(db.urls('u-std', 1), ['https://b.example/manifest.json'])
+})
+
+
+// ---------------------------------------------------------------- one call
+
+test('an up-to-date backend gets the whole list in one sync_push_addons call, in order, never deleted first', async (t) => {
+  const state = backend(t, [row('u1', 1, 'https://a.example/manifest.json', 0), row('u1', 1, 'https://old.example/manifest.json', 1)])
+  state.pushSupported = true
+  await provider('u1', 1).setAddons([addon('https://b.example/manifest.json', 'B'), addon('https://a.example/manifest.json', 'A')])
+  assert.equal(state.pushes.length, 1)
+  assert.deepEqual(state.pushes[0].addons, [
+    { url: 'https://b.example/manifest.json', name: 'B', enabled: true, sort_order: 0 },
+    { url: 'https://a.example/manifest.json', name: 'A', enabled: true, sort_order: 1 },
+  ])
+  assert.equal(Array.isArray(state.pushes[0].addons), true, 'the list goes as a real array, not a JSON string')
+  assert.deepEqual(state.methods().filter((m) => m === 'DELETE' || m === 'POST'), [], 'nothing is deleted or inserted row by row')
+  assert.deepEqual(state.urls('u1', 1), ['https://b.example/manifest.json', 'https://a.example/manifest.json'])
+})
+
+test('one call: duplicate addresses are sent once', async (t) => {
+  const state = backend(t)
+  state.pushSupported = true
+  await provider('u1', 1).setAddons([addon('https://a.example/manifest.json'), addon('https://a.example/manifest.json'), addon('https://b.example/manifest.json')])
+  assert.deepEqual(state.pushes[0].addons.map((a) => a.url), ['https://a.example/manifest.json', 'https://b.example/manifest.json'])
+})
+
+test('one call: a failure leaves the old list whole and is reported', async (t) => {
+  quiet(t)
+  const state = backend(t, [row('u1', 1, 'https://a.example/manifest.json', 0)])
+  state.pushSupported = true
+  state.pushStatus = 400
+  await assert.rejects(provider('u1', 1).setAddons([addon('https://b.example/manifest.json')]))
+  assert.deepEqual(state.urls('u1', 1), ['https://a.example/manifest.json'])
+  assert.deepEqual(state.methods().filter((m) => m === 'DELETE' || m === 'POST'), [], 'no fallback to delete-and-insert on a real failure')
+})
+
+test('a backend without the call (404) gets delete-and-insert instead', async (t) => {
+  const state = backend(t, [row('u1', 1, 'https://a.example/manifest.json', 0)])
+  await provider('u1', 1).setAddons([addon('https://b.example/manifest.json')])
+  assert.equal(state.pushes.length, 1, 'the one call is tried first')
+  assert.deepEqual(state.urls('u1', 1), ['https://b.example/manifest.json'])
+  assert.ok(state.methods().includes('DELETE') && state.methods().includes('POST'))
+})
+
+test('one call: two writes for one list still run one after the other', async (t) => {
+  const state = backend(t)
+  state.pushSupported = true
+  await Promise.all([
+    provider('u1', 1).setAddons([addon('https://first.example/manifest.json')]),
+    provider('u1', 1).setAddons([addon('https://second.example/manifest.json')]),
+  ])
+  assert.deepEqual(state.pushes.map((p) => p.addons[0].url), ['https://first.example/manifest.json', 'https://second.example/manifest.json'])
+  assert.deepEqual(state.urls('u1', 1), ['https://second.example/manifest.json'])
 })

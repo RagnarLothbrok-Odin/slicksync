@@ -83,21 +83,37 @@ async function writeConfig({ base, uuid, password }, config) {
   await request(`${base}/api/config/update/${encodeURIComponent(uuid)}`, { method: 'PUT', body: { config, password } })
 }
 
-/** At sign-in: keep the password when it opens the configuration (a client password doesn't). */
+/**
+ * At sign-in: keep the password when it opens the configuration (a client
+ * password doesn't). A main user with a PIN signs in as "password/PIN", so
+ * the part before the last slash is tried too - the whole entry first, since
+ * a password may itself contain a slash. AIOStreams does the same
+ * (aiostreamsConfig.findWorkingPassword).
+ */
 async function rememberAccess(prisma, encrypt, person, { probe, password }) {
   if (probe?.kind !== 'aiometadata' || !password) return false
   const where = configOf(probe.serverUrl)
   if (!where) return false
-  try {
-    await readConfig({ ...where, password })
-    await prisma.user.update({
-      where: { id: person.id },
-      data: { aioConfigId: where.uuid, aioConfigPassword: encrypt(password, { appAccountId: person.accountId || 'default' }) },
-    })
-    return true
-  } catch {
-    return false
+  const candidates = [password]
+  const slash = String(password).lastIndexOf('/')
+  if (slash > 0) candidates.push(password.slice(0, slash))
+  for (const candidate of candidates) {
+    try {
+      await readConfig({ ...where, password: candidate })
+    } catch {
+      continue
+    }
+    try {
+      await prisma.user.update({
+        where: { id: person.id },
+        data: { aioConfigId: where.uuid, aioConfigPassword: encrypt(candidate, { appAccountId: person.accountId || 'default' }) },
+      })
+      return true
+    } catch {
+      return false // a failed save never fails the sign-in
+    }
   }
+  return false
 }
 
 function canManage(owner) {

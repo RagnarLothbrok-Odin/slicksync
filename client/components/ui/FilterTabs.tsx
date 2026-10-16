@@ -362,6 +362,25 @@ export function FilterTabsResponsive({
   };
 
   const styles = sizeClasses[size];
+
+  // Full-width tabs slide sideways at every width, phones included, so they
+  // need no drop-down.
+  if (fill) {
+    return (
+      <FilterTabs
+        fill
+        options={options}
+        activeKey={activeKey}
+        onChange={onChange}
+        size={size}
+        className={className}
+        layoutId={layoutId}
+        enableDropTargets={enableDropTargets}
+        dropTargetPrefix={dropTargetPrefix}
+      />
+    );
+  }
+
   // More than five tabs: the drop-down until a laptop's width, not a tablet's.
   const many = options.length > 5;
 

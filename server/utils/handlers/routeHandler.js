@@ -58,38 +58,6 @@ class DatabaseTransactions {
   }
 
   /**
-   * Delete user with all its relations
-   */
-  async deleteUserWithRelations(userId, accountId) {
-    return await this.prisma.$transaction([
-      // Remove user from all groups
-      this.prisma.group.updateMany({
-        where: { 
-          accountId,
-          userIds: { contains: userId }
-        },
-        data: {
-          userIds: {
-            set: this.prisma.group.findMany({
-              where: { 
-                accountId,
-                userIds: { contains: userId }
-              },
-              select: { userIds: true }
-            }).then(groups => 
-              groups.flatMap(g => JSON.parse(g.userIds || '[]'))
-                .filter(id => id !== userId)
-            )
-          }
-        }
-      }),
-      this.prisma.user.delete({ 
-        where: { id: userId, accountId }
-      })
-    ]);
-  }
-
-  /**
    * Upsert group-addon relationship
    */
   async upsertGroupAddon(groupId, addonId, isEnabled = true) {
