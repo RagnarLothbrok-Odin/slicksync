@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.99.0",
+    "date": "2026-10-16",
+    "title": "1.99.0 - Phone tabs you can swipe, and safer Nuvio addon writes",
+    "features": [
+      "Tabs on a phone: every page's tabs - Addons, Vault, Activity, Metrics, Users, Invitations and Discover - show their full names on a line of their own, and slide sideways when they don't all fit: swipe them, or tap the small arrow at the edge. No more drop-downs.",
+      "Nuvio addon lists are written in one step, the way Nuvio's own apps do it: a list is never left empty part-way through, and if Nuvio fails the old list stays as it was. An older self-hosted Nuvio backend is written the previous way."
+    ],
+    "bugFixes": [
+      "AIOMetadata: a main user with a PIN - who signs in as password/PIN - keeps working with the household card, ready for AIOMetadata's next release."
+    ]
+  },
+  {
     "version": "1.98.0",
     "date": "2026-10-15",
     "title": "1.98.0 - Full tab names, shared-settings warnings, and safer group changes",
