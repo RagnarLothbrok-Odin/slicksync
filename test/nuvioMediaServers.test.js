@@ -25,8 +25,8 @@ function loadWith(calls, { quickConnectUserId = 'jfuser1' } = {}) {
       }
       throw new Error('unexpected ' + path)
     },
-    async quickConnectInitiate() { calls.push(['qc-start']); return { code: '123456', secret: 's', deviceId: 'd' } },
-    async quickConnectAuthenticate() { calls.push(['qc-finish']); return { token: 'nuvio-own-token', userId: quickConnectUserId } },
+    async quickConnectInitiate(url, opts = {}) { calls.push(['qc-start', opts.deviceName]); return { code: '123456', secret: 's', deviceId: 'd' } },
+    async quickConnectAuthenticate(url, secret, opts = {}) { calls.push(['qc-finish', opts.deviceName]); return { token: 'nuvio-own-token', userId: quickConnectUserId } },
     async signOut(url, token) { calls.push(['signout', token]) },
   }
   delete require.cache[MOD]
@@ -85,6 +85,9 @@ test('turning it on adds one entry of its own and keeps their servers as they we
   assert.equal(ours.token, 'nuvio-own-token')
   assert.ok(calls.some((c) => c[0] === 'qc-start'))
   assert.ok(calls.some((c) => c[0] === 'request' && c[1].startsWith('/QuickConnect/Authorize') && c[2] === 'person-token'))
+  // Named so the server's device list tells it apart from SlickSync's own.
+  assert.ok(calls.some((c) => c[0] === 'qc-start' && c[1] === 'Nuvio (via SlickSync)'))
+  assert.ok(calls.some((c) => c[0] === 'qc-finish' && c[1] === 'Nuvio (via SlickSync)'))
   assert.deepEqual(ours.libraries, [
     { id: 'lib-m', name: 'Movies', kind: 'movie', selected: true },
     { id: 'lib-s', name: 'Shows', kind: 'series', selected: true },

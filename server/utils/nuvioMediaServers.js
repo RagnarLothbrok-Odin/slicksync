@@ -25,6 +25,9 @@ const {
 } = require('../providers/jellyfinAuth')
 
 const OUR_PREFIX = 'slicksync-'
+// What the server's device list calls Nuvio's sign-in, so it isn't mistaken
+// for SlickSync's own (signing that one out would cut SlickSync off).
+const NUVIO_DEVICE_NAME = 'Nuvio (via SlickSync)'
 const MAX_SERVERS = 16
 
 const isOurs = (entry) => typeof entry?.id === 'string' && entry.id.startsWith(OUR_PREFIX)
@@ -128,7 +131,7 @@ async function describe(prisma, { createProvider, decrypt, req }, userId) {
 /** Nuvio's own sign-in on the server: a Quick Connect approved with the person's sign-in. */
 async function signInForNuvio(jellyfin, personToken) {
   const url = jellyfin.jellyfinServerUrl
-  const qc = await quickConnectInitiate(url)
+  const qc = await quickConnectInitiate(url, { deviceName: NUVIO_DEVICE_NAME })
   try {
     await jfRequest(url, `/QuickConnect/Authorize?code=${encodeURIComponent(qc.code)}`, {
       method: 'POST',
@@ -141,7 +144,7 @@ async function signInForNuvio(jellyfin, personToken) {
     }
     throw e
   }
-  const signedIn = await quickConnectAuthenticate(url, qc.secret, { deviceId: qc.deviceId })
+  const signedIn = await quickConnectAuthenticate(url, qc.secret, { deviceId: qc.deviceId, deviceName: NUVIO_DEVICE_NAME })
   if (signedIn.userId !== String(jellyfin.jellyfinUserId).replace(/-/g, '').toLowerCase()) {
     await signOut(url, signedIn.token, { deviceId: qc.deviceId })
     throw Object.assign(new Error('The server signed Nuvio in as someone else'), { status: 502 })
@@ -249,4 +252,4 @@ async function setEnabled(prisma, { createProvider, decrypt, req }, userId, enab
   return { added: name }
 }
 
-module.exports = { describe, setEnabled, signInsFor, entryId, libraryKind, isOurs, OUR_PREFIX }
+module.exports = { describe, setEnabled, signInsFor, entryId, libraryKind, isOurs, OUR_PREFIX, NUVIO_DEVICE_NAME }
