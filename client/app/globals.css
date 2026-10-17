@@ -1194,3 +1194,38 @@ body {
   content-visibility: auto;
   contain-intrinsic-size: auto 150px 225px;
 }
+
+/* Users page card: drag handle, picture, name and switch on one line. The
+   badges take their own full-width line on a narrow card and sit right after
+   the name once the card is wide enough for both. */
+.user-card {
+  container-type: inline-size;
+}
+.user-card-head {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "drag avatar name toggle"
+    "badges badges badges badges";
+  align-items: center;
+}
+.user-card-head > .user-card-drag { grid-area: drag; margin-right: 6px; }
+.user-card-avatar { grid-area: avatar; display: flex; margin-right: 12px; }
+.user-card-name-cell { grid-area: name; min-width: 0; }
+.user-card-toggle { grid-area: toggle; display: flex; margin-left: 10px; }
+.user-card-badges {
+  grid-area: badges;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  min-width: 0;
+}
+@container (min-width: 470px) {
+  .user-card-head {
+    grid-template-columns: auto auto minmax(0, max-content) auto minmax(0, 1fr) auto;
+    grid-template-areas: "drag avatar name badges . toggle";
+  }
+  .user-card-badges { margin-top: 0; margin-left: 10px; flex-wrap: nowrap; }
+}

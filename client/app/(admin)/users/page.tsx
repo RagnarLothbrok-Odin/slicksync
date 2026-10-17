@@ -1176,157 +1176,145 @@ function UserCard({
       <Card
         variant="interactive"
         padding="md"
-        // pr-24 reserves clearance for the absolutely-positioned toggle below
-        // (top-4 right-4) — without it, the name/status row's content can
-        // run under the toggle and overlap it. Unconditional (not just md:)
-        // because the toggle itself has no responsive hiding — it's just as
-        // visible on a narrow phone as it is at 3-column desktop.
-        className={`group cursor-pointer tap-card pr-24 ${isSelected ? 'ring-2 ring-primary' : ''}`}
+        // The switch sits on the name line and the badges get their own
+        // full-width line on a narrow card (beside the name once the card is
+        // wide enough - see .user-card-head), so nothing is squeezed into a
+        // column next to the switch.
+        className={`user-card group cursor-pointer tap-card ${isSelected ? 'ring-2 ring-primary' : ''}`}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         {...longPress}
       >
-        {/* Selection indicator & Toggle - stacked (toggle above, checkbox
-            below) rather than side-by-side, so the checkbox sits directly
-            under the toggle instead of next to it. */}
-        <div className="absolute top-4 right-4 flex flex-col items-end gap-1.5">
-          <ToggleSwitch
-            checked={user.status === 'active'}
-            onChange={async () => {
-              try {
-                const newStatus = user.status === 'active' ? false : true;
-                await api.toggleUserStatus(user.id, newStatus);
-                toast.success(`User ${newStatus ? 'activated' : 'deactivated'}`);
-                onToggleStatus?.(user.id, newStatus);
-              } catch (err: any) {
-                toast.error(err.message || 'Failed to toggle user status');
-              }
-            }}
-          />
-          <SelectionCheckbox
-            checked={isSelected}
-            onChange={onToggleSelect}
-          />
-        </div>
-
-        <div className="flex items-start gap-4">
-          {/* Genuine flex sibling, not an absolute overlay - this card's
-              avatar sits flush at the same top-left offset an absolute
-              handle would use (unlike AddonCard, whose icon has extra
-              clearance from its own header layout), so an overlay directly
-              collided with the avatar. Same nesting the User detail page's
-              own addon lists already use for exactly this reason. */}
+        <div className="user-card-head">
           {dragHandleProps && (
             <div
               {...dragHandleProps}
               onClick={(e: React.MouseEvent) => e.stopPropagation()}
-              className="shrink-0 mt-1 p-1.5 rounded-lg text-subtle hover:text-default hover:bg-surface-hover cursor-grab active:cursor-grabbing"
+              className="user-card-drag shrink-0 p-1.5 rounded-lg text-subtle hover:text-default hover:bg-surface-hover cursor-grab active:cursor-grabbing"
               title="Drag to reorder"
             >
               <Bars3Icon className="w-4 h-4" />
             </div>
           )}
-          {/* Avatar */}
-          <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} useGravatar={user.useGravatar} size="lg" />
-
-          {/* Main content - stats moved here */}
-          <div className="flex-1 min-w-0">
-            {/* Header row with name and sync badge */}
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <Link
-                href={`/users/${user.id}`}
-                className="font-semibold truncate transition-colors hover:text-primary text-default"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {user.name}
-              </Link>
-              <Badge
-                variant={providerBadgeVariant(user)}
-                size="sm"
-              >
-                {providerLabel(user)}
-              </Badge>
-              {user.providerType === 'nuvio' && (user.nuvioProfileId ?? 1) !== 1 && (
-                <Badge variant="secondary" size="sm">
-                  Profile {user.nuvioProfileId}
-                </Badge>
-              )}
-              {user.secondaryProviderType && (
-                <Badge
-                  variant={providerBadgeVariant({ providerType: user.secondaryProviderType })}
-                  size="sm"
-                >
-                  {providerTypeLabel(user.secondaryProviderType)}
-                </Badge>
-              )}
-              {user.providerConnectionError && (
-                <ExclamationTriangleIcon
-                  className="w-4 h-4 text-warning shrink-0"
-                  title={user.providerConnectionError}
-                />
-              )}
-              <LimitsButton
-                id={user.id}
-                name={user.name}
-                summary={limits}
-                onReconnect={onReconnect ? () => onReconnect(user.id, user.name) : undefined}
-              />
-              <SyncBadge
-                key={`sync-badge-${user.id}`}
-                userId={user.id}
-                onSync={async (id) => {
-                  onSyncStart(id);
-                  try {
-                    await api.syncUser(id);
-                    toast.success(`Synced ${user.name} successfully`);
-                  } catch (err: any) {
-                    toast.error(err.message || `Failed to sync ${user.name}`);
-                  } finally {
-                    onSyncEnd(id);
-                  }
-                }}
-                onReconnect={(id) => {
-                  if (onReconnect) {
-                    onReconnect(user.id, user.name);
-                  }
-                }}
-                isSyncing={syncingUserIds.has(user.id)}
-                size="sm"
-              />
-            </div>
-            {/* Stats below */}
-            <div className="flex items-center gap-3 text-sm text-muted">
-              <span className="flex items-center gap-1.5">
-                <UserGroupIcon className="w-4 h-4 text-secondary" />
-                {user.groups.length > 0 ? (
-                  <>
-                    {user.groups[0]}
-                    {user.groups.length > 1 && ` +${user.groups.length - 1}`}
-                  </>
-                ) : (
-                  'No group'
-                )}
-              </span>
-              {hasAddonList(user) && (
-                <>
-                  <span className="hidden md:inline">•</span>
-                  <span className="flex items-center gap-1.5">
-                    <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
-                    <span className="md:hidden">{user.addonCount || 0}</span>
-                    <span className="hidden md:inline">{user.addonCount || 0} addon{user.addonCount !== 1 ? 's' : ''}</span>
-                  </span>
-                </>
-              )}
-              <span className="hidden md:inline">•</span>
-              <span className="flex items-center gap-1.5">
-                <ClockIcon className="w-4 h-4 text-secondary" />
-                <span className="hidden md:inline">{formatWatchTime(user.watchTime)}</span>
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-subtle">
-              {user.lastSeen === 'Never' ? 'Never seen' : `Last seen ${user.lastSeen}`}
-            </p>
+          <div className="user-card-avatar">
+            <UserAvatar userId={user.id} name={user.name} email={user.email} colorIndex={user.colorIndex} src={user.avatarUrl || undefined} useGravatar={user.useGravatar} size="lg" />
           </div>
+          <div className="user-card-name-cell">
+            <Link
+              href={`/users/${user.id}`}
+              className="user-card-name block font-semibold truncate transition-colors hover:text-primary text-default"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {user.name}
+            </Link>
+          </div>
+          <div className="user-card-badges">
+            <Badge
+              variant={providerBadgeVariant(user)}
+              size="sm"
+            >
+              {providerLabel(user)}
+            </Badge>
+            {user.providerType === 'nuvio' && (user.nuvioProfileId ?? 1) !== 1 && (
+              <Badge variant="secondary" size="sm">
+                Profile {user.nuvioProfileId}
+              </Badge>
+            )}
+            {user.secondaryProviderType && (
+              <Badge
+                variant={providerBadgeVariant({ providerType: user.secondaryProviderType })}
+                size="sm"
+              >
+                {providerTypeLabel(user.secondaryProviderType)}
+              </Badge>
+            )}
+            {user.providerConnectionError && (
+              <ExclamationTriangleIcon
+                className="w-4 h-4 text-warning shrink-0"
+                title={user.providerConnectionError}
+              />
+            )}
+            <LimitsButton
+              id={user.id}
+              name={user.name}
+              summary={limits}
+              onReconnect={onReconnect ? () => onReconnect(user.id, user.name) : undefined}
+            />
+            <SyncBadge
+              key={`sync-badge-${user.id}`}
+              userId={user.id}
+              onSync={async (id) => {
+                onSyncStart(id);
+                try {
+                  await api.syncUser(id);
+                  toast.success(`Synced ${user.name} successfully`);
+                } catch (err: any) {
+                  toast.error(err.message || `Failed to sync ${user.name}`);
+                } finally {
+                  onSyncEnd(id);
+                }
+              }}
+              onReconnect={(id) => {
+                if (onReconnect) {
+                  onReconnect(user.id, user.name);
+                }
+              }}
+              isSyncing={syncingUserIds.has(user.id)}
+              size="sm"
+            />
+          </div>
+          <div className="user-card-toggle">
+            <ToggleSwitch
+              checked={user.status === 'active'}
+              onChange={async () => {
+                try {
+                  const newStatus = user.status === 'active' ? false : true;
+                  await api.toggleUserStatus(user.id, newStatus);
+                  toast.success(`User ${newStatus ? 'activated' : 'deactivated'}`);
+                  onToggleStatus?.(user.id, newStatus);
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to toggle user status');
+                }
+              }}
+            />
+          </div>
+        </div>
+        {/* Stats below */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted whitespace-nowrap">
+          <span className="flex items-center gap-1.5">
+            <UserGroupIcon className="w-4 h-4 text-secondary" />
+            {user.groups.length > 0 ? (
+              <>
+                {user.groups[0]}
+                {user.groups.length > 1 && ` +${user.groups.length - 1}`}
+              </>
+            ) : (
+              'No group'
+            )}
+          </span>
+          {hasAddonList(user) && (
+            <>
+              <span>•</span>
+              <span className="flex items-center gap-1.5">
+                <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
+                {user.addonCount || 0} addon{user.addonCount !== 1 ? 's' : ''}
+              </span>
+            </>
+          )}
+          <span>•</span>
+          <span className="flex items-center gap-1.5">
+            <ClockIcon className="w-4 h-4 text-secondary" />
+            {formatWatchTime(user.watchTime)}
+          </span>
+        </div>
+        <div className="mt-1.5 flex items-center justify-between gap-3">
+          <p className="text-xs text-subtle">
+            {user.lastSeen === 'Never' ? 'Never seen' : `Last seen ${user.lastSeen}`}
+          </p>
+          <SelectionCheckbox
+            checked={isSelected}
+            onChange={onToggleSelect}
+          />
         </div>
       </Card>
   );

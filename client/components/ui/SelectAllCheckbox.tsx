@@ -77,7 +77,7 @@ export function SelectAllCheckbox({
     // active. Confirmed via computed styles that an earlier, fainter pass
     // (5-9px) WAS rendering correctly everywhere, just too subtle to
     // register at normal viewing distance - this pass turns it up.
-    const idleGlow = '0 0 8px color-mix(in srgb, var(--color-primary) 75%, transparent), 0 0 16px color-mix(in srgb, var(--color-secondary) 50%, transparent)';
+    const idleGlow = '0 0 4px color-mix(in srgb, var(--color-primary) 38%, transparent), 0 0 8px color-mix(in srgb, var(--color-secondary) 25%, transparent)';
     if (isEmpty) return `inset 0 1px 3px rgba(0,0,0,0.2), ${idleGlow}`;
     if (isHovered && (isAllSelected || isIndeterminate)) {
       return '0 0 14px var(--color-primary-muted)';
