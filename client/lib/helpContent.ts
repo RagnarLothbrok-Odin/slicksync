@@ -683,6 +683,27 @@ export const HELP_ENTRIES: HelpEntry[] = [
     linkLabel: 'Open Users',
   },
   {
+    id: 'nuvio-sign-in-tv',
+    title: 'Signing a Nuvio TV or computer in with its code',
+    category: 'Users & Groups',
+    keywords: ['nuvio tv', 'sign in tv', 'tv code', 'device code', 'link device', 'nuvio desktop', 'sign in a nuvio tv', 'nuvio login code'],
+    answer: 'On the person’s page, press Sign in a Nuvio TV and type the code their Nuvio TV or computer shows. SlickSync shows which device is asking, and Approve signs it in to their Nuvio account - no email or password typed on a remote.',
+    steps: [
+      'On the TV or computer, start Nuvio’s sign-in. It shows a 6-character code.',
+      'Open the person on the Users page and press Sign in a Nuvio TV.',
+      'Type the code (capitals, spaces and dashes don’t matter) and press Find the device.',
+      'Check it is the right device, then press Approve. The device signs in and asks which profile to use.',
+    ],
+    details: [
+      'It signs the device in to the whole Nuvio account, the same as approving it from Nuvio’s own website. The device picks the profile itself.',
+      'Codes last 5 minutes and work once. Nuvio counts wrong codes, so after several in a row it makes you wait a little before trying again.',
+      'People on Jellyfin, AIOStreams or AIOMetadata have Sign in a TV instead, which approves the Quick Connect code their app shows.',
+    ],
+    related: ['add-nuvio-account', 'add-jellyfin-account'],
+    href: '/users',
+    linkLabel: 'Open Users',
+  },
+  {
     id: 'add-jellyfin-account',
     title: 'Adding someone who watches on Jellyfin, AIOStreams or AIOMetadata',
     category: 'Getting started',

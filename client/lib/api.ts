@@ -2556,6 +2556,22 @@ class ApiClient {
     return this.fetch<{ ok: boolean }>(`/jellyfin/users/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
   }
 
+  // Sign a Nuvio TV or computer in with the code it shows: look the code up
+  // first (which device is asking), then approve it.
+  async lookupNuvioDeviceLogin(userId: string, code: string) {
+    return this.fetch<{ success: boolean; deviceName: string | null; deviceType: string | null; expiresAt: string | null }>(`/nuvio/users/${encodeURIComponent(userId)}/device-login/lookup`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async approveNuvioDeviceLogin(userId: string, code: string) {
+    return this.fetch<{ success: boolean; deviceName: string | null; deviceType: string | null }>(`/nuvio/users/${encodeURIComponent(userId)}/device-login/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  }
+
   async authorizeQuickConnect(userId: string, code: string, profileId?: string | null) {
     return this.fetch<{ success: boolean; who: string }>(`/jellyfin/users/${encodeURIComponent(userId)}/quick-connect`, {
       method: 'POST',

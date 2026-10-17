@@ -1229,3 +1229,36 @@ body {
   }
   .user-card-badges { margin-top: 0; margin-left: 10px; flex-wrap: nowrap; }
 }
+
+/* Addons page card. Narrow (phone, 1280 laptop): icon, name and switch on
+   top, then version + counts + select box, then the tags (desktop only).
+   Wide (the card itself 480px or more): the version beside the name, the
+   counts under it, and the tags row ends with the select box. */
+.addon-card {
+  container-type: inline-size;
+}
+.addon-card-body { padding: 16px; }
+.addon-card-icon { width: 44px; height: 44px; }
+.addon-card-name {
+  display: block;
+  font-size: 16px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.addon-card-wide { display: none; }
+.addon-card-narrow { display: flex; }
+.addon-card-tags { display: none; }
+@media (min-width: 768px) {
+  .addon-card-name { font-size: 17px; }
+  .addon-card-tags { display: flex; }
+}
+@container (min-width: 480px) {
+  .addon-card-body { padding: 20px; }
+  .addon-card-icon { width: 56px; height: 56px; }
+  .addon-card-name { font-size: 18px; }
+  .addon-card-wide { display: inline-flex; }
+  div.addon-card-wide { display: flex; }
+  .addon-card-narrow { display: none; }
+  .addon-card-tags { display: flex; margin-top: 12px; }
+  .has-drag .addon-card-tags { padding-left: 38px; }
+}

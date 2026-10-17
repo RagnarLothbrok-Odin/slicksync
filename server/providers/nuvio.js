@@ -662,6 +662,24 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
       return Array.isArray(rows) ? rows : []
     },
 
+    // A Nuvio TV or computer that isn't signed in shows a 6-character code.
+    // A signed-in account looks the code up (which device is asking) and
+    // approves it; the device is then signed in to this account and picks
+    // its own profile. Both answer { success, message, device_name,
+    // device_type } - an unknown or expired code is success: false, not an
+    // error, and Nuvio counts failed tries against the account.
+    async getDeviceLogin(code) {
+      const accessToken = await ensureAuth()
+      const rows = await supabaseRpc('get_device_login_session', { p_user_code: code }, accessToken, await getServerConfig())
+      return (Array.isArray(rows) ? rows[0] : rows) || null
+    },
+
+    async approveDeviceLogin(code) {
+      const accessToken = await ensureAuth()
+      const rows = await supabaseRpc('approve_device_login_session', { p_user_code: code }, accessToken, await getServerConfig())
+      return (Array.isArray(rows) ? rows[0] : rows) || null
+    },
+
     // profileId here is Nuvio's own profile_index (an integer, e.g. 1) -
     // NOT the profile row's id (a UUID). Easy to mix up since getProfiles()
     // returns both on the same row.
