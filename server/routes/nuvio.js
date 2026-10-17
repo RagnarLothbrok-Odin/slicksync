@@ -84,6 +84,41 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
     }
   })
 
+  // "Their servers in Nuvio" (utils/nuvioMediaServers.js).
+  const mediaServerDeps = (req) => {
+    const { makeCreateProvider } = require('../providers')
+    return { createProvider: makeCreateProvider({ prisma, encrypt, getAccountId }), decrypt, req }
+  }
+  const ownPerson = async (req) => {
+    const person = await prisma.user.findFirst({ where: { id: String(req.params.id), accountId: getAccountId(req) }, select: { id: true } })
+    if (!person) {
+      const err = new Error('Person not found')
+      err.status = 404
+      throw err
+    }
+    return person.id
+  }
+
+  router.get('/users/:id/media-servers', async (req, res) => {
+    try {
+      const id = await ownPerson(req)
+      res.json(await require('../utils/nuvioMediaServers').describe(prisma, mediaServerDeps(req), id))
+    } catch (error) {
+      sendDeviceError(res, error, 'Could not read their servers')
+    }
+  })
+
+  router.put('/users/:id/media-servers', async (req, res) => {
+    try {
+      const id = await ownPerson(req)
+      const mediaServers = require('../utils/nuvioMediaServers')
+      await mediaServers.setEnabled(prisma, mediaServerDeps(req), id, req.body?.enabled === true)
+      res.json(await mediaServers.describe(prisma, mediaServerDeps(req), id))
+    } catch (error) {
+      sendDeviceError(res, error, 'Could not update their servers in Nuvio')
+    }
+  })
+
   // Validate Nuvio credentials
   router.post('/validate', async (req, res) => {
     try {

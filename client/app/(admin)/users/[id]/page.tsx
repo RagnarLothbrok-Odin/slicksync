@@ -24,6 +24,7 @@ import { AioHealthButton } from '@/components/jellyfin/AioHealthButton';
 import { AioHistoryButton } from '@/components/jellyfin/AioHistoryButton';
 import { LimitsButton } from '@/components/user/LimitsButton';
 import { SignInNuvioTvButton } from '@/components/nuvio/SignInNuvioTvButton';
+import { NuvioServersTile } from '@/components/nuvio/NuvioServersTile';
 import { CatchUpButton } from '@/components/user/CatchUpButton';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
@@ -1535,6 +1536,12 @@ export default function UserDetailPage() {
                 a paid Trakt account to work at all. Bringing a Trakt history
                 across is handled by the import below instead, which reads
                 Trakt's own free export and needs no app and no VIP. */}
+            {/* Their Jellyfin / AIOStreams / AIOMetadata in their Nuvio profile -
+                only for someone with both sign-ins (renders nothing otherwise). */}
+            <PageSection className="mb-6 empty:hidden">
+              <NuvioServersTile userId={user.id} />
+            </PageSection>
+
             <PageSection className="mb-6">
               <Card padding="lg">
                 <button

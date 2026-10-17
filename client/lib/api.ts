@@ -2556,6 +2556,18 @@ class ApiClient {
     return this.fetch<{ ok: boolean }>(`/jellyfin/users/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
   }
 
+  // "Their servers in Nuvio" - their Jellyfin / AIOStreams / AIOMetadata in their Nuvio profile.
+  async getNuvioMediaServers(userId: string) {
+    return this.fetch<NuvioServersState>(`/nuvio/users/${encodeURIComponent(userId)}/media-servers`);
+  }
+
+  async setNuvioMediaServers(userId: string, enabled: boolean) {
+    return this.fetch<NuvioServersState>(`/nuvio/users/${encodeURIComponent(userId)}/media-servers`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
   // Sign a Nuvio TV or computer in with the code it shows: look the code up
   // first (which device is asking), then approve it.
   async lookupNuvioDeviceLogin(userId: string, code: string) {
@@ -3798,6 +3810,15 @@ export interface AioCollectionsView {
 }
 
 /** One household user on an AIOStreams or AIOMetadata sign-in, as a profile. */
+export interface NuvioServersState {
+  available: boolean;
+  enabled: boolean;
+  hasNuvio: boolean;
+  server: { kind: string; kindLabel: string; userName: string | null } | null;
+  servers: { id: string; name: string; userName: string | null; fromSlickSync: boolean; enabled: boolean }[];
+  readError: string | null;
+}
+
 export interface HouseholdProfile {
   id: string;
   name: string;

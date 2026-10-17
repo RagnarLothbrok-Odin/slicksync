@@ -680,6 +680,30 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
       return (Array.isArray(rows) ? rows[0] : rows) || null
     },
 
+    // A profile's media servers (Jellyfin / Emby) - the list Nuvio's apps
+    // sign in to. One list per profile, replaced whole on every write, so a
+    // caller always pulls first and keeps what isn't theirs.
+    async getMediaServers(profileId) {
+      const accessToken = await ensureAuth()
+      const rows = await supabaseRpc('sync_pull_media_servers', { p_profile_id: profileId }, accessToken, await getServerConfig())
+      let raw = (Array.isArray(rows) ? rows[0] : rows)?.servers_json
+      if (typeof raw === 'string') {
+        try { raw = JSON.parse(raw) } catch { raw = [] }
+      }
+      return Array.isArray(raw) ? raw : []
+    },
+
+    // p_servers is the raw array, not a JSON string (the same double-encoding
+    // trap as sync_push_collections).
+    async setMediaServers(profileId, servers) {
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_media_servers', {
+        p_profile_id: profileId,
+        p_servers: servers,
+        p_origin_client_id: 'slicksync',
+      }, accessToken, await getServerConfig())
+    },
+
     // profileId here is Nuvio's own profile_index (an integer, e.g. 1) -
     // NOT the profile row's id (a UUID). Easy to mix up since getProfiles()
     // returns both on the same row.

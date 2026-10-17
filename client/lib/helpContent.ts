@@ -704,6 +704,27 @@ export const HELP_ENTRIES: HelpEntry[] = [
     linkLabel: 'Open Users',
   },
   {
+    id: 'nuvio-their-servers',
+    title: 'Putting someone’s Jellyfin, AIOStreams or AIOMetadata in their Nuvio',
+    category: 'Users & Groups',
+    keywords: ['nuvio jellyfin', 'nuvio media server', 'their servers in nuvio', 'nuvio emby', 'nuvio aiostreams', 'media servers', 'server in nuvio'],
+    answer: 'For someone with both a Nuvio sign-in and a Jellyfin, AIOStreams or AIOMetadata one, turn on Their servers in Nuvio on their page. That server then shows up in Nuvio on every device of theirs, already signed in.',
+    steps: [
+      'Give the person both sign-ins - add the second one and merge the two people (Users page), or reconnect.',
+      'On their page, turn on Their servers in Nuvio.',
+      'Open Nuvio on any of their devices: the server is listed, signed in as them.',
+    ],
+    details: [
+      'It goes into the Nuvio profile SlickSync manages for them. Servers they added in Nuvio themselves are listed on the tile and left as they are.',
+      'Nuvio gets a sign-in of its own on the server, made with Quick Connect, so signing Nuvio out (or removing the server there) never signs SlickSync out. The server needs Quick Connect turned on.',
+      'Turning it on again keeps which libraries they switched off in Nuvio. Turning it off takes the server out of their Nuvio and signs that sign-in out.',
+      'A Nuvio profile holds up to 16 servers.',
+    ],
+    related: ['add-jellyfin-account', 'add-nuvio-account', 'nuvio-sign-in-tv'],
+    href: '/users',
+    linkLabel: 'Open Users',
+  },
+  {
     id: 'add-jellyfin-account',
     title: 'Adding someone who watches on Jellyfin, AIOStreams or AIOMetadata',
     category: 'Getting started',
