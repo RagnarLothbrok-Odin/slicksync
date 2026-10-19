@@ -662,7 +662,7 @@ export default function UsersPage() {
             <LayoutGroup>
               <AnimatePresence mode="popLayout">
                 {viewMode === 'grid' ? (
-                  <StaggerContainer key="grid" className="users-grid">
+                  <StaggerContainer key="grid" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                     <AnimatePresence mode="popLayout">
                       <SortableContext items={filteredUsers.map(u => u.id)} strategy={rectSortingStrategy}>
                       {filteredUsers.map((user) => (
@@ -1274,9 +1274,10 @@ function UserCard({
             />
           </div>
         </div>
-        {/* Group, addons and time, then Limits and Caught up. On a narrow
-            card the time starts a second line with the two after it. */}
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted whitespace-nowrap">
+        {/* Group, addons and time, then Limits and Caught up - no dots, like
+            the Groups cards. On a narrow card the time starts a second line
+            with the two after it. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm text-muted whitespace-nowrap">
           <span className="flex items-center gap-1.5">
             <UserGroupIcon className="w-4 h-4 text-secondary" />
             {user.groups.length > 0 ? (
@@ -1290,14 +1291,12 @@ function UserCard({
           </span>
           {hasAddonList(user) && (
             <>
-              <span>•</span>
               <span className="flex items-center gap-1.5">
                 <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
                 {user.addonCount || 0} addon{user.addonCount !== 1 ? 's' : ''}
               </span>
             </>
           )}
-          <span className="user-card-dot">•</span>
           <span className="user-card-break" aria-hidden="true" />
           <span className="flex items-center gap-1.5">
             <ClockIcon className="w-4 h-4 text-secondary" />
