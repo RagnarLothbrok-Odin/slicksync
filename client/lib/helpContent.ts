@@ -1271,7 +1271,7 @@ export const HELP_ENTRIES: HelpEntry[] = [
       'Episodes that haven’t aired yet and specials are skipped.',
       'On AIOStreams and AIOMetadata it is one request; on a real Jellyfin server each episode is marked in turn, a few at a time, so a long show takes a little while. Episodes the server already has as played are left alone.',
       'A show Cinemeta doesn’t know - anime, or anything with only a TMDb id - is listed from their own server.',
-      'For someone on AIOStreams, anime episodes the server knows are filler or a recap are marked F or R in the episode grid.',
+      'For someone on AIOStreams or AIOMetadata, anime episodes the server knows are filler or a recap are marked F or R in the episode grid (AIOMetadata from its first release that tags them). An episode that is only partly filler isn’t marked.',
     ],
     related: ['daily-screen-time', 'add-jellyfin-account', 'aiostreams-watch-history'],
     href: '/users',

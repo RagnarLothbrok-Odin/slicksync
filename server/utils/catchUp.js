@@ -120,9 +120,10 @@ async function episodesFor(prisma, decrypt, accountId, userId, showId, { createP
       episodes = meta.allEpisodes.map((e) => ({ season: e.season, episode: e.episode, title: e.title || null, released: e.released || null }))
     }
   }
-  // On AIOStreams the server's own list is read too: it says which anime
-  // episodes are filler or a recap, matched to these by season and episode.
-  const provider = !episodes || person?.jellyfinServerKind === 'aiostreams' ? providerFor(person, decrypt, createProvider) : null
+  // On AIOStreams and AIOMetadata the server's own list is read too: it says
+  // which anime episodes are filler or a recap, matched by season and episode.
+  const marksFiller = person?.jellyfinServerKind === 'aiostreams' || person?.jellyfinServerKind === 'aiometadata'
+  const provider = !episodes || marksFiller ? providerFor(person, decrypt, createProvider) : null
   const listed = provider ? await provider.listEpisodes(id).catch(() => null) : null
   if (!episodes && listed?.length) episodes = listed.map((e) => ({ season: e.season, episode: e.episode, title: e.title, released: e.premiere }))
   if (!episodes) throw fail('SlickSync couldn’t find that show’s episodes', 404)
