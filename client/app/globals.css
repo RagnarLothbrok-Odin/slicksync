@@ -1268,11 +1268,12 @@ body {
   .has-drag .addon-card-tags { padding-left: 38px; }
 }
 
-/* Users page: as many columns as fit with each card at least 520px wide -
-   2 on a 1280 laptop, 3 at 1920, 4 at 2560 - so the provider and sync
-   badges fit beside the name and Limits beside the details. */
+/* Users page: as many columns as fit with each card at least 570px wide, so
+   the provider and sync badges fit beside the name and Limits and Caught up
+   beside the group / addons / time line - in the sidebar layout as well as
+   the top bar one (the sidebar takes ~190px). */
 .users-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 570px), 1fr));
   gap: 24px;
 }
