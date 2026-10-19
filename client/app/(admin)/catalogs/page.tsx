@@ -21,6 +21,7 @@ import {
   ShieldExclamationIcon,
 } from '@heroicons/react/24/outline';
 import { MapPinIcon as MapPinIconSolid, PlayIcon } from '@heroicons/react/24/solid';
+import { JellyfinLogo } from '@/components/jellyfin/JellyfinLogo';
 
 // Matches AvatarPickerModal's own color-swatch formula exactly, so a
 // catalog's solid-color cover reads as the same color the picker showed.
@@ -269,33 +270,29 @@ export default function ListsPage() {
 
   // Jellyfin | AIOStreams collections, next to Nuvio's: which catalogs show
   // up as collections in AIOStreams' apps and on a household's own Jellyfin
-  // server. AIOStreams' black and white.
+  // server. Jellyfin's mark and colours, with "AIOStreams" in AIOStreams' own
+  // lavender and indigo.
   const aiostreamsCollectionsButton = (
     <button
       type="button"
       onClick={() => router.push('/catalogs/aiostreams-collections')}
       className="flex-[0_1_19rem] min-w-0 flex items-center gap-3 pl-3 pr-6 py-2.5 rounded-full transition-transform hover:scale-105"
       style={{
-        background: 'linear-gradient(115deg, rgb(12, 12, 14) 0%, rgb(12, 12, 14) 50%, rgb(30, 30, 34) 50%, rgb(30, 30, 34) 100%)',
-        border: '1.5px solid rgba(244, 244, 245, 0.55)',
-        boxShadow: '0 0 20px -6px rgba(244, 244, 245, 0.35)',
+        background: 'linear-gradient(rgba(0, 11, 37, 0.94), rgba(6, 16, 46, 0.94)) padding-box, linear-gradient(115deg, rgba(170, 92, 195, 0.75), rgba(0, 164, 220, 0.75)) border-box',
+        border: '1.5px solid transparent',
+        boxShadow: '-6px 0 20px -6px rgba(170, 92, 195, 0.35), 6px 0 20px -6px rgba(0, 164, 220, 0.35)',
       }}
     >
       <span
-        className="flex items-center justify-center rounded-2xl shrink-0 font-display font-black text-sm"
-        style={{
-          width: 44,
-          height: 44,
-          background: 'linear-gradient(115deg, rgb(12, 12, 14) 0%, rgb(12, 12, 14) 50%, rgb(244, 244, 245) 50%, rgb(244, 244, 245) 100%)',
-          border: '1px solid rgba(244, 244, 245, 0.5)',
-          color: 'rgb(255, 255, 255)',
-          textShadow: '0 0 2px rgb(0, 0, 0), 0 0 2px rgb(0, 0, 0)',
-        }}
+        className="flex items-center justify-center rounded-2xl shrink-0"
+        style={{ width: 44, height: 44, background: '#000B25', border: '1px solid rgba(120, 130, 220, 0.35)' }}
       >
-        AIO
+        <JellyfinLogo />
       </span>
-      <span className="font-display font-bold text-lg sm:text-xl tracking-tight truncate" style={{ color: 'rgb(244, 244, 245)' }}>
-        Jellyfin | AIOStreams
+      <span className="font-display font-bold text-lg sm:text-xl tracking-tight truncate">
+        <span style={{ background: 'linear-gradient(90deg, #C58BDA, #4CC3EE)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>Jellyfin</span>{' '}
+        <span style={{ color: 'rgb(212, 208, 255)' }}>| AIO</span>
+        <span style={{ color: 'rgb(159, 146, 255)' }}>Streams</span>
       </span>
     </button>
   );
