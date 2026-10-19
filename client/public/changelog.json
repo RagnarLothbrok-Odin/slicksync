@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.100.0",
+    "date": "2026-10-19",
+    "title": "1.100.0 - Sign in a Nuvio TV, their servers in Nuvio, and tidier cards everywhere",
+    "features": [
+      "Sign in a Nuvio TV: on a Nuvio person's page, type the 6-character code a Nuvio TV or computer shows. SlickSync shows which device is asking, and Approve signs it in to their Nuvio account - no email or password typed on a remote. The device then picks its profile.",
+      "Their servers in Nuvio: for someone with both a Nuvio sign-in and a Jellyfin, AIOStreams or AIOMetadata one, a switch on their page puts that server in their Nuvio profile, so every Nuvio app lists it already signed in. Nuvio gets a sign-in of its own (it shows as \"Nuvio (via SlickSync)\" in the server's device list), so signing Nuvio out never signs SlickSync out. Servers they added in Nuvio themselves are kept; turning it off takes SlickSync's out again.",
+      "Caught up on the Users cards: \"Caught up to…\" sits right beside Limits on every card, opening the same box as on the person's page - for Stremio, Nuvio, Jellyfin, AIOStreams and AIOMetadata people alike.",
+      "Filler and recap marks for AIOMetadata: \"Caught up to…\" marks anime filler and recap episodes for AIOMetadata people too, as soon as AIOMetadata's next release tags them (AIOStreams people already had them). Episodes that are only partly filler aren't marked.",
+      "Users cards: the name is never cut. On a computer the provider and sync status sit beside the name, and Limits and Caught up follow the group, addon and watch-time line; on a phone they flow onto the second line beside the time. The page shows as many columns as fit with every card wide enough for that - in the sidebar layout as well as the top bar one.",
+      "Addons cards: names wrap instead of being cut. On a phone and a laptop the version, users and groups share a row with the select box; on wider screens the version sits beside the name. An addon's label and Shared settings lead the tags row instead of taking a row of their own.",
+      "Groups cards: picture, name and switch on top; members, addons and sync status with the select box underneath.",
+      "Person page: the sync status sits right beside the provider pill, the buttons get a line of their own with Debug at the end, and group, expiry and join date each get their own line.",
+      "Catalogs: the Jellyfin | AIOStreams tile carries Jellyfin's logo and colours, with AIOStreams in its own lavender and indigo."
+    ],
+    "bugFixes": [
+      "Phone stat tiles on Users, Groups and Invitations show their labels in full (\"Total Members\", \"Addons Assigned\") instead of cutting them.",
+      "Vault's empty page sits on the panel like every other page's, instead of in a second glowing box.",
+      "The select box's glow is softer."
+    ]
+  },
+  {
     "version": "1.99.0",
     "date": "2026-10-16",
     "title": "1.99.0 - Phone tabs you can swipe, and safer Nuvio addon writes",
