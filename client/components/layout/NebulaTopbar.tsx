@@ -218,7 +218,9 @@ export function NebulaHeaderStats({
   stats: Array<{ label: string; value: string | number; icon?: ReactNode }>;
 }) {
   return (
-    <div className="flex items-center gap-2 md:gap-4">
+    // On a phone, an even full-width row of three - the same as the stat row
+    // on Users and Groups - rather than cards shrunk to their text.
+    <div className="w-full grid grid-cols-3 gap-2 md:w-auto md:flex md:items-center md:gap-4">
       {stats.map((s, i) => (
         <NebulaCompactStatCard key={s.label} label={s.label} value={s.value} icon={s.icon} colorIndex={i} />
       ))}
