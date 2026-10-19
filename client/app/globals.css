@@ -1213,6 +1213,9 @@ body {
 .user-card-avatar { grid-area: avatar; display: flex; margin-right: 12px; }
 .user-card-name-cell { grid-area: name; min-width: 0; }
 .user-card-toggle { grid-area: toggle; display: flex; margin-left: 10px; }
+/* Narrow card: the time starts a new line, with Limits and Caught up after it. */
+.user-card-dot { display: none; }
+.user-card-break { flex-basis: 100%; height: 0; }
 .user-card-badges {
   grid-area: badges;
   display: flex;
@@ -1223,6 +1226,8 @@ body {
   min-width: 0;
 }
 @container (min-width: 470px) {
+  .user-card-dot { display: inline; }
+  .user-card-break { display: none; }
   .user-card-head {
     grid-template-columns: auto auto minmax(0, max-content) auto minmax(0, 1fr) auto;
     grid-template-areas: "drag avatar name badges . toggle";
@@ -1261,4 +1266,13 @@ body {
   .addon-card-narrow { display: none; }
   .addon-card-tags { display: flex; margin-top: 12px; }
   .has-drag .addon-card-tags { padding-left: 38px; }
+}
+
+/* Users page: as many columns as fit with each card at least 520px wide -
+   2 on a 1280 laptop, 3 at 1920, 4 at 2560 - so the provider and sync
+   badges fit beside the name and Limits beside the details. */
+.users-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+  gap: 24px;
 }

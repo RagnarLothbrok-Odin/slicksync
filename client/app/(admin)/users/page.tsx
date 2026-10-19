@@ -10,6 +10,7 @@ import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { ProfilesCard } from '@/components/user/ProfilesCard';
 import { LimitsButton } from '@/components/user/LimitsButton';
+import { CatchUpButton } from '@/components/user/CatchUpButton';
 import { HouseholdsCard } from '@/components/jellyfin/HouseholdCard';
 import { NebulaPageHeading, NebulaCompactStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
@@ -661,7 +662,7 @@ export default function UsersPage() {
             <LayoutGroup>
               <AnimatePresence mode="popLayout">
                 {viewMode === 'grid' ? (
-                  <StaggerContainer key="grid" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  <StaggerContainer key="grid" className="users-grid">
                     <AnimatePresence mode="popLayout">
                       <SortableContext items={filteredUsers.map(u => u.id)} strategy={rectSortingStrategy}>
                       {filteredUsers.map((user) => (
@@ -1176,10 +1177,10 @@ function UserCard({
       <Card
         variant="interactive"
         padding="md"
-        // The switch sits on the name line and the badges get their own
-        // full-width line on a narrow card (beside the name once the card is
-        // wide enough - see .user-card-head), so nothing is squeezed into a
-        // column next to the switch.
+        // The switch sits on the name line. The provider and sync badges sit
+        // beside the name on a wide card and get a line of their own on a
+        // narrow one (see .user-card-head); Limits and Caught up follow the
+        // group / addons / time line.
         className={`user-card group cursor-pointer tap-card ${isSelected ? 'ring-2 ring-primary' : ''}`}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
@@ -1234,12 +1235,6 @@ function UserCard({
                 title={user.providerConnectionError}
               />
             )}
-            <LimitsButton
-              id={user.id}
-              name={user.name}
-              summary={limits}
-              onReconnect={onReconnect ? () => onReconnect(user.id, user.name) : undefined}
-            />
             <SyncBadge
               key={`sync-badge-${user.id}`}
               userId={user.id}
@@ -1279,8 +1274,9 @@ function UserCard({
             />
           </div>
         </div>
-        {/* Stats below */}
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted whitespace-nowrap">
+        {/* Group, addons and time, then Limits and Caught up. On a narrow
+            card the time starts a second line with the two after it. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted whitespace-nowrap">
           <span className="flex items-center gap-1.5">
             <UserGroupIcon className="w-4 h-4 text-secondary" />
             {user.groups.length > 0 ? (
@@ -1301,10 +1297,20 @@ function UserCard({
               </span>
             </>
           )}
-          <span>•</span>
+          <span className="user-card-dot">•</span>
+          <span className="user-card-break" aria-hidden="true" />
           <span className="flex items-center gap-1.5">
             <ClockIcon className="w-4 h-4 text-secondary" />
             {formatWatchTime(user.watchTime)}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <LimitsButton
+              id={user.id}
+              name={user.name}
+              summary={limits}
+              onReconnect={onReconnect ? () => onReconnect(user.id, user.name) : undefined}
+            />
+            <CatchUpButton userId={user.id} name={user.name} hasServer={user.providerType === 'jellyfin'} size="sm" />
           </span>
         </div>
         <div className="mt-1.5 flex items-center justify-between gap-3">

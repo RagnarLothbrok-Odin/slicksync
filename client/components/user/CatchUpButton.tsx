@@ -46,7 +46,13 @@ function Poster({ item, className }: { item: { id: string; poster: string | null
   );
 }
 
-export function CatchUpButton({ userId, name, hasServer }: { userId: string; name: string; hasServer: boolean }) {
+export function CatchUpButton({ userId, name, hasServer, size = 'md' }: {
+  userId: string;
+  name: string;
+  hasServer: boolean;
+  /** 'sm' on a Users card, beside Limits - there it reads "Caught up". */
+  size?: 'sm' | 'md';
+}) {
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<PopupPlacement | null>(null);
@@ -244,9 +250,20 @@ export function CatchUpButton({ userId, name, hasServer }: { userId: string; nam
     : job.state === 'failed' ? 'Stopped' : 'Marked';
 
   return (
-    <>
-      <ActionPill ref={button} icon={CheckCircleIcon} open={open} onClick={toggle} tone={working ? 'on' : 'neutral'}>
-        {job?.state === 'running' ? 'Marking…' : job?.state === 'undoing' ? 'Undoing…' : 'Caught up to…'}
+    // On a Users card the card itself opens the person on a click; nothing
+    // done here - in the pill or its popup - reaches it (React passes a
+    // portal's events up through the component that rendered it).
+    <span
+      className="inline-flex max-w-full min-w-0"
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <ActionPill ref={button} icon={CheckCircleIcon} size={size} open={open} onClick={toggle} tone={working ? 'on' : 'neutral'}>
+        {job?.state === 'running' ? 'Marking…' : job?.state === 'undoing' ? 'Undoing…' : size === 'sm' ? 'Caught up' : 'Caught up to…'}
       </ActionPill>
       {open && anchor && typeof document !== 'undefined' && createPortal(
         <>
@@ -493,6 +510,6 @@ export function CatchUpButton({ userId, name, hasServer }: { userId: string; nam
         </>,
         document.body,
       )}
-    </>
+    </span>
   );
 }

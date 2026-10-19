@@ -1378,6 +1378,34 @@ function AddonCard({
     </div>
   );
 
+  // The label and Shared settings: on a phone they follow the version and
+  // counts, everywhere else they lead the tags row - never a row of their own.
+  const labelPills = (addon.customTag || (sharedPeers && sharedPeers.length > 0)) ? (
+    <>
+      {addon.customTag && (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-muted text-primary"
+          style={
+            addonTagColors?.[addon.customTag]
+              ? { background: `${addonTagColors[addon.customTag]}26`, color: addonTagColors[addon.customTag] }
+              : undefined
+          }
+          title={`Labeled "${addon.customTag}" — right-click to change or remove`}
+        >
+          <TagIcon className="w-3 h-3" />
+          {addon.customTag}
+        </span>
+      )}
+      {sharedPeers && sharedPeers.length > 0 && (
+        <SharedConfigPill
+          peers={sharedPeers}
+          kind={configKindOf(addon.manifestUrl, addon.name)}
+          isTV={focusable}
+        />
+      )}
+    </>
+  ) : null;
+
   const cardElement = (
       <Card
         variant="interactive"
@@ -1458,39 +1486,16 @@ function AddonCard({
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted whitespace-nowrap min-w-0">
               {addon.version && <VersionBadge version={addon.version.slice(0, 7)} size="sm" />}
               {counts}
+              {labelPills && <span className="contents md:hidden">{labelPills}</span>}
             </div>
             {selectBox}
           </div>
 
-          {(addon.customTag || (sharedPeers && sharedPeers.length > 0)) && (
-            <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-              {addon.customTag && (
-                <span
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-muted text-primary"
-                  style={
-                    addonTagColors?.[addon.customTag]
-                      ? { background: `${addonTagColors[addon.customTag]}26`, color: addonTagColors[addon.customTag] }
-                      : undefined
-                  }
-                  title={`Labeled "${addon.customTag}" — right-click to change or remove`}
-                >
-                  <TagIcon className="w-3 h-3" />
-                  {addon.customTag}
-                </span>
-              )}
-              {sharedPeers && sharedPeers.length > 0 && (
-                <SharedConfigPill
-                  peers={sharedPeers}
-                  kind={configKindOf(addon.manifestUrl, addon.name)}
-                  isTV={focusable}
-                                  />
-              )}
-            </div>
-          )}
-
-          {/* Tags - not on a phone. On a wide card the select box ends this row. */}
+          {/* Tags - not on a phone - led by the label and Shared settings. On a
+              wide card the select box ends this row. */}
           <div className="addon-card-tags items-center justify-between gap-2.5 mt-2.5">
-            <div className="flex flex-wrap gap-1.5 min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+              {labelPills}
               {addon.resources.map((resource) => (
                 <ResourceBadge key={resource} resource={resource} />
               ))}
