@@ -47,7 +47,7 @@ export function SelectionCheckbox({
         // custom theme is active.
         boxShadow: checked
           ? '0 0 14px var(--color-primary-muted), 0 0 0 1px var(--color-primary)'
-          : '0 0 8px color-mix(in srgb, var(--color-primary) 75%, transparent), 0 0 16px color-mix(in srgb, var(--color-secondary) 50%, transparent), inset 0 1px 3px rgba(0,0,0,0.2)',
+          : '0 0 4px color-mix(in srgb, var(--color-primary) 38%, transparent), 0 0 8px color-mix(in srgb, var(--color-secondary) 25%, transparent), inset 0 1px 3px rgba(0,0,0,0.2)',
       }}
       whileHover={{
         borderColor: 'var(--color-primary)',

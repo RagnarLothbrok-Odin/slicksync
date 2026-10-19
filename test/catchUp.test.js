@@ -220,3 +220,22 @@ test('on AIOStreams, filler and recap episodes are marked as such in the list', 
   assert.deepEqual(list.episodes.map((e) => e.kind || null), [null, 'filler', 'recap', null])
   assert.equal(list.episodes[0].title, 'One', 'Cinemeta still gives the titles')
 })
+
+test("on AIOMetadata the server's filler and recap marks are read too; a plain Jellyfin isn't asked", async () => {
+  const server = [
+    { itemId: 'e1', season: 1, episode: 1, played: false },
+    { itemId: 'e2', season: 1, episode: 2, played: false, filler: true },
+    { itemId: 'e3', season: 1, episode: 3, played: false, recap: true },
+  ]
+  const w = world()
+  const base = w.prisma.user.findFirst
+  w.prisma.user.findFirst = async (args) => ({ ...(await base(args)), jellyfinServerKind: 'aiometadata' })
+  const list = await catchUp.episodesFor(w.prisma, () => 'tok', 'acc', 'mia', 'tt1', { fetchMeta: meta, createProvider: () => ({ listEpisodes: async () => server }) })
+  assert.deepEqual(list.episodes.map((e) => e.kind || null), [null, 'filler', 'recap', null])
+
+  const plain = world()
+  let asked = false
+  const jf = await catchUp.episodesFor(plain.prisma, () => 'tok', 'acc', 'mia', 'tt1', { fetchMeta: meta, createProvider: () => ({ listEpisodes: async () => { asked = true; return server } }) })
+  assert.equal(asked, false, "Cinemeta's list is enough there")
+  assert.ok(jf.episodes.every((e) => !e.kind))
+})

@@ -801,102 +801,84 @@ function GroupCard({
       <Card
         variant="interactive"
         padding="md"
-        // pr-24 reserves clearance for the absolutely-positioned toggle below
-        // (top-4 right-4) — without it, the name/sync-badge row's content
-        // can run under the toggle and overlap it. Unconditional (not just
-        // md:) because the toggle itself has no responsive hiding — it's
-        // just as visible on a narrow phone as it is at 3-column desktop.
-        className={`group cursor-pointer tap-card pr-24 ${isSelected ? 'ring-2 ring-primary' : ''}`}
+        // Two rows: picture, name and switch on top; then the member and
+        // addon counts with the sync status, and the select box at the end.
+        className={`group cursor-pointer tap-card ${isSelected ? 'ring-2 ring-primary' : ''}`}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         {...longPress}
       >
-        {/* Selection indicator & Toggle - stacked (toggle above, checkbox
-            below) rather than side-by-side, so the checkbox sits directly
-            under the toggle instead of next to it. */}
-        <div className="absolute top-4 right-4 flex flex-col items-end gap-1.5">
-          <ToggleSwitch
-            checked={group.isActive !== false}
-            onChange={async () => {
-              try {
-                // Derived from exactly what the switch is showing, so the
-                // click always does the opposite of what the user can see.
-                const newStatus = !(group.isActive !== false);
-                await api.toggleGroupStatus(group.id, newStatus);
-                toast.success(`Group ${newStatus ? 'activated' : 'deactivated'}`);
-                onToggleStatus?.(group.id, newStatus);
-              } catch (err: any) {
-                toast.error(err.message || `Failed to toggle ${group.name}`);
-              }
-            }}
-          />
-          <SelectionCheckbox
-            checked={isSelected}
-            onChange={onToggleSelect}
-          />
-        </div>
-
-        <div className="flex items-start gap-4">
-          {/* Genuine flex sibling, not an absolute overlay - this card's
-              avatar sits flush at the same top-left offset an absolute
-              handle would use, so an overlay directly collided with it.
-              Same nesting the User detail page's own addon lists use. */}
+        <div className="flex items-center gap-2.5">
           {dragHandleProps && (
             <div
               {...dragHandleProps}
               onClick={(e: React.MouseEvent) => e.stopPropagation()}
-              className="shrink-0 mt-1 p-1.5 rounded-lg text-subtle hover:text-default hover:bg-surface-hover cursor-grab active:cursor-grabbing"
+              className="shrink-0 p-1.5 rounded-lg text-subtle hover:text-default hover:bg-surface-hover cursor-grab active:cursor-grabbing"
               title="Drag to reorder"
             >
               <Bars3Icon className="w-4 h-4" />
             </div>
           )}
-          {/* Color icon */}
           <Avatar
             name={group.name}
-            size="lg"
+            size="md"
             src={group.avatarUrl || undefined}
             colorIndex={group.colorIndex ?? 0}
           />
+          <Link
+            href={`/groups/${group.id}`}
+            className="flex-1 min-w-0 font-semibold truncate transition-colors hover:text-primary text-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {group.name}
+          </Link>
+          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+            <ToggleSwitch
+              checked={group.isActive !== false}
+              onChange={async () => {
+                try {
+                  // Derived from exactly what the switch is showing, so the
+                  // click always does the opposite of what the user can see.
+                  const newStatus = !(group.isActive !== false);
+                  await api.toggleGroupStatus(group.id, newStatus);
+                  toast.success(`Group ${newStatus ? 'activated' : 'deactivated'}`);
+                  onToggleStatus?.(group.id, newStatus);
+                } catch (err: any) {
+                  toast.error(err.message || `Failed to toggle ${group.name}`);
+                }
+              }}
+            />
+          </div>
+        </div>
 
-          {/* Main content - stats moved here */}
-          <div className="flex-1 min-w-0">
-            {/* Header row with name and sync badge */}
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <Link
-                href={`/groups/${group.id}`}
-                className="font-semibold truncate transition-colors hover:text-primary text-default"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {group.name}
-              </Link>
-              <SyncBadge
-                groupId={group.id}
-                onSync={async (id) => {
-                  try {
-                    await api.syncGroup(id);
-                    toast.success(`Synced ${group.name} successfully`);
-                  } catch (err: any) {
-                    toast.error(err.message || `Failed to sync ${group.name}`);
-                  }
-                }}
-                size="sm"
-              />
-            </div>
-            {/* Stats inline */}
-            <div className="flex items-center gap-3 text-sm text-muted">
-              <span className="flex items-center gap-1.5">
-                <UsersIcon className="w-4 h-4 text-secondary" />
-                <span className="md:hidden">{group.userCount}</span>
-                <span className="hidden md:inline">{group.userCount} user{group.userCount !== 1 ? 's' : ''}</span>
-              </span>
-              <span className="hidden md:inline">•</span>
-              <span className="flex items-center gap-1.5">
-                <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
-                <span className="md:hidden">{group.addonCount}</span>
-                <span className="hidden md:inline">{group.addonCount} addon{group.addonCount !== 1 ? 's' : ''}</span>
-              </span>
-            </div>
+        <div className="mt-3 flex items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted whitespace-nowrap min-w-0">
+            <span className="flex items-center gap-1.5">
+              <UsersIcon className="w-4 h-4 text-secondary" />
+              {group.userCount} user{group.userCount !== 1 ? 's' : ''}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
+              {group.addonCount} addon{group.addonCount !== 1 ? 's' : ''}
+            </span>
+            <SyncBadge
+              groupId={group.id}
+              onSync={async (id) => {
+                try {
+                  await api.syncGroup(id);
+                  toast.success(`Synced ${group.name} successfully`);
+                } catch (err: any) {
+                  toast.error(err.message || `Failed to sync ${group.name}`);
+                }
+              }}
+              size="sm"
+            />
+          </div>
+          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+            <SelectionCheckbox
+              checked={isSelected}
+              onChange={onToggleSelect}
+            />
           </div>
         </div>
       </Card>

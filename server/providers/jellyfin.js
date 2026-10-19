@@ -102,6 +102,11 @@ function encodePackedId({ kind, base, season = null, episode = null, version = 0
  * (tmdb:603, kitsu:46676:1), so splitting on the first ':' alone read
  * "tmdb:209867" as show "tmdb", season 209867.
  */
+// Whether an episode carries one of AIOMetadata's filler tags, exactly.
+function episodeTagged(item, tag) {
+  return Array.isArray(item?.Tags) && item.Tags.includes(tag)
+}
+
 function splitStremioId(id) {
   const parts = String(id || '').split(':')
   const prefixed = parts.length > 1 && !/^tt\d+$/i.test(parts[0])
@@ -491,7 +496,7 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
     async listEpisodes(stremioShowId) {
       const seriesId = await this.findItem(splitStremioId(stremioShowId).base, 'series')
       if (!seriesId) return null
-      const data = await call(`/Shows/${seriesId}/Episodes?${new URLSearchParams({ userId, EnableUserData: 'true', Fields: 'PremiereDate' })}`)
+      const data = await call(`/Shows/${seriesId}/Episodes?${new URLSearchParams({ userId, EnableUserData: 'true', Fields: 'PremiereDate,Tags' })}`)
       return (Array.isArray(data?.Items) ? data.Items : [])
         .filter((it) => Number.isInteger(it.ParentIndexNumber) && Number.isInteger(it.IndexNumber))
         .map((it) => ({
@@ -501,10 +506,12 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
           title: it.Name || null,
           premiere: it.PremiereDate || null,
           played: it.UserData?.Played === true,
-          // AIOStreams marks anime filler and recap episodes (its "fillers"
-          // extension); other servers never say, so these stay false there.
-          filler: it.aiostreams?.filler === true,
-          recap: it.aiostreams?.recap === true,
+          // Anime filler and recap episodes: AIOStreams says so in its own
+          // field (its "fillers" extension), AIOMetadata in the episode's
+          // Tags ("Filler", "Recap"; its "Mixed Canon/Filler" still has story
+          // in it, so it isn't marked). Other servers never say.
+          filler: it.aiostreams?.filler === true || episodeTagged(it, 'Filler'),
+          recap: it.aiostreams?.recap === true || episodeTagged(it, 'Recap'),
         }))
     },
 

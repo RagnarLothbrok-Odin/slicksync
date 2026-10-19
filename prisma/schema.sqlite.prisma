@@ -26,6 +26,9 @@ model User {
   // syncs. Defaults to 1, which is what every existing user is, and is
   // ignored entirely for Stremio users.
   nuvioProfileId     Int       @default(1)
+  // Their Jellyfin / AIOStreams / AIOMetadata sign-in is kept in their Nuvio
+  // profile's server list (utils/nuvioMediaServers.js). Off by default.
+  nuvioMediaServers  Boolean   @default(false)
   // A login on a Jellyfin-compatible server (providerType "jellyfin"): a real
   // Jellyfin, or the media server AIOStreams or AIOMetadata runs. One User per
   // server user - see server/providers/jellyfin.js.

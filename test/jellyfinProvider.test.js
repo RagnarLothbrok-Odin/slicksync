@@ -181,3 +181,29 @@ test('ids split into title, season and episode - a prefixed id keeps its prefix'
   assert.deepEqual(splitStremioId('tmdb:209867:1:3'), { base: 'tmdb:209867', season: '1', episode: '3' })
   assert.deepEqual(splitStremioId('kitsu:46676:1'), { base: 'kitsu:46676', season: '1', episode: undefined })
 })
+
+test('episodes: filler and recap come from AIOStreams\' field or AIOMetadata\'s tags; mixed episodes stay unmarked', async () => {
+  const server = fakeServer({
+    'IncludeItemTypes=Series': () => ({ Items: [{ Type: 'Series', Id: 's9', Name: 'Naruto', ProviderIds: { Imdb: 'tt0409591' } }] }),
+    '/Shows/s9/Episodes': (q) => {
+      assert.match(q.get('Fields') || '', /Tags/, 'asks for the tags')
+      return { Items: [
+        { Id: 'a', ParentIndexNumber: 1, IndexNumber: 1, Tags: [] },
+        { Id: 'b', ParentIndexNumber: 1, IndexNumber: 2, Tags: ['Filler'] },
+        { Id: 'c', ParentIndexNumber: 1, IndexNumber: 3, Tags: ['Recap'] },
+        { Id: 'd', ParentIndexNumber: 1, IndexNumber: 4, Tags: ['Mixed Canon/Filler'] },
+        { Id: 'e', ParentIndexNumber: 1, IndexNumber: 5, aiostreams: { filler: true } },
+        { Id: 'f', ParentIndexNumber: 1, IndexNumber: 6, Tags: ['filler fan favourite'] },
+      ] }
+    },
+  })
+  try {
+    const provider = createJellyfinProvider({ serverUrl: 'https://jf.test', token: 't', userId: 'u1', serverId: 'srv-test-1' })
+    const eps = await provider.listEpisodes('tt0409591')
+    assert.deepEqual(eps.map((e) => [e.episode, e.filler, e.recap]), [
+      [1, false, false], [2, true, false], [3, false, true], [4, false, false], [5, true, false], [6, false, false],
+    ])
+  } finally {
+    server.restore()
+  }
+})

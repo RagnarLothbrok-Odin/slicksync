@@ -320,11 +320,31 @@ export function NebulaCompactStatCard({
 }) {
   const isPrimary = colorIndex % 2 === 0;
   return (
-    <div className={`${NEBULA_GLASS_CLASS} p-2.5 sm:p-3 md:p-5 flex items-center gap-2 md:gap-4 min-w-0`} style={nebulaGlassStyle}>
+    // Phone: the number sits beside the icon and the label gets the tile's
+    // whole width underneath (three tiles in a row left it ~45px, so labels
+    // were cut). From md up: icon on the left, number over label.
+    <div className={`${NEBULA_GLASS_CLASS} p-2.5 sm:p-3 md:p-5 flex flex-col md:flex-row md:items-center gap-1.5 md:gap-4 min-w-0`} style={nebulaGlassStyle}>
       <NebulaGlassStripe />
+      <div className="contents md:hidden">
+        <div className="flex items-center gap-2 min-w-0">
+          {icon && (
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+              style={{
+                background: isPrimary ? 'var(--color-primary-muted)' : 'var(--color-secondary-muted)',
+                color: isPrimary ? 'var(--color-primary)' : 'var(--color-secondary)',
+              }}
+            >
+              {icon}
+            </div>
+          )}
+          <p className="text-lg font-bold font-display text-default leading-none truncate">{value}</p>
+        </div>
+        <p className="text-[11px] leading-tight text-muted">{label}</p>
+      </div>
       {icon && (
         <div
-          className="w-8 h-8 md:w-11 md:h-11 rounded-lg md:rounded-xl flex items-center justify-center shrink-0"
+          className="hidden md:flex w-11 h-11 rounded-xl items-center justify-center shrink-0"
           style={{
             background: isPrimary ? 'var(--color-primary-muted)' : 'var(--color-secondary-muted)',
             color: isPrimary ? 'var(--color-primary)' : 'var(--color-secondary)',
@@ -333,9 +353,9 @@ export function NebulaCompactStatCard({
           {icon}
         </div>
       )}
-      <div className="min-w-0">
-        <p className="text-base sm:text-lg md:text-3xl font-bold font-display text-default leading-none truncate">{value}</p>
-        <p className="text-[10px] md:text-sm text-muted mt-1 truncate">{label}</p>
+      <div className="hidden md:block min-w-0">
+        <p className="text-3xl font-bold font-display text-default leading-none truncate">{value}</p>
+        <p className="text-sm text-muted mt-1 truncate">{label}</p>
       </div>
     </div>
   );

@@ -34,6 +34,91 @@ const OAUTH_SESSION_TTL_MS = 5 * 60 * 1000;
 module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
   const router = express.Router();
 
+  // "Sign in a Nuvio TV": the TV (or computer) shows a code; typed into the
+  // person page, SlickSync looks it up with that person's Nuvio sign-in so
+  // the right device can be confirmed, then approves it. The device lands in
+  // their Nuvio account and asks which profile - the same as approving it
+  // from Nuvio's own website.
+  const deviceCode = (raw) => String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const nuvioPerson = async (req) => {
+    const user = await prisma.user.findFirst({ where: { id: String(req.params.id), accountId: getAccountId(req), providerType: 'nuvio' } })
+    if (!user) {
+      const err = new Error('Person not found')
+      err.status = 404
+      throw err
+    }
+    const { makeCreateProvider } = require('../providers')
+    return makeCreateProvider({ prisma, encrypt, getAccountId })(user, { decrypt, req })
+  }
+  const deviceAnswer = (row) => ({
+    deviceName: row?.device_name || null,
+    deviceType: row?.device_type || null,
+    expiresAt: row?.expires_at || null,
+  })
+  const sendDeviceError = (res, error, fallback) => {
+    const status = error?.status && error.status < 500 ? error.status : 502
+    res.status(status).json({ error: status === 404 ? 'Person not found' : publicMessage(error, fallback) })
+  }
+
+  router.post('/users/:id/device-login/lookup', async (req, res) => {
+    try {
+      const code = deviceCode(req.body?.code)
+      if (code.length !== 6) return res.status(400).json({ error: 'Type the 6-character code the TV shows' })
+      const row = await (await nuvioPerson(req)).getDeviceLogin(code)
+      if (!row?.success) return res.status(400).json({ error: "That code didn't work - it lasts 5 minutes, so check the TV and try again" })
+      res.json({ success: true, ...deviceAnswer(row) })
+    } catch (error) {
+      sendDeviceError(res, error, 'Could not look that code up')
+    }
+  })
+
+  router.post('/users/:id/device-login/approve', async (req, res) => {
+    try {
+      const code = deviceCode(req.body?.code)
+      if (code.length !== 6) return res.status(400).json({ error: 'Type the 6-character code the TV shows' })
+      const row = await (await nuvioPerson(req)).approveDeviceLogin(code)
+      if (!row?.success) return res.status(400).json({ error: "That code didn't work - it lasts 5 minutes, so check the TV and try again" })
+      res.json({ success: true, ...deviceAnswer(row) })
+    } catch (error) {
+      sendDeviceError(res, error, 'Could not sign the device in')
+    }
+  })
+
+  // "Their servers in Nuvio" (utils/nuvioMediaServers.js).
+  const mediaServerDeps = (req) => {
+    const { makeCreateProvider } = require('../providers')
+    return { createProvider: makeCreateProvider({ prisma, encrypt, getAccountId }), decrypt, req }
+  }
+  const ownPerson = async (req) => {
+    const person = await prisma.user.findFirst({ where: { id: String(req.params.id), accountId: getAccountId(req) }, select: { id: true } })
+    if (!person) {
+      const err = new Error('Person not found')
+      err.status = 404
+      throw err
+    }
+    return person.id
+  }
+
+  router.get('/users/:id/media-servers', async (req, res) => {
+    try {
+      const id = await ownPerson(req)
+      res.json(await require('../utils/nuvioMediaServers').describe(prisma, mediaServerDeps(req), id))
+    } catch (error) {
+      sendDeviceError(res, error, 'Could not read their servers')
+    }
+  })
+
+  router.put('/users/:id/media-servers', async (req, res) => {
+    try {
+      const id = await ownPerson(req)
+      const mediaServers = require('../utils/nuvioMediaServers')
+      await mediaServers.setEnabled(prisma, mediaServerDeps(req), id, req.body?.enabled === true)
+      res.json(await mediaServers.describe(prisma, mediaServerDeps(req), id))
+    } catch (error) {
+      sendDeviceError(res, error, 'Could not update their servers in Nuvio')
+    }
+  })
+
   // Validate Nuvio credentials
   router.post('/validate', async (req, res) => {
     try {

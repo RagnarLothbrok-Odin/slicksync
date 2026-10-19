@@ -1333,64 +1333,107 @@ function AddonCard({
 
   const configUrl = getConfigureUrl(addon);
 
+  // The name wraps instead of being cut; its last word carries the status dot
+  // (and, on a wide card, the version) so they never sit on a line alone.
+  const nameWords = addon.name.split(' ');
+  const nameLast = nameWords.pop() || '';
+  const nameHead = nameWords.length ? `${nameWords.join(' ')} ` : '';
+  const nameTail = (
+    <span className="whitespace-nowrap">
+      {nameLast}
+      <span className="inline-flex items-center gap-2 align-middle ml-2">
+        {addon.lastHealthCheck && (
+          <span
+            className={`inline-block w-2 h-2 rounded-full shrink-0 ${addon.isOnline ? 'bg-success' : 'bg-error'}`}
+            title={addon.isOnline
+              ? `Online - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
+              : `Offline${addon.healthCheckError ? `: ${addon.healthCheckError}` : ''} - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
+            }
+          />
+        )}
+        {addon.version && (
+          <VersionBadge version={addon.version.slice(0, 7)} size="sm" className="addon-card-wide" />
+        )}
+        {addon.isProtected && (
+          <ShieldCheckIcon className="w-5 h-5 shrink-0 text-success" title="Protected" />
+        )}
+      </span>
+    </span>
+  );
+  const counts = (
+    <>
+      <span className="flex items-center gap-1.5">
+        <UsersIcon className="w-4 h-4 text-secondary" />
+        {addon.userCount || 0} user{addon.userCount !== 1 ? 's' : ''}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
+        {addon.groupCount} group{addon.groupCount !== 1 ? 's' : ''}
+      </span>
+    </>
+  );
+  const selectBox = (
+    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+      <SelectionCheckbox checked={isSelected} onChange={onToggleSelect} />
+    </div>
+  );
+
+  // The label and Shared settings: on a phone they follow the version and
+  // counts, everywhere else they lead the tags row - never a row of their own.
+  const labelPills = (addon.customTag || (sharedPeers && sharedPeers.length > 0)) ? (
+    <>
+      {addon.customTag && (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-muted text-primary"
+          style={
+            addonTagColors?.[addon.customTag]
+              ? { background: `${addonTagColors[addon.customTag]}26`, color: addonTagColors[addon.customTag] }
+              : undefined
+          }
+          title={`Labeled "${addon.customTag}" — right-click to change or remove`}
+        >
+          <TagIcon className="w-3 h-3" />
+          {addon.customTag}
+        </span>
+      )}
+      {sharedPeers && sharedPeers.length > 0 && (
+        <SharedConfigPill
+          peers={sharedPeers}
+          kind={configKindOf(addon.manifestUrl, addon.name)}
+          isTV={focusable}
+        />
+      )}
+    </>
+  ) : null;
+
   const cardElement = (
       <Card
         variant="interactive"
         padding="none"
-        className={`group relative cursor-pointer tap-card ${isSelected ? 'ring-2 ring-primary' : ''}`}
+        // Narrow card (phone, 1280 laptop): icon, name and switch on top,
+        // then version + counts + select box, then the tags. Wide card
+        // (1920 and up): the version sits beside the name and the counts
+        // under it, and the tags row ends with the select box. Which one
+        // shows is decided by the card's own width - see .addon-card.
+        className={`addon-card group relative cursor-pointer tap-card ${isSelected ? 'ring-2 ring-primary' : ''}`}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
         {...longPress}
       >
-        {/* Selection checkbox is md:-only here - the pr-24 clearance below
-            that keeps it from overlapping the name/version row is ALSO
-            md:-only (a narrow mobile card never had that clearance), so on
-            mobile it sat directly on top of the name/version content
-            instead of near it. Moved to a normal in-flow spot under the
-            version tag on mobile instead (below), rather than trying to
-            carve out corner clearance on an already-tight card width.
-            Stacked (toggle above, checkbox below) rather than side-by-side
-            on PC too - checkbox sits directly under the toggle, not next
-            to it. */}
-        <div className="hidden md:flex absolute top-4 right-4 z-10 flex-col items-end gap-1.5">
-          <ToggleSwitch
-            checked={addon.isActive !== false}
-            onChange={async () => {
-              try {
-                const newStatus = !addon.isActive;
-                await api.toggleAddonStatus(addon.id, newStatus);
-                toast.success(`Addon ${newStatus ? 'activated' : 'deactivated'}`);
-                onToggleStatus?.(addon.id, newStatus);
-              } catch (err: any) {
-                toast.error(err.message || `Failed to toggle ${addon.name}`);
-              }
-            }}
-          />
-          <SelectionCheckbox
-            checked={isSelected}
-            onChange={onToggleSelect}
-          />
-        </div>
-
-        {/* Header. md:pr-24 reserves clearance for the absolutely-positioned
-            toggle/checkbox above (top-4 right-4) — without it, a narrow card
-            (3-column grid on a wide screen) lets the name/version/health-dot
-            row's content run right up under the toggle and overlap it. */}
-        <div className="relative p-6 pb-4 md:pr-24">
-          <div className="flex items-start gap-4">
+        <div className={`addon-card-body ${dragHandleProps ? 'has-drag' : ''}`}>
+          <div className="flex items-center gap-2.5 addon-card-head">
             {dragHandleProps && (
               <div
                 {...dragHandleProps}
                 onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                className="self-center shrink-0 p-1 rounded-lg text-subtle hover:text-default hover:bg-surface-hover cursor-grab active:cursor-grabbing"
+                className="shrink-0 p-1.5 rounded-lg text-subtle hover:text-default hover:bg-surface-hover cursor-grab active:cursor-grabbing"
                 title="Drag to reorder"
               >
-                <Bars3Icon className="w-3.5 h-3.5" />
+                <Bars3Icon className="w-4 h-4" />
               </div>
             )}
-            {/* Icon */}
             <div
-              className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 overflow-hidden"
+              className="addon-card-icon rounded-xl flex items-center justify-center shrink-0 overflow-hidden"
               style={{ background: 'linear-gradient(135deg, var(--color-primary-muted), var(--color-secondary-muted))' }}
             >
               {addon.logo ? (
@@ -1400,107 +1443,66 @@ function AddonCard({
                   className="w-full h-full object-contain p-1.5"
                 />
               ) : (
-                <PuzzlePieceIcon className="w-7 h-7 text-primary" />
+                <PuzzlePieceIcon className="w-1/2 h-1/2 text-primary" />
               )}
             </div>
-
-            {/* Info */}
             <div className="flex-1 min-w-0">
-              {/* Single row: name → health dot → version → protected */}
-              <div className="flex items-center gap-2 mb-2 min-w-0">
-                {configUrl ? (
-                  <button
-                    onClick={handleOpenConfigure}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default min-w-0 text-left"
-                    title="Open configure page"
-                  >
-                    {addon.name}
-                  </button>
-                ) : (
-                  <h3 className="text-lg font-semibold transition-all truncate group-hover:text-primary text-default min-w-0">
-                    {addon.name}
-                  </h3>
-                )}
-                {addon.lastHealthCheck && (
-                  <div
-                    className={`w-2 h-2 rounded-full shrink-0 ${addon.isOnline ? 'bg-success' : 'bg-error'}`}
-                    title={addon.isOnline
-                      ? `Online - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
-                      : `Offline${addon.healthCheckError ? `: ${addon.healthCheckError}` : ''} - Last checked: ${new Date(addon.lastHealthCheck).toLocaleString()}`
-                    }
-                  />
-                )}
-                {addon.version && (
-                  <VersionBadge version={addon.version.slice(0, 7)} size="sm" />
-                )}
-                {addon.isProtected && (
-                  <ShieldCheckIcon className="w-5 h-5 shrink-0 text-success" title="Protected" />
-                )}
-              </div>
-              {/* Mobile-only selection checkbox, sitting right under the
-                  version tag above (the md: corner checkbox is hidden below
-                  this breakpoint - see its own comment). Right-aligned to
-                  land directly under the version tag, which is also on the
-                  right side of that row - not under the name/icon on the
-                  left, where a plain block-level div would otherwise sit. */}
-              <div className="md:hidden mb-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
-                <SelectionCheckbox checked={isSelected} onChange={onToggleSelect} />
-              </div>
-              {/* Stats inline */}
-              <div className="flex items-center gap-3 text-sm text-muted">
-                <span className="flex items-center gap-1.5">
-                  <UsersIcon className="w-4 h-4 text-secondary" />
-                  <span className="md:hidden">{addon.userCount || 0}</span>
-                  <span className="hidden md:inline">{addon.userCount || 0} user{addon.userCount !== 1 ? 's' : ''}</span>
-                </span>
-                <span className="hidden md:inline">•</span>
-                <span className="flex items-center gap-1.5">
-                  <PuzzlePieceIcon className="w-4 h-4 text-secondary" />
-                  <span className="md:hidden">{addon.groupCount}</span>
-                  <span className="hidden md:inline">{addon.groupCount} group{addon.groupCount !== 1 ? 's' : ''}</span>
-                </span>
-              </div>
-              {/* Custom tag badge — display-only. Deliberately NOT clickable
-                  to clear: an easy-to-hit badge sitting right on the card
-                  was getting bumped by accident. Change or remove it via
-                  right-click (or long-press) → Label instead. */}
-              {addon.customTag && (
-                <span
-                  className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-muted text-primary"
-                  style={
-                    addonTagColors?.[addon.customTag]
-                      ? { background: `${addonTagColors[addon.customTag]}26`, color: addonTagColors[addon.customTag] }
-                      : undefined
-                  }
-                  title={`Labeled "${addon.customTag}" — right-click to change or remove`}
+              {configUrl ? (
+                <button
+                  onClick={handleOpenConfigure}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="addon-card-name font-semibold transition-all group-hover:text-primary text-default text-left"
+                  title="Open configure page"
                 >
-                  <TagIcon className="w-3 h-3" />
-                  {addon.customTag}
-                </span>
+                  {nameHead}{nameTail}
+                </button>
+              ) : (
+                <h3 className="addon-card-name font-semibold transition-all group-hover:text-primary text-default">
+                  {nameHead}{nameTail}
+                </h3>
               )}
-              {sharedPeers && sharedPeers.length > 0 && (
-                <SharedConfigPill
-                  peers={sharedPeers}
-                  kind={configKindOf(addon.manifestUrl, addon.name)}
-                  isTV={focusable}
-                  className={addon.customTag ? 'mt-2 ml-1.5' : 'mt-2'}
-                />
-              )}
+              <div className="addon-card-wide flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-sm text-muted whitespace-nowrap">
+                {counts}
+              </div>
+            </div>
+            <div className="shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
+              <ToggleSwitch
+                checked={addon.isActive !== false}
+                onChange={async () => {
+                  try {
+                    const newStatus = !addon.isActive;
+                    await api.toggleAddonStatus(addon.id, newStatus);
+                    toast.success(`Addon ${newStatus ? 'activated' : 'deactivated'}`);
+                    onToggleStatus?.(addon.id, newStatus);
+                  } catch (err: any) {
+                    toast.error(err.message || `Failed to toggle ${addon.name}`);
+                  }
+                }}
+              />
             </div>
           </div>
-        </div>
 
-        {/* Resources - hidden on mobile */}
-        {addon.resources.length > 0 && (
-          <div className="hidden md:block px-6 pb-4">
-            <div className="flex flex-wrap gap-2">
+          <div className="addon-card-narrow items-center justify-between gap-2.5 mt-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted whitespace-nowrap min-w-0">
+              {addon.version && <VersionBadge version={addon.version.slice(0, 7)} size="sm" />}
+              {counts}
+              {labelPills && <span className="contents md:hidden">{labelPills}</span>}
+            </div>
+            {selectBox}
+          </div>
+
+          {/* Tags - not on a phone - led by the label and Shared settings. On a
+              wide card the select box ends this row. */}
+          <div className="addon-card-tags items-center justify-between gap-2.5 mt-2.5">
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+              {labelPills}
               {addon.resources.map((resource) => (
                 <ResourceBadge key={resource} resource={resource} />
               ))}
             </div>
+            <div className="addon-card-wide">{selectBox}</div>
           </div>
-        )}
+        </div>
       </Card>
   );
 

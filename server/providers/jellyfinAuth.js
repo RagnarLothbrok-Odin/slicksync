@@ -91,8 +91,11 @@ function signInDeviceId(serverUrl, username) {
   return deviceIdFor(serverUrl, username)
 }
 
-function authorizationHeader({ token, deviceId } = {}) {
-  let value = `MediaBrowser Client="${CLIENT_NAME}", Device="${CLIENT_NAME}", DeviceId="${deviceId || deviceIdFor('anonymous')}", Version="${appVersion}"`
+// deviceName is what the server's device list calls this sign-in - SlickSync
+// unless a caller signs something else in (the sign-in made for Nuvio).
+function authorizationHeader({ token, deviceId, deviceName } = {}) {
+  const device = String(deviceName || CLIENT_NAME).replace(/"/g, '')
+  let value = `MediaBrowser Client="${CLIENT_NAME}", Device="${device}", DeviceId="${deviceId || deviceIdFor('anonymous')}", Version="${appVersion}"`
   if (token) value += `, Token="${token}"`
   return value
 }
@@ -101,9 +104,9 @@ function authorizationHeader({ token, deviceId } = {}) {
  * One request to a server. Throws an Error carrying `.status` on an HTTP
  * failure, so callers can tell a rejected sign-in from a server that is down.
  */
-async function jfRequest(baseUrl, path, { method = 'GET', token, deviceId, body, timeoutMs = REQUEST_TIMEOUT_MS, checkAddress = restrictsPrivateAddresses() } = {}) {
+async function jfRequest(baseUrl, path, { method = 'GET', token, deviceId, deviceName, body, timeoutMs = REQUEST_TIMEOUT_MS, checkAddress = restrictsPrivateAddresses() } = {}) {
   if (!baseUrl) throw Object.assign(new Error('No server address'), { status: 400 })
-  const headers = { Authorization: authorizationHeader({ token, deviceId }), Accept: 'application/json' }
+  const headers = { Authorization: authorizationHeader({ token, deviceId, deviceName }), Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   const init = {
     method,
@@ -273,11 +276,11 @@ async function authenticateByName(baseUrl, username, password, { deviceId } = {}
 }
 
 /** Start Quick Connect: the code to approve on another signed-in device, and the secret to finish with. */
-async function quickConnectInitiate(baseUrl, { deviceId } = {}) {
+async function quickConnectInitiate(baseUrl, { deviceId, deviceName } = {}) {
   const device = deviceId || deviceIdFor(baseUrl, 'quickconnect', crypto.randomBytes(6).toString('hex'))
   let data
   try {
-    data = await jfRequest(baseUrl, '/QuickConnect/Initiate', { method: 'POST', deviceId: device })
+    data = await jfRequest(baseUrl, '/QuickConnect/Initiate', { method: 'POST', deviceId: device, deviceName })
   } catch (e) {
     if (e.status === 401 || e.status === 403 || e.status === 404) {
       throw Object.assign(new Error('Quick Connect is turned off on this server'), { status: 400 })
@@ -295,11 +298,12 @@ async function quickConnectStatus(baseUrl, secret, { deviceId } = {}) {
 }
 
 /** Trade an approved code for a sign-in. */
-async function quickConnectAuthenticate(baseUrl, secret, { deviceId } = {}) {
+async function quickConnectAuthenticate(baseUrl, secret, { deviceId, deviceName } = {}) {
   try {
     const data = await jfRequest(baseUrl, '/Users/AuthenticateWithQuickConnect', {
       method: 'POST',
       deviceId,
+      deviceName,
       body: { Secret: String(secret || '') },
     })
     return signInResult(baseUrl, data)

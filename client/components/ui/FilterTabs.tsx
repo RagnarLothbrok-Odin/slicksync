@@ -16,7 +16,12 @@ import { ScrollRow } from './ScrollRow';
 // conditionally inside the options.map() loop.
 function DroppableTabButton({ id, enabled, isOver: isOverOverride, children }: { id: string; enabled: boolean; isOver?: boolean; children: (isOver: boolean) => React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: !enabled });
-  return <div ref={enabled ? setNodeRef : undefined} className="grow shrink-0">{children(enabled ? isOver : false)}</div>;
+  // A tab may grow into spare room, but only to 150px: on a wide screen the
+  // rest becomes even space between tabs rather than long, mostly empty
+  // buttons. min-w-max keeps a longer name (Vault's "Metadata & Trackers")
+  // whole - an explicit min-width wins over max-width. Inline, as this
+  // project's max-w-* classes don't apply (see commit 423221d).
+  return <div ref={enabled ? setNodeRef : undefined} className="grow shrink-0 min-w-max" style={{ maxWidth: 150 }}>{children(enabled ? isOver : false)}</div>;
 }
 
 export interface FilterTabOption {
@@ -150,7 +155,7 @@ export function FilterTabs({
       role="tablist"
       aria-label="Filter options"
     >
-    <div ref={containerRef} className={`relative flex ${styles.gap} w-max min-w-full`}>
+    <div ref={containerRef} className={`relative flex justify-evenly ${styles.gap} w-max min-w-full`}>
       {/* Animated sliding indicator - only render when position is calculated */}
       {indicatorStyle && (
         <motion.div

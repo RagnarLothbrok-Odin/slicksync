@@ -23,6 +23,8 @@ import { AioRotateKeysRow } from '@/components/jellyfin/AioRotateKeysRow';
 import { AioHealthButton } from '@/components/jellyfin/AioHealthButton';
 import { AioHistoryButton } from '@/components/jellyfin/AioHistoryButton';
 import { LimitsButton } from '@/components/user/LimitsButton';
+import { SignInNuvioTvButton } from '@/components/nuvio/SignInNuvioTvButton';
+import { NuvioServersTile } from '@/components/nuvio/NuvioServersTile';
 import { CatchUpButton } from '@/components/user/CatchUpButton';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
@@ -1246,8 +1248,9 @@ export default function UserDetailPage() {
 
                     {/* Info */}
                     <div className="flex-1 min-w-0 w-full">
-                      {/* Name with sync badge */}
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      {/* Name line: the name, then the provider with its sync status
+                          right beside it (they wrap together, never apart). */}
+                      <div className="flex items-center gap-x-2 gap-y-1.5 mb-2 flex-wrap">
                         <InlineEdit
                           value={user.username || user.name || 'User'}
                           onSave={handleUsernameUpdate}
@@ -1255,12 +1258,50 @@ export default function UserDetailPage() {
                           maxLength={50}
                           className="text-xl md:text-2xl font-bold font-display"
                         />
-                        <Badge
-                          variant={providerBadgeVariant(user)}
-                          size="sm"
-                        >
-                          {providerLabel(user)}
-                        </Badge>
+                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                          <Badge
+                            variant={providerBadgeVariant(user)}
+                            size="sm"
+                          >
+                            {providerLabel(user)}
+                          </Badge>
+                          {/* Only worth saying when it is not the primary - a
+                              Nuvio user that manages profile 1 is the ordinary
+                              case and does not need labelling. */}
+                          {user.providerType === 'nuvio' && (user.nuvioProfileId ?? 1) !== 1 && (
+                            <Badge variant="secondary" size="sm">
+                              Profile {user.nuvioProfileId}
+                            </Badge>
+                          )}
+                          <SyncBadge
+                            userId={user.id}
+                            onSync={async (id) => {
+                              setIsSyncing(true);
+                              try {
+                                await api.syncUser(id);
+                                toast.success(`Synced ${user.username || user.name} successfully`);
+                              } catch (err: any) {
+                                toast.error(err.message || `Failed to sync ${user.username || user.name}`);
+                              } finally {
+                                setIsSyncing(false);
+                              }
+                            }}
+                            onReconnect={(id) => {
+                              setIsReconnectModalOpen(true);
+                            }}
+                            isSyncing={isSyncing}
+                            size="sm"
+                          />
+                          {streaks?.currentStreak > 0 ? (
+                            <Badge variant="warning" size="sm" className="hidden sm:inline-flex">
+                              <FireIcon className="w-3 h-3 mr-1" />
+                              {streaks.currentStreak}
+                            </Badge>
+                          ) : null}
+                        </span>
+                      </div>
+                      {/* Buttons on a line of their own, Debug at the end. */}
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         {/* Which server, and who they sign in as there. */}
                         {user.providerType === 'jellyfin' && (user.jellyfinServer || user.jellyfinUserName) && (
                           <span className="text-xs text-muted truncate max-w-[16rem]" title={user.jellyfinServer || undefined}>
@@ -1275,6 +1316,9 @@ export default function UserDetailPage() {
                         <LimitsButton id={user.id} name={user.username || user.name || 'them'} size="md" onPickGroup={() => setIsEditDetailsOpen(true)} onReconnect={() => setIsReconnectModalOpen(true)} />
                         {/* Mark a show watched up to an episode - here and on their server. */}
                         <CatchUpButton userId={user.id} name={user.username || user.name || 'them'} hasServer={user.providerType === 'jellyfin'} />
+                        {user.providerType === 'nuvio' && (
+                          <SignInNuvioTvButton userId={user.id} name={user.username || user.name || 'them'} />
+                        )}
                         {/* What AIOStreams itself says about their configuration. */}
                         {user.providerType === 'jellyfin' && user.jellyfinServerKind === 'aiostreams' && (
                           <>
@@ -1288,33 +1332,6 @@ export default function UserDetailPage() {
                             <JellyfinDevicesButton userId={user.id} name={user.username || user.name || 'them'} />
                           </>
                         )}
-                        {/* Only worth saying when it is not the primary - a
-                            Nuvio user that manages profile 1 is the ordinary
-                            case and does not need labelling. */}
-                        {user.providerType === 'nuvio' && (user.nuvioProfileId ?? 1) !== 1 && (
-                          <Badge variant="secondary" size="sm">
-                            Profile {user.nuvioProfileId}
-                          </Badge>
-                        )}
-                        <SyncBadge
-                          userId={user.id}
-                          onSync={async (id) => {
-                            setIsSyncing(true);
-                            try {
-                              await api.syncUser(id);
-                              toast.success(`Synced ${user.username || user.name} successfully`);
-                            } catch (err: any) {
-                              toast.error(err.message || `Failed to sync ${user.username || user.name}`);
-                            } finally {
-                              setIsSyncing(false);
-                            }
-                          }}
-                          onReconnect={(id) => {
-                            setIsReconnectModalOpen(true);
-                          }}
-                          isSyncing={isSyncing}
-                          size="sm"
-                        />
                         <button
                           onClick={() => {
                             if (!showSyncDebug) {
@@ -1326,12 +1343,6 @@ export default function UserDetailPage() {
                         >
                           {showSyncDebug ? 'Hide' : 'Debug'}
                         </button>
-                        {streaks?.currentStreak > 0 ? (
-                          <Badge variant="warning" size="sm" className="hidden sm:inline-flex">
-                            <FireIcon className="w-3 h-3 mr-1" />
-                            {streaks.currentStreak}
-                          </Badge>
-                        ) : null}
                       </div>
                       <div className="flex items-center gap-2 mb-3 md:mb-4">
                         <p className="text-sm md:text-base text-muted truncate">
@@ -1353,7 +1364,7 @@ export default function UserDetailPage() {
                       </div>
 
                       {/* Meta Row (Matched with Group Style) */}
-                      <div className="flex flex-wrap items-center gap-3 md:gap-6">
+                      <div className="flex flex-col items-start gap-1.5">
                         <button
                           onClick={() => setIsEditDetailsOpen(true)}
                           className="flex items-center gap-2 group transition-colors"
@@ -1525,6 +1536,12 @@ export default function UserDetailPage() {
                 a paid Trakt account to work at all. Bringing a Trakt history
                 across is handled by the import below instead, which reads
                 Trakt's own free export and needs no app and no VIP. */}
+            {/* Their Jellyfin / AIOStreams / AIOMetadata in their Nuvio profile -
+                only for someone with both sign-ins (renders nothing otherwise). */}
+            <PageSection className="mb-6 empty:hidden">
+              <NuvioServersTile userId={user.id} />
+            </PageSection>
+
             <PageSection className="mb-6">
               <Card padding="lg">
                 <button
