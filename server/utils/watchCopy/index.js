@@ -89,12 +89,13 @@ async function sides(prisma, deps, accountId, userId) {
   if (rows.nuvio) {
     let profiles = []
     try {
-      const list = await makeProvider(deps, rows.nuvio).getProfiles()
+      const provider = makeProvider(deps, rows.nuvio)
+      const [list, avatars] = await Promise.all([provider.getProfiles(), provider.getProfileAvatars?.().catch(() => null)])
       profiles = list
-        .map((p) => ({ index: p.profile_index ?? p.profileIndex, name: p.name }))
+        .map((p) => ({ index: p.profile_index ?? p.profileIndex, name: p.name, color: p.avatar_color_hex || null }))
         .filter((p) => Number.isInteger(p.index))
         .sort((a, b) => a.index - b.index)
-        .map((p) => ({ side: `nuvio:${p.index}`, name: p.name || `Profile ${p.index}` }))
+        .map((p) => ({ side: `nuvio:${p.index}`, name: p.name || `Profile ${p.index}`, avatar: avatars?.get(p.index)?.url || null, color: p.color }))
     } catch { /* listed without profiles; profile 1 is assumed */ }
     if (!profiles.length) profiles = [{ side: 'nuvio:1', name: 'Profile 1' }]
     out.push({ side: profiles[0].side, provider: 'nuvio', kind: 'nuvio', name: 'Nuvio', detail: rows.nuvio === user ? maskEmail(user.email) : null, profiles })
@@ -105,12 +106,20 @@ async function sides(prisma, deps, accountId, userId) {
     let household = []
     if (kind === 'aiostreams' || kind === 'aiometadata') {
       const tracked = await require('../jellyfinProfiles').trackedProfiles(prisma, (t, o) => deps.decrypt(t, o), userId).catch(() => [])
-      household = tracked.map((p) => ({ side: `jellyfin:${encodeURIComponent(p.name)}`, name: p.name }))
+      const pictures = new Map((await prisma.jellyfinProfile.findMany({ where: { ownerUserId: userId }, select: { id: true, avatarUrl: true } }).catch(() => [])).map((r) => [r.id, r.avatarUrl]))
+      household = tracked.map((p) => ({ side: `jellyfin:${encodeURIComponent(p.name)}`, name: p.name, avatar: pictures.get(p.id) || null }))
     }
-    const own = { side: 'jellyfin', name: row.jellyfinUserName || user.username || 'Their sign-in' }
+    // The sign-in's own user is the person themselves: their picture.
+    const own = { side: 'jellyfin', name: row.jellyfinUserName || user.username || 'Their sign-in', isPerson: true }
     out.push({ side: 'jellyfin', provider: 'jellyfin', kind, name: KIND_LABEL[kind] || 'Jellyfin', detail: kind === 'jellyfin' ? 'Home server' : 'Media server', profiles: household.length ? [own, ...household] : [] })
   }
   return out
+}
+
+/** The person as the page shows them (their picture, as everywhere else). */
+async function personOf(prisma, accountId, userId) {
+  const { user } = await personWithSignIns(prisma, accountId, userId)
+  return { id: user.id, username: user.username, email: user.email || null, avatarUrl: user.avatarUrl || null, useGravatar: user.useGravatar === true, colorIndex: user.colorIndex ?? 0 }
 }
 
 async function readSide(prisma, deps, accountId, userId, side) {
@@ -273,4 +282,4 @@ function forgetForTests() {
   jobs.clear()
 }
 
-module.exports = { sides, preview, run, status, lastRun, undo, candidates, parseSide, maskEmail, forgetForTests, UNDO_DAYS }
+module.exports = { sides, personOf, preview, run, status, lastRun, undo, candidates, parseSide, maskEmail, forgetForTests, UNDO_DAYS }

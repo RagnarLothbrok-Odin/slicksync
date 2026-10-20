@@ -20,12 +20,13 @@ import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button } from '@/components/ui';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import { toast } from '@/components/ui/Toast';
 import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
 import { posterUrl } from '@/lib/posterUrl';
 import { useCoarsePointer } from '@/lib/hooks/useCoarsePointer';
 import {
-  api, type WatchCopySide, type WatchCopyPreview, type WatchCopyItem, type WatchCopyOutcome, type WatchCopyRun,
+  api, type WatchCopySide, type WatchCopyPerson, type WatchCopyPreview, type WatchCopyItem, type WatchCopyOutcome, type WatchCopyRun,
 } from '@/lib/api';
 
 const FROM_C = '#2dd4bf';
@@ -70,18 +71,42 @@ function Logo({ kind, size = 40 }: { kind: string; size?: number }) {
   );
 }
 
-type Choice = { side: string; sideInfo: WatchCopySide; profileName: string | null };
+type Profile = WatchCopySide['profiles'][number];
+type Choice = { side: string; sideInfo: WatchCopySide; profileName: string | null; profile: Profile | null };
 
 function choiceFor(sides: WatchCopySide[], side: string): Choice | null {
   for (const s of sides) {
-    if (s.side === side && !s.profiles.length) return { side, sideInfo: s, profileName: null };
+    if (s.side === side && !s.profiles.length) return { side, sideInfo: s, profileName: null, profile: null };
     const p = s.profiles.find((x) => x.side === side);
-    if (p) return { side, sideInfo: s, profileName: p.name };
+    if (p) return { side, sideInfo: s, profileName: p.name, profile: p };
   }
   return null;
 }
 
 const choiceLabel = (c: Choice | null) => (c ? `${c.sideInfo.name}${c.profileName ? ` · ${c.profileName}` : ''}` : '');
+
+// A profile's picture: Nuvio's avatar or the household member's own on the
+// server; the sign-in's own user is the person (their picture as everywhere
+// else); otherwise the profile's colour with its initial.
+function ProfilePic({ profile, person, kind, size }: { profile: Profile | null; person: WatchCopyPerson | null; kind: string; size: number }) {
+  if (profile?.avatar) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={profile.avatar} alt="" className="rounded-full object-cover shrink-0" style={{ width: size, height: size, background: profile.color || undefined }} />;
+  }
+  if ((!profile || profile.isPerson) && person) {
+    return (
+      <span className="shrink-0 inline-flex overflow-hidden rounded-full" style={{ width: size, height: size }}>
+        <UserAvatar userId={person.id} name={person.username} email={person.email || undefined} src={person.avatarUrl || undefined} useGravatar={person.useGravatar} colorIndex={person.colorIndex} size="xs" className="!w-full !h-full" />
+      </span>
+    );
+  }
+  const name = profile?.name || '?';
+  return (
+    <span className="rounded-full flex items-center justify-center font-bold text-white shrink-0" style={{ width: size, height: size, fontSize: size * 0.45, background: profile?.color || PROVIDER_LOOK[kind]?.bg }}>
+      {name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
 
 // Closes a popover on a tap outside it or Escape.
 function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
@@ -95,10 +120,10 @@ function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, clo
   }, [open, ref, close]);
 }
 
-function SidePicker({ sides, current, other, title, onPick }: {
-  sides: WatchCopySide[]; current: string; other: string; title: string; onPick: (side: string) => void;
+function SidePicker({ sides, person, current, other, title, onPick }: {
+  sides: WatchCopySide[]; person: WatchCopyPerson | null; current: string; other: string; title: string; onPick: (side: string) => void;
 }) {
-  const row = (side: string, label: string, kind: string, letter?: string) => {
+  const row = (side: string, label: string, kind: string, profile?: Profile) => {
     const disabled = side === other;
     const active = side === current;
     return (
@@ -110,9 +135,7 @@ function SidePicker({ sides, current, other, title, onPick }: {
         className="w-full flex items-center gap-2.5 text-left px-2 py-1.5 rounded-xl border transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover"
         style={{ borderColor: active ? 'var(--color-primary)' : 'transparent', background: active ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)' : undefined }}
       >
-        {letter
-          ? <span className="w-[26px] h-[26px] rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: PROVIDER_LOOK[kind]?.bg }}>{letter}</span>
-          : <Logo kind={kind} size={26} />}
+        {profile ? <ProfilePic profile={profile} person={person} kind={kind} size={26} /> : <Logo kind={kind} size={26} />}
         <span className="flex-1 text-sm text-default truncate">{label}</span>
         {disabled && <span className="text-xs text-subtle">{title === 'Copy to…' ? 'copying from' : 'copying to'}</span>}
         {active && <CheckIcon className="w-4 h-4 text-primary" />}
@@ -130,7 +153,7 @@ function SidePicker({ sides, current, other, title, onPick }: {
             </div>
           )}
           {s.profiles.length
-            ? s.profiles.map((p) => row(p.side, p.name, s.kind, p.name.slice(0, 1).toUpperCase()))
+            ? s.profiles.map((p) => row(p.side, p.name, s.kind, p))
             : row(s.side, `${s.name}${s.detail ? ` · ${s.detail}` : ''}`, s.kind)}
         </div>
       ))}
@@ -138,8 +161,8 @@ function SidePicker({ sides, current, other, title, onPick }: {
   );
 }
 
-function Slot({ role, choice, count, sides, other, onPick, compact }: {
-  role: 'from' | 'to'; choice: Choice | null; count: number | null; sides: WatchCopySide[]; other: string; onPick: (side: string) => void; compact: boolean;
+function Slot({ role, choice, count, sides, person, other, onPick, compact }: {
+  role: 'from' | 'to'; choice: Choice | null; count: number | null; sides: WatchCopySide[]; person: WatchCopyPerson | null; other: string; onPick: (side: string) => void; compact: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -164,17 +187,17 @@ function Slot({ role, choice, count, sides, other, onPick, compact }: {
           <span className="block text-xs text-muted truncate">
             {[choice?.sideInfo.detail, count != null ? `${count.toLocaleString()} titles` : null].filter(Boolean).join(' · ')}
           </span>
-          {choice?.profileName && (
+          {choice && (choice.profileName || person) && (
             <span className="inline-flex items-center gap-1.5 mt-2 pl-0.5 pr-2 py-0.5 rounded-full border border-default bg-surface-hover">
-              <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: PROVIDER_LOOK[choice.sideInfo.kind]?.bg }}>{choice.profileName.slice(0, 1).toUpperCase()}</span>
-              <span className="text-xs text-default">Profile: {choice.profileName}</span>
-              <ChevronDownIcon className="w-3 h-3 opacity-60" />
+              <ProfilePic profile={choice.profile} person={person} kind={choice.sideInfo.kind} size={20} />
+              <span className="text-xs text-default">{choice.profileName ? `Profile: ${choice.profileName}` : person?.username}</span>
+              {choice.profileName && <ChevronDownIcon className="w-3 h-3 opacity-60" />}
             </span>
           )}
         </span>
         <span className="text-xs text-muted shrink-0 flex items-center gap-1">Change<ChevronDownIcon className="w-3 h-3" /></span>
       </button>
-      {open && <SidePicker sides={sides} current={choice?.side || ''} other={other} title={role === 'from' ? 'Copy from…' : 'Copy to…'} onPick={(s) => { onPick(s); setOpen(false); }} />}
+      {open && <SidePicker sides={sides} person={person} current={choice?.side || ''} other={other} title={role === 'from' ? 'Copy from…' : 'Copy to…'} onPick={(s) => { onPick(s); setOpen(false); }} />}
     </div>
   );
 }
@@ -281,6 +304,7 @@ export default function CopyHistoryPage() {
 
   const [person, setPerson] = useState<string>('');
   const [sides, setSides] = useState<WatchCopySide[] | null>(null);
+  const [personInfo, setPersonInfo] = useState<WatchCopyPerson | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [watched, setWatched] = useState(true);
@@ -309,6 +333,7 @@ export default function CopyHistoryPage() {
     api.getUser(userId).then((u: { username?: string }) => setPerson(u?.username || '')).catch(() => {});
     api.getWatchCopySides(userId).then((r) => {
       setSides(r.sides);
+      setPersonInfo(r.person || null);
       setLastRun(r.lastRun);
       const all = r.sides.flatMap((s) => (s.profiles.length ? s.profiles.map((p) => p.side) : [s.side]));
       setFrom(all[0] || '');
@@ -450,14 +475,14 @@ export default function CopyHistoryPage() {
             )}
 
             {sides === null && !error && <div className="text-sm text-muted">Reading their sign-ins…</div>}
-            {sides && sides.flatMap((s) => (s.profiles.length ? s.profiles : [s])).length < 2 && (
+            {sides && sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0) < 2 && (
               <div className="text-sm text-muted">They need a second sign-in (or a second profile) to copy between. Add one from their page.</div>
             )}
 
             {sides && fromChoice && toChoice && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 md:gap-4 items-start max-w-[70rem]">
-                  <Slot role="from" choice={fromChoice} count={preview?.counts.from ?? null} sides={sides} other={to} onPick={pickFrom} compact={compact} />
+                  <Slot role="from" choice={fromChoice} count={preview?.counts.from ?? null} sides={sides} person={personInfo} other={to} onPick={pickFrom} compact={compact} />
                   <div className="flex md:flex-col items-center justify-center gap-3 md:gap-2 md:pt-6">
                     <span className="w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${FROM_C}, var(--color-primary))`, boxShadow: '0 8px 22px -10px var(--color-primary)' }}>
                       <ArrowRightIcon className="hidden md:block w-5 h-5" /><ArrowDownIcon className="md:hidden w-5 h-5" />
@@ -466,7 +491,7 @@ export default function CopyHistoryPage() {
                       <ArrowsRightLeftIcon className="hidden md:block w-3.5 h-3.5" /><ArrowsUpDownIcon className="md:hidden w-3.5 h-3.5" />Swap
                     </button>
                   </div>
-                  <Slot role="to" choice={toChoice} count={preview?.counts.to ?? null} sides={sides} other={from} onPick={pickTo} compact={compact} />
+                  <Slot role="to" choice={toChoice} count={preview?.counts.to ?? null} sides={sides} person={personInfo} other={from} onPick={pickTo} compact={compact} />
                 </div>
                 {others.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">

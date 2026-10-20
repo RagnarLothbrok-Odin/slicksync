@@ -2499,7 +2499,7 @@ class ApiClient {
 
   // Copy watch history between a person's sign-ins (server/utils/watchCopy).
   async getWatchCopySides(userId: string) {
-    return this.fetch<{ sides: WatchCopySide[]; lastRun: WatchCopyRun | null; job: WatchCopyJob | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/sides`);
+    return this.fetch<{ sides: WatchCopySide[]; person: WatchCopyPerson; lastRun: WatchCopyRun | null; job: WatchCopyJob | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/sides`);
   }
 
   async previewWatchCopy(userId: string, body: WatchCopyRequest) {
@@ -3690,7 +3690,17 @@ export interface WatchCopySide {
   kind: 'stremio' | 'nuvio' | 'jellyfin' | 'aiostreams' | 'aiometadata';
   name: string;
   detail: string | null;
-  profiles: { side: string; name: string }[];
+  profiles: { side: string; name: string; avatar?: string | null; color?: string | null; isPerson?: boolean }[];
+}
+
+/** The person whose sign-ins these are - their picture, as everywhere else. */
+export interface WatchCopyPerson {
+  id: string;
+  username: string;
+  email: string | null;
+  avatarUrl: string | null;
+  useGravatar: boolean;
+  colorIndex: number;
 }
 
 export interface WatchCopyRequest {

@@ -662,6 +662,28 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
       return Array.isArray(rows) ? rows : []
     },
 
+    // Each profile's picture: the avatar it picked from Nuvio's catalogue (a
+    // public file on the backend), else null - callers fall back to the
+    // profile's colour (avatar_color_hex).
+    async getProfileAvatars() {
+      const accessToken = await ensureAuth()
+      const config = await getServerConfig()
+      const [profiles, catalog] = await Promise.all([
+        supabaseRpc('sync_pull_profiles', {}, accessToken, config),
+        supabaseRpc('get_avatar_catalog', {}, accessToken, config).catch(() => []),
+      ])
+      const base = require('./supabase').backendUrl(config)
+      const paths = new Map((Array.isArray(catalog) ? catalog : []).map((a) => [a.id, a.storage_path]))
+      const out = new Map()
+      for (const p of Array.isArray(profiles) ? profiles : []) {
+        const idx = Number(p.profile_index ?? p.profileIndex)
+        if (!Number.isInteger(idx)) continue
+        const path = p.avatar_id ? paths.get(p.avatar_id) : null
+        out.set(idx, { url: path ? `${base}/storage/v1/object/public/avatars/${String(path).split('/').map(encodeURIComponent).join('/')}` : null, color: p.avatar_color_hex || null })
+      }
+      return out
+    },
+
     // A Nuvio TV or computer that isn't signed in shows a 6-character code.
     // A signed-in account looks the code up (which device is asking) and
     // approves it; the device is then signed in to this account and picks
