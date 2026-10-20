@@ -61,6 +61,7 @@ function describe(title) {
     const [s, e] = epOrder(f.key)
     return { text: n > 1 ? `${n} episodes · up to S${s} E${e}` : `S${s} E${e} finished` }
   }
+  if (title.watchedAt != null) return { text: 'Marked watched' }
   return { text: 'Not watched', none: true }
 }
 
@@ -77,6 +78,10 @@ function planTitle(src, dst, { watched = true, resume = true, library = false, s
       if (src.watchedAt != null && (src.watchedAt || Infinity) >= sinceMs) {
         if (dst?.watchedAt == null) changes.markWatched = { at: src.watchedAt || null }
       }
+    } else if (!src.episodes?.size && src.watchedAt != null) {
+      // A whole show marked watched with no episodes (Nuvio does this, and
+      // for live channels it is all there is).
+      if ((src.watchedAt || Infinity) >= sinceMs && dst?.watchedAt == null && !dst?.episodes?.size) changes.markWatched = { at: src.watchedAt || null }
     } else if (src.episodes?.size) {
       const add = []
       for (const [k, at] of src.episodes) {

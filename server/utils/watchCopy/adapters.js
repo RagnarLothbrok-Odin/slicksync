@@ -340,6 +340,7 @@ const jellyfin = {
           if (c.resume) { await provider.setPosition(titleId, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: titleId, before: 0 }) }
           return
         }
+        if (!c.addEpisodes?.length && !c.resume) return // a whole-show mark: Jellyfin has no such thing
         const eps = await provider.episodesOf(titleId)
         const byKey = new Map(eps.map((e) => [epKey(e.season, e.episode), e.itemId]))
         for (const e of c.addEpisodes || []) {

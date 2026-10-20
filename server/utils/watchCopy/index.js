@@ -142,6 +142,7 @@ async function preview(prisma, deps, accountId, userId, body = {}) {
   const presence = to.kind === 'jellyfin' ? await ADAPTERS.jellyfin.presence(to.provider).catch(() => null) : null
   const opts = options(body, from.kind, to.kind)
   const result = plan(from.read.state, to.read.state, opts, { isPresent: presence?.isPresent || null })
+  await fillNames(result.items, deps.fetch)
   return {
     ...result,
     options: { ...opts, libraryAvailable: from.kind !== 'jellyfin' && to.kind !== 'jellyfin' },
@@ -149,6 +150,25 @@ async function preview(prisma, deps, accountId, userId, body = {}) {
     limits: limitsOf(to.kind),
     _ctx: { from, to, presence },
   }
+}
+
+// Resume points carry no title on some providers (Nuvio): Cinemeta names them.
+const nameCache = new Map()
+async function fillNames(items, fetchImpl = fetch) {
+  const missing = items.filter((i) => !i.name && /^tt\d+$/.test(i.id || '')).slice(0, 200)
+  await require('../mapLimit').mapLimit(missing, 6, async (i) => {
+    const key = `${i.type}:${i.id}`
+    if (!nameCache.has(key)) {
+      let name = null
+      try {
+        const res = await fetchImpl(`https://v3-cinemeta.strem.io/meta/${i.type === 'movie' ? 'movie' : 'series'}/${i.id}.json`, { signal: AbortSignal.timeout(8000) })
+        if (res.ok) name = (await res.json())?.meta?.name || null
+      } catch {}
+      if (nameCache.size > 5000) nameCache.delete(nameCache.keys().next().value)
+      nameCache.set(key, name)
+    }
+    i.name = nameCache.get(key) || null
+  })
 }
 
 const countTitles = (state) => [...state.values()].filter((t) => t.id).length
