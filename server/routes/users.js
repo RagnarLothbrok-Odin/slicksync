@@ -1146,6 +1146,60 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     }
   })
 
+  // Copy watch history (utils/watchCopy): watched titles and resume points
+  // from one of a person's sign-ins or profiles to another, undoable 7 days.
+  const watchCopyDeps = (req) => ({
+    decrypt: (text, opts) => decrypt(text, opts || req),
+    createProvider: (row) => createProvider(row, { decrypt, req }),
+  })
+  const watchCopyError = (res, error, fallback) => {
+    const status = error?.status && error.status < 500 ? error.status : 502
+    res.status(status).json({ message: error?.status && error.status < 500 ? error.message : publicMessage(error, fallback) })
+  }
+  router.get('/:id/watch-copy/sides', async (req, res) => {
+    try {
+      const watchCopy = require('../utils/watchCopy')
+      const id = String(req.params.id)
+      const [sides, last] = await Promise.all([
+        watchCopy.sides(prisma, watchCopyDeps(req), getAccountId(req), id),
+        watchCopy.lastRun(prisma, getAccountId(req), id),
+      ])
+      res.json({ sides, lastRun: last, job: watchCopy.status(id) })
+    } catch (error) {
+      watchCopyError(res, error, 'Could not read their sign-ins')
+    }
+  })
+  router.post('/:id/watch-copy/preview', async (req, res) => {
+    try {
+      const { _ctx, ...result } = await require('../utils/watchCopy').preview(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id), req.body || {})
+      res.json(result)
+    } catch (error) {
+      watchCopyError(res, error, 'Could not read their watch history')
+    }
+  })
+  router.post('/:id/watch-copy/run', async (req, res) => {
+    try {
+      res.json(await require('../utils/watchCopy').run(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id), req.body || {}))
+    } catch (error) {
+      watchCopyError(res, error, 'Could not copy their watch history')
+    }
+  })
+  router.get('/:id/watch-copy/status', async (req, res) => {
+    const watchCopy = require('../utils/watchCopy')
+    const id = String(req.params.id)
+    res.json({ job: watchCopy.status(id), lastRun: await watchCopy.lastRun(prisma, getAccountId(req), id).catch(() => null) })
+  })
+  router.post('/:id/watch-copy/undo', async (req, res) => {
+    try {
+      res.json(await require('../utils/watchCopy').undo(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id), req.body?.runId))
+    } catch (error) {
+      watchCopyError(res, error, 'Could not undo that copy')
+    }
+  })
+  router.get('/:id/watch-copy/candidates', async (req, res) => {
+    res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
+  })
+
   // Who has a limit or a pause, for the Limits pills on the Users page.
   router.get('/screen-time/overview', async (req, res) => {
     try {

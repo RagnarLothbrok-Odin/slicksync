@@ -1562,3 +1562,20 @@ model AioConfigSnapshot {
   @@index([accountId, configKey, createdAt])
   @@map("aio_config_snapshots")
 }
+
+// Copy watch history (server/utils/watchCopy): one row per copy, holding what
+// it changed on the destination so it can be undone for 7 days.
+model WatchCopyRun {
+  id        String   @id @default(cuid())
+  accountId String   @default("default")
+  userId    String
+  fromSide  String // "stremio" | "nuvio:2" | "jellyfin" | "jellyfin:<profile>"
+  toSide    String
+  summary   String // JSON: copied, failed
+  undo      String // JSON: the destination's undo record (utils/watchCopy/adapters.js)
+  state     String   @default("done") // done | undone
+  createdAt DateTime @default(now())
+
+  @@index([accountId, userId, createdAt])
+  @@map("watch_copy_runs")
+}

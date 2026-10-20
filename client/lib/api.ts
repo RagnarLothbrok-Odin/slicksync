@@ -2497,6 +2497,31 @@ class ApiClient {
     return this.fetch<{ job: CatchUpJob | null }>(`/users/${encodeURIComponent(userId)}/catch-up/status`);
   }
 
+  // Copy watch history between a person's sign-ins (server/utils/watchCopy).
+  async getWatchCopySides(userId: string) {
+    return this.fetch<{ sides: WatchCopySide[]; lastRun: WatchCopyRun | null; job: WatchCopyJob | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/sides`);
+  }
+
+  async previewWatchCopy(userId: string, body: WatchCopyRequest) {
+    return this.fetch<WatchCopyPreview>(`/users/${encodeURIComponent(userId)}/watch-copy/preview`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async runWatchCopy(userId: string, body: WatchCopyRequest & { keys?: string[]; matches?: Record<string, string>; fromName?: string; toName?: string }) {
+    return this.fetch<WatchCopyJob>(`/users/${encodeURIComponent(userId)}/watch-copy/run`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async getWatchCopyStatus(userId: string) {
+    return this.fetch<{ job: WatchCopyJob | null; lastRun: WatchCopyRun | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/status`);
+  }
+
+  async undoWatchCopy(userId: string, runId: string) {
+    return this.fetch<{ restored: number; kept: number }>(`/users/${encodeURIComponent(userId)}/watch-copy/undo`, { method: 'POST', body: JSON.stringify({ runId }) });
+  }
+
+  async getWatchCopyCandidates(userId: string, name: string, type: string) {
+    return this.fetch<{ candidates: { id: string; name: string; year: string | null; poster: string | null }[] }>(`/users/${encodeURIComponent(userId)}/watch-copy/candidates?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`);
+  }
+
   // Their AIOStreams configuration's history (server/utils/aioConfigHistory.js).
   async getAioHistory(userId: string) {
     return this.fetch<AioHistory>(`/jellyfin/users/${encodeURIComponent(userId)}/aio-history`);
@@ -3656,6 +3681,67 @@ export interface CatchUpEpisodes {
   poster: string | null;
   /** kind: a filler or recap episode, where the server says so (AIOStreams, for anime). */
   episodes: { season: number; episode: number; title: string | null; released: string | null; watched: boolean; kind?: 'filler' | 'recap' }[];
+}
+
+/** One of a person's sign-ins, with the profiles inside it (Copy watch history). */
+export interface WatchCopySide {
+  side: string;
+  provider: 'stremio' | 'nuvio' | 'jellyfin';
+  kind: 'stremio' | 'nuvio' | 'jellyfin' | 'aiostreams' | 'aiometadata';
+  name: string;
+  detail: string | null;
+  profiles: { side: string; name: string }[];
+}
+
+export interface WatchCopyRequest {
+  from: string;
+  to: string;
+  watched?: boolean;
+  resume?: boolean;
+  library?: boolean;
+  sinceDays?: number;
+}
+
+export type WatchCopyOutcome = 'copy' | 'there' | 'further' | 'match' | 'missing';
+
+export interface WatchCopyItem {
+  key: string;
+  id: string | null;
+  type: 'movie' | 'series';
+  name: string | null;
+  poster: string | null;
+  outcome: WatchCopyOutcome;
+  from: { text: string; none?: boolean };
+  to: { text: string; none?: boolean };
+}
+
+export interface WatchCopyPreview {
+  items: WatchCopyItem[];
+  totals: { found: number; copy: number; there: number; further: number; match: number; missing: number };
+  options: { watched: boolean; resume: boolean; library: boolean; libraryAvailable: boolean };
+  counts: { from: number; to: number };
+  limits: string[];
+}
+
+export interface WatchCopyJob {
+  state: 'running' | 'done' | 'failed';
+  total: number;
+  done: number;
+  failed: number;
+  runId: string | null;
+  error: string | null;
+}
+
+export interface WatchCopyRun {
+  id: string;
+  from: string;
+  to: string;
+  createdAt: string;
+  undoUntil: string;
+  copied?: number;
+  failed?: number;
+  fromName?: string | null;
+  toName?: string | null;
 }
 
 /** One "Caught up to here" run, as it goes. */

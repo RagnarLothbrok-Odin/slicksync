@@ -535,6 +535,105 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
       return call(`/UserPlayedItems/${itemId}?userId=${viewer.userId}`, { method: played ? 'POST' : 'DELETE' }, viewer)
     },
 
+    /**
+     * Everything one sign-in (or household profile) has finished or has in
+     * progress, read in full for Copy watch history: movies and episodes,
+     * each with the title's own id, the date and the position.
+     * Returns [{ itemId, type, id, season, episode, played, playedAt, positionMs, durationMs, name, seriesName }].
+     */
+    async watchState(profile = null) {
+      const viewer = await viewerFor(profile)
+      const PAGE = 500
+      const pages = async (params) => {
+        const all = []
+        for (let start = 0; start < 50000; start += PAGE) {
+          const items = await itemsQuery({ ...params, StartIndex: String(start), Limit: String(PAGE) }, viewer)
+          all.push(...items)
+          if (items.length < PAGE) break
+        }
+        return all
+      }
+      const fields = { Recursive: 'true', IncludeItemTypes: 'Movie,Episode', Fields: 'ProviderIds', EnableUserData: 'true' }
+      const [played, resume] = await Promise.all([
+        pages({ ...fields, Filters: 'IsPlayed', SortBy: 'DatePlayed', SortOrder: 'Descending' }),
+        pages({ ...fields, Filters: 'IsResumable' }).catch(() => resumeItems(viewer)),
+      ])
+      const seriesIds = new Set([...played, ...resume].filter((it) => it.Type === 'Episode' && it.SeriesId).map((it) => normId(it.SeriesId)))
+      const series = await resolveSeries([...seriesIds], viewer)
+      const out = new Map()
+      for (const it of [...played, ...resume]) {
+        if (!it || (it.Type !== 'Movie' && it.Type !== 'Episode')) continue
+        const itemId = normId(it.Id)
+        if (out.has(itemId)) continue
+        const ud = it.UserData || {}
+        const entry = {
+          itemId,
+          type: it.Type === 'Movie' ? 'movie' : 'episode',
+          played: ud.Played === true,
+          playedAt: dateMs(ud.LastPlayedDate) || null,
+          positionMs: ticksToMs(ud.PlaybackPositionTicks),
+          durationMs: ticksToMs(it.RunTimeTicks),
+          name: it.Name || null,
+        }
+        if (it.Type === 'Movie') {
+          entry.id = movieIdOf(it)
+        } else {
+          const show = series.get(normId(it.SeriesId))
+          const packed = decodePackedId(it.Id)
+          entry.id = show?.id || null
+          entry.seriesName = it.SeriesName || show?.name || null
+          entry.season = Number.isInteger(it.ParentIndexNumber) ? it.ParentIndexNumber : (packed?.season ?? null)
+          entry.episode = Number.isInteger(it.IndexNumber) ? it.IndexNumber : (packed?.episode ?? null)
+        }
+        out.set(itemId, entry)
+      }
+      return [...out.values()]
+    },
+
+    /**
+     * Which titles this server has at all: the id of each movie and show
+     * (tt123, tmdb:1) -> its item id. Only a real Jellyfin has a fixed
+     * library to list; AIOStreams and AIOMetadata make any title on request,
+     * so they answer null and findItem() is asked instead.
+     */
+    async titleIndex() {
+      if (isAio) return null
+      const index = new Map()
+      const PAGE = 1000
+      for (let start = 0; start < 200000; start += PAGE) {
+        const items = await itemsQuery({ Recursive: 'true', IncludeItemTypes: 'Movie,Series', Fields: 'ProviderIds', StartIndex: String(start), Limit: String(PAGE) })
+        for (const it of items) {
+          const id = stremioIdFromProviderIds(it.ProviderIds) || decodePackedId(it.Id)?.base
+          if (id && !index.has(id)) index.set(id, { itemId: normId(it.Id), type: it.Type === 'Series' ? 'series' : 'movie' })
+        }
+        if (items.length < PAGE) break
+      }
+      return index
+    },
+
+    /** A show's episodes by the show's item id: [{ itemId, season, episode }]. */
+    async episodesOf(seriesItemId) {
+      const data = await call(`/Shows/${seriesItemId}/Episodes?${new URLSearchParams({ userId })}`)
+      return (Array.isArray(data?.Items) ? data.Items : [])
+        .filter((it) => Number.isInteger(it.ParentIndexNumber) && Number.isInteger(it.IndexNumber))
+        .map((it) => ({ itemId: normId(it.Id), season: it.ParentIndexNumber, episode: it.IndexNumber }))
+    },
+
+    /** Mark played on the date it was really watched (Jellyfin keeps it as the last-played date). */
+    async setPlayedAt(itemId, at, profile = null) {
+      const viewer = await viewerFor(profile)
+      const date = at ? `&datePlayed=${encodeURIComponent(new Date(at).toISOString())}` : ''
+      return call(`/UserPlayedItems/${itemId}?userId=${viewer.userId}${date}`, { method: 'POST' }, viewer)
+    },
+
+    /** Put a resume point on an item (0 clears it). */
+    async setPosition(itemId, positionMs, profile = null, at = null) {
+      const viewer = await viewerFor(profile)
+      const body = { PlaybackPositionTicks: Math.max(0, Math.round(Number(positionMs) || 0)) * TICKS_PER_MS }
+      if (at) body.LastPlayedDate = new Date(at).toISOString()
+      return call(`/UserItems/${itemId}/UserData?userId=${viewer.userId}`, { method: 'POST', body }, viewer)
+    },
+
     async setFavorite(itemId, favorite, profile = null) {
       const viewer = await viewerFor(profile)
       return call(`/UserFavoriteItems/${itemId}?userId=${viewer.userId}`, { method: favorite ? 'POST' : 'DELETE' }, viewer)

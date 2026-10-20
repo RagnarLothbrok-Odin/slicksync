@@ -680,6 +680,66 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
       return (Array.isArray(rows) ? rows[0] : rows) || null
     },
 
+    // One profile's watch state as Nuvio keeps it, unmerged: finished titles
+    // and episodes (watched_items, with the date), resume points
+    // (watch_progress) and the library. Read a page at a time - the backend
+    // may cap one answer below what a long history holds.
+    async getWatchState(profileId) {
+      const accessToken = await ensureAuth()
+      const config = await getServerConfig()
+      const PAGE = 1000
+      const watched = []
+      for (let page = 1; page <= 200; page++) {
+        const rows = await supabaseRpc('sync_pull_watched_items', { p_profile_id: profileId, p_page: page, p_page_size: PAGE }, accessToken, config)
+        const list = Array.isArray(rows) ? rows : []
+        watched.push(...list)
+        if (list.length < PAGE) break
+      }
+      const progress = await supabaseRpc('sync_pull_watch_progress', { p_profile_id: profileId }, accessToken, config)
+      const library = []
+      for (let offset = 0; offset < 100000; offset += 500) {
+        const rows = await supabaseRpc('sync_pull_library', { p_profile_id: profileId, p_limit: 500, p_offset: offset }, accessToken, config)
+        const list = Array.isArray(rows) ? rows : []
+        library.push(...list)
+        if (list.length < 500) break
+      }
+      return { watched, progress: Array.isArray(progress) ? progress : [], library }
+    },
+
+    // Writes for Copy watch history and Keep in step. Each is an upsert (or a
+    // delete by key) on one profile, tagged with SlickSync as the origin so
+    // Nuvio's apps pick the change up as coming from elsewhere.
+    async pushWatchedItems(profileId, items) {
+      if (!items?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_watched_items', { p_items: items, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async deleteWatchedItems(profileId, keys) {
+      if (!keys?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_delete_watched_items', { p_keys: keys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async pushWatchProgress(profileId, entries) {
+      if (!entries?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_watch_progress', { p_entries: entries, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async deleteWatchProgress(profileId, progressKeys) {
+      if (!progressKeys?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_delete_watch_progress', { p_keys: progressKeys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async pushLibraryItems(profileId, items) {
+      if (!items?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_library_items', { p_items: items, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async deleteLibraryItems(profileId, keys) {
+      if (!keys?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_delete_library_items', { p_keys: keys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+
     // A profile's media servers (Jellyfin / Emby) - the list Nuvio's apps
     // sign in to. One list per profile, replaced whole on every write, so a
     // caller always pulls first and keeps what isn't theirs.
