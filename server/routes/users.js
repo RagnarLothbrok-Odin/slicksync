@@ -1198,6 +1198,24 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       watchCopyError(res, error, 'Could not undo that copy')
     }
   })
+  // Keep in step (utils/watchCopy/keepInStep.js): per person, off by default.
+  router.get('/:id/keep-in-step', async (req, res) => {
+    try {
+      res.json(await require('../utils/watchCopy/keepInStep').describe(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id)))
+    } catch (error) {
+      watchCopyError(res, error, 'Could not read Keep in step')
+    }
+  })
+  router.put('/:id/keep-in-step', async (req, res) => {
+    try {
+      const id = String(req.params.id)
+      const person = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) }, select: { id: true } })
+      if (!person) return res.status(404).json({ message: 'User not found' })
+      res.json(await require('../utils/watchCopy/keepInStep').save(prisma, watchCopyDeps(req), getAccountId(req), id, { enabled: req.body?.enabled, members: req.body?.members }))
+    } catch (error) {
+      watchCopyError(res, error, 'Could not change Keep in step')
+    }
+  })
   router.get('/:id/watch-copy/candidates', async (req, res) => {
     res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
   })

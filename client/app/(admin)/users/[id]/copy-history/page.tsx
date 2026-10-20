@@ -21,6 +21,7 @@ import { useLayoutMode } from '@/lib/layout-mode';
 import { Button } from '@/components/ui';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { UserAvatar } from '@/components/ui/UserAvatar';
+import { KeepInStepCard } from '@/components/user/KeepInStepCard';
 import { toast } from '@/components/ui/Toast';
 import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
 import { posterUrl } from '@/lib/posterUrl';
@@ -665,6 +666,7 @@ export default function CopyHistoryPage() {
                 )}
               </>
             )}
+            {sides && <div className="mt-6"><KeepInStepCard userId={userId} /></div>}
           </PageSection>
         </div>
       </div>

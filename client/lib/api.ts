@@ -2522,6 +2522,15 @@ class ApiClient {
     return this.fetch<{ candidates: { id: string; name: string; year: string | null; poster: string | null }[] }>(`/users/${encodeURIComponent(userId)}/watch-copy/candidates?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`);
   }
 
+  // Keep in step (server/utils/watchCopy/keepInStep.js).
+  async getKeepInStep(userId: string) {
+    return this.fetch<KeepInStep>(`/users/${encodeURIComponent(userId)}/keep-in-step`);
+  }
+
+  async saveKeepInStep(userId: string, body: { enabled?: boolean; members?: { side: string; mode: KeepInStepMode }[] }) {
+    return this.fetch<KeepInStep>(`/users/${encodeURIComponent(userId)}/keep-in-step`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
   // Their AIOStreams configuration's history (server/utils/aioConfigHistory.js).
   async getAioHistory(userId: string) {
     return this.fetch<AioHistory>(`/jellyfin/users/${encodeURIComponent(userId)}/aio-history`);
@@ -3754,6 +3763,18 @@ export interface WatchCopyRun {
   failed?: number;
   fromName?: string | null;
   toName?: string | null;
+}
+
+export type KeepInStepMode = 'both' | 'receive' | 'off';
+
+/** Keep in step for one person: the switch, each place's mode, and what moved. */
+export interface KeepInStep {
+  enabled: boolean;
+  since: string | null;
+  lastPass: string | null;
+  lastError: string | null;
+  places: { side: string; provider: string; kind: string; name: string; profile: string | null; first: boolean; mode: KeepInStepMode }[];
+  moves: { at: string; title: string; what: string; from: string; to: string[] }[];
 }
 
 /** One "Caught up to here" run, as it goes. */

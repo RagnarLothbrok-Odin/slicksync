@@ -736,6 +736,11 @@ async function bootstrap() {
     // opening Discover reads them out of memory instead of waiting on
     // Cinemeta - see utils/discover.js.
     try {
+      require('./utils/watchCopy/keepInStep').scheduleKeepInStep(prisma, { decrypt, encrypt })
+    } catch (err) {
+      console.error('Keep in step scheduler failed to start:', err?.message)
+    }
+    try {
       require('./utils/discover').scheduleDiscoverWarm()
     } catch (err) {
       console.error('⚠️ Failed to initialize Discover pre-warm:', err)

@@ -1403,3 +1403,34 @@ model WatchCopyRun {
   @@index([accountId, userId, createdAt])
   @@map("watch_copy_runs")
 }
+
+// Keep in step (server/utils/watchCopy/keepInStep.js): per person, off by
+// default. members is JSON [{ side, mode: both | receive | off }].
+model WatchSyncSetting {
+  id         String    @id @default(cuid())
+  accountId  String    @default("default")
+  userId     String    @unique
+  enabled    Boolean   @default(false)
+  members    String    @default("[]")
+  enabledAt  DateTime?
+  lastPassAt DateTime?
+  lastError  String?
+  updatedAt  DateTime  @updatedAt
+
+  @@map("watch_sync_settings")
+}
+
+// What Keep in step moved, newest kept, for the "Recently moved" list.
+model WatchSyncMove {
+  id        String   @id @default(cuid())
+  accountId String   @default("default")
+  userId    String
+  at        DateTime @default(now())
+  title     String
+  what      String
+  fromLabel String
+  toLabels  String // JSON array of where it went
+
+  @@index([userId, at])
+  @@map("watch_sync_moves")
+}

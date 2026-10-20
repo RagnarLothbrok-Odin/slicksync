@@ -327,4 +327,4 @@ function forgetForTests() {
   jobs.clear()
 }
 
-module.exports = { sides, others, personOf, preview, run, status, lastRun, undo, candidates, parseSide, maskEmail, forgetForTests, UNDO_DAYS }
+module.exports = { sides, others, personOf, readSide, preview, run, status, lastRun, undo, candidates, parseSide, maskEmail, forgetForTests, UNDO_DAYS }

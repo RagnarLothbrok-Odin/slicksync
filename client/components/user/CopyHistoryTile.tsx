@@ -19,8 +19,10 @@ const LOOK: Record<string, { letter: string; bg: string }> = {
 
 export function CopyHistoryTile({ userId, name }: { userId: string; name: string }) {
   const [sides, setSides] = useState<WatchCopySide[] | null>(null);
+  const [inStep, setInStep] = useState(false);
   useEffect(() => {
     api.getWatchCopySides(userId).then((r) => setSides(r.sides)).catch(() => setSides([]));
+    api.getKeepInStep(userId).then((k) => setInStep(k.enabled)).catch(() => {});
   }, [userId]);
   if (!sides) return null;
   const places = sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0);
@@ -44,6 +46,7 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
       ))}
     </span>
   );
+  const chip = <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'color-mix(in srgb, var(--color-success) 18%, transparent)', color: 'var(--color-success)' }}>Keep in step: on</span>;
   return (
     <Link
       href={`/users/${encodeURIComponent(userId)}/copy-history`}
@@ -54,8 +57,9 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
       <span className="flex-1 min-w-0">
         <span className="block font-semibold text-default whitespace-nowrap">Sync watch history</span>
         <span className="block text-sm text-muted">{what}</span>
-        <span className="flex sm:hidden mt-2">{logos(22)}</span>
+        <span className="flex sm:hidden items-center gap-2 mt-2">{logos(22)}{inStep && chip}</span>
       </span>
+      {inStep && <span className="hidden sm:inline">{chip}</span>}
       <ChevronRightIcon className="w-[18px] h-[18px] text-muted shrink-0" />
     </Link>
   );
