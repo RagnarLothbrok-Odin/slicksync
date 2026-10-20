@@ -1160,12 +1160,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     try {
       const watchCopy = require('../utils/watchCopy')
       const id = String(req.params.id)
-      const [sides, last, person] = await Promise.all([
+      const [sides, last, person, others] = await Promise.all([
         watchCopy.sides(prisma, watchCopyDeps(req), getAccountId(req), id),
         watchCopy.lastRun(prisma, getAccountId(req), id),
         watchCopy.personOf(prisma, getAccountId(req), id),
+        req.query.others === '1' ? watchCopy.others(prisma, getAccountId(req), id) : [],
       ])
-      res.json({ sides, person, lastRun: last, job: watchCopy.status(id) })
+      res.json({ sides, others, person, lastRun: last, job: watchCopy.status(id) })
     } catch (error) {
       watchCopyError(res, error, 'Could not read their sign-ins')
     }

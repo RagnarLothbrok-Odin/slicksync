@@ -205,6 +205,36 @@ test('Jellyfin write: played on the real date per episode, a profile kept, undo 
   assert.ok(calls.some((c) => c[0] === 'unplayed' && c[1] === 'e2' && c[2] === false && c[3] === 'Sam'))
 })
 
+test('another person can be either side: "<id>|<side>", scoped to the account', async () => {
+  watchCopy.forgetForTests()
+  const people = {
+    u1: { id: 'u1', accountId: 'acc', username: 'Chris', providerType: 'nuvio', nuvioRefreshToken: 'r', nuvioUserId: 'n', nuvioProfileId: 1 },
+    u2: { id: 'u2', accountId: 'acc', username: 'Sam', providerType: 'stremio', stremioAuthKey: 'k' },
+    x9: { id: 'x9', accountId: 'other', username: 'Stranger', providerType: 'stremio', stremioAuthKey: 'k' },
+  }
+  const library = []
+  const stremioProvider = { getLibrary: async () => library, addLibraryItem: async (c) => library.push(...c) }
+  const nuvioProvider = { getWatchState: async () => ({ watched: [{ content_id: 'tt8', content_type: 'movie', title: 'Film', watched_at: 5 }], progress: [], library: [] }) }
+  const runs = []
+  const prisma = {
+    user: {
+      findFirst: async ({ where }) => { const u = people[where.id]; return u && u.accountId === where.accountId ? u : null },
+      findMany: async ({ where }) => Object.values(people).filter((u) => u.accountId === where.accountId && u.id !== where.id.not),
+    },
+    userProviderCredential: { findMany: async () => [] },
+    watchCopyRun: { create: async ({ data }) => { const r = { id: 'r1', state: 'done', createdAt: new Date(), ...data }; runs.push(r); return r } },
+  }
+  const deps = { createProvider: (row) => (row.providerType === 'nuvio' ? nuvioProvider : stremioProvider), decrypt: (t) => t, wait: true }
+  const others = await watchCopy.others(prisma, 'acc', 'u1')
+  assert.deepEqual(others.map((o) => [o.side, o.name, o.person.username]), [['u2|stremio', 'Stremio', 'Sam']])
+  const job = await watchCopy.run(prisma, deps, 'acc', 'u1', { from: 'nuvio:1', to: 'u2|stremio' })
+  assert.equal(job.state, 'done')
+  assert.equal(library[0]._id, 'tt8')
+  assert.equal(runs[0].toSide, 'u2|stremio')
+  // Someone from another account is never reachable.
+  await assert.rejects(watchCopy.preview(prisma, deps, 'acc', 'u1', { from: 'x9|stremio', to: 'nuvio:1' }), /Person not found/)
+})
+
 test('AIOStreams/AIOMetadata: finished = a dated stop at the runtime; refused writes are sent again', async () => {
   const calls = []
   let landed = false

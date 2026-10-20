@@ -1,7 +1,7 @@
 'use client';
 
-// Copy watch history (server/utils/watchCopy): watched titles and resume
-// points from one of a person's sign-ins - or one of its profiles - to
+// Sync watch history (server/utils/watchCopy): watched titles and resume
+// points from any sign-in or profile - this person's or anyone else's - to
 // another. COPY FROM and COPY TO are two big boxes in their own colours with
 // the direction arrow between them; tapping a box opens a picker anchored to
 // it. The preview is every title as poster cards with what each side has;
@@ -40,6 +40,14 @@ const PROVIDER_LOOK: Record<string, { letter: string; bg: string }> = {
   jellyfin: { letter: 'J', bg: 'linear-gradient(135deg,#aa5cc3,#00a4dc)' },
   aiostreams: { letter: 'A', bg: 'linear-gradient(135deg,#9f92ff,#5b4fd6)' },
   aiometadata: { letter: 'A', bg: 'linear-gradient(135deg,#14b8a6,#0e7490)' },
+};
+
+const PROVIDER_PILL: Record<string, { bg: string; fg: string }> = {
+  stremio: { bg: 'rgba(123,91,245,0.18)', fg: 'rgb(196,181,253)' },
+  nuvio: { bg: 'rgba(56,89,158,.3)', fg: 'rgb(186,208,240)' },
+  jellyfin: { bg: 'rgba(0,164,220,.18)', fg: 'rgb(160,215,240)' },
+  aiostreams: { bg: 'rgba(159,146,255,0.16)', fg: 'rgb(212,208,255)' },
+  aiometadata: { bg: 'rgba(45,212,191,0.14)', fg: 'rgb(153,246,228)' },
 };
 
 const OUTCOME: Record<WatchCopyOutcome, { label: string; color: string }> = {
@@ -83,7 +91,7 @@ function choiceFor(sides: WatchCopySide[], side: string): Choice | null {
   return null;
 }
 
-const choiceLabel = (c: Choice | null) => (c ? `${c.sideInfo.name}${c.profileName ? ` · ${c.profileName}` : ''}` : '');
+const choiceLabel = (c: Choice | null) => (c ? `${c.sideInfo.person ? `${c.sideInfo.person.username}’s ` : ''}${c.sideInfo.name}${c.profileName ? ` · ${c.profileName}` : ''}` : '');
 
 // A profile's picture: Nuvio's avatar or the household member's own on the
 // server; the sign-in's own user is the person (their picture as everywhere
@@ -120,9 +128,12 @@ function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, clo
   }, [open, ref, close]);
 }
 
-function SidePicker({ sides, person, current, other, title, onPick }: {
-  sides: WatchCopySide[]; person: WatchCopyPerson | null; current: string; other: string; title: string; onPick: (side: string) => void;
+function SidePicker({ sides, others, person, current, other, title, onPick }: {
+  sides: WatchCopySide[]; others: WatchCopySide[]; person: WatchCopyPerson | null; current: string; other: string; title: string; onPick: (side: string) => void;
 }) {
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+  const shownOthers = others.filter((o) => !q || (o.person?.username || '').toLowerCase().includes(q) || o.name.toLowerCase().includes(q));
   const row = (side: string, label: string, kind: string, profile?: Profile) => {
     const disabled = side === other;
     const active = side === current;
@@ -143,8 +154,9 @@ function SidePicker({ sides, person, current, other, title, onPick }: {
     );
   };
   return (
-    <div className="absolute z-30 left-0 right-0 sm:right-auto sm:w-80 mt-2 rounded-2xl border border-default p-3 shadow-2xl" style={{ background: 'var(--color-surface)' }}>
+    <div className="absolute z-30 left-0 right-0 sm:right-auto sm:w-[22rem] mt-2 rounded-2xl border border-default p-3 shadow-2xl max-h-[70vh] overflow-y-auto" style={{ background: 'var(--color-surface)' }}>
       <div className="font-semibold text-sm mb-1">{title}</div>
+      {person && <div className="text-xs text-subtle mt-2 mb-1">{person.username}</div>}
       {sides.map((s) => (
         <div key={s.provider}>
           {s.profiles.length > 0 && (
@@ -157,13 +169,45 @@ function SidePicker({ sides, person, current, other, title, onPick }: {
             : row(s.side, `${s.name}${s.detail ? ` · ${s.detail}` : ''}`, s.kind)}
         </div>
       ))}
+      {others.length > 0 && (
+        <>
+          <div className="text-xs text-subtle mt-3 mb-1">Other people</div>
+          {others.length > 5 && (
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people" className="w-full mb-1.5 px-2.5 py-1.5 rounded-lg border border-default bg-transparent text-sm text-default placeholder:text-muted outline-none" />
+          )}
+          {shownOthers.map((o) => {
+            const disabled = o.side === other;
+            const active = o.side === current;
+            const pill = PROVIDER_PILL[o.kind] || PROVIDER_PILL.jellyfin;
+            return (
+              <button
+                key={o.side}
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(o.side)}
+                className="w-full flex items-center gap-2.5 text-left px-2 py-1.5 rounded-xl border transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover"
+                style={{ borderColor: active ? 'var(--color-primary)' : 'transparent', background: active ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)' : undefined }}
+              >
+                <ProfilePic profile={null} person={o.person || null} kind={o.kind} size={26} />
+                <span className="flex-1 min-w-0 text-sm text-default truncate">{o.person?.username}</span>
+                {o.detail && <span className="text-xs text-subtle whitespace-nowrap">{o.detail}</span>}
+                <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: pill.bg, color: pill.fg }}>{o.name}</span>
+                {active && <CheckIcon className="w-4 h-4 text-primary" />}
+              </button>
+            );
+          })}
+          {shownOthers.length === 0 && <div className="text-xs text-muted px-2 py-1.5">Nobody by that name.</div>}
+          <div className="text-xs text-subtle mt-2">Copying between people only adds - the source&apos;s own history is never changed.</div>
+        </>
+      )}
     </div>
   );
 }
 
-function Slot({ role, choice, count, sides, person, other, onPick, compact }: {
-  role: 'from' | 'to'; choice: Choice | null; count: number | null; sides: WatchCopySide[]; person: WatchCopyPerson | null; other: string; onPick: (side: string) => void; compact: boolean;
+function Slot({ role, choice, count, sides, others, person, other, onPick, compact }: {
+  role: 'from' | 'to'; choice: Choice | null; count: number | null; sides: WatchCopySide[]; others: WatchCopySide[]; person: WatchCopyPerson | null; other: string; onPick: (side: string) => void; compact: boolean;
 }) {
+  const owner = choice?.sideInfo.person || person;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -189,15 +233,15 @@ function Slot({ role, choice, count, sides, person, other, onPick, compact }: {
           </span>
           {choice && (choice.profileName || person) && (
             <span className="inline-flex max-w-full items-center gap-1.5 mt-2 pl-0.5 pr-2 py-0.5 rounded-full border border-default bg-surface-hover">
-              <ProfilePic profile={choice.profile} person={person} kind={choice.sideInfo.kind} size={20} />
-              <span className="text-xs text-default truncate">{choice.profileName ? `Profile: ${choice.profileName}` : person?.username}</span>
+              <ProfilePic profile={choice.profile} person={owner} kind={choice.sideInfo.kind} size={20} />
+              <span className="text-xs text-default truncate">{choice.profileName ? `Profile: ${choice.profileName}` : owner?.username}</span>
               {choice.profileName && <ChevronDownIcon className="w-3 h-3 opacity-60" />}
             </span>
           )}
         </span>
         <span className="text-xs text-muted shrink-0 flex items-center gap-1">Change<ChevronDownIcon className="w-3 h-3" /></span>
       </button>
-      {open && <SidePicker sides={sides} person={person} current={choice?.side || ''} other={other} title={role === 'from' ? 'Copy from…' : 'Copy to…'} onPick={(s) => { onPick(s); setOpen(false); }} />}
+      {open && <SidePicker sides={sides} others={others} person={person} current={choice?.side || ''} other={other} title={role === 'from' ? 'Copy from…' : 'Copy to…'} onPick={(s) => { onPick(s); setOpen(false); }} />}
     </div>
   );
 }
@@ -305,6 +349,11 @@ export default function CopyHistoryPage() {
   const [person, setPerson] = useState<string>('');
   const [sides, setSides] = useState<WatchCopySide[] | null>(null);
   const [personInfo, setPersonInfo] = useState<WatchCopyPerson | null>(null);
+  const [others, setOthers] = useState<WatchCopySide[]>([]);
+  const [confirmCopy, setConfirmCopy] = useState(false);
+  const copyRef = useRef<HTMLDivElement>(null);
+  const closeCopy = useCallback(() => setConfirmCopy(false), []);
+  useDismiss(confirmCopy, copyRef, closeCopy);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [watched, setWatched] = useState(true);
@@ -331,8 +380,9 @@ export default function CopyHistoryPage() {
 
   useEffect(() => {
     api.getUser(userId).then((u: { username?: string }) => setPerson(u?.username || '')).catch(() => {});
-    api.getWatchCopySides(userId).then((r) => {
+    api.getWatchCopySides(userId, true).then((r) => {
       setSides(r.sides);
+      setOthers(r.others || []);
       setPersonInfo(r.person || null);
       setLastRun(r.lastRun);
       const all = r.sides.flatMap((s) => (s.profiles.length ? s.profiles.map((p) => p.side) : [s.side]));
@@ -341,8 +391,8 @@ export default function CopyHistoryPage() {
     }).catch((e) => setError(e?.message || 'Could not read their sign-ins'));
   }, [userId]);
 
-  const fromChoice = sides ? choiceFor(sides, from) : null;
-  const toChoice = sides ? choiceFor(sides, to) : null;
+  const fromChoice = sides ? choiceFor([...sides, ...others], from) : null;
+  const toChoice = sides ? choiceFor([...sides, ...others], to) : null;
   const libraryAvailable = !!fromChoice && !!toChoice && fromChoice.sideInfo.provider !== 'jellyfin' && toChoice.sideInfo.provider !== 'jellyfin';
 
   const load = useCallback(async () => {
@@ -376,6 +426,7 @@ export default function CopyHistoryPage() {
 
   const toCopy = [...selected].filter((k) => preview?.items.some((i) => i.key === k && (i.outcome === 'copy' || matches[k])));
 
+  const copyLabel = `Copy ${toCopy.length.toLocaleString()} title${toCopy.length === 1 ? '' : 's'}`;
   const swap = () => { setFrom(to); setTo(from); };
   const pickFrom = (s: string) => { if (s === to) setTo(from); setFrom(s); };
   const pickTo = (s: string) => { if (s === from) setFrom(to); setTo(s); };
@@ -418,13 +469,13 @@ export default function CopyHistoryPage() {
     }
   };
 
-  const others = (sides || []).filter((s) => s.provider !== fromChoice?.sideInfo.provider && s.provider !== toChoice?.sideInfo.provider);
+  const otherSignIns = (sides || []).filter((s) => s.provider !== fromChoice?.sideInfo.provider && s.provider !== toChoice?.sideInfo.provider);
   const backButton = (
     <Button variant="ghost" size="sm" leftIcon={<ArrowLeftIcon className="w-4 h-4" />} onClick={() => router.push(`/users/${encodeURIComponent(userId)}`)}>
       {person || 'Back'}
     </Button>
   );
-  const subtitle = `Watched titles and resume points, from one of ${person || 'their'}${person ? '’s' : ''} sign-ins (or one of its profiles) to another. Nothing is removed.`;
+  const subtitle = 'Watched titles and resume points between any sign-ins and profiles - copy once, or keep them in step. Nothing is removed.';
   const daysLeft = lastRun ? Math.max(0, Math.ceil((new Date(lastRun.undoUntil).getTime() - Date.now()) / 86400000)) : 0;
   const totals = preview?.totals;
   const tiles: { key: WatchCopyOutcome; n: number; label: string; color: string }[] = totals ? [
@@ -438,14 +489,14 @@ export default function CopyHistoryPage() {
     <>
       {layoutMode !== 'nebula' && (
         <Header
-          title={<Breadcrumbs items={[{ label: 'Users', href: '/users' }, { label: person || 'Person', href: `/users/${encodeURIComponent(userId)}` }, { label: 'Copy watch history' }]} className="text-xl font-semibold" />}
+          title={<Breadcrumbs items={[{ label: 'Users', href: '/users' }, { label: person || 'Person', href: `/users/${encodeURIComponent(userId)}` }, { label: 'Sync watch history' }]} className="text-xl font-semibold" />}
           subtitle={subtitle}
           actions={backButton}
         />
       )}
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-4 md:p-8'}>
         <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
-          {layoutMode === 'nebula' && <NebulaPageHeading title="Copy watch history" subtitle={subtitle} leading={backButton} />}
+          {layoutMode === 'nebula' && <NebulaPageHeading title="Sync watch history" subtitle={subtitle} leading={backButton} />}
           <PageSection>
             {lastRun && (
               <div className="mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 rounded-2xl border" style={{ borderColor: `color-mix(in srgb, ${AMBER} 60%, transparent)`, background: `color-mix(in srgb, ${AMBER} 11%, var(--color-surface))` }}>
@@ -482,7 +533,7 @@ export default function CopyHistoryPage() {
             {sides && fromChoice && toChoice && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 md:gap-4 items-start max-w-[70rem]">
-                  <Slot role="from" choice={fromChoice} count={preview?.counts.from ?? null} sides={sides} person={personInfo} other={to} onPick={pickFrom} compact={compact} />
+                  <Slot role="from" choice={fromChoice} count={preview?.counts.from ?? null} sides={sides} others={others} person={personInfo} other={to} onPick={pickFrom} compact={compact} />
                   <div className="flex md:flex-col items-center justify-center gap-3 md:gap-2 md:pt-6">
                     <span className="w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white" style={{ background: `linear-gradient(135deg, ${FROM_C}, var(--color-primary))`, boxShadow: '0 8px 22px -10px var(--color-primary)' }}>
                       <ArrowRightIcon className="hidden md:block w-5 h-5" /><ArrowDownIcon className="md:hidden w-5 h-5" />
@@ -491,12 +542,12 @@ export default function CopyHistoryPage() {
                       <ArrowsRightLeftIcon className="hidden md:block w-3.5 h-3.5" /><ArrowsUpDownIcon className="md:hidden w-3.5 h-3.5" />Swap
                     </button>
                   </div>
-                  <Slot role="to" choice={toChoice} count={preview?.counts.to ?? null} sides={sides} person={personInfo} other={from} onPick={pickTo} compact={compact} />
+                  <Slot role="to" choice={toChoice} count={preview?.counts.to ?? null} sides={sides} others={others} person={personInfo} other={from} onPick={pickTo} compact={compact} />
                 </div>
-                {others.length > 0 && (
+                {otherSignIns.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="text-xs text-subtle">Their other sign-ins:</span>
-                    {others.map((s) => (
+                    {otherSignIns.map((s) => (
                       <OtherChip key={s.provider} side={s} onUse={(role) => (role === 'from' ? pickFrom : pickTo)(s.profiles[0]?.side || s.side)} />
                     ))}
                   </div>
@@ -587,9 +638,28 @@ export default function CopyHistoryPage() {
                         <span className="hidden sm:inline">SlickSync saves what {choiceLabel(toChoice)} has first, so you can <b>undo this copy for 7 days</b></span>
                         <span className="sm:hidden leading-tight">Undo for 7 days</span>
                       </div>
-                      <button type="button" disabled={!toCopy.length || copying} onClick={runCopy} className="shrink-0 px-4 sm:px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-50" style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 8px 22px -10px var(--color-primary)' }}>
-                        {copying ? 'Copying…' : `Copy ${toCopy.length.toLocaleString()} title${toCopy.length === 1 ? '' : 's'}`}
-                      </button>
+                      {/* Copy asks first, naming where it goes - one tap once wrote into
+                          a real profile by accident. */}
+                      <div ref={copyRef} className="relative shrink-0">
+                        <button type="button" disabled={!toCopy.length || copying} onClick={() => setConfirmCopy((o) => !o)} aria-expanded={confirmCopy} className="px-4 sm:px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-50" style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 8px 22px -10px var(--color-primary)', outline: confirmCopy ? '2px solid var(--color-primary)' : undefined, outlineOffset: 2 }}>
+                          {copying ? 'Copying…' : copyLabel}
+                        </button>
+                        {confirmCopy && (
+                          <div className="absolute z-30 right-0 bottom-full mb-3 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-default p-4 shadow-2xl" style={{ background: 'var(--color-surface)' }}>
+                            <div className="font-semibold text-sm text-default">{copyLabel} into {choiceLabel(toChoice)}?</div>
+                            <div className="mt-2.5 flex flex-wrap items-center gap-2 p-2.5 rounded-xl text-xs font-semibold bg-surface-hover">
+                              <span className="inline-flex items-center gap-1.5 min-w-0" style={{ color: FROM_C }}><ProfilePic profile={fromChoice.profile} person={fromChoice.sideInfo.person || personInfo} kind={fromChoice.sideInfo.kind} size={22} /><span className="truncate">{fromChoice.profileName || choiceLabel(fromChoice)}</span></span>
+                              <span className="text-muted">→</span>
+                              <span className="inline-flex items-center gap-1.5 min-w-0" style={{ color: TO_C }}><ProfilePic profile={toChoice.profile} person={toChoice.sideInfo.person || personInfo} kind={toChoice.sideInfo.kind} size={22} /><span className="truncate">{toChoice.profileName || choiceLabel(toChoice)}</span></span>
+                            </div>
+                            <p className="text-sm text-muted mt-2">Watched marks and resume points are added there. Nothing is removed, and you can undo it from this page for 7 days.</p>
+                            <div className="flex justify-end gap-2 mt-3">
+                              <Button variant="secondary" size="sm" onClick={() => setConfirmCopy(false)}>Cancel</Button>
+                              <button type="button" onClick={() => { setConfirmCopy(false); void runCopy(); }} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white" style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))' }}>{copyLabel}</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </>
                 )}

@@ -61,13 +61,17 @@ async function personWithSignIns(prisma, accountId, userId) {
   return { user, rows }
 }
 
-function parseSide(side) {
-  const s = String(side || '')
+// Another person's sign-in is "<their id>|<side>"; this person's has no prefix.
+function parseSide(side, pageUserId = null) {
+  let s = String(side || '')
+  let personId = pageUserId
+  const bar = s.indexOf('|')
+  if (bar >= 0) { personId = s.slice(0, bar); s = s.slice(bar + 1) }
   const at = s.indexOf(':')
   const provider = at < 0 ? s : s.slice(0, at)
   const profile = at < 0 ? null : decodeURIComponent(s.slice(at + 1))
   if (!ADAPTERS[provider]) throw fail('Pick a sign-in')
-  return { provider, profile }
+  return { provider, profile, personId }
 }
 
 function makeProvider(deps, row) {
@@ -116,6 +120,36 @@ async function sides(prisma, deps, accountId, userId) {
   return out
 }
 
+const PROVIDER_NAME = (row) => (row.providerType === 'jellyfin' ? (KIND_LABEL[row.jellyfinServerKind || 'jellyfin'] || 'Jellyfin') : row.providerType === 'nuvio' ? 'Nuvio' : 'Stremio')
+
+/**
+ * Everyone else's sign-ins, for the "Other people" part of the picker - read
+ * from SlickSync alone (no network): one entry per sign-in, a Nuvio one on
+ * the profile that person is.
+ */
+async function others(prisma, accountId, userId) {
+  const people = await prisma.user.findMany({
+    where: { accountId, id: { not: userId } },
+    select: { id: true, username: true, email: true, avatarUrl: true, useGravatar: true, colorIndex: true, providerType: true, jellyfinServerKind: true, nuvioProfileId: true, stremioAuthKey: true, nuvioRefreshToken: true, jellyfinToken: true },
+    orderBy: { username: 'asc' },
+  })
+  const creds = await prisma.userProviderCredential.findMany({ where: { userId: { in: people.map((p) => p.id) } } }).catch(() => [])
+  const out = []
+  for (const u of people) {
+    const person = { id: u.id, username: u.username, email: u.email || null, avatarUrl: u.avatarUrl || null, useGravatar: u.useGravatar === true, colorIndex: u.colorIndex ?? 0 }
+    const rows = [u, ...creds.filter((c) => c.userId === u.id).map((c) => ({ ...c, nuvioProfileId: 1 }))]
+    for (const r of rows) {
+      const type = r.providerType || 'stremio'
+      const signedIn = type === 'stremio' ? !!r.stremioAuthKey : type === 'nuvio' ? !!r.nuvioRefreshToken : !!r.jellyfinToken
+      if (!signedIn) continue
+      const kind = type === 'jellyfin' ? (r.jellyfinServerKind || 'jellyfin') : type
+      const local = type === 'nuvio' ? `nuvio:${r.nuvioProfileId || 1}` : type
+      out.push({ side: `${u.id}|${local}`, provider: type, kind, name: PROVIDER_NAME(r), detail: type === 'nuvio' ? `Profile ${r.nuvioProfileId || 1}` : null, profiles: [], person })
+    }
+  }
+  return out
+}
+
 /** The person as the page shows them (their picture, as everywhere else). */
 async function personOf(prisma, accountId, userId) {
   const { user } = await personWithSignIns(prisma, accountId, userId)
@@ -123,8 +157,8 @@ async function personOf(prisma, accountId, userId) {
 }
 
 async function readSide(prisma, deps, accountId, userId, side) {
-  const { rows } = await personWithSignIns(prisma, accountId, userId)
-  const { provider: kind, profile } = parseSide(side)
+  const { provider: kind, profile, personId } = parseSide(side, userId)
+  const { rows } = await personWithSignIns(prisma, accountId, personId)
   if (!rows[kind]) throw fail('They have no sign-in there', 404)
   const provider = makeProvider(deps, rows[kind])
   const read = await ADAPTERS[kind].read(provider, profile, deps)
@@ -255,8 +289,8 @@ async function undo(prisma, deps, accountId, userId, runId, now = Date.now()) {
   if (!row || row.state !== 'done') throw fail('Nothing to undo', 404)
   if (now - new Date(row.createdAt).getTime() > UNDO_DAYS * 86400000) throw fail('That copy is more than 7 days old and can no longer be undone', 410)
   const record = JSON.parse(row.undo)
-  const { rows } = await personWithSignIns(prisma, accountId, userId)
-  const { provider: kind } = parseSide(row.toSide)
+  const { provider: kind, personId } = parseSide(row.toSide, userId)
+  const { rows } = await personWithSignIns(prisma, accountId, personId)
   if (!rows[kind]) throw fail('They no longer have that sign-in', 409)
   const result = await ADAPTERS[record.kind].undo(makeProvider(deps, rows[kind]), record, deps)
   await prisma.watchCopyRun.update({ where: { id: row.id }, data: { state: 'undone' } })
@@ -282,4 +316,4 @@ function forgetForTests() {
   jobs.clear()
 }
 
-module.exports = { sides, personOf, preview, run, status, lastRun, undo, candidates, parseSide, maskEmail, forgetForTests, UNDO_DAYS }
+module.exports = { sides, others, personOf, preview, run, status, lastRun, undo, candidates, parseSide, maskEmail, forgetForTests, UNDO_DAYS }

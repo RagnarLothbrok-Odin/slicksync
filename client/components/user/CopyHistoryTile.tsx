@@ -1,6 +1,6 @@
 'use client';
 
-// The way into Copy watch history from a person's page (inside the Watch
+// The way into Sync watch history from a person's page (inside the Watch
 // History section): their sign-in logos and a plain title. Shown only when
 // there is something to copy between - two sign-ins, or two profiles.
 
@@ -25,7 +25,7 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
   if (!sides) return null;
   const places = sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0);
   if (places < 2) return null;
-  const what = sides.length > 1 ? `Between ${name}’s ${sides.length} sign-ins` : `Between ${name}’s ${places} profiles`;
+  const what = `Copy once or keep in step · ${name}’s ${sides.length > 1 ? `${sides.length} sign-ins` : `${places} profiles`}`;
   // One sign-in with several profiles: their pictures (colour + initial when none).
   const profilePics = (size: number) => (
     <span className="flex gap-1 shrink-0">
@@ -52,7 +52,7 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
     >
       <span className="hidden sm:flex">{logos(30)}</span>
       <span className="flex-1 min-w-0">
-        <span className="block font-semibold text-default whitespace-nowrap">Copy watch history</span>
+        <span className="block font-semibold text-default whitespace-nowrap">Sync watch history</span>
         <span className="block text-sm text-muted">{what}</span>
         <span className="flex sm:hidden mt-2">{logos(22)}</span>
       </span>

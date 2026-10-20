@@ -2498,8 +2498,8 @@ class ApiClient {
   }
 
   // Copy watch history between a person's sign-ins (server/utils/watchCopy).
-  async getWatchCopySides(userId: string) {
-    return this.fetch<{ sides: WatchCopySide[]; person: WatchCopyPerson; lastRun: WatchCopyRun | null; job: WatchCopyJob | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/sides`);
+  async getWatchCopySides(userId: string, withOthers = false) {
+    return this.fetch<{ sides: WatchCopySide[]; others: WatchCopySide[]; person: WatchCopyPerson; lastRun: WatchCopyRun | null; job: WatchCopyJob | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/sides${withOthers ? '?others=1' : ''}`);
   }
 
   async previewWatchCopy(userId: string, body: WatchCopyRequest) {
@@ -3691,6 +3691,8 @@ export interface WatchCopySide {
   name: string;
   detail: string | null;
   profiles: { side: string; name: string; avatar?: string | null; color?: string | null; isPerson?: boolean }[];
+  /** Set on another person's sign-in (the "Other people" part of the picker). */
+  person?: WatchCopyPerson;
 }
 
 /** The person whose sign-ins these are - their picture, as everywhere else. */
