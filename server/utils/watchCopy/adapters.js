@@ -302,17 +302,15 @@ const jellyfin = {
   async read(provider, profile) {
     const rows = await provider.watchState(profile || null)
     const state = new Map()
-    const unmatched = new Map()
     for (const r of rows) {
       const isEp = r.type === 'episode'
       const name = isEp ? r.seriesName : r.name
-      if (!r.id) {
-        const key = `name:${(name || '').toLowerCase()}`
-        if (name && !unmatched.has(key)) unmatched.set(key, { ...blankTitle(null, isEp ? 'series' : 'movie', name, null), lastActivity: r.playedAt || 0 })
-        continue
-      }
-      let t = state.get(r.id)
-      if (!t) { t = blankTitle(r.id, isEp ? 'series' : 'movie', name); state.set(r.id, t) }
+      // A title the server has no ids for is kept under its name, with what
+      // was watched on it, so the page can offer "Pick the match".
+      const key = r.id || (name ? `name:${name.toLowerCase()}` : null)
+      if (!key) continue
+      let t = state.get(key)
+      if (!t) { t = blankTitle(r.id || null, isEp ? 'series' : 'movie', name, r.id ? undefined : null); state.set(key, t) }
       touch(t, r.playedAt || 0)
       const inProgress = !r.played && r.positionMs > 0
       if (isEp) {
@@ -322,7 +320,6 @@ const jellyfin = {
       } else if (r.played) t.watchedAt = r.playedAt || 0
       else if (inProgress) t.resume = { position: r.positionMs, duration: r.durationMs, at: r.playedAt || 0 }
     }
-    for (const [k, t] of unmatched) state.set(k, t)
     return { state, profile: profile || null }
   },
 

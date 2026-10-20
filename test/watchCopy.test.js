@@ -244,6 +244,18 @@ test('another person can be either side: "<id>|<side>", scoped to the account', 
   await assert.rejects(watchCopy.preview(prisma, deps, 'acc', 'u1', { from: 'x9|stremio', to: 'nuvio:1' }), /Person not found/)
 })
 
+test('Jellyfin read: a title with no ids keeps what was watched, so it can be matched', async () => {
+  const provider = { watchState: async () => [
+    { itemId: 'a', type: 'movie', id: null, name: 'Mystery Film', played: true, playedAt: 7, positionMs: 0 },
+    { itemId: 'b', type: 'episode', id: null, seriesName: 'Mystery Show', season: 1, episode: 2, played: true, playedAt: 8, positionMs: 0 },
+  ] }
+  const { state } = await ADAPTERS.jellyfin.read(provider, null)
+  assert.equal(state.get('name:mystery film').watchedAt, 7)
+  assert.ok(state.get('name:mystery show').episodes.has('1:2'))
+  const out = plan(state, new Map(), {})
+  assert.deepEqual(out.items.map((i) => i.outcome), ['match', 'match'])
+})
+
 test('AIOStreams/AIOMetadata: finished = a dated stop at the runtime; refused writes are sent again', async () => {
   const calls = []
   let landed = false
