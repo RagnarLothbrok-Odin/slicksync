@@ -90,6 +90,15 @@ test('plan: whole-show marks (Nuvio, live channels) copy', () => {
   assert.equal(planTitle(src, title('streamed:x', 'series', { watchedAt: 1 }), {}).outcome, 'there')
 })
 
+test('plan: with resume points off, a title that only has one is left out (not "already there")', () => {
+  const src = new Map([
+    ['tt1', title('tt1', 'movie', { resume: { position: 5, duration: 100, at: 1 } })],
+    ['tt2', title('tt2', 'movie', { watchedAt: 3 })],
+  ])
+  const out = plan(src, new Map(), { resume: false })
+  assert.deepEqual(out.items.map((i) => [i.key, i.outcome]), [['tt2', 'copy']])
+})
+
 test('plan: "Since" leaves older history out, and titles with no id need a match', () => {
   const src = new Map([
     ['tt1', title('tt1', 'movie', { watchedAt: 50, lastActivity: 50 })],

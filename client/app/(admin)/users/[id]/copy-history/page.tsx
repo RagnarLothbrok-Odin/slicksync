@@ -512,7 +512,7 @@ export default function CopyHistoryPage() {
                     <ArrowUturnLeftIcon className="w-4 h-4" />Undo this copy
                   </button>
                   {confirmUndo && (
-                    <div className="absolute z-30 right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-default p-4 shadow-2xl" style={{ background: 'var(--color-surface)' }}>
+                    <div className="absolute z-30 left-0 right-0 sm:left-auto sm:w-80 mt-2 rounded-2xl border border-default p-4 shadow-2xl" style={{ background: 'var(--color-surface)' }}>
                       <div className="font-semibold text-sm">Undo this copy?</div>
                       <p className="text-sm text-muted mt-1.5">{lastRun.toName || 'The destination'} goes back to how it was before: the watched marks and resume points this copy added come off. Anything they watched since stays.</p>
                       <div className="flex justify-end gap-2 mt-3">
@@ -640,12 +640,12 @@ export default function CopyHistoryPage() {
                       </div>
                       {/* Copy asks first, naming where it goes - one tap once wrote into
                           a real profile by accident. */}
-                      <div ref={copyRef} className="relative shrink-0">
+                      <div ref={copyRef} className="sm:relative shrink-0">
                         <button type="button" disabled={!toCopy.length || copying} onClick={() => setConfirmCopy((o) => !o)} aria-expanded={confirmCopy} className="px-4 sm:px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-50" style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 8px 22px -10px var(--color-primary)', outline: confirmCopy ? '2px solid var(--color-primary)' : undefined, outlineOffset: 2 }}>
                           {copying ? 'Copying…' : copyLabel}
                         </button>
                         {confirmCopy && (
-                          <div className="absolute z-30 right-0 bottom-full mb-3 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-default p-4 shadow-2xl" style={{ background: 'var(--color-surface)' }}>
+                          <div className="absolute z-30 left-0 right-0 bottom-full mb-3 sm:left-auto sm:w-[22rem] rounded-2xl border border-default p-4 shadow-2xl" style={{ background: 'var(--color-surface)' }}>
                             <div className="font-semibold text-sm text-default">{copyLabel} into {choiceLabel(toChoice)}?</div>
                             <div className="mt-2.5 flex flex-wrap items-center gap-2 p-2.5 rounded-xl text-xs font-semibold bg-surface-hover">
                               <span className="inline-flex items-center gap-1.5 min-w-0" style={{ color: FROM_C }}><ProfilePic profile={fromChoice.profile} person={fromChoice.sideInfo.person || personInfo} kind={fromChoice.sideInfo.kind} size={22} /><span className="truncate">{fromChoice.profileName || choiceLabel(fromChoice)}</span></span>

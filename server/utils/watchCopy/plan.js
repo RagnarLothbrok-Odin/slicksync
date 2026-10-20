@@ -123,8 +123,12 @@ function planTitle(src, dst, { watched = true, resume = true, library = false, s
   return { outcome: behind ? 'further' : 'there', changes: null }
 }
 
-function hasHistory(t) {
-  return t.watchedAt != null || (t.episodes?.size || 0) > 0 || !!t.resume
+// Whether a title has anything of the kinds being copied - with resume
+// points switched off, a title that only has one isn't listed at all.
+function relevant(t, opts) {
+  return (opts.watched !== false && (t.watchedAt != null || (t.episodes?.size || 0) > 0)) ||
+    (opts.resume !== false && !!t.resume) ||
+    (!!opts.library && !!t.inLibrary)
 }
 
 /**
@@ -136,7 +140,7 @@ function plan(source, dest, opts = {}, { isPresent = null } = {}) {
   const items = []
   const sinceMs = opts.sinceMs || 0
   for (const [key, src] of source) {
-    if (!hasHistory(src) && !(opts.library && src.inLibrary)) continue
+    if (!relevant(src, opts)) continue
     if (sinceMs && (src.lastActivity || 0) < sinceMs) continue
     const base = { key, id: src.id, type: src.type, name: src.name || null, poster: src.poster || null, from: describe(src) }
     if (!src.id) { items.push({ ...base, outcome: 'match', to: { text: 'Couldn’t tell which title', none: true }, changes: null }); continue }
