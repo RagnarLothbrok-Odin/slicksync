@@ -53,7 +53,7 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
       <span className="hidden sm:flex">{logos(30)}</span>
       <span className="flex-1 min-w-0">
         <span className="block font-semibold text-default whitespace-nowrap">Copy watch history</span>
-        <span className="block text-sm text-muted truncate">{what}</span>
+        <span className="block text-sm text-muted">{what}</span>
         <span className="flex sm:hidden mt-2">{logos(22)}</span>
       </span>
       <ChevronRightIcon className="w-[18px] h-[18px] text-muted shrink-0" />

@@ -188,9 +188,9 @@ function Slot({ role, choice, count, sides, person, other, onPick, compact }: {
             {[choice?.sideInfo.detail, count != null ? `${count.toLocaleString()} titles` : null].filter(Boolean).join(' · ')}
           </span>
           {choice && (choice.profileName || person) && (
-            <span className="inline-flex items-center gap-1.5 mt-2 pl-0.5 pr-2 py-0.5 rounded-full border border-default bg-surface-hover">
+            <span className="inline-flex max-w-full items-center gap-1.5 mt-2 pl-0.5 pr-2 py-0.5 rounded-full border border-default bg-surface-hover">
               <ProfilePic profile={choice.profile} person={person} kind={choice.sideInfo.kind} size={20} />
-              <span className="text-xs text-default">{choice.profileName ? `Profile: ${choice.profileName}` : person?.username}</span>
+              <span className="text-xs text-default truncate">{choice.profileName ? `Profile: ${choice.profileName}` : person?.username}</span>
               {choice.profileName && <ChevronDownIcon className="w-3 h-3 opacity-60" />}
             </span>
           )}
@@ -262,8 +262,8 @@ function MatchPicker({ userId, item, onPick, onClose }: { userId: string; item: 
   );
 }
 
-function Poster({ item, selected, matched, onToggle, onMatch, rpdb, fromKind, toKind }: {
-  item: WatchCopyItem; selected: boolean; matched: boolean; onToggle: () => void; onMatch: () => void; rpdb: boolean; fromKind: string; toKind: string;
+function Poster({ item, selected, matched, onToggle, onMatch, rpdb }: {
+  item: WatchCopyItem; selected: boolean; matched: boolean; onToggle: () => void; onMatch: () => void; rpdb: boolean;
 }) {
   const look = OUTCOME[item.outcome];
   const src = item.id ? posterUrl({ id: item.id, poster: item.poster }, rpdb) : undefined;
@@ -287,8 +287,8 @@ function Poster({ item, selected, matched, onToggle, onMatch, rpdb, fromKind, to
       </div>
       <div className="font-semibold text-default text-[13px] mt-1.5 truncate">{item.name || item.id}</div>
       <div className="mt-1 text-[11px] leading-snug">
-        <div className="flex items-center gap-1.5 text-muted"><span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: PROVIDER_LOOK[fromKind]?.bg }} /><span className="truncate">{item.from.text}</span></div>
-        <div className="flex items-center gap-1.5 text-subtle"><span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: PROVIDER_LOOK[toKind]?.bg }} /><span className="truncate">{item.to.text}</span></div>
+        <div className="flex items-start gap-1.5 text-muted" title={`From: ${item.from.text}`}><span className="w-[7px] h-[7px] rounded-full shrink-0 mt-[5px]" style={{ background: FROM_C }} /><span className="line-clamp-2">{item.from.text}</span></div>
+        <div className="flex items-start gap-1.5 text-subtle mt-0.5" title={`To: ${item.to.text}`}><span className="w-[7px] h-[7px] rounded-full shrink-0 mt-[5px]" style={{ background: TO_C }} /><span className="line-clamp-2">{item.to.text}</span></div>
       </div>
     </div>
   );
@@ -562,8 +562,6 @@ export default function CopyHistoryPage() {
                             selected={selected.has(item.key)}
                             matched={!!matches[item.key]}
                             rpdb={rpdbEnabled}
-                            fromKind={fromChoice.sideInfo.kind}
-                            toKind={toChoice.sideInfo.kind}
                             onToggle={() => setSelected((s) => { const n = new Set(s); if (n.has(item.key)) n.delete(item.key); else n.add(item.key); return n; })}
                             onMatch={() => setMatching(item.key)}
                           />
@@ -582,7 +580,8 @@ export default function CopyHistoryPage() {
                       <div className="mt-4 flex justify-center"><Button variant="secondary" size="sm" onClick={() => setShown((n) => n + PAGE)}>Show more ({(visible.length - shown).toLocaleString()} left)</Button></div>
                     )}
 
-                    <div className="sticky bottom-3 z-20 mt-4 flex items-center justify-between gap-3 px-3.5 py-3 rounded-2xl border border-default backdrop-blur-xl" style={{ background: 'color-mix(in srgb, var(--color-surface) 88%, transparent)', boxShadow: '0 -8px 30px -16px rgba(0,0,0,.7)' }}>
+                    {/* In the top-bar layout the account button floats in the bottom-left corner; the bar starts after it. */}
+                    <div className={`sticky bottom-3 z-20 mt-4 flex items-center justify-between gap-3 pr-3.5 py-3 rounded-2xl border border-default backdrop-blur-xl ${layoutMode === 'nebula' ? 'pl-[4.25rem] md:pl-20' : 'pl-3.5'}`} style={{ background: 'color-mix(in srgb, var(--color-surface) 88%, transparent)', boxShadow: '0 -8px 30px -16px rgba(0,0,0,.7)' }}>
                       <div className="flex items-center gap-2 min-w-0 text-xs" style={{ color: AMBER }}>
                         <ShieldCheckIcon className="w-4 h-4 shrink-0" />
                         <span className="hidden sm:inline">SlickSync saves what {choiceLabel(toChoice)} has first, so you can <b>undo this copy for 7 days</b></span>
