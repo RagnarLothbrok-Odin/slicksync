@@ -274,6 +274,15 @@ const nuvio = {
     }
     for (let i = 0; i < watched.length; i += 500) await provider.pushWatchedItems(profileId, watched.slice(i, i + 500))
     for (let i = 0; i < progress.length; i += 200) await provider.pushWatchProgress(profileId, progress.slice(i, i + 200))
+    // Nuvio quietly refuses a resume point older than the last time that
+    // entry was removed (so a dismissed Continue Watching item stays gone) -
+    // which is also what an earlier Undo leaves behind. Whatever it refused is
+    // sent again dated now: the copy was asked for, so it should land.
+    if (progress.length) {
+      const landed = new Set(((await provider.getWatchState(profileId).catch(() => null))?.progress || []).map((p) => p.progress_key))
+      const refused = progress.filter((p) => !landed.has(p.progress_key)).map((p) => ({ ...p, last_watched: now }))
+      for (let i = 0; i < refused.length; i += 200) await provider.pushWatchProgress(profileId, refused.slice(i, i + 200))
+    }
     for (let i = 0; i < library.length; i += 200) await provider.pushLibraryItems(profileId, library.slice(i, i + 200))
     return { undo, written: items.length, failed: [] }
   },

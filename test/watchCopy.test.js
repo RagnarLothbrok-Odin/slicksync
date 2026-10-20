@@ -171,7 +171,12 @@ test('Nuvio: read per profile, write upserts with real dates, undo deletes by ke
   const watched = calls.find((c) => c[0] === 'watched')
   assert.equal(watched[1], 2)
   assert.deepEqual(watched[2].map((w) => [w.content_id, w.season, w.episode, w.watched_at]), [['tt5', 1, 2, 99], ['tt8', null, null, 77]])
-  assert.equal(calls.find((c) => c[0] === 'progress')[2][0].progress_key, 'tt5_s1e3')
+  const pushes = calls.filter((c) => c[0] === 'progress')
+  assert.equal(pushes[0][2][0].progress_key, 'tt5_s1e3')
+  assert.equal(pushes[0][2][0].last_watched, 100)
+  // Nuvio refused it (it isn't there on read-back), so it goes again dated now.
+  assert.equal(pushes.length, 2)
+  assert.equal(pushes[1][2][0].last_watched, 1000)
   await ADAPTERS.nuvio.undo(provider, r.undo)
   assert.deepEqual(calls.find((c) => c[0] === '-progress')[2], ['tt5_s1e3'])
   assert.deepEqual(calls.find((c) => c[0] === '-library')[2], [{ content_id: 'tt8', content_type: 'movie' }])
