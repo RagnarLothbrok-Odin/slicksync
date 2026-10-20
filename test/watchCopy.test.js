@@ -75,6 +75,21 @@ test('plan: a resume point behind the destination is kept', () => {
   assert.equal(planTitle(src, dst, {}).outcome, 'further')
 })
 
+test('plan: the same state on both sides is "already there", not "further along"', () => {
+  const same = () => title('tt2', 'series', { episodes: new Map([['1:1', 1], ['1:8', 2]]), resume: { season: 1, episode: 3, position: 5, duration: 10, at: 1 } })
+  assert.equal(planTitle(same(), same(), {}).outcome, 'there')
+  const playing = () => title('tt3', 'series', { resume: { season: 2, episode: 1, position: 5, duration: 10, at: 1 } })
+  assert.equal(planTitle(playing(), playing(), {}).outcome, 'there')
+  const film = () => title('tt4', 'movie', { resume: { position: 5, duration: 100, at: 1 } })
+  assert.equal(planTitle(film(), film(), {}).outcome, 'there')
+})
+
+test('plan: whole-show marks (Nuvio, live channels) copy', () => {
+  const src = title('streamed:x', 'series', { watchedAt: 9 })
+  assert.deepEqual(planTitle(src, null, {}).changes, { markWatched: { at: 9 } })
+  assert.equal(planTitle(src, title('streamed:x', 'series', { watchedAt: 1 }), {}).outcome, 'there')
+})
+
 test('plan: "Since" leaves older history out, and titles with no id need a match', () => {
   const src = new Map([
     ['tt1', title('tt1', 'movie', { watchedAt: 50, lastActivity: 50 })],

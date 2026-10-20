@@ -104,11 +104,16 @@ function planTitle(src, dst, { watched = true, resume = true, library = false, s
     } else if (r.season != null && r.episode != null) {
       const rk = epKey(r.season, r.episode)
       const dstAt = furthest(dst)
-      const finishedThere = dst?.episodes?.has(rk)
-      if (finishedThere) behind = true
-      else if (!dstAt || later(rk, dstAt.key) || (dstAt.key === rk && dstAt.resume && (dst.resume?.position || 0) < r.position)) {
-        changes.resume = { ...r }
-      } else behind = true
+      const sameEpisode = dst?.resume && dst.resume.season === r.season && dst.resume.episode === r.episode
+      // A resume point older than the source's own finished episodes is
+      // left behind there too - nothing to copy, and nothing to report.
+      if (!furthest(src)?.resume) { /* skip */ }
+      else if (dst?.episodes?.has(rk)) behind = true
+      else if (sameEpisode) {
+        if (dst.resume.position < r.position) changes.resume = { ...r }
+        else if (dst.resume.position > r.position) behind = true
+      } else if (!dstAt || later(rk, dstAt.key)) changes.resume = { ...r }
+      else behind = true
     }
   }
 
