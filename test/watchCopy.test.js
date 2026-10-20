@@ -256,6 +256,16 @@ test('Jellyfin read: a title with no ids keeps what was watched, so it can be ma
   assert.deepEqual(out.items.map((i) => i.outcome), ['match', 'match'])
 })
 
+test('a sign-in that stopped working is named in plain words', async () => {
+  const prisma = {
+    user: { findFirst: async () => ({ id: 'u1', accountId: 'acc', username: 'Mia', providerType: 'nuvio', nuvioRefreshToken: 'r', nuvioUserId: 'n' }) },
+    userProviderCredential: { findMany: async () => [{ id: 'c1', providerType: 'stremio', stremioAuthKey: 'k' }] },
+  }
+  const expired = Object.assign(new Error('Provider authentication expired'), { code: 'PROVIDER_AUTH_EXPIRED' })
+  const deps = { createProvider: (row) => (row.providerType === 'nuvio' ? { getWatchState: async () => { throw expired } } : { getLibrary: async () => [] }) }
+  await assert.rejects(watchCopy.preview(prisma, deps, 'acc', 'u1', { from: 'stremio', to: 'nuvio:1' }), /Mia’s Nuvio sign-in needs reconnecting/)
+})
+
 test('AIOStreams/AIOMetadata: finished = a dated stop at the runtime; refused writes are sent again', async () => {
   const calls = []
   let landed = false

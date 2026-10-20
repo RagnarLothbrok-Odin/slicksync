@@ -161,7 +161,18 @@ async function readSide(prisma, deps, accountId, userId, side) {
   const { rows } = await personWithSignIns(prisma, accountId, personId)
   if (!rows[kind]) throw fail('They have no sign-in there', 404)
   const provider = makeProvider(deps, rows[kind])
-  const read = await ADAPTERS[kind].read(provider, profile, deps)
+  let read
+  try {
+    read = await ADAPTERS[kind].read(provider, profile, deps)
+  } catch (e) {
+    // A sign-in that stopped working says which one, in plain words.
+    if (e?.code === 'PROVIDER_AUTH_EXPIRED' || e?.status === 401 || /authenticat|unauthori[sz]ed|invalid auth|session does not exist/i.test(e?.message || '')) {
+      const who = rows[kind].username || 'Their'
+      const label = kind === 'jellyfin' ? (KIND_LABEL[rows[kind].jellyfinServerKind || 'jellyfin'] || 'Jellyfin') : kind === 'nuvio' ? 'Nuvio' : 'Stremio'
+      throw fail(`${who}’s ${label} sign-in needs reconnecting - reconnect it from their page, then try again`, 409)
+    }
+    throw e
+  }
   return { kind, profile, provider, read }
 }
 
