@@ -583,9 +583,9 @@ export default function CopyHistoryPage() {
                     {/* In the top-bar layout the account button floats in the bottom-left corner; the bar starts after it. */}
                     <div className={`sticky bottom-3 z-20 mt-4 flex items-center justify-between gap-3 pr-3.5 py-3 rounded-2xl border border-default backdrop-blur-xl ${layoutMode === 'nebula' ? 'pl-[4.25rem] md:pl-20' : 'pl-3.5'}`} style={{ background: 'color-mix(in srgb, var(--color-surface) 88%, transparent)', boxShadow: '0 -8px 30px -16px rgba(0,0,0,.7)' }}>
                       <div className="flex items-center gap-2 min-w-0 text-xs" style={{ color: AMBER }}>
-                        <ShieldCheckIcon className="w-4 h-4 shrink-0" />
+                        <ShieldCheckIcon className="hidden sm:block w-4 h-4 shrink-0" />
                         <span className="hidden sm:inline">SlickSync saves what {choiceLabel(toChoice)} has first, so you can <b>undo this copy for 7 days</b></span>
-                        <span className="sm:hidden">You can undo this for 7 days</span>
+                        <span className="sm:hidden leading-tight">Undo for 7 days</span>
                       </div>
                       <button type="button" disabled={!toCopy.length || copying} onClick={runCopy} className="shrink-0 px-4 sm:px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-50" style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 8px 22px -10px var(--color-primary)' }}>
                         {copying ? 'Copying…' : `Copy ${toCopy.length.toLocaleString()} title${toCopy.length === 1 ? '' : 's'}`}
