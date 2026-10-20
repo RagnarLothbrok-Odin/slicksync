@@ -626,6 +626,13 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
       return call(`/UserPlayedItems/${itemId}?userId=${viewer.userId}${date}`, { method: 'POST' }, viewer)
     },
 
+    /** An item's runtime (ms), or 0 when the server doesn't say. */
+    async runtimeMs(itemId, profile = null) {
+      const viewer = await viewerFor(profile)
+      const it = await call(`/Items/${itemId}?userId=${viewer.userId}`, {}, viewer).catch(() => null)
+      return ticksToMs(it?.RunTimeTicks)
+    },
+
     /** Put a resume point on an item (0 clears it). */
     async setPosition(itemId, positionMs, profile = null, at = null) {
       const viewer = await viewerFor(profile)

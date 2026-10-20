@@ -205,6 +205,24 @@ test('Jellyfin write: played on the real date per episode, a profile kept, undo 
   assert.ok(calls.some((c) => c[0] === 'unplayed' && c[1] === 'e2' && c[2] === false && c[3] === 'Sam'))
 })
 
+test('AIOStreams/AIOMetadata: finished = a dated stop at the runtime; refused writes are sent again', async () => {
+  const calls = []
+  let landed = false
+  const provider = {
+    serverKind: 'aiostreams',
+    titleIndex: async () => null,
+    findItem: async () => 'm1',
+    runtimeMs: async () => 7200000,
+    setPosition: async (id, pos, profile, at) => calls.push(['pos', id, pos, at]),
+    setPlayedAt: async (id, at) => { calls.push(['played', id, at]); landed = true },
+    watchState: async () => [{ itemId: 'm1', played: landed, positionMs: 0 }],
+  }
+  await ADAPTERS.jellyfin.write(provider, { profile: null }, [{ key: 'tt1', id: 'tt1', type: 'movie', changes: { markWatched: { at: 42 } } }])
+  assert.deepEqual(calls[0], ['pos', 'm1', 7200000, 42])
+  // The server kept the newer activity it had (not played): sent again, dated now.
+  assert.deepEqual(calls[1], ['played', 'm1', null])
+})
+
 test('a whole run: Nuvio profile to Stremio, saved for undo, then undone', async () => {
   watchCopy.forgetForTests()
   forgetForTests()

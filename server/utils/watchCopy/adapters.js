@@ -339,14 +339,25 @@ const jellyfin = {
     const undo = { kind: 'jellyfin', profile, played: [], positions: [] }
     const failed = []
     const itemFor = async (id, type) => (index ? index.get(id)?.itemId || null : await provider.findItem(id, type))
+    // AIOStreams and AIOMetadata ignore a date on "mark played", but keep one
+    // on a playback stop - a dated stop at the very end is "finished then".
+    const aio = provider.serverKind === 'aiostreams' || provider.serverKind === 'aiometadata'
+    const markPlayed = async (itemId, at) => {
+      if (aio && at && typeof provider.runtimeMs === 'function') {
+        const runtime = await provider.runtimeMs(itemId, profile).catch(() => 0)
+        if (runtime > 0) return provider.setPosition(itemId, runtime, profile, at)
+      }
+      return provider.setPlayedAt(itemId, at, profile)
+    }
+    const wanted = new Map() // itemId -> position to resume at (0 = finished)
     await mapLimit(items, 4, async (item) => {
       const c = item.changes
       try {
         const titleId = await itemFor(item.id, item.type)
         if (!titleId) { failed.push({ key: item.key, reason: 'Not on that server' }); return }
         if (item.type === 'movie') {
-          if (c.markWatched) { await provider.setPlayedAt(titleId, c.markWatched.at, profile); undo.played.push(titleId) }
-          if (c.resume) { await provider.setPosition(titleId, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: titleId, before: 0 }) }
+          if (c.markWatched) { await markPlayed(titleId, c.markWatched.at); undo.played.push(titleId); wanted.set(titleId, 0) }
+          if (c.resume) { await provider.setPosition(titleId, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: titleId, before: 0 }); wanted.set(titleId, c.resume.position) }
           return
         }
         if (!c.addEpisodes?.length && !c.resume) return // a whole-show mark: Jellyfin has no such thing
@@ -355,17 +366,31 @@ const jellyfin = {
         for (const e of c.addEpisodes || []) {
           const id = byKey.get(epKey(e.season, e.episode))
           if (!id) continue
-          await provider.setPlayedAt(id, e.at, profile)
+          await markPlayed(id, e.at)
           undo.played.push(id)
+          wanted.set(id, 0)
         }
         if (c.resume) {
           const id = byKey.get(epKey(c.resume.season, c.resume.episode))
-          if (id) { await provider.setPosition(id, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: id, before: 0 }) }
+          if (id) { await provider.setPosition(id, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: id, before: 0 }); wanted.set(id, c.resume.position) }
         }
       } catch (e) {
         failed.push({ key: item.key, reason: e?.message || 'The server refused' })
       }
     })
+    // AIOStreams (like Nuvio) refuses an event older than the title's own last
+    // activity - an earlier Undo leaves exactly that. Read back, and send
+    // whatever didn't land again, dated now.
+    if (aio && wanted.size) {
+      const now = new Map(((await provider.watchState(profile).catch(() => null)) || []).map((r) => [r.itemId, r]))
+      await mapLimit([...wanted], 4, async ([itemId, pos]) => {
+        const got = now.get(itemId)
+        try {
+          if (pos === 0 && !got?.played) await provider.setPlayedAt(itemId, null, profile)
+          else if (pos > 0 && !(got && Math.abs((got.positionMs || 0) - pos) < 5000)) await provider.setPosition(itemId, pos, profile)
+        } catch { /* left as the server has it */ }
+      })
+    }
     return { undo, written: items.length - failed.length, failed }
   },
 
