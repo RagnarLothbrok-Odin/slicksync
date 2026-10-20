@@ -103,7 +103,7 @@ function merge(reads) {
   return out
 }
 
-const placeLabel = (p) => `${p.name}${p.profile ? ` · ${p.profile}` : ''}`
+const placeLabel = (p) => `${p.name}${p.profile && p.profile !== p.name ? ` · ${p.profile}` : ''}`
 
 // One person, one pass. Returns what moved.
 async function runPerson(prisma, deps, setting, now = Date.now()) {

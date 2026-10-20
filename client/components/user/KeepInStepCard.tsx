@@ -118,7 +118,7 @@ export function KeepInStepCard({ userId }: { userId: string }) {
               <span className="w-[26px] h-[26px] rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: LOOK[p.kind] || LOOK.jellyfin }}>
                 {p.name.slice(0, 1).toUpperCase()}
               </span>
-              <span className={`flex-1 min-w-0 text-sm truncate ${p.mode === 'off' ? 'text-muted' : 'text-default'}`}>{p.name}{p.profile ? ` · ${p.profile}` : ''}</span>
+              <span className={`flex-1 min-w-0 text-sm truncate ${p.mode === 'off' ? 'text-muted' : 'text-default'}`}>{p.name}{p.profile && p.profile !== p.name ? ` · ${p.profile}` : ''}</span>
               <ModePicker mode={p.mode} onPick={(m) => setMode(p.side, m)} />
             </div>
           ))}
