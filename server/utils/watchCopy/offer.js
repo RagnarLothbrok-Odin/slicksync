@@ -10,17 +10,20 @@ const NEW_FOR_MS = 14 * 24 * 60 * 60 * 1000
 const CACHE_MS = 10 * 60 * 1000
 const FEW = 0.1 // the new one holds under a tenth of the other's titles
 
-const cache = new Map() // userId -> { at, value }
+const cache = new Map() // "<account>|<person>" -> { at, value }
 
 function parse(json) {
   try { return JSON.parse(json) } catch { return [] }
 }
 
 async function offerFor(prisma, deps, accountId, userId, now = Date.now()) {
-  const hit = cache.get(userId)
+  // Keyed by account too: the answer names the person and their sign-ins.
+  const key = `${accountId}|${userId}`
+  const hit = cache.get(key)
   if (hit && now - hit.at < CACHE_MS) return hit.value
   const value = await compute(prisma, deps, accountId, userId, now).catch(() => null)
-  cache.set(userId, { at: now, value })
+  if (cache.size > 2000) cache.delete(cache.keys().next().value)
+  cache.set(key, { at: now, value })
   return value
 }
 
@@ -78,12 +81,12 @@ async function dismiss(prisma, accountId, userId, provider) {
     create: { userId, accountId, enabled: false, dismissedOffers: JSON.stringify(list) },
     update: { dismissedOffers: JSON.stringify(list) },
   })
-  cache.delete(userId)
+  forget(userId)
 }
 
 function forget(userId) {
-  if (userId) cache.delete(userId)
-  else cache.clear()
+  if (!userId) return cache.clear()
+  for (const key of cache.keys()) if (key.endsWith(`|${userId}`)) cache.delete(key)
 }
 
 module.exports = { offerFor, dismiss, forget, NEW_FOR_MS }

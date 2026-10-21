@@ -11,7 +11,13 @@ const SYNC_CFG = path.join(SYNC_DIR, 'schedule.json')
 let syncTimer = null
 // Priority queue (min-heap) of { accountId|null, nextRunAt:number, intervalMs:number }
 let scheduleHeap = []
-let isSchedulerRunning = false
+// Each scheduleSyncs call starts a new generation; a loop from an older one
+// notices on its next wake and stops, so a reschedule never leaves two loops
+// popping the same heap.
+let schedulerGeneration = 0
+// Accounts whose run is still going - a slow account is skipped for one turn
+// rather than holding up everyone else's schedule.
+const runningAccounts = new Set()
 // Track last configured global frequency (private mode)
 let globalFrequencyStr = '0'
 // De-dup guard: last run timestamp per account
@@ -19,6 +25,12 @@ const lastRunAtByAccount = new Map()
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MINUTE_MS = 60 * 1000
+// setTimeout holds at most 2^31-1 ms (about 24.8 days) and fires at once for
+// anything longer, which made Monthly sync run every half a minute. Long waits
+// are slept in pieces of this size instead.
+const MAX_SLEEP_MS = 6 * 60 * 60 * 1000
+// Public instances run this many accounts' syncs at the same time at most.
+const MAX_PARALLEL_RUNS = 3
 
 function nextMidnight(fromTs = Date.now()) {
   const d = new Date(fromTs)
@@ -78,7 +90,7 @@ async function performSyncOnce(prisma, getAccountId, scopedWhere, decrypt, reloa
 function clearSyncSchedule() {
   if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
   scheduleHeap = []
-  isSchedulerRunning = false
+  schedulerGeneration++
 }
 
 function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE = 'private') {
@@ -117,9 +129,10 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
     return top
   }
 
+  const generation = schedulerGeneration
   const seedHeap = async () => {
     if (INSTANCE_TYPE === 'public') {
-      try {
+      {
         const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } })
         for (const acc of accounts) {
           let syncCfg = acc.sync || null
@@ -152,7 +165,7 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
           }
           pushHeap({ accountId: acc.id, nextRunAt: firstRunAt, intervalMs })
         }
-      } catch {}
+      }
     } else {
       // Private mode: parse frequency string (e.g., '1m', '1h', '1d', '3d', '7d')
       let intervalMs
@@ -317,51 +330,59 @@ function scheduleSyncs(frequency, prisma, getAccountId, scopedWhere, decrypt, re
     }
   }
 
+  const current = () => generation === schedulerGeneration
+  const sleepUntil = async (at) => {
+    while (current() && Date.now() < at) {
+      await new Promise((r) => setTimeout(r, Math.min(MAX_SLEEP_MS, Math.max(0, at - Date.now()))))
+    }
+  }
+  const waitForSlot = async () => {
+    while (current() && runningAccounts.size >= MAX_PARALLEL_RUNS) await new Promise((r) => setTimeout(r, 1000))
+  }
+
   const schedulerLoop = async () => {
-    if (isSchedulerRunning) return
-    isSchedulerRunning = true
-    try {
-      while (scheduleHeap.length > 0) {
-        const next = scheduleHeap[0]
-        const delay = Math.max(0, next.nextRunAt - Date.now())
-        await new Promise((r) => setTimeout(r, delay))
-        const due = popHeap(); if (!due) continue
-        // De-dup guard: avoid accidental double runs within a short window
-        const accountKey = String(due.accountId || 'global')
-        const prev = lastRunAtByAccount.get(accountKey) || 0
-        if (Date.now() - prev < Math.min(due.intervalMs / 2, 30000)) {
-          // Skip duplicate trigger
-        } else {
-          await runOnceAccount(due.accountId)
-          lastRunAtByAccount.set(accountKey, Date.now())
-        }
-        const jitterMs = 0 // eliminate jitter to keep schedule predictable
-        let nextRun
-        if (due.intervalMs >= DAY_MS) {
-          // For day-based schedules, always schedule at midnight
-          const days = Math.floor(due.intervalMs / DAY_MS)
-          if (days === 1) {
-            // Every day: next midnight
-            nextRun = nextMidnight(Date.now())
-          } else {
-            // Multi-day (7d, 15d, 30d): schedule at next midnight, then add (days - 1) more days
-            // This ensures it runs at midnight every N days
-            // Example: if interval is 7 days and we just ran, next run is next midnight + 6 days = 7 days from now at midnight
-            const nextMidnightTime = nextMidnight(Date.now())
-            nextRun = nextMidnightTime + (days - 1) * DAY_MS
-          }
-        } else {
-          // For hour-based schedules (1h), add the interval to current time
-          nextRun = Date.now() + due.intervalMs + jitterMs
-        }
-        pushHeap({ accountId: due.accountId, nextRunAt: nextRun, intervalMs: due.intervalMs })
+    while (current() && scheduleHeap.length > 0) {
+      await sleepUntil(scheduleHeap[0].nextRunAt)
+      if (!current()) return
+      const due = popHeap(); if (!due) continue
+      const accountKey = String(due.accountId || 'global')
+      const prev = lastRunAtByAccount.get(accountKey) || 0
+      // De-dup guard: avoid accidental double runs within a short window, and
+      // skip an account whose previous run hasn't finished.
+      if (!runningAccounts.has(accountKey) && Date.now() - prev >= Math.min(due.intervalMs / 2, 30000)) {
+        await waitForSlot()
+        if (!current()) return
+        runningAccounts.add(accountKey)
+        lastRunAtByAccount.set(accountKey, Date.now())
+        runOnceAccount(due.accountId)
+          .catch(() => {})
+          .finally(() => { runningAccounts.delete(accountKey); lastRunAtByAccount.set(accountKey, Date.now()) })
       }
-    } finally {
-      isSchedulerRunning = false
+      let nextRun
+      if (due.intervalMs >= DAY_MS) {
+        // Day-based schedules run at midnight: every N days is the next
+        // midnight plus N-1 more days.
+        const days = Math.floor(due.intervalMs / DAY_MS)
+        nextRun = nextMidnight(Date.now()) + (days - 1) * DAY_MS
+      } else {
+        nextRun = Date.now() + due.intervalMs
+      }
+      pushHeap({ accountId: due.accountId, nextRunAt: nextRun, intervalMs: due.intervalMs })
     }
   }
 
-  seedHeap().then(() => { schedulerLoop() })
+  // A database hiccup while reading the accounts used to leave the scheduler
+  // empty until the next restart; it now tries again a minute later.
+  const start = () => {
+    if (!current()) return
+    seedHeap().then(() => { schedulerLoop() }, (e) => {
+      const QUIET = process.env.QUIET === 'true' || process.env.QUIET === '1'
+      if (!QUIET) console.warn('Sync scheduler could not read the accounts, retrying in a minute:', e?.message || e)
+      scheduleHeap = []
+      setTimeout(start, MINUTE_MS)
+    })
+  }
+  start()
 }
 
 /**

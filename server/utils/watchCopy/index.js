@@ -15,6 +15,7 @@
 
 const { plan } = require('./plan')
 const { ADAPTERS } = require('./adapters')
+const locks = require('./locks')
 
 const UNDO_DAYS = 7
 const KIND_LABEL = { aiostreams: 'AIOStreams', aiometadata: 'AIOMetadata', jellyfin: 'Jellyfin' }
@@ -245,7 +246,24 @@ const jobs = new Map()
  */
 async function run(prisma, deps, accountId, userId, body = {}) {
   if (jobs.get(userId)?.state === 'running') throw fail('Already copying for them - wait for it to finish', 429)
-  const pv = await preview(prisma, deps, accountId, userId, body)
+  // Held from here, before anything is awaited, so a double-tap can't start
+  // a second copy while the first is still reading.
+  const previous = jobs.get(userId)
+  const job = { state: 'running', total: 0, done: 0, failed: 0, from: body.from, to: body.to, runId: null, error: null, startedAt: new Date(deps.now || Date.now()).toISOString() }
+  jobs.set(userId, job)
+  let lockKey = null
+  const giveUp = (e) => {
+    if (previous) jobs.set(userId, previous); else jobs.delete(userId)
+    if (lockKey) locks.release(lockKey)
+    throw e
+  }
+  try {
+    const dest = parseSide(body.to, userId)
+    const key = locks.keyOf(accountId, dest.personId, dest.provider)
+    if (!locks.take(key, 'copy')) throw fail('Keep in step is updating that sign-in right now - try again in a minute', 429)
+    lockKey = key
+  } catch (e) { giveUp(e) }
+  const pv = await preview(prisma, deps, accountId, userId, body).catch(giveUp)
   const { from, to, presence } = pv._ctx
   const wanted = Array.isArray(body.keys) ? new Set(body.keys.map(String)) : null
   const items = pv.items.filter((i) => i.outcome === 'copy' && (!wanted || wanted.has(i.key)))
@@ -258,28 +276,29 @@ async function run(prisma, deps, accountId, userId, body = {}) {
     const p = planTitle(fixed, to.read.state.get(fixed.id) || null, pv.options)
     if (p.outcome === 'copy') items.push({ key, id: fixed.id, type: fixed.type, name: fixed.name, poster: fixed.poster, changes: p.changes })
   }
-  if (!items.length) throw fail('Nothing to copy')
+  if (!items.length) giveUp(fail('Nothing to copy'))
 
-  const job = { state: 'running', total: items.length, done: 0, failed: 0, from: body.from, to: body.to, runId: null, error: null, startedAt: new Date(deps.now || Date.now()).toISOString() }
-  jobs.set(userId, job)
+  job.total = items.length
   const work = (async () => {
     const result = await ADAPTERS[to.kind].write(to.provider, to.read, items, { ...deps, index: presence?.index || null })
     job.done = result.written
     job.failed = result.failed.length
-    const row = await prisma.watchCopyRun.create({
-      data: {
-        accountId, userId, fromSide: body.from, toSide: body.to,
-        summary: JSON.stringify({ copied: result.written, failed: result.failed.length, fromName: body.fromName || null, toName: body.toName || null }),
-        undo: JSON.stringify(result.undo),
-      },
-    })
-    job.runId = row.id
+    const data = {
+      accountId, userId, fromSide: body.from, toSide: body.to,
+      summary: JSON.stringify({ copied: result.written, failed: result.failed.length, fromName: body.fromName || null, toName: body.toName || null }),
+      undo: JSON.stringify(result.undo),
+    }
+    // The titles are already written: one more try before saying the undo
+    // couldn't be kept, rather than failing the copy that did happen.
+    const row = await prisma.watchCopyRun.create({ data }).catch(() => prisma.watchCopyRun.create({ data })).catch(() => null)
+    job.runId = row?.id || null
     job.state = 'done'
+    if (!row) job.error = 'Copied, but the undo for it could not be saved'
     require('./offer').forget(userId)
   })().catch((e) => {
     job.state = 'failed'
     job.error = e?.message || 'Something went wrong'
-  })
+  }).finally(() => locks.release(lockKey))
   if (deps.wait) await work
   return job
 }

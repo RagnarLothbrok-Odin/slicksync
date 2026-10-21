@@ -270,9 +270,16 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
 
         const jsonData = fs.readFileSync(filePath, 'utf8')
         const baseUrl = `http://localhost:${process.env.PORT || 4000}`
+        // The caller's own sign-in goes along: with a login set, the import
+        // route sits behind it (and its CSRF check) like every other.
         const rsp = await fetch(`${baseUrl}/api/public-auth/config-import`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}),
+            ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+            ...(req.headers['x-csrf-token'] ? { 'x-csrf-token': req.headers['x-csrf-token'] } : {}),
+          },
           body: JSON.stringify({ jsonData }),
         })
         const result = await rsp.json().catch(() => ({}))
@@ -1330,7 +1337,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
         const scopedWhere = require('../utils/helpers').scopedWhere
         const decrypt = require('../utils/encryption').decrypt
         const schedulerReq = { appAccountId: DEFAULT_ACCOUNT_ID }
-        scheduleSyncs(nextMinutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, false)
+        scheduleSyncs(nextMinutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, INSTANCE_TYPE)
         return res.json({ message: 'Sync settings updated' })
       }
       // Load current config to preserve unspecified fields
@@ -1400,8 +1407,8 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const { reloadGroupAddons } = require('../routes/users');
       const scopedWhere = require('../utils/helpers').scopedWhere;
       const decrypt = require('../utils/encryption').decrypt;
-      scheduleSyncs(0, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, true) // clear
-      scheduleSyncs(1, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, true) // re-seed; minutes ignored in AUTH mode
+      scheduleSyncs(0, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE) // clear
+      scheduleSyncs(1, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE) // re-seed every account; the frequency is read per account in public mode
       return res.json({ message: 'Account sync settings updated' })
     } catch (e) {
       return res.status(500).json({ message: 'Failed to update account sync settings', error: publicMessage(e, 'Failed to update account sync settings') })
@@ -2054,7 +2061,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
     try {
       // Run in background
       const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID;
-      triggerManualHealthCheck(prisma, accountId);
+      triggerManualHealthCheck(prisma, accountId).catch((e) => console.warn('[AddonHealthCheck] Manual check failed:', e?.message));
       
       return res.json({ message: 'Health check started' });
     } catch (e) {

@@ -16,6 +16,7 @@
 
 const { plan } = require('./plan')
 const { ADAPTERS } = require('./adapters')
+const locks = require('./locks')
 
 const PASS_MS = 4 * 60 * 1000
 const MARGIN_MS = 15 * 60 * 1000
@@ -105,8 +106,12 @@ function merge(reads) {
 
 const placeLabel = (p) => `${p.name}${p.profile && p.profile !== p.name ? ` · ${p.profile}` : ''}`
 
-// One person, one pass. Returns what moved.
-async function runPerson(prisma, deps, setting, now = Date.now()) {
+// One person, one pass. Returns what moved. Anything that kept a place from
+// being read or written goes in report.problems: the pass then doesn't count
+// as done, so the next one looks back to the last complete pass and nothing
+// watched during an outage is skipped.
+async function runPerson(prisma, deps, setting, now = Date.now(), report = {}) {
+  const problems = report.problems = []
   const { accountId, userId } = setting
   const info = await describe(prisma, deps, accountId, userId)
   const active = info.places.filter((p) => p.mode !== 'off')
@@ -119,6 +124,7 @@ async function runPerson(prisma, deps, setting, now = Date.now()) {
       reads.set(p.side, { place: p, ...(await watchCopy.readSide(prisma, deps, accountId, userId, p.side)) })
     } catch (e) {
       console.warn(`[keepInStep] ${userId} could not read ${p.side}:`, e?.message)
+      problems.push(e?.status === 409 ? e.message : `Couldn’t read ${placeLabel(p)} - trying again shortly`)
     }
   }
   const since = Math.max(new Date(setting.enabledAt || now).getTime(), setting.lastPassAt ? new Date(setting.lastPassAt).getTime() - MARGIN_MS : 0)
@@ -132,6 +138,9 @@ async function runPerson(prisma, deps, setting, now = Date.now()) {
     const result = plan(merged, target.read.state, { watched: true, resume: true, sinceMs: since })
     const items = result.items.filter((i) => i.outcome === 'copy')
     if (!items.length) continue
+    // A copy into this sign-in is running: this place waits for the next pass.
+    const lockKey = locks.keyOf(accountId, userId, target.kind)
+    if (!locks.take(lockKey, 'keepInStep')) { problems.push(`${placeLabel(p)} is busy with a copy - trying again shortly`); continue }
     try {
       const w = await ADAPTERS[target.kind].write(target.provider, target.read, items, { ...deps, now })
       const failed = new Set((w.failed || []).map((f) => f.key))
@@ -143,6 +152,9 @@ async function runPerson(prisma, deps, setting, now = Date.now()) {
       }
     } catch (e) {
       console.warn(`[keepInStep] ${userId} could not write ${p.side}:`, e?.message)
+      problems.push(`Couldn’t update ${placeLabel(p)} - trying again shortly`)
+    } finally {
+      locks.release(lockKey)
     }
   }
   if (moved.size) {
@@ -163,13 +175,23 @@ async function runAll(prisma, makeDeps, now = Date.now()) {
     const settings = await prisma.watchSyncSetting.findMany({ where: { enabled: true } }).catch(() => [])
     for (const s of settings) {
       let lastError = null
+      const report = {}
       try {
-        await runPerson(prisma, makeDeps(s.accountId), s, now)
+        await runPerson(prisma, makeDeps(s.accountId), s, now, report)
+        if (report.problems?.length) lastError = [...new Set(report.problems)].join(' · ')
       } catch (e) {
+        // The person is gone: their setting goes too, instead of failing
+        // every few minutes forever.
+        if (e?.status === 404) {
+          await prisma.watchSyncSetting.deleteMany({ where: { userId: s.userId } }).catch(() => {})
+          continue
+        }
         lastError = e?.message || 'Something went wrong'
         console.warn(`[keepInStep] ${s.userId}:`, lastError)
       }
-      await prisma.watchSyncSetting.update({ where: { userId: s.userId }, data: { lastPassAt: new Date(now), lastError } }).catch(() => {})
+      // Only a pass with nothing left out moves the clock forward.
+      const data = lastError ? { lastError } : { lastPassAt: new Date(now), lastError: null }
+      await prisma.watchSyncSetting.update({ where: { userId: s.userId }, data }).catch(() => {})
     }
   } finally {
     running = false

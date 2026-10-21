@@ -26,10 +26,12 @@ const posterFor = (id) => (/^tt\d+$/.test(id || '') ? `https://images.metahub.sp
 const CINEMETA = 'https://v3-cinemeta.strem.io'
 const videoCache = new Map()
 const VIDEO_TTL = 6 * 60 * 60 * 1000
+const MISS_TTL = 10 * 60 * 1000
 async function showVideos(id, fetchImpl = fetch) {
   if (!/^tt\d+$/.test(id || '')) return null
   const hit = videoCache.get(id)
-  if (hit && Date.now() - hit.at < VIDEO_TTL) return hit.ids
+  // A miss (Cinemeta down, or no such show) is tried again after a few minutes.
+  if (hit && Date.now() - hit.at < (hit.ids ? VIDEO_TTL : MISS_TTL)) return hit.ids
   let ids = null
   try {
     const res = await fetchImpl(`${CINEMETA}/meta/series/${id}.json`, { signal: AbortSignal.timeout(10000) })
@@ -42,6 +44,12 @@ async function showVideos(id, fetchImpl = fetch) {
   videoCache.set(id, { at: Date.now(), ids })
   return ids
 }
+
+// Undo leaves alone anything that changed after the copy - they watched it
+// for real since. A date this much past the copy's own counts as a change
+// (servers stamp writes a moment after they're sent).
+const CHANGED_SLACK_MS = 2 * 60 * 1000
+const changedSince = (currentAt, copiedAt) => msOf(currentAt) > msOf(copiedAt) + CHANGED_SLACK_MS
 
 function blankTitle(id, type, name, poster) {
   return { id, type, name: name || null, poster: poster || posterFor(id), watchedAt: null, episodes: new Map(), resume: null, inLibrary: false, lastActivity: 0 }
@@ -240,7 +248,11 @@ const nuvio = {
       t.inLibrary = true
       touch(t, msOf(l.added_at))
     }
-    return { state, profileId, library: new Map(ws.library.map((l) => [l.content_id, l])) }
+    return {
+      state, profileId,
+      library: new Map(ws.library.map((l) => [l.content_id, l])),
+      progress: new Map(ws.progress.filter((p) => p.progress_key).map((p) => [p.progress_key, p])),
+    }
   },
 
   async write(provider, read, items, deps = {}) {
@@ -249,17 +261,19 @@ const nuvio = {
     const watched = []
     const progress = []
     const library = []
-    const undo = { kind: 'nuvio', profileId, watched: [], progress: [], library: [] }
+    // at: when the copy ran - undo leaves alone what changed after it.
+    // progress holds what each resume point was before (null: there was none).
+    const undo = { kind: 'nuvio', profileId, at: now, watched: [], progress: [], library: [] }
     for (const item of items) {
       const c = item.changes
       const ctype = item.type === 'movie' ? 'movie' : 'series'
       if (c.markWatched) {
         watched.push({ content_id: item.id, content_type: ctype, title: item.name || '', season: null, episode: null, watched_at: c.markWatched.at || now })
-        undo.watched.push({ content_id: item.id })
+        undo.watched.push({ content_id: item.id, at: c.markWatched.at || now })
       }
       for (const e of c.addEpisodes || []) {
         watched.push({ content_id: item.id, content_type: ctype, title: item.name || '', season: e.season, episode: e.episode, watched_at: e.at || now })
-        undo.watched.push({ content_id: item.id, season: e.season, episode: e.episode })
+        undo.watched.push({ content_id: item.id, season: e.season, episode: e.episode, at: e.at || now })
       }
       if (c.resume) {
         const r = c.resume
@@ -270,7 +284,8 @@ const nuvio = {
           season: isEp ? r.season : null, episode: isEp ? r.episode : null,
           position: Math.round(r.position), duration: Math.round(r.duration || 0), last_watched: r.at || now, progress_key: key,
         })
-        undo.progress.push(key)
+        const was = read.progress?.get(key) || null
+        undo.progress.push({ key, before: was ? { ...was } : null })
       }
       if (c.addLibrary) {
         library.push({ content_id: item.id, content_type: ctype, name: item.name || '', poster: item.poster || null, poster_shape: 'POSTER', added_at: now })
@@ -289,15 +304,41 @@ const nuvio = {
       for (let i = 0; i < refused.length; i += 200) await provider.pushWatchProgress(profileId, refused.slice(i, i + 200))
     }
     for (let i = 0; i < library.length; i += 200) await provider.pushLibraryItems(profileId, library.slice(i, i + 200))
+    undo.at = deps.now || Date.now()
     return { undo, written: items.length, failed: [] }
   },
 
+  // Takes back what the copy wrote - except what they've watched since (a
+  // newer date than the copy's), and a resume point that was there before
+  // goes back to where it was instead of disappearing.
   async undo(provider, record) {
     const p = record.profileId
-    for (let i = 0; i < record.watched.length; i += 500) await provider.deleteWatchedItems(p, record.watched.slice(i, i + 500))
-    for (let i = 0; i < record.progress.length; i += 200) await provider.deleteWatchProgress(p, record.progress.slice(i, i + 200))
+    const now = typeof provider.getWatchState === 'function' ? await provider.getWatchState(p).catch(() => null) : null
+    const wKey = (w) => `${w.content_id}|${w.season ?? ''}|${w.episode ?? ''}`
+    const watchedNow = new Map((now?.watched || []).map((w) => [wKey(w), w]))
+    const progressNow = new Map((now?.progress || []).map((r) => [r.progress_key, r]))
+    let kept = 0
+    const watched = []
+    for (const w of record.watched) {
+      const cur = watchedNow.get(wKey(w))
+      if (cur && w.at != null && changedSince(cur.watched_at, Math.max(msOf(w.at), msOf(record.at)))) { kept++; continue }
+      watched.push({ content_id: w.content_id, ...(w.season != null ? { season: w.season, episode: w.episode } : {}) })
+    }
+    const drop = []
+    const putBack = []
+    for (const entry of record.progress) {
+      // Records from before this change hold just the key.
+      const { key, before } = typeof entry === 'string' ? { key: entry, before: null } : entry
+      const cur = progressNow.get(key)
+      if (cur && record.at != null && changedSince(cur.last_watched, record.at)) { kept++; continue }
+      if (before) putBack.push({ ...before, last_watched: Date.now() })
+      else drop.push(key)
+    }
+    for (let i = 0; i < watched.length; i += 500) await provider.deleteWatchedItems(p, watched.slice(i, i + 500))
+    for (let i = 0; i < drop.length; i += 200) await provider.deleteWatchProgress(p, drop.slice(i, i + 200))
+    for (let i = 0; i < putBack.length; i += 200) await provider.pushWatchProgress(p, putBack.slice(i, i + 200))
     for (let i = 0; i < record.library.length; i += 200) await provider.deleteLibraryItems(p, record.library.slice(i, i + 200))
-    return { restored: record.watched.length + record.progress.length + record.library.length, kept: 0 }
+    return { restored: watched.length + drop.length + putBack.length + record.library.length, kept }
   },
 }
 
@@ -307,6 +348,8 @@ const jellyfin = {
   async read(provider, profile) {
     const rows = await provider.watchState(profile || null)
     const state = new Map()
+    // Each item's resume position before a copy, for its undo.
+    const positions = new Map(rows.filter((r) => r.itemId).map((r) => [r.itemId, r.played ? 0 : (r.positionMs || 0)]))
     for (let r of rows) {
       const isEp = r.type === 'episode'
       const name = isEp ? r.seriesName : r.name
@@ -328,7 +371,7 @@ const jellyfin = {
       } else if (r.played) t.watchedAt = r.playedAt || 0
       else if (inProgress) t.resume = { position: r.positionMs, duration: r.durationMs, at: r.playedAt || 0 }
     }
-    return { state, profile: profile || null }
+    return { state, profile: profile || null, positions }
   },
 
   /** For a real Jellyfin: which source titles its library has. */
@@ -341,7 +384,8 @@ const jellyfin = {
   async write(provider, read, items, deps = {}) {
     const profile = read.profile
     const index = deps.index || (await provider.titleIndex())
-    const undo = { kind: 'jellyfin', profile, played: [], positions: [] }
+    const undo = { kind: 'jellyfin', profile, at: deps.now || Date.now(), played: [], positions: [] }
+    const before = (itemId) => read.positions?.get(itemId) || 0
     const failed = []
     const itemFor = async (id, type) => (index ? index.get(id)?.itemId || null : await provider.findItem(id, type))
     // AIOStreams ignores a date on "mark played" but keeps one on a playback
@@ -365,7 +409,7 @@ const jellyfin = {
         if (!titleId) { failed.push({ key: item.key, reason: 'Not on that server' }); return }
         if (item.type === 'movie') {
           if (c.markWatched) { await markPlayed(titleId, c.markWatched.at); undo.played.push(titleId); wanted.set(titleId, 0) }
-          if (c.resume) { await provider.setPosition(titleId, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: titleId, before: 0 }); wanted.set(titleId, c.resume.position) }
+          if (c.resume) { await provider.setPosition(titleId, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: titleId, before: before(titleId), set: c.resume.position }); wanted.set(titleId, c.resume.position) }
           return
         }
         if (!c.addEpisodes?.length && !c.resume) return // a whole-show mark: Jellyfin has no such thing
@@ -380,7 +424,7 @@ const jellyfin = {
         }
         if (c.resume) {
           const id = byKey.get(epKey(c.resume.season, c.resume.episode))
-          if (id) { await provider.setPosition(id, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: id, before: 0 }); wanted.set(id, c.resume.position) }
+          if (id) { await provider.setPosition(id, c.resume.position, profile, c.resume.at); undo.positions.push({ itemId: id, before: before(id), set: c.resume.position }); wanted.set(id, c.resume.position) }
         }
       } catch (e) {
         failed.push({ key: item.key, reason: e?.message || 'The server refused' })
@@ -399,13 +443,29 @@ const jellyfin = {
         } catch { /* left as the server has it */ }
       })
     }
+    undo.at = deps.now || Date.now()
     return { undo, written: items.length - failed.length, failed }
   },
 
+  // Takes back the played marks and resume points the copy set - except on
+  // anything played since (a newer date than the copy's, or a resume point
+  // that moved), and a resume point goes back to where it was.
   async undo(provider, record) {
-    await mapLimit(record.played || [], 4, async (id) => { try { await provider.setPlayed(id, false, record.profile) } catch {} })
-    await mapLimit(record.positions || [], 4, async (p) => { try { await provider.setPosition(p.itemId, p.before || 0, record.profile) } catch {} })
-    return { restored: (record.played?.length || 0) + (record.positions?.length || 0), kept: 0 }
+    const rows = record.at != null && typeof provider.watchState === 'function' ? await provider.watchState(record.profile).catch(() => null) : null
+    const nowById = new Map((rows || []).map((r) => [r.itemId, r]))
+    let kept = 0
+    let restored = 0
+    await mapLimit(record.played || [], 4, async (id) => {
+      const cur = nowById.get(id)
+      if (cur && changedSince(cur.playedAt, record.at)) { kept++; return }
+      try { await provider.setPlayed(id, false, record.profile); restored++ } catch {}
+    })
+    await mapLimit(record.positions || [], 4, async (p) => {
+      const cur = nowById.get(p.itemId)
+      if (cur && p.set != null && (cur.played || Math.abs((cur.positionMs || 0) - p.set) > 5000)) { kept++; return }
+      try { await provider.setPosition(p.itemId, p.before || 0, record.profile); restored++ } catch {}
+    })
+    return { restored, kept }
   },
 }
 

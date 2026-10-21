@@ -1226,8 +1226,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       let filtered = manifestData
       if (Array.isArray(manifestData?.resources) && manifestData.resources.length > 0) {
         filtered = filterManifestByResources(manifestData, manifestData.resources)
-        console.log('🔍 DEBUG: After filtering, catalogs count:', filtered?.catalogs?.length || 0)
-        console.log('🔍 DEBUG: Original catalogs count:', manifestData?.catalogs?.length || 0)
       }
 
       // Extract simplified resources and catalogs for storage
@@ -1244,13 +1242,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       const simplifiedCatalogs = (() => {
         try {
-          // DEBUG: Trace catalog processing
-          console.log('[DEBUG] 1. catalogs from req.body:', catalogs)
-
           // Use the UI state (catalogs parameter) if available, otherwise fall back to manifest data
           const src = Array.isArray(catalogs) && catalogs.length > 0 ? catalogs : (Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [])
-          console.log('[DEBUG] 2. src after fallback logic:', src)
-          console.log('[DEBUG] 3. Number of catalogs in src:', src.length)
 
           const processedCatalogs = []
 
@@ -1294,8 +1287,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             }
           }
 
-          console.log('[DEBUG] 4. Number of catalogs in processedCatalogs:', processedCatalogs.length)
-          console.log('[DEBUG] 5. Final simplifiedCatalogs result:', processedCatalogs)
 
           return processedCatalogs
         } catch { return [] }

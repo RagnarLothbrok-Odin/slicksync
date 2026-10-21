@@ -102,3 +102,23 @@ test('switching on starts the clock; modes are saved', async () => {
   assert.deepEqual(JSON.parse(w.setting.members), [{ side: 'nuvio:2', mode: 'receive' }])
   assert.equal(d.places.find((p) => p.side === 'nuvio:2').mode, 'receive')
 })
+
+test('a pass that could not read a place does not move the clock, so the next pass catches up', async () => {
+  forgetForTests()
+  const w = world()
+  w.deps.createProvider = (row) => { if (row.providerType === 'stremio') return { getLibrary: async () => { throw new Error('offline') } }; return w.deps.__nuvio }
+  const nuvio = w.deps.__nuvio = { getProfiles: async () => [{ profile_index: 1, name: 'Chris' }], getProfileAvatars: async () => new Map(), getWatchState: async () => ({ watched: [], progress: [], library: [] }) }
+  await kis.runAll(w.prisma, () => w.deps, LATER + 60000)
+  assert.equal(w.setting.lastPassAt, null, 'not counted as done')
+  assert.match(w.setting.lastError, /Stremio/)
+  assert.ok(nuvio)
+})
+
+test('a person who was deleted has their Keep in step removed', async () => {
+  const w = world()
+  w.prisma.user.findFirst = async () => null
+  let deleted = null
+  w.prisma.watchSyncSetting.deleteMany = async ({ where }) => { deleted = where.userId; return { count: 1 } }
+  await kis.runAll(w.prisma, () => w.deps, LATER + 60000)
+  assert.equal(deleted, 'u1')
+})

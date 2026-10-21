@@ -236,6 +236,13 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
 
   async function ensureAuth() {
     const cached = tokenCache.get(userId)
+    if (cached?.unsaved && !cached.saving && onTokenRefresh) {
+      cached.saving = true
+      Promise.resolve(onTokenRefresh(cached.refreshToken))
+        .then(() => { cached.unsaved = false })
+        .catch(() => {})
+        .finally(() => { cached.saving = false })
+    }
     if (cached?.accessToken && !isTokenExpired(cached.accessToken)) {
       return cached.accessToken
     }
@@ -252,8 +259,17 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
 
         tokenCache.set(userId, { accessToken: newAccessToken, refreshToken: newRefreshToken })
 
+        // The old refresh token is spent the moment Nuvio answers, so the new
+        // one has to reach the database. A failed save is retried, and is not
+        // reported as an expired sign-in - the sign-in works, and the token
+        // kept in memory is saved on the next use.
         if (result.refresh_token && onTokenRefresh) {
           await onTokenRefresh(newRefreshToken)
+            .catch(() => onTokenRefresh(newRefreshToken))
+            .catch((saveError) => {
+              tokenCache.set(userId, { accessToken: newAccessToken, refreshToken: newRefreshToken, unsaved: true })
+              console.warn(`[NuvioProvider] Could not save the new sign-in token for user ${userId}, will retry:`, saveError?.message)
+            })
         }
         return newAccessToken
       } catch (e) {

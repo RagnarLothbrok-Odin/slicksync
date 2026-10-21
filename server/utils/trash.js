@@ -174,16 +174,33 @@ async function restoreTrashItem(prisma, accountId, trashId) {
   throw new Error(`Unsupported trash kind: ${item.kind}`)
 }
 
+// A person's Trash entry going for good takes the history they left with it.
+async function purgePeopleIn(prisma, items) {
+  const { purgePersonLeftovers } = require('./accountDeletion')
+  for (const item of items) {
+    if (item.kind !== 'user') continue
+    let userId = null
+    try { userId = JSON.parse(item.payload)?.user?.id || null } catch {}
+    await purgePersonLeftovers(prisma, userId).catch((e) => console.error('[Trash] Could not clear a deleted person\'s history:', e?.message))
+  }
+}
+
 async function purgeTrashItem(prisma, accountId, trashId) {
-  await prisma.trashItem.deleteMany({ where: { id: trashId, accountId: accountId || 'default' } })
+  const where = { id: trashId, accountId: accountId || 'default' }
+  const items = await prisma.trashItem.findMany({ where, select: { kind: true, payload: true } }).catch(() => [])
+  await prisma.trashItem.deleteMany({ where })
+  await purgePeopleIn(prisma, items)
 }
 
 /** Drops anything past the retention window. Safe to call repeatedly. */
 async function purgeExpiredTrash(prisma) {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000)
   try {
-    const res = await prisma.trashItem.deleteMany({ where: { deletedAt: { lt: cutoff } } })
+    const where = { deletedAt: { lt: cutoff } }
+    const people = await prisma.trashItem.findMany({ where: { ...where, kind: 'user' }, select: { kind: true, payload: true } }).catch(() => [])
+    const res = await prisma.trashItem.deleteMany({ where })
     if (res.count > 0) console.log(`[Trash] Purged ${res.count} expired item(s)`)
+    await purgePeopleIn(prisma, people)
   } catch (e) {
     console.error('[Trash] Purge failed:', e?.message)
   }

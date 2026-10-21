@@ -1189,6 +1189,8 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   router.get('/:id/watch-copy/status', async (req, res) => {
     const watchCopy = require('../utils/watchCopy')
     const id = String(req.params.id)
+    const person = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) }, select: { id: true } }).catch(() => null)
+    if (!person) return res.status(404).json({ message: 'User not found' })
     res.json({ job: watchCopy.status(id), lastRun: await watchCopy.lastRun(prisma, getAccountId(req), id).catch(() => null) })
   })
   router.post('/:id/watch-copy/undo', async (req, res) => {

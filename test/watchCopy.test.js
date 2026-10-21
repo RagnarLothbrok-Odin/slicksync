@@ -354,3 +354,90 @@ test('a whole run: Nuvio profile to Stremio, saved for undo, then undone', async
   assert.equal(runs[0].state, 'undone')
   await assert.rejects(watchCopy.undo(prisma, deps, 'acc', 'u1', 'run1'), /Nothing to undo/)
 })
+
+test('Nuvio undo: keeps what was watched after the copy, and puts an earlier resume point back', async () => {
+  const COPY = Date.parse('2026-10-20T12:00:00Z')
+  const calls = []
+  let state = {
+    watched: [],
+    progress: [{ progress_key: 'tt5_s1e3', content_id: 'tt5', position: 100, duration: 2000, last_watched: COPY - 86400000 }],
+    library: [],
+  }
+  const provider = {
+    getWatchState: async () => state,
+    pushWatchedItems: async (_p, rows) => calls.push(['watched', rows.length]),
+    pushWatchProgress: async (_p, rows) => calls.push(['progress', rows.map((r) => [r.progress_key, r.position])]),
+    pushLibraryItems: async () => {},
+    deleteWatchedItems: async (_p, rows) => calls.push(['unwatch', rows]),
+    deleteWatchProgress: async (_p, keys) => calls.push(['unprogress', keys]),
+    deleteLibraryItems: async () => {},
+  }
+  const read = await ADAPTERS.nuvio.read(provider, 1)
+  state = {
+    ...state,
+    progress: [{ progress_key: 'tt5_s1e3', content_id: 'tt5', position: 900, duration: 2000, last_watched: COPY }],
+  }
+  const r = await ADAPTERS.nuvio.write(provider, read, [
+    { key: 'tt5', id: 'tt5', type: 'series', changes: { addEpisodes: [{ season: 1, episode: 1, at: 5 }, { season: 1, episode: 2, at: 5 }], resume: { season: 1, episode: 3, position: 900, duration: 2000, at: COPY } } },
+  ], { now: COPY })
+  // Afterwards they watch episode 2 again for real.
+  state = { watched: [{ content_id: 'tt5', season: 1, episode: 1, watched_at: 5 }, { content_id: 'tt5', season: 1, episode: 2, watched_at: COPY + 3600000 }], progress: state.progress, library: [] }
+  calls.length = 0
+  const out = await ADAPTERS.nuvio.undo(provider, r.undo)
+  assert.deepEqual(calls.find((c) => c[0] === 'unwatch')[1], [{ content_id: 'tt5', season: 1, episode: 1 }])
+  assert.deepEqual(calls.find((c) => c[0] === 'progress')[1], [['tt5_s1e3', 100]], 'the resume point from before the copy is back')
+  assert.equal(calls.some((c) => c[0] === 'unprogress'), false)
+  assert.equal(out.kept, 1)
+})
+
+test('Jellyfin undo: played since the copy stays played, a resume point goes back to where it was', async () => {
+  const COPY = Date.parse('2026-10-20T12:00:00Z')
+  const calls = []
+  let rows = [{ itemId: 'm2', type: 'movie', id: 'tt2', played: false, positionMs: 60000, durationMs: 6000000, playedAt: COPY - 86400000 }]
+  const provider = {
+    watchState: async () => rows,
+    titleIndex: async () => null,
+    findItem: async (id) => ({ tt1: 'm1', tt2: 'm2' }[id] || null),
+    setPlayedAt: async () => {},
+    setPosition: async (id, pos) => calls.push(['pos', id, pos]),
+    setPlayed: async (id, played) => calls.push(['played', id, played]),
+  }
+  const read = await ADAPTERS.jellyfin.read(provider, null)
+  const r = await ADAPTERS.jellyfin.write(provider, read, [
+    { key: 'tt1', id: 'tt1', type: 'movie', changes: { markWatched: { at: 5 } } },
+    { key: 'tt2', id: 'tt2', type: 'movie', changes: { resume: { position: 3000000, at: COPY } } },
+  ], { now: COPY })
+  rows = [
+    { itemId: 'm1', played: true, playedAt: COPY + 7200000, positionMs: 0 },
+    { itemId: 'm2', played: false, playedAt: COPY, positionMs: 3000000 },
+  ]
+  calls.length = 0
+  const out = await ADAPTERS.jellyfin.undo(provider, r.undo)
+  assert.equal(calls.some((c) => c[0] === 'played'), false, 'm1 was watched again after the copy')
+  assert.deepEqual(calls, [['pos', 'm2', 60000]])
+  assert.equal(out.kept, 1)
+})
+
+test('a double-tap starts one copy, not two', async () => {
+  watchCopy.forgetForTests()
+  require('../server/utils/watchCopy/locks').forgetForTests()
+  let release
+  const gate = new Promise((r) => { release = r })
+  const people = { u1: { id: 'u1', accountId: 'acc', username: 'Chris', providerType: 'nuvio', nuvioRefreshToken: 'r', nuvioUserId: 'n', nuvioProfileId: 1 } }
+  const nuvioProvider = {
+    getWatchState: async (p) => { await gate; return p === 1 ? { watched: [{ content_id: 'tt8', content_type: 'movie', title: 'Film', watched_at: 5 }], progress: [], library: [] } : { watched: [], progress: [], library: [] } },
+    pushWatchedItems: async () => {}, pushWatchProgress: async () => {}, pushLibraryItems: async () => {},
+  }
+  const prisma = {
+    user: { findFirst: async ({ where }) => people[where.id] || null },
+    userProviderCredential: { findMany: async () => [] },
+    watchCopyRun: { create: async ({ data }) => ({ id: 'r1', ...data }) },
+  }
+  const deps = { createProvider: () => nuvioProvider, decrypt: (t) => t, wait: true }
+  const first = watchCopy.run(prisma, deps, 'acc', 'u1', { from: 'nuvio:1', to: 'nuvio:2' })
+  await assert.rejects(watchCopy.run(prisma, deps, 'acc', 'u1', { from: 'nuvio:1', to: 'nuvio:2' }), /Already copying/)
+  release()
+  const job = await first
+  assert.equal(job.state, 'done')
+  assert.equal(require('../server/utils/watchCopy/locks').holder('acc|u1|nuvio'), null, 'the sign-in is free again')
+})

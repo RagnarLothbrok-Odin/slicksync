@@ -87,7 +87,12 @@ async function startAuthorization() {
   const codeVerifier = base64url(crypto.randomBytes(32))
   const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest())
   const state = crypto.randomBytes(24).toString('hex')
-  pendingStore.set(state, { codeVerifier, expiresAt: Date.now() + PENDING_TTL_MS })
+  // Sign-ins that were started and never finished are dropped here, and the
+  // store is capped - anyone can start one, so it can't be left to grow.
+  const now = Date.now()
+  for (const [key, entry] of pendingStore) if (entry.expiresAt < now) pendingStore.delete(key)
+  while (pendingStore.size >= 5000) pendingStore.delete(pendingStore.keys().next().value)
+  pendingStore.set(state, { codeVerifier, expiresAt: now + PENDING_TTL_MS })
 
   const params = new URLSearchParams({
     response_type: 'code',
