@@ -1,6 +1,6 @@
 'use client';
 
-// The way into Watch Sync from a person's page (inside the Watch
+// The way into AIOSync from a person's page (inside the Watch
 // History section): their sign-in logos and a plain title. Shown only when
 // there is something to copy between - two sign-ins, or two profiles.
 
@@ -55,7 +55,7 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
     >
       <span className="hidden sm:flex">{logos(30)}</span>
       <span className="flex-1 min-w-0">
-        <span className="block font-semibold text-default whitespace-nowrap">Watch Sync</span>
+        <span className="block font-semibold text-default whitespace-nowrap">AIOSync</span>
         <span className="block text-sm text-muted">{what}</span>
         <span className="flex sm:hidden items-center gap-2 mt-2">{logos(22)}{inStep && chip}</span>
       </span>

@@ -1,7 +1,7 @@
 'use client';
 
-// The Watch Sync card on Tasks: a tile per person (with whether Keep in step
-// is on for them) that opens Watch Sync for that person. The page itself is
+// The AIOSync card on Tasks: a tile per person (with whether Keep in step
+// is on for them) that opens AIOSync for that person. The page itself is
 // components/user/WatchSyncView.tsx.
 
 import { useEffect, useState } from 'react';
@@ -27,18 +27,18 @@ export function WatchSyncCard() {
           <ArrowsRightLeftIcon className="w-5 h-5" style={{ color: 'var(--color-secondary)' }} />
         </div>
         <div>
-          <h3 className="text-base font-semibold font-display text-default">Watch Sync</h3>
+          <h3 className="text-base font-semibold font-display text-default">AIOSync</h3>
           <p className="text-xs text-muted">Copy watched titles and resume points between any sign-ins and profiles, or keep them in step</p>
         </div>
       </div>
-      {people && people.length === 0 && <p className="text-sm text-muted">Add people first - Watch Sync works between their sign-ins.</p>}
+      {people && people.length === 0 && <p className="text-sm text-muted">Add people first - AIOSync works between their sign-ins.</p>}
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' }}>
         {(people || []).map((p) => {
           const on = inStep.has(p.id);
           return (
             <Link
               key={p.id}
-              href={`/tasks/watch-sync?person=${encodeURIComponent(p.id)}`}
+              href={`/tasks/aiosync?person=${encodeURIComponent(p.id)}`}
               className="flex items-center gap-3 p-3 rounded-2xl border border-default bg-surface-hover hover:border-[color:var(--color-secondary)] transition-colors"
             >
               <UserAvatar userId={p.id} name={p.username} email={p.email} src={p.avatarUrl || undefined} useGravatar={p.useGravatar} colorIndex={p.colorIndex} size="md" />

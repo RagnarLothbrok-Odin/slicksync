@@ -2547,7 +2547,7 @@ class ApiClient {
     return this.fetch<{ success: boolean }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer/dismiss`, { method: 'POST', body: JSON.stringify({ provider }) });
   }
 
-  // Who has Keep in step on (the Watch Sync card on Tasks).
+  // Who has Keep in step on (the AIOSync card on Tasks).
   async getWatchSyncOverview() {
     return this.fetch<{ keepInStep: string[] }>('/users/watch-sync/overview');
   }

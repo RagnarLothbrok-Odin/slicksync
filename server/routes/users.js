@@ -1254,7 +1254,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
   })
 
-  // Who has Keep in step on, for the Watch Sync card on Tasks.
+  // Who has Keep in step on, for the AIOSync card on Tasks.
   router.get('/watch-sync/overview', async (req, res) => {
     try {
       const rows = await prisma.watchSyncSetting.findMany({ where: { accountId: getAccountId(req), enabled: true }, select: { userId: true } })

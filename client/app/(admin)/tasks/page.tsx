@@ -1504,7 +1504,7 @@ export default function TasksPage() {
           />
         </PageSection>
 
-        {/* Watch Sync - copy watch history between sign-ins and profiles, or
+        {/* AIOSync - copy watch history between sign-ins and profiles, or
             keep them in step (components/user/WatchSyncCard.tsx). */}
         <PageSection>
           <WatchSyncCard />

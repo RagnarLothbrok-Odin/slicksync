@@ -1,6 +1,6 @@
 'use client';
 
-// Watch Sync, reached from Tasks: the same page as on a person's own page,
+// AIOSync, reached from Tasks: the same page as on a person's own page,
 // with a For switcher on top to change person without leaving it.
 
 import { Suspense, useEffect, useRef, useState } from 'react';
@@ -71,13 +71,13 @@ function WatchSyncFromTasks() {
   const wanted = search.get('person');
   const current = people?.find((p) => p.id === wanted) || people?.[0] || null;
   if (!people) return null;
-  if (!current) return <p className="text-center text-muted p-10">Add people first - Watch Sync works between their sign-ins.</p>;
+  if (!current) return <p className="text-center text-muted p-10">Add people first - AIOSync works between their sign-ins.</p>;
   return (
     <WatchSyncView
       key={current.id}
       userId={current.id}
       home="tasks"
-      forSlot={<ForSwitcher people={people} current={current} onPick={(id) => router.replace(`/tasks/watch-sync?person=${encodeURIComponent(id)}`)} />}
+      forSlot={<ForSwitcher people={people} current={current} onPick={(id) => router.replace(`/tasks/aiosync?person=${encodeURIComponent(id)}`)} />}
     />
   );
 }

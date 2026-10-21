@@ -1,7 +1,7 @@
 'use client';
 
-// Watch Sync from a person's own page (components/user/WatchSyncView.tsx);
-// Tasks opens the same page at /tasks/watch-sync.
+// AIOSync from a person's own page (components/user/WatchSyncView.tsx);
+// Tasks opens the same page at /tasks/aiosync.
 
 import { useParams } from 'next/navigation';
 import { WatchSyncView } from '@/components/user/WatchSyncView';

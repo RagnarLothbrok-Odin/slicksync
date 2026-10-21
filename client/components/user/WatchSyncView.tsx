@@ -1,6 +1,6 @@
 'use client';
 
-// Watch Sync (server/utils/watchCopy): watched titles and resume
+// AIOSync (server/utils/watchCopy): watched titles and resume
 // points from any sign-in or profile - this person's or anyone else's - to
 // another. COPY FROM and COPY TO are two big boxes in their own colours with
 // the direction arrow between them; tapping a box opens a picker anchored to
@@ -340,7 +340,7 @@ function Poster({ item, selected, matched, onToggle, onMatch, rpdb }: {
   );
 }
 
-// Watch Sync for one person. Reached two ways: from their own page
+// AIOSync for one person. Reached two ways: from their own page
 // (home 'person', back goes to them) and from Tasks (home 'tasks', with the
 // For switcher passed in as forSlot).
 export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: string; home?: 'person' | 'tasks'; forSlot?: React.ReactNode }) {
@@ -502,15 +502,15 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
       {layoutMode !== 'nebula' && (
         <Header
           title={<Breadcrumbs items={home === 'tasks'
-            ? [{ label: 'Tasks', href: '/tasks' }, { label: 'Watch Sync' }]
-            : [{ label: 'Users', href: '/users' }, { label: person || 'Person', href: `/users/${encodeURIComponent(userId)}` }, { label: 'Watch Sync' }]} className="text-xl font-semibold" />}
+            ? [{ label: 'Tasks', href: '/tasks' }, { label: 'AIOSync' }]
+            : [{ label: 'Users', href: '/users' }, { label: person || 'Person', href: `/users/${encodeURIComponent(userId)}` }, { label: 'AIOSync' }]} className="text-xl font-semibold" />}
           subtitle={subtitle}
           actions={backButton}
         />
       )}
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-4 md:p-8'}>
         <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
-          {layoutMode === 'nebula' && <NebulaPageHeading title="Watch Sync" subtitle={subtitle} leading={backButton} />}
+          {layoutMode === 'nebula' && <NebulaPageHeading title="AIOSync" subtitle={subtitle} leading={backButton} />}
           {forSlot}
           <PageSection>
             {lastRun && (
