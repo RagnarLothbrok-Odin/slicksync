@@ -180,13 +180,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     if (hit && Date.now() - hit.at < LIVE_ADDON_COUNT_MS) return hit.count
     const { getUserAddons } = require('../utils/sync')
     const result = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
-    if (!result.success || !Array.isArray(result.addons)) {
-      if (!result.success) console.error(`Error fetching live addons for user ${user.id}:`, result.error)
-      return 0
-    }
+    // A sign-in that can't answer is kept the same minute too - otherwise
+    // every visit waits on it again.
+    const count = result.success && Array.isArray(result.addons) ? result.addons.length : 0
+    if (!result.success) console.error(`Error fetching live addons for user ${user.id}:`, result.error)
     if (liveAddonCountCache.size > 5000) liveAddonCountCache.delete(liveAddonCountCache.keys().next().value)
-    liveAddonCountCache.set(key, { at: Date.now(), count: result.addons.length })
-    return result.addons.length
+    liveAddonCountCache.set(key, { at: Date.now(), count })
+    return count
   }
 
   router.get('/', async (req, res) => {
