@@ -1,8 +1,8 @@
 'use client';
 
 // The way into AIOSync from a person's page (inside the Watch
-// History section): their sign-in logos and a plain title. Shown only when
-// there is something to copy between - two sign-ins, or two profiles.
+// History section): their sign-in logos and a plain title. Shown for anyone
+// with a sign-in - with a single one they copy to or from someone else's.
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -25,9 +25,11 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
     api.getKeepInStep(userId).then((k) => setInStep(k.enabled)).catch(() => {});
   }, [userId]);
   if (!sides) return null;
+  if (!sides.length) return null;
   const places = sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0);
-  if (places < 2) return null;
-  const what = `Copy once or keep in step · ${name}’s ${sides.length > 1 ? `${sides.length} sign-ins` : `${places} profiles`}`;
+  const what = places < 2
+    ? `Copy to or from someone else’s sign-in · ${name}’s ${sides[0].name}`
+    : `Copy once or keep in step · ${name}’s ${sides.length > 1 ? `${sides.length} sign-ins` : `${places} profiles`}`;
   // One sign-in with several profiles: their pictures (colour + initial when none).
   const profilePics = (size: number) => (
     <span className="flex gap-1 shrink-0">
@@ -37,7 +39,7 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
         : <span key={p.side} className="rounded-full flex items-center justify-center text-white font-bold" style={{ width: size, height: size, fontSize: size * 0.45, background: p.color || LOOK[sides[0].kind]?.bg }}>{(p.name || '?').slice(0, 1).toUpperCase()}</span>))}
     </span>
   )
-  const logos = (size: number) => sides.length === 1 ? profilePics(size) : (
+  const logos = (size: number) => sides.length === 1 && sides[0].profiles.length ? profilePics(size) : (
     <span className="flex gap-1 shrink-0">
       {sides.map((s) => (
         <span key={s.provider} className="flex items-center justify-center text-white font-bold" style={{ width: size, height: size, borderRadius: size * 0.3, background: LOOK[s.kind]?.bg, fontSize: size * 0.42 }}>
