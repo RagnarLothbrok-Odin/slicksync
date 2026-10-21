@@ -539,6 +539,7 @@ model EpisodeWatchHistory {
   createdAt   DateTime @default(now())
 
   @@index([accountId, userId, watchedAt])
+  @@index([accountId, watchedAt]) // account-wide windows: Continue Watching, stats, Year in Review
   @@index([accountId, userId, showId])
   @@unique([accountId, userId, videoId]) // One entry per episode per user
   @@map("episode_watch_history")
@@ -578,6 +579,7 @@ model MovieWatchHistory {
   createdAt DateTime @default(now())
 
   @@index([accountId, userId, watchedAt])
+  @@index([accountId, watchedAt]) // account-wide windows: Continue Watching, stats, Year in Review
   @@unique([accountId, userId, itemId]) // One entry per movie per user
   @@map("movie_watch_history")
 }
@@ -720,6 +722,7 @@ model WatchSession {
 
   @@unique([accountId, userId, itemId])
   @@index([accountId, userId, startTime])
+  @@index([accountId, startTime]) // account-wide windows: stats, Now/Recently watched
   @@index([accountId, userId, isActive])
   @@index([accountId, isActive])
   @@map("watch_sessions")

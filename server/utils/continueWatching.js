@@ -146,19 +146,26 @@ async function getResumeState(prisma, accountId, userId, itemId, videoId) {
 // a wipe - so the row is never stale in a way anyone could notice.
 const CW_MEMO_TTL_MS = 30 * 1000
 const cwMemo = new Map()
+const cwBuilding = new Map()
 
 function invalidateContinueWatching(accountId) {
   const prefix = `${accountId || 'default'}:`
   for (const key of cwMemo.keys()) if (key.startsWith(prefix)) cwMemo.delete(key)
+  // A computation already under way read the old rows: not kept, not shared.
+  for (const key of cwBuilding.keys()) if (key.startsWith(prefix)) cwBuilding.delete(key)
 }
 
 async function getContinueWatching(prisma, accountId, limit = 8) {
   const key = `${accountId || 'default'}:${limit}`
   const hit = cwMemo.get(key)
   if (hit && Date.now() - hit.at < CW_MEMO_TTL_MS) return hit.value
-  const value = await computeContinueWatching(prisma, accountId, limit)
-  cwMemo.set(key, { at: Date.now(), value })
-  return value
+  // Several screens opening at once share one computation.
+  if (cwBuilding.has(key)) return cwBuilding.get(key)
+  const promise = computeContinueWatching(prisma, accountId, limit)
+    .then((value) => { if (cwBuilding.get(key) === promise) cwMemo.set(key, { at: Date.now(), value }); return value })
+    .finally(() => { if (cwBuilding.get(key) === promise) cwBuilding.delete(key) })
+  cwBuilding.set(key, promise)
+  return promise
 }
 
 async function computeContinueWatching(prisma, accountId, limit = 8) {

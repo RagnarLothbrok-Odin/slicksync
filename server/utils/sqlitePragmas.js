@@ -41,4 +41,22 @@ async function applySqlitePragmas(prisma) {
   return applied
 }
 
-module.exports = { applySqlitePragmas }
+/**
+ * Keeps SQLite's query planner statistics fresh. Without them it guesses at
+ * which index to use, and guesses worse as tables grow - it had never been
+ * run here. PRAGMA optimize only analyzes the tables that need it, and the
+ * statistics live in the file, so every connection benefits. A few minutes
+ * after boot (not on the startup path), then twice a day.
+ */
+function scheduleSqliteOptimize(prisma) {
+  const url = String(process.env.DATABASE_URL || '')
+  if (!url.startsWith('file:')) return null
+  const optimize = (all) => prisma.$executeRawUnsafe(all ? 'PRAGMA optimize=0x10002' : 'PRAGMA optimize')
+    .catch((e) => console.warn('[SQLite] optimize failed:', e?.message))
+  setTimeout(() => optimize(true), 3 * 60 * 1000).unref?.()
+  const timer = setInterval(() => optimize(false), 12 * 60 * 60 * 1000)
+  timer.unref?.()
+  return timer
+}
+
+module.exports = { applySqlitePragmas, scheduleSqliteOptimize }

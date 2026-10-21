@@ -532,9 +532,14 @@ export default function DashboardPage() {
   // 30s auto-refresh below so Now Playing stays live without the whole
   // Dashboard flashing back to a loading state every cycle (same pattern
   // Activity's own 30s Now Playing refresh already uses).
+  // The live refresh only needs Now Playing and the metrics; the addon list
+  // and account counts barely move, so they're re-read every few minutes
+  // rather than on every 30s tick and every play/stop.
+  const sideDataAtRef = useRef(0);
   const refreshData = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     setError(null);
+    const withSideData = !silent || Date.now() - sideDataAtRef.current > 5 * 60 * 1000;
     try {
       const [stats, metrics, addons] = await Promise.all([
         // Separately caught - a fresh account has no API key configured
@@ -543,16 +548,17 @@ export default function DashboardPage() {
         // fall back gracefully to null), and shouldn't block metrics/addons
         // from loading or put a scary "Failed to load dashboard data" banner
         // in front of a brand new signup.
-        api.getAccountStats().catch(() => null),
+        withSideData ? api.getAccountStats().catch(() => null) : Promise.resolve(undefined),
         api.getMetrics('7d'),
-        api.getAddons(),
+        withSideData ? api.getAddons() : Promise.resolve(undefined),
       ]);
 
-      setAccountStats(stats);
+      if (withSideData) sideDataAtRef.current = Date.now();
+      if (stats !== undefined) setAccountStats(stats);
       setMetricsData(metrics);
       setMetricsAt(Date.now());
       setNowTick(Date.now());
-      setRecentAddons(addons.slice(0, 3));
+      if (addons) setRecentAddons(addons.slice(0, 3));
     } catch (err) {
       console.error('Dashboard data fetch failed:', err);
       if (!silent) setError(err as Error);
@@ -570,9 +576,14 @@ export default function DashboardPage() {
     const stopPoll = startAdaptivePoll(() => refreshData(true), 30000, 180000);
     // SSE accelerant: a stream starting or stopping refetches immediately
     // instead of waiting out the interval above (which stays as fallback).
-    const onLive = () => refreshData(true);
+    // Several devices starting at once send a burst: one refresh for it.
+    let liveTimer: ReturnType<typeof setTimeout> | null = null;
+    const onLive = () => {
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(() => { liveTimer = null; refreshData(true); }, 1500);
+    };
     window.addEventListener('slicksync:live-nowplaying', onLive);
-    return () => { stopPoll(); window.removeEventListener('slicksync:live-nowplaying', onLive); };
+    return () => { stopPoll(); if (liveTimer) clearTimeout(liveTimer); window.removeEventListener('slicksync:live-nowplaying', onLive); };
   }, [refreshData]);
 
   // Derived stats with fallbacks

@@ -226,30 +226,10 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     const fetchRequests = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
-        const invitations = await api.getInvitations();
-
-        // One round-trip per invitation without its own `requests` array,
-        // fired concurrently rather than awaited one at a time in a loop -
-        // a household with several invitations was serializing N sequential
-        // fetches on every 30s poll tick, all on the shared api.ts request
-        // path every other in-flight call also uses.
-        const perInvitation = await Promise.all(invitations.map(async (inv) => {
-          const invName = inv.name || inv.code || inv.inviteCode || 'Invitation';
-          const groupName = (inv as any).groupName || 'a group';
-          if (inv.requests && Array.isArray(inv.requests)) {
-            return inv.requests.map((req: any) => ({ ...req, invitationName: invName, groupName }));
-          }
-          try {
-            const reqs = await api.getInvitationRequests(inv.id);
-            return Array.isArray(reqs) ? reqs.map((req: any) => ({ ...req, invitationName: invName, groupName })) : [];
-          } catch {
-            return [];
-          }
-        }));
-        const allRequests: any[] = perInvitation.flat();
-
-        setPendingRequests(allRequests.filter((r: any) => r.status === 'pending'));
-        setAcceptedRequests(allRequests.filter((r: any) => r.status === 'accepted'));
+        // One small read of just the requests the bell shows.
+        const { pending, accepted } = await api.getInvitationBell();
+        setPendingRequests(pending);
+        setAcceptedRequests(accepted);
       } catch (e) {
         console.error('Failed to fetch pending requests', e);
       }

@@ -3,7 +3,10 @@
 // and read by both /users/metrics and /ext/metrics.json routes.
 
 const metricsCache = new Map()
-const METRICS_TTL_MS = 5 * 60 * 1000 // 5 minute TTL for cached metrics
+// A little longer than the 5-minute background rebuild, so an entry is
+// replaced before it expires instead of expiring just before - which left a
+// window every few minutes where a visit paid for a full rebuild itself.
+const METRICS_TTL_MS = 7 * 60 * 1000
 
 // Which periods anyone has actually looked at, and when. The background
 // precompute rebuilds every period it is told to, whether or not a person
@@ -68,6 +71,17 @@ function setCachedMetrics(accountId, period, data) {
   })
 }
 
+// Builds already under way, so several tabs opening the dashboard at once
+// share one build instead of running one each.
+const building = new Map()
+function buildOnce(accountId, period, build) {
+  const key = makeKey(accountId, period)
+  if (building.has(key)) return building.get(key)
+  const promise = Promise.resolve().then(build).finally(() => building.delete(key))
+  building.set(key, promise)
+  return promise
+}
+
 /**
  * Clear all cached metrics for a given account.
  */
@@ -83,6 +97,7 @@ function clearMetricsForAccount(accountId) {
 module.exports = {
   getCachedMetrics,
   setCachedMetrics,
+  buildOnce,
   clearMetricsForAccount,
   noteRequested,
   recentlyRequestedPeriods

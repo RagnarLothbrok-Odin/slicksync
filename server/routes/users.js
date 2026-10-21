@@ -169,6 +169,26 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   });
 
   // Get all users
+  // The Users list's live addon count asks each person's Stremio/Nuvio
+  // account - a network round trip per person on every visit. Kept a minute,
+  // and dropped as soon as they're synced (the key carries their last sync).
+  const liveAddonCountCache = new Map()
+  const LIVE_ADDON_COUNT_MS = 60 * 1000
+  async function liveAddonCount(user, req) {
+    const key = `${user.id}|${user.lastSyncedAt ? new Date(user.lastSyncedAt).getTime() : ''}`
+    const hit = liveAddonCountCache.get(key)
+    if (hit && Date.now() - hit.at < LIVE_ADDON_COUNT_MS) return hit.count
+    const { getUserAddons } = require('../utils/sync')
+    const result = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
+    if (!result.success || !Array.isArray(result.addons)) {
+      if (!result.success) console.error(`Error fetching live addons for user ${user.id}:`, result.error)
+      return 0
+    }
+    if (liveAddonCountCache.size > 5000) liveAddonCountCache.delete(liveAddonCountCache.keys().next().value)
+    liveAddonCountCache.set(key, { at: Date.now(), count: result.addons.length })
+    return result.addons.length
+  }
+
   router.get('/', async (req, res) => {
     try {
       const users = await prisma.user.findMany({
@@ -193,22 +213,47 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         console.warn('[users] last seen failed:', error.message)
       }
 
+      // Every group once (not one query per person); each person's are the
+      // ones listing them, in the same order as before.
+      const allGroups = await prisma.group.findMany({
+        where: scopedWhere(req, {}),
+        select: { id: true, name: true, userIds: true, _count: { select: { addons: true } } },
+      })
+      const groupMembers = allGroups.map((g) => {
+        try { return new Set(JSON.parse(g.userIds || '[]')) } catch { return new Set() }
+      })
+
+      // Watch time for everyone in one read of the account's activity, not
+      // one full read per person. Cross-user dedup applied so library-sync
+      // phantoms from shared-email sibling accounts don't inflate anyone's
+      // total - see utils/watchDedup.js for the rationale.
+      const watchSecondsByUser = new Map()
+      try {
+        const accountIdForScope = getAccountId(req) || 'default'
+        const [activities, siblings] = await Promise.all([
+          prisma.watchActivity.findMany({
+            where: { accountId: accountIdForScope },
+            select: { userId: true, itemId: true, date: true, watchTimeSeconds: true, profileLabel: true }
+          }),
+          prisma.user.findMany({
+            where: { accountId: accountIdForScope },
+            select: { id: true, email: true, nuvioProfileId: true }
+          })
+        ])
+        const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require('../utils/watchDedup')
+        for (const a of dedupWatchActivityBySharedEmail(activities, findSharedEmailUserIds(siblings))) {
+          watchSecondsByUser.set(a.userId, (watchSecondsByUser.get(a.userId) || 0) + (a.watchTimeSeconds || 0))
+        }
+      } catch (error) {
+        console.warn('Error fetching watch time:', error.message)
+      }
+
       // Transform data for frontend compatibility
       const transformedUsers = await Promise.all(users.map(async (user) => {
-        // For SQLite, we need to find groups that contain this user
-        const groups = await prisma.group.findMany({
-          where: scopedWhere(req, { userIds: { contains: user.id } }),
-          include: {
-            addons: {
-              include: {
-                addon: true
-              }
-            }
-          }
-        })
+        const groups = allGroups.filter((g, i) => groupMembers[i].has(user.id))
 
         const userGroup = groups[0] // Use first group
-        const addonCount = userGroup?.addons?.length || 0
+        const addonCount = userGroup?._count?.addons || 0
 
         // Calculate Stremio addons count by fetching live data
         let stremioAddonsCount = 0
@@ -219,13 +264,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           // of a genuine live count, which is why counts and sync status could differ
           // between provider types even when both were actually in sync)
           try {
-            const { getUserAddons } = require('../utils/sync')
-            const result = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
-            if (result.success && Array.isArray(result.addons)) {
-              stremioAddonsCount = result.addons.length
-            } else if (!result.success) {
-              console.error(`Error fetching live addons for user ${user.id}:`, result.error)
-            }
+            stremioAddonsCount = await liveAddonCount(user, req)
           } catch (error) {
             console.error(`Error fetching live addons for user ${user.id}:`, error.message)
             // No fallback to database value available
@@ -235,33 +274,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
         const excludedAddons = parseAddonIds(user.excludedAddons)
         const protectedAddons = parseProtectedAddons(user.protectedAddons, req)
 
-        // Calculate total watch time from watch activity (like old slicksync).
-        // Cross-user dedup applied so library-sync phantoms from shared-email
-        // sibling accounts don't inflate this user's total — see
-        // utils/watchDedup.js for the rationale.
-        let totalWatchTimeMinutes = 0
-        try {
-          const accountIdForScope = user.accountId || getAccountId(req) || 'default'
-          const [activities, siblings] = await Promise.all([
-            prisma.watchActivity.findMany({
-              where: { accountId: accountIdForScope },
-              select: { userId: true, itemId: true, date: true, watchTimeSeconds: true, profileLabel: true }
-            }),
-            prisma.user.findMany({
-              where: { accountId: accountIdForScope },
-              select: { id: true, email: true, nuvioProfileId: true }
-            })
-          ])
-          const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require('../utils/watchDedup')
-          const shared = findSharedEmailUserIds(siblings)
-          const cleaned = dedupWatchActivityBySharedEmail(activities, shared)
-          const totalSeconds = cleaned
-            .filter((a) => a.userId === user.id)
-            .reduce((sum, a) => sum + (a.watchTimeSeconds || 0), 0)
-          totalWatchTimeMinutes = Math.round(totalSeconds / 60)
-        } catch (error) {
-          console.warn(`Error fetching watch time for user ${user.id}:`, error.message)
-        }
+        const totalWatchTimeMinutes = Math.round((watchSecondsByUser.get(user.id) || 0) / 60)
 
         return {
           id: user.id,
@@ -2056,6 +2069,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
   // The Activity feed asks for the posters of the newest sessions the moment
   // this response lands; have them ready. Newest-first, capped - the feed
   // shows the first screenful, not the whole period.
+  const warmedMetrics = new WeakSet() // cached builds whose posters were warmed
   const warmActivityPosters = (metrics) => {
     try {
       const sessions = Array.isArray(metrics?.watchSessions) ? metrics.watchSessions.slice(0, 60) : []
@@ -2082,7 +2096,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       // handed the small, fast payload it was built for.
       const deepActivity = req.query.deep === '1' || req.query.deep === 'true'
 
-      const { getCachedMetrics, setCachedMetrics } = require('../utils/metricsCache')
+      const { getCachedMetrics, setCachedMetrics, buildOnce } = require('../utils/metricsCache')
       const { buildMetricsForAccount } = require('../utils/metricsBuilder')
 
       // Try in-memory metrics cache first (populated by activityMonitor every 5 minutes)
@@ -2100,19 +2114,15 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
           console.warn('[API] Live Now Playing failed, sending the cached list:', e?.message)
         }
         res.json(answer)
-        warmActivityPosters(answer)
+        // Posters are warmed once per cached build, not on every visit.
+        if (!warmedMetrics.has(cached)) { warmedMetrics.add(cached); warmActivityPosters(answer) }
         return
       }
 
       console.log(`[API] Building metrics for ${period}...`)
       // Build on demand (also used on first boot or if scheduler hasn't run yet)
-      const metrics = await buildMetricsForAccount({
-        prisma,
-        accountId,
-        period,
-        decrypt,
-        deepActivity
-      })
+      const build = () => buildMetricsForAccount({ prisma, accountId, period, decrypt, deepActivity })
+      const metrics = deepActivity ? await build() : await buildOnce(accountId, period, build)
 
       console.log(`[API] Metrics built. Sessions: ${metrics.watchSessions?.length}, Episodes: ${metrics.recentEpisodes?.length}`)
 

@@ -117,6 +117,7 @@ const prisma = new PrismaClient();
 require('./utils/sqlitePragmas').applySqlitePragmas(prisma)
   .then((applied) => { if (applied) console.log('[SQLite] runtime settings:', JSON.stringify(applied)) })
   .catch((e) => console.warn('[SQLite] could not apply runtime settings:', e?.message));
+require('./utils/sqlitePragmas').scheduleSqliteOptimize(prisma);
 console.log('Prisma client initialized:', !!prisma);
 
 // Provider factory: routes addon operations to Stremio or Nuvio based on user.providerType

@@ -1362,6 +1362,12 @@ class ApiClient {
     return this.fetch<Invitation[]>('/invitations');
   }
 
+  // Just what the notification bell shows: waiting requests and the last
+  // month's accepted ones.
+  async getInvitationBell() {
+    return this.fetch<{ pending: any[]; accepted: any[] }>('/invitations/bell');
+  }
+
   async createInvitation(data: CreateInvitationData) {
     // Map frontend field names to backend field names
     // IMPORTANT: Use null instead of undefined so JSON.stringify includes the key
