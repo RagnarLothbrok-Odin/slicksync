@@ -57,6 +57,8 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
     let { x, y } = position;
     if (x + width > vw - pad) x = Math.max(pad, Math.min(position.x - width, vw - width - pad));
     if (y + height > vh - pad) y = position.y - height >= pad ? position.y - height : vh - height - pad;
+    x = Math.min(x, vw - width - pad);
+    y = Math.min(y, vh - height - pad);
     setAdjustedPosition({ x: Math.max(pad, x), y: Math.max(pad, y) });
   }, [position]);
 
