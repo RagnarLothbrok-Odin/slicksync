@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -43,23 +43,32 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
   // Adjust position to keep within viewport
   const [adjustedPosition, setAdjustedPosition] = useState(position);
 
-  useEffect(() => {
-    if (isOpen && menuRef.current) {
-      const rect = menuRef.current.getBoundingClientRect();
-      let { x, y } = position;
+  // Kept whole on screen, and again whenever the menu changes size (a confirm
+  // step inside it makes it taller): near the right edge it moves left, near
+  // the bottom it opens upwards from the click, and it never goes past any
+  // edge. Taller than the screen, it scrolls inside (maxHeight below).
+  const fit = useCallback(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const pad = 10;
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = window.innerHeight;
+    const { width, height } = el.getBoundingClientRect();
+    let { x, y } = position;
+    if (x + width > vw - pad) x = Math.max(pad, Math.min(position.x - width, vw - width - pad));
+    if (y + height > vh - pad) y = position.y - height >= pad ? position.y - height : vh - height - pad;
+    setAdjustedPosition({ x: Math.max(pad, x), y: Math.max(pad, y) });
+  }, [position]);
 
-      if (x + rect.width > window.innerWidth) {
-        x = window.innerWidth - rect.width - 10;
-      }
-      if (y + rect.height > window.innerHeight) {
-        y = window.innerHeight - rect.height - 10;
-      }
-
-      setAdjustedPosition({ x, y });
-    } else {
-      setAdjustedPosition(position);
-    }
-  }, [isOpen, position]);
+  useLayoutEffect(() => {
+    if (!isOpen) { setAdjustedPosition(position); return; }
+    fit();
+    const el = menuRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isOpen, position, fit]);
 
   if (!isOpen) return null;
 
@@ -76,6 +85,8 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
           top: adjustedPosition.y,
           left: adjustedPosition.x,
           zIndex: 9999, // High z-index to be on top of everything
+          maxHeight: 'calc(100vh - 20px)',
+          overflowY: 'auto',
         }}
         className="min-w-[180px] py-1.5 rounded-xl shadow-xl bg-surface border border-default backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()} // Prevent click from bubbling

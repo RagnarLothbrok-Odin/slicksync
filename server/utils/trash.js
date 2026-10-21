@@ -462,6 +462,14 @@ async function restoreExtendedKind(prisma, accountIdValue, item, payload) {
     return { kind: 'wipe', label: item.label, restoredEpisodes: restored }
   }
 
+  // "Remove from Activity" (utils/removeViewing.js).
+  if (item.kind === 'viewing') {
+    const restored = await require('./removeViewing').restoreViewing(prisma, payload)
+    try { require('./metricsCache').clearMetricsForAccount(accountIdValue) } catch { /* optional */ }
+    try { require('./continueWatching').invalidateContinueWatching(accountIdValue) } catch { /* optional */ }
+    return { kind: 'viewing', label: item.label, restored }
+  }
+
   if (item.kind === 'import') {
     const { userId, createdItemIds, createdRatingIds } = payload
     const del = await prisma.movieWatchHistory.deleteMany({

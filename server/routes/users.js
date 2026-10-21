@@ -1254,6 +1254,18 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
   })
 
+  // "Remove from Activity": one viewing out of the page and the person's
+  // watch time and history, into the Trash (utils/removeViewing.js).
+  router.post('/:id/activity/remove', async (req, res) => {
+    try {
+      const r = await require('../utils/removeViewing').removeViewing(prisma, getAccountId(req), String(req.params.id), req.body || {})
+      res.json(r)
+    } catch (error) {
+      const status = error?.status && error.status < 500 ? error.status : 500
+      res.status(status).json({ message: status < 500 ? error.message : publicMessage(error, 'Could not remove that viewing') })
+    }
+  })
+
   // Who is kept in step with what, for the AIOSync card on Tasks: per person,
   // the names of their sign-ins and profiles that take part.
   router.get('/watch-sync/overview', async (req, res) => {

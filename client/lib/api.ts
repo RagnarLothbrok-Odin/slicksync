@@ -2547,6 +2547,12 @@ class ApiClient {
     return this.fetch<{ success: boolean }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer/dismiss`, { method: 'POST', body: JSON.stringify({ provider }) });
   }
 
+  // "Remove from Activity": one viewing (person, title or episode, one day)
+  // out of the page and their watch time and history; Undo via the Trash.
+  async removeActivityViewing(userId: string, body: { itemId: string; videoId?: string | null; day: string; from: string; to: string }) {
+    return this.fetch<{ trashId: string; label: string; removed: { history: number; watchTimeSeconds: number; sessions: number } }>(`/users/${encodeURIComponent(userId)}/activity/remove`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
   // Who has Keep in step on (the AIOSync card on Tasks).
   async getWatchSyncOverview() {
     return this.fetch<{ keepInStep: string[]; synced: { userId: string; name: string; places: string[] }[] }>('/users/watch-sync/overview');
