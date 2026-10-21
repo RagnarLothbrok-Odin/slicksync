@@ -2531,6 +2531,11 @@ class ApiClient {
     return this.fetch<{ success: boolean }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer/dismiss`, { method: 'POST', body: JSON.stringify({ provider }) });
   }
 
+  // AIOStreams servers people here sign in to, for "Open in AIOStreams".
+  async getAioStreamsServers() {
+    return this.fetch<{ servers: { address: string; people: string[] }[] }>(`/jellyfin/aiostreams-servers`);
+  }
+
   // Keep in step (server/utils/watchCopy/keepInStep.js).
   async getKeepInStep(userId: string) {
     return this.fetch<KeepInStep>(`/users/${encodeURIComponent(userId)}/keep-in-step`);

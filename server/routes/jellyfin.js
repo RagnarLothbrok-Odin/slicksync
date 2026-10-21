@@ -582,6 +582,36 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
   });
 
   // A person's household, and - for someone separated out of one - whose it is.
+  // The AIOStreams servers people here sign in to, for "Open in AIOStreams"
+  // on a title: its apps open aiostreams://item/<id>?server=<address> links,
+  // where the address is the API base the app saved - the one SlickSync signs
+  // in to. One entry per address, named by who uses it.
+  router.get('/aiostreams-servers', async (req, res) => {
+    try {
+      const accountId = getAccountId(req);
+      const people = await prisma.user.findMany({ where: { accountId }, select: { id: true, username: true, jellyfinServerKind: true, jellyfinServerUrl: true } });
+      const byId = new Map(people.map((p) => [p.id, p]));
+      const creds = await prisma.userProviderCredential.findMany({
+        where: { userId: { in: people.map((p) => p.id) }, jellyfinServerKind: 'aiostreams', jellyfinServerUrl: { not: null } },
+        select: { userId: true, jellyfinServerUrl: true },
+      }).catch(() => []);
+      const rows = [
+        ...people.filter((p) => p.jellyfinServerKind === 'aiostreams' && p.jellyfinServerUrl).map((p) => ({ name: p.username, address: p.jellyfinServerUrl })),
+        ...creds.map((c) => ({ name: byId.get(c.userId)?.username || '', address: c.jellyfinServerUrl })),
+      ];
+      const servers = new Map();
+      for (const r of rows) {
+        const address = String(r.address).replace(/\/+$/, '');
+        const s = servers.get(address) || { address, people: [] };
+        if (r.name && !s.people.includes(r.name)) s.people.push(r.name);
+        servers.set(address, s);
+      }
+      res.json({ servers: [...servers.values()] });
+    } catch (error) {
+      res.json({ servers: [] });
+    }
+  });
+
   router.get('/users/:id/household', async (req, res) => {
     try {
       const accountId = getAccountId(req);

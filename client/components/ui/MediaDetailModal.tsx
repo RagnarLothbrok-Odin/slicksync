@@ -6,6 +6,7 @@ import { BookmarkIcon as BookmarkOutlineIcon, ChevronLeftIcon, ChevronDownIcon, 
 import { Modal } from './Modal';
 import { Badge } from './Badge';
 import { AddToListButton } from './AddToListButton';
+import { buildAioStreamsAppUrl } from '@/lib/aiostreamsLink';
 import { metacriticColor as metacriticTextColor } from './RatingBadges';
 import { api, MediaDetails, DiscoverItem, SeriesSeason } from '@/lib/api';
 import { toast } from './Toast';
@@ -55,6 +56,37 @@ interface MediaDetailModalProps {
   // Watchlist tab (both reading from the page's own already-fetched list,
   // not a fresh request) kept showing the old state until a full reload.
   onWatchlistChange?: (itemId: string, inWatchlist: boolean) => void;
+}
+
+// The account's AIOStreams servers, read once per page load (see
+// lib/aiostreamsLink.ts). An empty list hides Open in AIOStreams.
+let aioServersPromise: Promise<{ address: string; people: string[] }[]> | null = null;
+function loadAioServers() {
+  if (!aioServersPromise) aioServersPromise = api.getAioStreamsServers().then((r) => r.servers || []).catch(() => []);
+  return aioServersPromise;
+}
+
+// Bookmark and Watched as small soft pills - under the title on a computer,
+// after the ratings on a phone (with + Catalog beside them).
+function SmallPill({ on, tint, onClick, busy, icon, label, title }: {
+  on: boolean; tint: string; onClick: () => void; busy?: boolean; icon: React.ReactNode; label: string; title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      title={title}
+      aria-pressed={on}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap border transition-colors ${busy ? 'opacity-60 cursor-wait' : ''}`}
+      style={on
+        ? { color: tint, background: `color-mix(in srgb, ${tint} 12%, transparent)`, borderColor: `color-mix(in srgb, ${tint} 30%, transparent)` }
+        : { color: 'var(--color-text-muted)', borderColor: 'var(--color-surface-border)' }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 }
 
 export function MediaDetailModal({
@@ -863,6 +895,45 @@ export function MediaDetailModal({
   // TV mode: one focus group for the whole modal body, so D-pad navigation
   // moves between the trailer button and the action row by actual on-
   // screen position instead of needing separate scopes stitched together.
+  // Open in AIOStreams needs to know which AIOStreams servers people here use.
+  const [aioServers, setAioServers] = useState<{ address: string; people: string[] }[]>([]);
+  const [aioPickerOpen, setAioPickerOpen] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    loadAioServers().then((list) => { if (!cancelled) setAioServers(list); });
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Bookmark and Watched as small pills (see SmallPill above).
+  const personalPills = (
+    <>
+      {enableWatchlist && (
+        <SmallPill
+          on={inWatchlist}
+          tint="var(--color-primary)"
+          onClick={toggleWatchlist}
+          busy={watchlistBusy}
+          title={inWatchlist ? 'In your Watchlist - tap to remove' : 'Add to Watchlist'}
+          icon={inWatchlist ? <BookmarkSolidIcon className="w-3.5 h-3.5" /> : <BookmarkOutlineIcon className="w-3.5 h-3.5" />}
+          label={inWatchlist ? 'Bookmarked' : 'Bookmark'}
+        />
+      )}
+      {enableWatchedIndicators && selfWatched !== null && (
+        <SmallPill
+          on={!!selfWatched}
+          tint="var(--color-success)"
+          onClick={toggleSelfWatched}
+          busy={selfWatchedBusy}
+          title={selfWatched ? 'Watched - tap to mark unwatched (the underlying history is kept)' : 'Mark as watched for the household'}
+          icon={<CheckCircleIcon className="w-3.5 h-3.5" />}
+          label={selfWatched ? 'Watched' : 'Not watched'}
+        />
+      )}
+    </>
+  );
+  const hasPersonalPills = enableWatchlist || (enableWatchedIndicators && selfWatched !== null);
+
   const TVScope = isTV ? FocusContext.Provider : Fragment;
   const tvScopeProps = isTV ? { value: modalFocusKey } : {};
 
@@ -1010,6 +1081,11 @@ export function MediaDetailModal({
             </button>
           ))}
           <h2 className="text-2xl font-bold font-display text-default">{title}</h2>
+          {/* On a computer, Bookmark and Watched sit right under the title,
+              where the eye lands first - not mixed in with the app buttons. */}
+          {!isTV && !isLoading && details?.imdb_id && hasPersonalPills && (
+            <div className="hidden sm:flex items-center gap-2 mt-2">{personalPills}</div>
+          )}
 
           {isLoading && (
             <div className="flex items-center gap-2 mt-4 text-base text-muted">
@@ -1136,6 +1212,18 @@ export function MediaDetailModal({
                   </div>
                 )}
               </div>
+
+              {/* On a phone, Bookmark, Watched and + Catalog are one row of
+                  small pills straight after the ratings. */}
+              {!isTV && details.imdb_id && (
+                <div className="flex sm:hidden items-center gap-1.5 flex-nowrap">
+                  {personalPills}
+                  <AddToListButton
+                    item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
+                    pill
+                  />
+                </div>
+              )}
 
               {/* "You might not even need an addon for this" - shown
                   unconditionally (not behind a disclosure like Collection
@@ -1310,6 +1398,48 @@ export function MediaDetailModal({
                   </a>
                 );
 
+                // AIOStreams: B2's soft lavender-to-indigo, "AIO" in white.
+                // One server opens straight away; more than one asks which.
+                const aioType: 'movie' | 'series' = effectiveType === 'movie' ? 'movie' : 'series';
+                const aioLinks = aioServers
+                  .map((srv) => ({ ...srv, url: buildAioStreamsAppUrl(srv.address, details.imdb_id!, aioType) }))
+                  .filter((srv): srv is { address: string; people: string[]; url: string } => !!srv.url);
+                const aioStyle = {
+                  background: 'linear-gradient(110deg, rgba(212, 208, 255, 0.13), rgba(124, 111, 240, 0.22))',
+                  color: 'rgb(212, 208, 255)',
+                  border: '1px solid rgba(159, 146, 255, 0.25)',
+                };
+                const aioLabel = (
+                  <>
+                    <PlayIcon className="w-4 h-4" />
+                    <span>{'Open in '}<span style={{ color: '#ffffff', fontWeight: 600 }}>AIO</span>Streams</span>
+                  </>
+                );
+                const aioClass = 'flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors w-full sm:w-auto';
+                const aioBtn = aioLinks.length === 0 ? null : aioLinks.length === 1 ? (
+                  <a href={aioLinks[0].url} tabIndex={isTV ? -1 : undefined} className={aioClass} style={aioStyle}>{aioLabel}</a>
+                ) : (
+                  <div className="relative w-full sm:w-auto">
+                    <button type="button" onClick={() => setAioPickerOpen((o) => !o)} aria-expanded={aioPickerOpen} className={aioClass} style={aioStyle}>{aioLabel}</button>
+                    {aioPickerOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setAioPickerOpen(false)} />
+                        <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] z-50 rounded-xl bg-surface border border-default shadow-xl p-2">
+                          <p className="text-sm font-semibold text-default px-1.5 pb-1">Open in AIOStreams on…</p>
+                          {aioLinks.map((srv) => (
+                            <a key={srv.address} href={srv.url} onClick={() => setAioPickerOpen(false)} className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-hover">
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-sm text-default truncate">{srv.people.join(', ') || 'AIOStreams'}</span>
+                                <span className="block text-xs text-muted truncate">{srv.address.replace(/^https?:\/\//, '')}</span>
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+
                 // TV mode: Norigin owns keyboard focus/activation itself
                 // (it doesn't ride native DOM Tab order or native Enter-on-
                 // link behavior) - so each control needs an explicit
@@ -1335,6 +1465,11 @@ export function MediaDetailModal({
                       <TVFocusable onEnterPress={() => { window.location.href = buildNuvioAppUrl(details.imdb_id!, effectiveType); }}>
                         {nuvioBtn}
                       </TVFocusable>
+                      {aioLinks.length === 1 && (
+                        <TVFocusable onEnterPress={() => { window.location.href = aioLinks[0].url; }}>
+                          {aioBtn}
+                        </TVFocusable>
+                      )}
                     </div>
                   );
                 }
@@ -1347,15 +1482,17 @@ export function MediaDetailModal({
                   <div className="flex items-center gap-2 flex-wrap">
                     {stremioBtn}
                     {nuvioBtn}
+                    {aioBtn}
                     <span className="hidden sm:block w-px h-6 mx-0.5" style={{ background: 'var(--color-surface-border)' }} />
                     <div className="flex items-center gap-1.5">
-                      {watchlistBtn}
-                      {watchedBtn}
                       {followBtn}
-                      <AddToListButton
-                        item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
-                        compact
-                      />
+                      {/* On a phone + Catalog is a pill after the ratings instead. */}
+                      <div className="hidden sm:block">
+                        <AddToListButton
+                          item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
+                          compact
+                        />
+                      </div>
                     </div>
                   </div>
                 );
