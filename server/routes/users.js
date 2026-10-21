@@ -1254,6 +1254,16 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
   })
 
+  // Who has Keep in step on, for the Watch Sync card on Tasks.
+  router.get('/watch-sync/overview', async (req, res) => {
+    try {
+      const rows = await prisma.watchSyncSetting.findMany({ where: { accountId: getAccountId(req), enabled: true }, select: { userId: true } })
+      res.json({ keepInStep: rows.map((r) => r.userId) })
+    } catch (error) {
+      res.json({ keepInStep: [] })
+    }
+  })
+
   // Who has a limit or a pause, for the Limits pills on the Users page.
   router.get('/screen-time/overview', async (req, res) => {
     try {

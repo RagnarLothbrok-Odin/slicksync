@@ -108,7 +108,7 @@ const NEBULA_ELIGIBLE_PATHS = [
 // opening a guide from the command palette snapped you into the other layout
 // mid-session, which reads as the layout setting resetting itself.
 // '/invitations/' is an invitation's own page - it was missed the same way.
-const NEBULA_ELIGIBLE_PREFIXES = ['/users/', '/groups/', '/addons/', '/catalogs/', '/guides/', '/invitations/'];
+const NEBULA_ELIGIBLE_PREFIXES = ['/users/', '/groups/', '/addons/', '/catalogs/', '/guides/', '/invitations/', '/tasks/'];
 
 export function isNebulaEligiblePath(pathname: string): boolean {
   return NEBULA_ELIGIBLE_PATHS.includes(pathname)

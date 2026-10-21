@@ -1,5 +1,6 @@
 'use client';
 
+import { WatchSyncCard } from '@/components/user/WatchSyncCard';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -1501,6 +1502,12 @@ export default function TasksPage() {
             onChange={handleHistoryFileChange}
             className="hidden"
           />
+        </PageSection>
+
+        {/* Watch Sync - copy watch history between sign-ins and profiles, or
+            keep them in step (components/user/WatchSyncCard.tsx). */}
+        <PageSection>
+          <WatchSyncCard />
         </PageSection>
 
         {/* Configuration */}

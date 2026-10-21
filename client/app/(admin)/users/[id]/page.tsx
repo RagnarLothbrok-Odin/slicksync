@@ -1751,7 +1751,7 @@ export default function UserDetailPage() {
                 </button>
                 {/* A new, nearly empty sign-in: offer to bring their history over. */}
                 <SignInOfferBanner userId={user.id} />
-                {/* Sync watch history between their sign-ins (its own page). */}
+                {/* Watch Sync between their sign-ins (its own page; also on Tasks). */}
                 <CopyHistoryTile userId={user.id} name={user.username} />
 
                 {openSections.history && (<div className="mt-4">

@@ -2547,6 +2547,11 @@ class ApiClient {
     return this.fetch<{ success: boolean }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer/dismiss`, { method: 'POST', body: JSON.stringify({ provider }) });
   }
 
+  // Who has Keep in step on (the Watch Sync card on Tasks).
+  async getWatchSyncOverview() {
+    return this.fetch<{ keepInStep: string[] }>('/users/watch-sync/overview');
+  }
+
   // AIOStreams servers people here sign in to, for "Open in AIOStreams".
   async getAioStreamsServers() {
     return this.fetch<{ servers: { address: string; people: string[] }[] }>(`/jellyfin/aiostreams-servers`);
