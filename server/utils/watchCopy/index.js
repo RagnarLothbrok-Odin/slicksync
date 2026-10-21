@@ -194,6 +194,7 @@ async function preview(prisma, deps, accountId, userId, body = {}) {
     readSide(prisma, deps, accountId, userId, body.to),
   ])
   const presence = to.kind === 'jellyfin' ? await ADAPTERS.jellyfin.presence(to.provider).catch(() => null) : null
+  const toServerKind = to.kind === 'jellyfin' ? (to.provider.serverKind || 'jellyfin') : to.kind
   const opts = options(body, from.kind, to.kind)
   const result = plan(from.read.state, to.read.state, opts, { isPresent: presence?.isPresent || null })
   await fillNames(result.items, deps.fetch)
@@ -201,7 +202,7 @@ async function preview(prisma, deps, accountId, userId, body = {}) {
     ...result,
     options: { ...opts, libraryAvailable: from.kind !== 'jellyfin' && to.kind !== 'jellyfin' },
     counts: { from: countTitles(from.read.state), to: countTitles(to.read.state) },
-    limits: limitsOf(to.kind),
+    limits: limitsOf(toServerKind),
     _ctx: { from, to, presence },
   }
 }
@@ -231,6 +232,7 @@ const countTitles = (state) => [...state.values()].filter((t) => t.id).length
 function limitsOf(kind) {
   if (kind === 'stremio') return ['Stremio keeps one resume point per show - the newest episode wins', 'Stremio keeps one date per show, not one per episode']
   if (kind === 'jellyfin') return ['Only titles the server has can be marked']
+  if (kind === 'aiometadata') return ['AIOMetadata shows today as the watch date']
   return []
 }
 

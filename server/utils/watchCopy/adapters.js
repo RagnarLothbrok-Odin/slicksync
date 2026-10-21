@@ -302,7 +302,7 @@ const jellyfin = {
   async read(provider, profile) {
     const rows = await provider.watchState(profile || null)
     const state = new Map()
-    for (const r of rows) {
+    for (let r of rows) {
       const isEp = r.type === 'episode'
       const name = isEp ? r.seriesName : r.name
       // A title the server has no ids for is kept under its name, with what
@@ -312,6 +312,9 @@ const jellyfin = {
       let t = state.get(key)
       if (!t) { t = blankTitle(r.id || null, isEp ? 'series' : 'movie', name, r.id ? undefined : null); state.set(key, t) }
       touch(t, r.playedAt || 0)
+      // Stopped in the last tenth counts as finished, as on the other providers.
+      const nearEnd = !r.played && r.durationMs > 0 && r.positionMs >= r.durationMs * FINISHED
+      if (nearEnd) r = { ...r, played: true }
       const inProgress = !r.played && r.positionMs > 0
       if (isEp) {
         if (r.season == null || r.episode == null || r.season <= 0) continue
@@ -336,11 +339,14 @@ const jellyfin = {
     const undo = { kind: 'jellyfin', profile, played: [], positions: [] }
     const failed = []
     const itemFor = async (id, type) => (index ? index.get(id)?.itemId || null : await provider.findItem(id, type))
-    // AIOStreams and AIOMetadata ignore a date on "mark played", but keep one
-    // on a playback stop - a dated stop at the very end is "finished then".
+    // AIOStreams ignores a date on "mark played" but keeps one on a playback
+    // stop - a dated stop at the very end is "finished then". AIOMetadata
+    // keeps no date either way (and a stop at the end stays a resume point
+    // there), so it is simply marked played.
     const aio = provider.serverKind === 'aiostreams' || provider.serverKind === 'aiometadata'
+    const datedStop = provider.serverKind === 'aiostreams'
     const markPlayed = async (itemId, at) => {
-      if (aio && at && typeof provider.runtimeMs === 'function') {
+      if (datedStop && at && typeof provider.runtimeMs === 'function') {
         const runtime = await provider.runtimeMs(itemId, profile).catch(() => 0)
         if (runtime > 0) return provider.setPosition(itemId, runtime, profile, at)
       }

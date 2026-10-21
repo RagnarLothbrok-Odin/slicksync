@@ -284,6 +284,28 @@ test('AIOStreams/AIOMetadata: finished = a dated stop at the runtime; refused wr
   assert.deepEqual(calls[1], ['played', 'm1', null])
 })
 
+test('AIOMetadata: finished is marked played directly (it keeps no date and a stop at the end stays a resume point)', async () => {
+  const calls = []
+  const provider = {
+    serverKind: 'aiometadata',
+    titleIndex: async () => null,
+    findItem: async () => 'm1',
+    runtimeMs: async () => 7200000,
+    setPosition: async (...a) => calls.push(['pos', ...a]),
+    setPlayedAt: async (id, at) => calls.push(['played', id, at]),
+    watchState: async () => [{ itemId: 'm1', played: true, positionMs: 0 }],
+  }
+  await ADAPTERS.jellyfin.write(provider, { profile: null }, [{ key: 'tt1', id: 'tt1', type: 'movie', changes: { markWatched: { at: 42 } } }])
+  assert.deepEqual(calls, [['played', 'm1', 42]])
+})
+
+test('Jellyfin-type read: stopped in the last tenth counts as finished', async () => {
+  const provider = { watchState: async () => [{ itemId: 'a', type: 'movie', id: 'tt1', name: 'Film', played: false, playedAt: 5, positionMs: 95, durationMs: 100 }] }
+  const { state } = await ADAPTERS.jellyfin.read(provider, null)
+  assert.equal(state.get('tt1').watchedAt, 5)
+  assert.equal(state.get('tt1').resume, null)
+})
+
 test('a whole run: Nuvio profile to Stremio, saved for undo, then undone', async () => {
   watchCopy.forgetForTests()
   forgetForTests()
