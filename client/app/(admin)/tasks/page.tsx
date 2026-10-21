@@ -1238,6 +1238,12 @@ export default function TasksPage() {
           </TaskCard>
         </PageSection>
 
+        {/* AIOSync - copy watch history between sign-ins and profiles, or
+            keep them in step (components/user/WatchSyncCard.tsx). */}
+        <PageSection>
+          <WatchSyncCard />
+        </PageSection>
+
         {/* Maintenance - off-site backup targets, database upkeep, and
             applying updates. All set-once-and-forget, which is why they
             live behind one card rather than as three more things on the
@@ -1502,12 +1508,6 @@ export default function TasksPage() {
             onChange={handleHistoryFileChange}
             className="hidden"
           />
-        </PageSection>
-
-        {/* AIOSync - copy watch history between sign-ins and profiles, or
-            keep them in step (components/user/WatchSyncCard.tsx). */}
-        <PageSection>
-          <WatchSyncCard />
         </PageSection>
 
         {/* Configuration */}
