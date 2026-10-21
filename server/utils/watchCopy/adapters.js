@@ -175,9 +175,14 @@ const stremio = {
     for (const u of record.items || []) {
       const cur = current.get(u.id)
       if (cur && cur._mtime !== u.mtime) { kept++; continue }
+      // Stremio has no delete, so an item the copy created can't go away.
+      // It becomes type "other" instead - the type every Stremio app skips:
+      // never listed, never in Continue Watching, never even synced to a
+      // device. Copying the title again later writes a fresh item over it
+      // (the reader only takes movies and shows).
       const back = u.before
         ? { ...u.before, _mtime: new Date(now).toISOString() }
-        : { ...(cur || { _id: u.id }), removed: true, temp: false, _mtime: new Date(now).toISOString(), state: { lastWatched: null, timeWatched: 0, timeOffset: 0, overallTimeWatched: 0, timesWatched: 0, flaggedWatched: 0, duration: 0, video_id: null, watched: null, noNotif: false } }
+        : { _id: u.id, name: cur?.name || '', type: 'other', poster: '', posterShape: 'poster', removed: true, temp: false, _ctime: cur?._ctime || new Date(now).toISOString(), _mtime: new Date(now).toISOString(), state: { lastWatched: null, timeWatched: 0, timeOffset: 0, overallTimeWatched: 0, timesWatched: 0, flaggedWatched: 0, duration: 0, video_id: null, watched: null, noNotif: false }, behaviorHints: { defaultVideoId: null, featuredVideoId: null, hasScheduledVideos: false } }
       puts.push(back)
     }
     for (let i = 0; i < puts.length; i += 50) await provider.addLibraryItem(puts.slice(i, i + 50))

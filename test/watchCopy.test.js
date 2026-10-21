@@ -143,6 +143,15 @@ test('Stremio write: marks episodes in the packed field and a movie watched; und
   assert.equal(undone.restored, 2)
   assert.equal(library.find((x) => x._id === SHOW).state.watched, null)
   assert.equal(library.find((x) => x._id === 'tt9').state.flaggedWatched, 0)
+  // Stremio has no delete: the item the copy made is left as type "other", which every Stremio app skips.
+  assert.equal(library.find((x) => x._id === 'tt9').type, 'other')
+  assert.equal(library.find((x) => x._id === SHOW).type, 'series', 'an item that existed before keeps its own type')
+  // Copying that title again writes a normal item over it.
+  const read2 = await ADAPTERS.stremio.read(provider, null, { fetch })
+  assert.equal(read2.state.has('tt9'), false)
+  await ADAPTERS.stremio.write(provider, read2, [items[1]], { fetch, now: Date.parse('2026-03-03T00:00:00Z') })
+  assert.equal(library.find((x) => x._id === 'tt9').type, 'movie')
+  assert.equal(library.find((x) => x._id === 'tt9').state.flaggedWatched, 1)
 })
 
 test('Stremio undo leaves a title alone when it changed after the copy', async () => {
