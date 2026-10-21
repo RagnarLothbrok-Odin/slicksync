@@ -176,9 +176,17 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
   // What this user has playing right now. A user's own token sees only their
   // own sessions, on every kind of server.
   async function nowPlaying(viewer = self) {
+    const mine = (s) => s?.NowPlayingItem && (!s.UserId || String(s.UserId).replace(/-/g, '').toLowerCase() === viewer.userId)
+    // AIOMetadata (3.6.1+) lists only the asking device's playback on
+    // /Sessions; every device of the account is on /AIOStreams/Activity,
+    // which answers in full to the main sign-in - the one SlickSync holds.
+    if (serverKind === 'aiometadata') {
+      const activity = await call('/AIOStreams/Activity').catch(() => null)
+      if (Array.isArray(activity?.sessions)) return activity.sessions.filter(mine)
+    }
     const sessions = await call('/Sessions', {}, viewer)
     if (!Array.isArray(sessions)) return []
-    return sessions.filter((s) => s?.NowPlayingItem && (!s.UserId || String(s.UserId).replace(/-/g, '').toLowerCase() === viewer.userId))
+    return sessions.filter(mine)
   }
 
   /** The show's own id and name for each series item id. */

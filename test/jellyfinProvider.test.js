@@ -207,3 +207,21 @@ test('episodes: filler and recap come from AIOStreams\' field or AIOMetadata\'s 
     server.restore()
   }
 })
+
+test('AIOMetadata: what plays on every device comes from /AIOStreams/Activity, kept to this viewer', async () => {
+  const server = fakeServer({
+    '/AIOStreams/Activity': () => ({ users: [], sessions: [
+      { UserId: 'e1271701-4ac0-4111-8066-c21a15cba9a0', DeviceName: 'Living room TV', PlayState: { PositionTicks: 15000000000 }, NowPlayingItem: { Type: 'Movie', Id: 'm1', Name: 'The Matrix' } },
+      { UserId: '2fc8a50e-4ce2-fa7e-5834-fe55ac1f8e08', DeviceName: 'Kid tablet', PlayState: { PositionTicks: 1 }, NowPlayingItem: { Type: 'Movie', Id: 'm2', Name: 'WALL-E' } },
+    ] }),
+    '/Sessions': () => ([]),
+  })
+  try {
+    const provider = createJellyfinProvider({ serverUrl: 'https://aiom.test/jellyfin/x', token: 't', userId: 'e12717014ac041118066c21a15cba9a0', serverKind: 'aiometadata' })
+    const sessions = await provider.getNowPlaying()
+    assert.deepEqual(sessions.map((s) => s.NowPlayingItem.Name), ['The Matrix'])
+    assert.ok(server.calls.some((c) => c.includes('/AIOStreams/Activity')))
+  } finally {
+    server.restore()
+  }
+})
