@@ -37,6 +37,7 @@ import {
 import dynamic from 'next/dynamic';
 import type { SyncStatusData } from '@/components/admin/SyncActivityChart';
 import { providerTypeLabel, providerBadgeVariant } from '@/lib/providers';
+import { cachedImageUrl } from '@/lib/posterUrl';
 
 // The chart's library (recharts) is loaded on demand - see the component
 // file for why it is not in the dashboard's first-load bundle.
@@ -238,7 +239,9 @@ const ContinueWatchingCard = memo(function ContinueWatchingCard({
               in" hard crop. */}
           {(item.nextEpisode?.thumbnail || item.background || item.poster) ? (
             <img
-              src={item.nextEpisode?.thumbnail || item.background || item.poster || ''}
+              // Through the server's image cache at the card's size, like
+              // every poster grid - not the full-size original each launch.
+              src={cachedImageUrl(item.nextEpisode?.thumbnail || item.background || item.poster) || ''}
               alt={item.showName}
               draggable={false}
               loading="lazy"
@@ -387,6 +390,9 @@ export default function DashboardPage() {
   // Fetched independently of the main dashboard load - Cinemeta lookups
   // powering this are a nice-to-have, and shouldn't be able to fail the
   // whole dashboard if Cinemeta is briefly unreachable.
+  // Last time's row shows at once (see useLastKnown), so it doesn't pop in
+  // late and push the page down.
+  useLastKnown<ContinueWatchingItem[]>('/users/continue-watching', (cached) => setContinueWatching((now) => (now.length ? now : cached)));
   useEffect(() => {
     api.getContinueWatching().then(setContinueWatching).catch(() => setContinueWatching([]));
   }, []);

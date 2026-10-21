@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 import { api } from '@/lib/api';
 
 interface UserData {
@@ -57,8 +57,12 @@ export function UserCacheProvider({ children }: { children: ReactNode }) {
     return undefined;
   }, [userCache]);
 
+  // The same object until the cache itself changes - a new one on every
+  // render of the app's root re-rendered everything reading it.
+  const value = useMemo(() => ({ getUser, fetchUser }), [getUser, fetchUser]);
+
   return (
-    <UserCacheContext.Provider value={{ getUser, fetchUser }}>
+    <UserCacheContext.Provider value={value}>
       {children}
     </UserCacheContext.Provider>
   );

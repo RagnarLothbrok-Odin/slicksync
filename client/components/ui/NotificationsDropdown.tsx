@@ -66,6 +66,12 @@ function useRememberedList(key: string): [any[], (next: ListUpdate) => void] {
   return [value, set];
 }
 
+// When each feed was last fetched. Pages with their own header mount a new
+// bell on every visit; one that fetched moments ago shows what it has (above)
+// instead of asking again, and its poll carries on from there.
+const fetchedAt: Record<string, number> = {};
+const fetchedRecently = (key: string, ms = 30000) => Date.now() - (fetchedAt[key] || 0) < ms;
+
 const DISMISSED_STORAGE_KEY = 'notifications-dismissed-ids';
 const READ_STORAGE_KEY = 'notifications-read-ids';
 
@@ -207,12 +213,13 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
       // itself catches back up on its own next tick once it's visible again.
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
+        fetchedAt.stored = Date.now();
         setStoredNotifications(await api.getNotifications());
       } catch {
         // Endpoint may not exist yet on an older backend - stay silent.
       }
     };
-    const initialDelay = setTimeout(fetchStored, 200 + Math.random() * 600);
+    const initialDelay = fetchedRecently('stored') ? undefined : setTimeout(fetchStored, 200 + Math.random() * 600);
     const stopPoll = startAdaptivePoll(fetchStored, 30000, 180000);
     // SSE accelerant: a server-side notification refetches the bell right
     // now instead of on the next tick. Polling above stays as the fallback.
@@ -227,6 +234,7 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
         // One small read of just the requests the bell shows.
+        fetchedAt.requests = Date.now();
         const { pending, accepted } = await api.getInvitationBell();
         setPendingRequests(pending);
         setAcceptedRequests(accepted);
@@ -244,7 +252,7 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     // dedupe/cache in api.ts covers repeat calls to these same two
     // endpoints, but a fresh page load fires plenty of genuinely different
     // endpoints too, which that cache can't help with.
-    const initialDelay = setTimeout(fetchRequests, 200 + Math.random() * 600);
+    const initialDelay = fetchedRecently('requests') ? undefined : setTimeout(fetchRequests, 200 + Math.random() * 600);
     const stopPoll = startAdaptivePoll(fetchRequests, 30000, 180000);
     return () => { clearTimeout(initialDelay); stopPoll(); };
   }, []);
@@ -262,12 +270,13 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     const fetchAlerts = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
+        fetchedAt.episodes = Date.now();
         setEpisodeAlerts(await api.getEpisodeAlerts());
       } catch {
         // Endpoint may not exist yet on an older backend - stay silent.
       }
     };
-    fetchAlerts();
+    if (!fetchedRecently('episodes', 5 * 60 * 1000)) fetchAlerts();
     const interval = setInterval(fetchAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -280,12 +289,13 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     const fetchAddonAlerts = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
+        fetchedAt.addons = Date.now();
         setAddonHealthAlerts(await api.getAddonHealthAlerts());
       } catch {
         // Endpoint may not exist yet on an older backend - stay silent.
       }
     };
-    fetchAddonAlerts();
+    if (!fetchedRecently('addons', 5 * 60 * 1000)) fetchAddonAlerts();
     const interval = setInterval(fetchAddonAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);

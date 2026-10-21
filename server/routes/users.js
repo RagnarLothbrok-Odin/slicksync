@@ -1577,9 +1577,13 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       const { getContinueWatching } = require('../utils/continueWatching')
       const items = await getContinueWatching(prisma, accountId)
       res.json(items)
-      // The dashboard's first row - its posters are requested the instant
-      // this response lands, so start producing them now.
-      try { require('../utils/posterWarm').warmPosters(items) } catch { /* optimisation only */ }
+      // The dashboard's first row - its pictures are requested the instant
+      // this response lands, so start producing them now: the one each card
+      // shows (episode still, then backdrop, then poster), at the card's size.
+      try {
+        const shown = items.map((i) => i?.nextEpisode?.thumbnail || i?.background || i?.poster).filter(Boolean)
+        require('../utils/posterWarm').warmPosters(shown, { widths: [342] })
+      } catch { /* optimisation only */ }
     } catch (error) {
       console.error('Error fetching continue watching:', error)
       res.status(500).json({ error: 'Failed to fetch continue watching' })

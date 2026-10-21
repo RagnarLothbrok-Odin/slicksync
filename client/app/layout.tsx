@@ -128,6 +128,17 @@ export default function RootLayout({
             __html: `try{if(window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches){document.documentElement.setAttribute('data-standalone','true')}}catch(e){}`,
           }}
         />
+        {/* The saved theme, before first paint - the same blocking-script
+            pattern as above. Without it every page opened in the default
+            colours and switched once the app started (a light theme flashed
+            dark first). A built-in theme is its class; a custom one starts
+            from its base theme here, and its own colours follow at start-up
+            (lib/theme.tsx). The id list mirrors themeIds there. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('slicksync-theme'),b=['nebula','slick','velvet','midnight','ember','nord','verdant','slate','rose','daylight'];if(t&&b.indexOf(t)<0){var c=JSON.parse(localStorage.getItem('slicksync-custom-themes')||'[]').filter(function(x){return x&&x.id===t})[0];t=c&&c.base}if(t&&b.indexOf(t)>=0)document.documentElement.className=t}catch(e){}`,
+          }}
+        />
       </head>
       <body
         className="antialiased aurora-scrollbar overflow-x-hidden bg-page"

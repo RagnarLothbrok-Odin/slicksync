@@ -145,6 +145,9 @@ class ApiClient {
   // recoloured from the Groups list opened its own page in the old colour.
   private lastKnown = new Map<string, unknown>();
   private lastKnownRestored = false;
+  // Set when a response lands, so going to the background only writes the
+  // snapshot again when something in it changed.
+  private lastKnownDirty = false;
   private static readonly LAST_KNOWN_STORAGE_KEY = 'slicksync-last-known';
   private static readonly LAST_KNOWN_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -169,21 +172,19 @@ class ApiClient {
   }
 
   private persistLastKnown() {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !this.lastKnownDirty) return;
     try {
-      let entries = Array.from(this.lastKnown.entries());
-      let raw = JSON.stringify(entries);
       // Size cap: drop the LARGEST entries first until it fits - one huge
-      // metrics snapshot shouldn't evict twenty small lists.
-      while (raw.length > ApiClient.LAST_KNOWN_MAX_BYTES && entries.length > 0) {
-        let biggest = 0;
-        for (let i = 1; i < entries.length; i++) {
-          if (JSON.stringify(entries[i][1]).length > JSON.stringify(entries[biggest][1]).length) biggest = i;
-        }
-        entries = entries.filter((_, i) => i !== biggest);
-        raw = JSON.stringify(entries);
-      }
-      localStorage.setItem(ApiClient.LAST_KNOWN_STORAGE_KEY, raw);
+      // metrics snapshot shouldn't evict twenty small lists. Each entry is
+      // measured once (this runs as the app goes to the background, where a
+      // phone notices every millisecond).
+      const sized = Array.from(this.lastKnown.entries()).map((e) => ({ e, size: JSON.stringify(e).length + 1 }));
+      let total = sized.reduce((sum, x) => sum + x.size, 1);
+      sized.sort((a, b) => b.size - a.size);
+      let drop = 0;
+      while (total > ApiClient.LAST_KNOWN_MAX_BYTES && drop < sized.length) total -= sized[drop++].size;
+      localStorage.setItem(ApiClient.LAST_KNOWN_STORAGE_KEY, JSON.stringify(sized.slice(drop).map((x) => x.e)));
+      this.lastKnownDirty = false;
     } catch {
       // Quota/private mode - instant nav still works in-memory this session.
     }
@@ -196,6 +197,14 @@ class ApiClient {
   peekGet<T>(endpoint: string): T | undefined {
     this.restoreLastKnown();
     return this.lastKnown.get(this.getKey(endpoint)) as T | undefined;
+  }
+
+  /** Whether this device was signed in last time (the snapshot is cleared on
+   * sign-out and on an expired session) - the app opens straight away then,
+   * and checks the session in the background. */
+  wasSignedIn(): boolean {
+    if (typeof window === 'undefined') return false;
+    try { return !!localStorage.getItem(ApiClient.LAST_KNOWN_STORAGE_KEY) || !!localStorage.getItem('slicksync_token'); } catch { return false; }
   }
 
   constructor() {
@@ -279,7 +288,7 @@ class ApiClient {
         this.recentGets.clear();
         const path = endpoint.split('?')[0];
         for (const k of Array.from(this.lastKnown.keys())) {
-          if (k.startsWith(`${path}::`) || k.startsWith(`${path}?`)) this.lastKnown.delete(k);
+          if (k.startsWith(`${path}::`) || k.startsWith(`${path}?`)) { this.lastKnown.delete(k); this.lastKnownDirty = true; }
         }
       });
     }
@@ -297,6 +306,7 @@ class ApiClient {
       .then((value) => {
         this.recentGets.set(key, { value, at: Date.now() });
         this.lastKnown.set(key, value);
+        this.lastKnownDirty = true;
         return value;
       })
       .finally(() => {

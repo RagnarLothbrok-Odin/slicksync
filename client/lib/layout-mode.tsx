@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useState, ReactNode } from 'react';
 import { useIsTV } from './hooks/useIsTV';
 
 // Layout mode is independent of Theme (lib/theme.tsx) - Theme picks colors,
@@ -51,7 +51,10 @@ export function LayoutModeProvider({ children }: { children: ReactNode }) {
   // at all" - TV mode ignores both the default and any saved preference.
   const isTV = useIsTV();
 
-  useEffect(() => {
+  // Read before the first paint after hydration (a layout effect, not a
+  // plain one): with a plain effect someone on Original saw Top Navi drawn
+  // first and then the whole page rebuilt in the other layout.
+  useLayoutEffect(() => {
     const saved = localStorage.getItem('slicksync-layout-mode') as LayoutModeId | null;
     const initial = saved && layoutModeIds.includes(saved) ? saved : 'nebula';
     setLayoutModeState(initial);
