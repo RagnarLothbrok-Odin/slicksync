@@ -963,6 +963,9 @@ body {
   position: absolute;
   border-radius: 50%;
   pointer-events: none;
+  /* Larger than a phone screen on purpose; the page-wide 100vw cap would
+     squash it into an oval. Its parent clips it. */
+  max-width: none;
   transition: background-color 0.6s ease-out;
   -webkit-mask-image: var(--glow-mask);
   mask-image: var(--glow-mask);
