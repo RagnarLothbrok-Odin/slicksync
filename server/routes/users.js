@@ -1254,13 +1254,24 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
   })
 
-  // Who has Keep in step on, for the AIOSync card on Tasks.
+  // Who is kept in step with what, for the AIOSync card on Tasks: per person,
+  // the names of their sign-ins and profiles that take part.
   router.get('/watch-sync/overview', async (req, res) => {
     try {
-      const rows = await prisma.watchSyncSetting.findMany({ where: { accountId: getAccountId(req), enabled: true }, select: { userId: true } })
-      res.json({ keepInStep: rows.map((r) => r.userId) })
+      const accountId = getAccountId(req)
+      const rows = await prisma.watchSyncSetting.findMany({ where: { accountId, enabled: true }, select: { userId: true } })
+      const kis = require('../utils/watchCopy/keepInStep')
+      const synced = []
+      for (const r of rows) {
+        const person = await prisma.user.findFirst({ where: { id: r.userId, accountId }, select: { username: true } })
+        if (!person) continue
+        const info = await kis.describe(prisma, watchCopyDeps(req), accountId, r.userId).catch(() => null)
+        const places = (info?.places || []).filter((p) => p.mode !== 'off').map((p) => p.profile || p.name)
+        if (places.length >= 2) synced.push({ userId: r.userId, name: person.username, places })
+      }
+      res.json({ keepInStep: rows.map((r) => r.userId), synced })
     } catch (error) {
-      res.json({ keepInStep: [] })
+      res.json({ keepInStep: [], synced: [] })
     }
   })
 

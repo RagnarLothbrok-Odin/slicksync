@@ -2549,7 +2549,7 @@ class ApiClient {
 
   // Who has Keep in step on (the AIOSync card on Tasks).
   async getWatchSyncOverview() {
-    return this.fetch<{ keepInStep: string[] }>('/users/watch-sync/overview');
+    return this.fetch<{ keepInStep: string[]; synced: { userId: string; name: string; places: string[] }[] }>('/users/watch-sync/overview');
   }
 
   // AIOStreams servers people here sign in to, for "Open in AIOStreams".
