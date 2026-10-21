@@ -1216,6 +1216,25 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       watchCopyError(res, error, 'Could not change Keep in step')
     }
   })
+  // "Just added a sign-in - bring their history over?" (utils/watchCopy/offer.js)
+  router.get('/:id/watch-copy/offer', async (req, res) => {
+    try {
+      res.json({ offer: await require('../utils/watchCopy/offer').offerFor(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id)) })
+    } catch (error) {
+      res.json({ offer: null })
+    }
+  })
+  router.post('/:id/watch-copy/offer/dismiss', async (req, res) => {
+    try {
+      const id = String(req.params.id)
+      const person = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) }, select: { id: true } })
+      if (!person) return res.status(404).json({ message: 'User not found' })
+      await require('../utils/watchCopy/offer').dismiss(prisma, getAccountId(req), id, req.body?.provider)
+      res.json({ success: true })
+    } catch (error) {
+      watchCopyError(res, error, 'Could not hide that')
+    }
+  })
   router.get('/:id/watch-copy/candidates', async (req, res) => {
     res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
   })

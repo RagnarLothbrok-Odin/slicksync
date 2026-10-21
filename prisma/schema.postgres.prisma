@@ -1415,6 +1415,8 @@ model WatchSyncSetting {
   enabledAt  DateTime?
   lastPassAt DateTime?
   lastError  String?
+  // Sign-ins whose "bring their history over" offer was dismissed (JSON array of provider types).
+  dismissedOffers String @default("[]")
   updatedAt  DateTime  @updatedAt
 
   @@map("watch_sync_settings")

@@ -9,7 +9,7 @@
 // and a copy can be undone from here for 7 days.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeftIcon, ArrowRightIcon, ArrowDownIcon, ArrowsRightLeftIcon, ArrowsUpDownIcon,
   ArrowUturnLeftIcon, ShieldCheckIcon, MagnifyingGlassIcon, ChevronDownIcon, CheckIcon,
@@ -342,6 +342,7 @@ function Poster({ item, selected, matched, onToggle, onMatch, rpdb }: {
 export default function CopyHistoryPage() {
   const params = useParams();
   const router = useRouter();
+  const search = useSearchParams();
   const userId = String(params?.id || '');
   const { layoutMode } = useLayoutMode();
   const compact = useCoarsePointer();
@@ -387,10 +388,18 @@ export default function CopyHistoryPage() {
       setPersonInfo(r.person || null);
       setLastRun(r.lastRun);
       const all = r.sides.flatMap((s) => (s.profiles.length ? s.profiles.map((p) => p.side) : [s.side]));
+      const wantFrom = search.get('from');
+      const wantTo = search.get('to');
+      const known = new Set([...all, ...(r.others || []).map((o) => o.side)]);
+      if (wantFrom && wantTo && wantFrom !== wantTo && known.has(wantFrom) && known.has(wantTo)) {
+        setFrom(wantFrom);
+        setTo(wantTo);
+        return;
+      }
       setFrom(all[0] || '');
       setTo(all.find((x) => x !== all[0] && !x.startsWith(all[0].split(':')[0])) || all[1] || '');
     }).catch((e) => setError(e?.message || 'Could not read their sign-ins'));
-  }, [userId]);
+  }, [userId, search]);
 
   const fromChoice = sides ? choiceFor([...sides, ...others], from) : null;
   const toChoice = sides ? choiceFor([...sides, ...others], to) : null;

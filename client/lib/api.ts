@@ -2522,6 +2522,15 @@ class ApiClient {
     return this.fetch<{ candidates: { id: string; name: string; year: string | null; poster: string | null }[] }>(`/users/${encodeURIComponent(userId)}/watch-copy/candidates?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`);
   }
 
+  // "Just added a sign-in - bring their history over?" (server/utils/watchCopy/offer.js).
+  async getWatchCopyOffer(userId: string) {
+    return this.fetch<{ offer: WatchCopyOffer | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer`);
+  }
+
+  async dismissWatchCopyOffer(userId: string, provider: string) {
+    return this.fetch<{ success: boolean }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer/dismiss`, { method: 'POST', body: JSON.stringify({ provider }) });
+  }
+
   // Keep in step (server/utils/watchCopy/keepInStep.js).
   async getKeepInStep(userId: string) {
     return this.fetch<KeepInStep>(`/users/${encodeURIComponent(userId)}/keep-in-step`);
@@ -3763,6 +3772,13 @@ export interface WatchCopyRun {
   failed?: number;
   fromName?: string | null;
   toName?: string | null;
+}
+
+/** A new, nearly empty sign-in, and the one whose titles could fill it. */
+export interface WatchCopyOffer {
+  name: string;
+  to: { provider: string; kind: string; side: string; label: string };
+  from: { provider: string; side: string; label: string; count: number };
 }
 
 export type KeepInStepMode = 'both' | 'receive' | 'off';

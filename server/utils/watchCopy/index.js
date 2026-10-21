@@ -273,6 +273,7 @@ async function run(prisma, deps, accountId, userId, body = {}) {
     })
     job.runId = row.id
     job.state = 'done'
+    require('./offer').forget(userId)
   })().catch((e) => {
     job.state = 'failed'
     job.error = e?.message || 'Something went wrong'
