@@ -350,7 +350,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
   // Opens at the top. The app keeps its top bar between pages, so a link
   // followed from further down a page (Tasks, a person's page) otherwise
   // landed partway down this one.
-  useEffect(() => { window.scrollTo(0, 0); }, [userId]);
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [userId]);
   const { layoutMode } = useLayoutMode();
   const compact = useCoarsePointer();
   const { rpdbEnabled } = usePersonalFeatures();

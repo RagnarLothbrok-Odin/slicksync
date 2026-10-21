@@ -49,8 +49,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // data-scroll-behavior lets Next.js turn the smooth scrolling in
+  // globals.css off while it changes page; without it the jump to the top of
+  // a new page was animated and cut short, landing partway down.
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" className="dark" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
