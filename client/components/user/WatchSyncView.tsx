@@ -346,6 +346,11 @@ function Poster({ item, selected, matched, onToggle, onMatch, rpdb }: {
 export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: string; home?: 'person' | 'tasks'; forSlot?: React.ReactNode }) {
   const router = useRouter();
   const search = useSearchParams();
+
+  // Opens at the top. The app keeps its top bar between pages, so a link
+  // followed from further down a page (Tasks, a person's page) otherwise
+  // landed partway down this one.
+  useEffect(() => { window.scrollTo(0, 0); }, [userId]);
   const { layoutMode } = useLayoutMode();
   const compact = useCoarsePointer();
   const { rpdbEnabled } = usePersonalFeatures();
@@ -399,7 +404,8 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
         return;
       }
       setFrom(all[0] || '');
-      setTo(all.find((x) => x !== all[0] && !x.startsWith(all[0].split(':')[0])) || all[1] || '');
+      // Someone with a single sign-in copies to (or from) another person's.
+      setTo(all.find((x) => x !== all[0] && !x.startsWith(all[0].split(':')[0])) || all[1] || r.others?.[0]?.side || '');
     }).catch((e) => setError(e?.message || 'Could not read their sign-ins'));
   }, [userId, search]);
 
@@ -541,8 +547,8 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
             )}
 
             {sides === null && !error && <div className="text-sm text-muted">Reading their sign-ins…</div>}
-            {sides && sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0) < 2 && (
-              <div className="text-sm text-muted">They need a second sign-in (or a second profile) to copy between. Add one from their page.</div>
+            {sides && sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0) + others.length < 2 && (
+              <div className="text-sm text-muted">There's nothing to copy between yet - add a second sign-in or profile, or another person.</div>
             )}
 
             {sides && fromChoice && toChoice && (
