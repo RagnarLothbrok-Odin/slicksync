@@ -53,9 +53,12 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
     const pad = 10;
     const vw = document.documentElement.clientWidth || window.innerWidth;
     const vh = window.innerHeight;
-    const { width, height } = el.getBoundingClientRect();
+    // Its real size - the opening animation scales it, which the on-screen
+    // box would include.
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
     let { x, y } = position;
-    if (x + width > vw - pad) x = Math.max(pad, Math.min(position.x - width, vw - width - pad));
+    if (x + width > vw - pad) x = position.x - width >= pad ? position.x - width : vw - width - pad;
     if (y + height > vh - pad) y = position.y - height >= pad ? position.y - height : vh - height - pad;
     x = Math.min(x, vw - width - pad);
     y = Math.min(y, vh - height - pad);
