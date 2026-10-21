@@ -156,7 +156,7 @@ export function AddToListButton({ item, compact = false, pill = false }: { item:
         title={compact ? 'Add to a catalog' : undefined}
         aria-label={compact ? 'Add to a catalog' : undefined}
         className={pill
-          ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap border border-default text-muted hover:text-primary transition-colors'
+          ? 'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap border border-default text-muted hover:text-primary transition-colors'
           : compact
           ? 'flex items-center justify-center w-10 h-10 rounded-lg bg-surface-hover text-muted hover:bg-primary/20 hover:text-primary transition-colors shrink-0'
           : 'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-surface-hover text-default hover:bg-primary/20 hover:text-primary transition-colors'}

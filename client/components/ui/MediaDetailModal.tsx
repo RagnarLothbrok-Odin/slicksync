@@ -78,7 +78,7 @@ function SmallPill({ on, tint, onClick, busy, icon, label, title }: {
       disabled={busy}
       title={title}
       aria-pressed={on}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium whitespace-nowrap border transition-colors ${busy ? 'opacity-60 cursor-wait' : ''}`}
+      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-xs sm:text-[13px] font-medium whitespace-nowrap border transition-colors ${busy ? 'opacity-60 cursor-wait' : ''}`}
       style={on
         ? { color: tint, background: `color-mix(in srgb, ${tint} 12%, transparent)`, borderColor: `color-mix(in srgb, ${tint} 30%, transparent)` }
         : { color: 'var(--color-text-muted)', borderColor: 'var(--color-surface-border)' }}
@@ -1216,7 +1216,7 @@ export function MediaDetailModal({
               {/* On a phone, Bookmark, Watched and + Catalog are one row of
                   small pills straight after the ratings. */}
               {!isTV && details.imdb_id && (
-                <div className="flex sm:hidden items-center gap-1.5 flex-nowrap">
+                <div className="flex sm:hidden items-center gap-1 flex-nowrap">
                   {personalPills}
                   <AddToListButton
                     item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
@@ -1412,7 +1412,7 @@ export function MediaDetailModal({
                 const aioLabel = (
                   <>
                     <PlayIcon className="w-4 h-4" />
-                    <span>{'Open in '}<span style={{ color: '#ffffff', fontWeight: 600 }}>AIO</span>Streams</span>
+                    <span className="whitespace-nowrap">{'Open in '}<span style={{ color: '#ffffff', fontWeight: 600 }}>AIO</span>Streams</span>
                   </>
                 );
                 const aioClass = 'flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors w-full sm:w-auto';
