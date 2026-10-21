@@ -45,7 +45,7 @@ function ModePicker({ mode, onPick }: { mode: KeepInStepMode; onPick: (m: KeepIn
     return () => { document.removeEventListener('pointerdown', down); document.removeEventListener('keydown', key); };
   }, [open]);
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div ref={ref} className="relative shrink-0 ml-auto">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -114,11 +114,11 @@ export function KeepInStepCard({ userId }: { userId: string }) {
 
         <div className="mt-3">
           {data.places.map((p) => (
-            <div key={p.side} className="flex items-center gap-2.5 py-2 border-t border-default">
+            <div key={p.side} className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 py-2 border-t border-default">
               <span className="w-[26px] h-[26px] rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: LOOK[p.kind] || LOOK.jellyfin }}>
                 {p.name.slice(0, 1).toUpperCase()}
               </span>
-              <span className={`flex-1 min-w-0 text-sm truncate ${p.mode === 'off' ? 'text-muted' : 'text-default'}`}>{p.name}{p.profile && p.profile !== p.name ? ` · ${p.profile}` : ''}</span>
+              <span className={`flex-1 min-w-[8rem] text-sm ${p.mode === 'off' ? 'text-muted' : 'text-default'}`}>{p.name}{p.profile && p.profile !== p.name ? ` · ${p.profile}` : ''}</span>
               <ModePicker mode={p.mode} onPick={(m) => setMode(p.side, m)} />
             </div>
           ))}
