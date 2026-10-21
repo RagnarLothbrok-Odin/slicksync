@@ -311,13 +311,14 @@ function Poster({ item, selected, matched, onToggle, onMatch, rpdb }: {
   item: WatchCopyItem; selected: boolean; matched: boolean; onToggle: () => void; onMatch: () => void; rpdb: boolean;
 }) {
   const look = OUTCOME[item.outcome];
-  const src = item.id ? posterUrl({ id: item.id, poster: item.poster }, rpdb) : undefined;
+  const [broken, setBroken] = useState(false);
+  const src = item.id && !broken ? posterUrl({ id: item.id, poster: item.poster }, rpdb) : undefined;
   const label = matched ? 'Matched' : look.label;
   return (
     <div className="min-w-0">
       <div className={`relative aspect-[2/3] rounded-xl overflow-hidden bg-surface-hover ${item.outcome === 'there' || item.outcome === 'missing' ? 'opacity-55' : ''}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        {src ? <img src={src} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" /> : <span className="absolute inset-0 flex items-end p-2 text-white font-extrabold uppercase text-sm leading-tight" style={{ background: 'linear-gradient(160deg,#2b2b2b,#555)' }}>{item.name}</span>}
+        {src ? <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className="absolute inset-0 w-full h-full object-cover" /> : <span className="absolute inset-0 flex items-end p-2 text-white font-extrabold uppercase text-sm leading-tight" style={{ background: 'linear-gradient(160deg,#2b2b2b,#555)' }}>{item.name}</span>}
         <button
           type="button"
           onClick={item.outcome === 'match' && !matched ? onMatch : undefined}

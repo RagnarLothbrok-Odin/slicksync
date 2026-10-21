@@ -36,13 +36,13 @@ export function SignInOfferBanner({ userId }: { userId: string }) {
       <span className="w-8 h-8 rounded-[10px] flex items-center justify-center text-white font-bold text-sm shrink-0" style={{ background: LOOK[offer.to.kind] || LOOK.jellyfin }} aria-hidden="true">
         {offer.to.label.slice(0, 1)}
       </span>
-      <div className="flex-1 min-w-[12rem]">
+      <div className="flex-1 min-w-0 basis-[12rem]">
         <div className="font-semibold text-default text-sm">{offer.name} just added {offer.to.label}</div>
         <div className="text-xs text-muted">Bring the {offer.from.count.toLocaleString()} title{offer.from.count === 1 ? '' : 's'} they&apos;ve watched on {offer.from.label} over to it?</div>
       </div>
       <div className="flex gap-2 ml-auto">
-        <button type="button" onClick={notNow} className="px-3 py-1.5 rounded-lg text-sm border border-default text-default">Not now</button>
-        <Link href={href} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white" style={{ background: 'var(--color-primary)' }}>Show me what copies</Link>
+        <button type="button" onClick={notNow} className="px-3 py-1.5 rounded-lg text-sm border border-default text-default whitespace-nowrap">Not now</button>
+        <Link href={href} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap" style={{ background: 'var(--color-primary)' }}>Show me what copies</Link>
       </div>
     </div>
   );
