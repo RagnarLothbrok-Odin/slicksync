@@ -65,7 +65,7 @@ const RecentAddonItem = memo(function RecentAddonItem({
   return (
     <TVLink href={`/addons/${addon.id}`} className="block" focusWrapperClassName="block">
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ scale: 1.01 }}
         className="flex items-center gap-4 p-3.5 rounded-xl transition-colors bg-surface-hover hover:bg-surface cursor-pointer group border border-transparent hover:border-default"
@@ -1285,7 +1285,7 @@ export default function DashboardPage() {
                   recentActivityItems.map((np, index) => (
                     <motion.div
                       key={`${np.user.id}-${np.item.id}-${np.timestamp}-${index}`}
-                      initial={{ opacity: 0, x: -10 }}
+                      initial={false}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.3 + index * 0.05 }}
                       whileHover={{ x: 4 }}
@@ -1354,7 +1354,7 @@ export default function DashboardPage() {
                   topUsers.map((user, index) => (
                     <Link key={user.id || user.name} href={`/users/${user.id}`} className="block">
                       <motion.div
-                        initial={{ opacity: 0, y: 10 }}
+                        initial={false}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.35 + index * 0.05 }}
                         whileHover={{ scale: 1.01 }}

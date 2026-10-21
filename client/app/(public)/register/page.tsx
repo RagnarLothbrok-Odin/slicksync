@@ -120,14 +120,9 @@ export default function RegisterPage() {
     >
       {/* Background gradient - matches the login page */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div
-          className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full blur-[120px] opacity-30"
-          style={{ background: 'var(--color-primaryMuted)' }}
-        />
-        <div
-          className="absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full blur-[100px] opacity-20"
-          style={{ background: 'var(--color-secondaryMuted)' }}
-        />
+        {/* Drawn without a blur filter - see .glow in globals.css. */}
+        <div className="glow glow-corner-a" />
+        <div className="glow glow-corner-b" />
       </div>
 
       <motion.div
