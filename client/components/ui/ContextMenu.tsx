@@ -24,8 +24,10 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
       }
     };
 
-    // Close on scroll
+    // Close on scroll - but not while typing in a box inside the menu: a
+    // phone's keyboard opening scrolls the page.
     const handleScroll = () => {
+      if (menuRef.current && menuRef.current.contains(document.activeElement)) return;
       onClose();
     };
 
@@ -66,6 +68,7 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
   }, [position]);
 
   useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- placed before paint, measured from the drawn menu
     if (!isOpen) { setAdjustedPosition(position); return; }
     fit();
     const el = menuRef.current;
@@ -93,7 +96,9 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
           maxHeight: 'calc(100vh - 20px)',
           overflowY: 'auto',
         }}
-        className="min-w-[180px] py-1.5 rounded-xl shadow-xl bg-surface border border-default backdrop-blur-xl"
+        // Options a step bigger than body text in every menu (15px, more room,
+        // 18px icons) - set here so all of them stay alike.
+        className="min-w-[180px] py-1.5 rounded-xl shadow-xl bg-surface border border-default backdrop-blur-xl [&_button]:text-[15px] [&_button]:py-2.5 [&_button>svg]:w-[18px] [&_button>svg]:h-[18px]"
         onClick={(e) => e.stopPropagation()} // Prevent click from bubbling
         onContextMenu={(e) => e.preventDefault()} // Prevent native context menu on the menu itself
       >

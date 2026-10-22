@@ -75,17 +75,17 @@ export function ActivityCardMenu({ target, onClose, actions }: {
   const run = (fn: () => void) => () => { close(); fn(); };
   return (
     <ContextMenu isOpen position={{ x: target.x, y: target.y }} onClose={close}>
-      <div className="w-[min(270px,calc(100vw-1.5rem))]">
-        <div className="px-3 pt-1.5 pb-2 mb-1 border-b border-default">
-          <div className="text-[13px] font-semibold text-default truncate">{target.title}</div>
-          <div className="text-[11px] text-muted truncate">
+      <div className="w-[min(296px,calc(100vw-1.5rem))]">
+        <div className="px-3.5 pt-2 pb-2.5 mb-1 border-b border-default">
+          <div className="text-[15px] font-semibold text-default truncate">{target.title}</div>
+          <div className="text-[13px] text-muted truncate mt-0.5">
             Watched by {target.watchers.map((w) => w.userName).join(', ')}{target.detail ? ` · ${target.detail}` : ''}
           </div>
         </div>
         {confirm ? (
           <div className="px-3 py-2">
-            <p className="text-sm text-default font-medium">Remove {confirm.userName}&rsquo;s viewing?</p>
-            <p className="text-xs text-muted mt-1">
+            <p className="text-[15px] text-default font-medium">Remove {confirm.userName}&rsquo;s viewing?</p>
+            <p className="text-[13px] text-muted mt-1">
               It comes off the Activity page and out of {confirm.userName}&rsquo;s watch time and history for that day, so their totals and stats drop too. The Trash keeps it for 30 days if you want it back.
             </p>
             <div className="flex justify-end gap-2 mt-3">

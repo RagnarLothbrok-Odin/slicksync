@@ -3,7 +3,7 @@
 // and the link each app understands. Only apps that open straight to a title
 // are listed; the item ids come from the server (/jellyfin/open-targets).
 
-export type OpenWithAppId = 'aiostreams' | 'swiftfin' | 'fladder' | 'wholphin' | 'streamyfin' | 'infuse' | 'web';
+export type OpenWithAppId = 'aiostreams' | 'swiftfin' | 'streamyfin' | 'infuse' | 'web' | 'shortcut';
 
 export interface OpenTargetServer {
   address: string;
@@ -35,11 +35,12 @@ export interface OpenWithApp {
 export const OPEN_WITH_APPS: OpenWithApp[] = [
   { id: 'aiostreams', name: 'AIOStreams', platforms: 'Android, desktop · AIOStreams servers', color: '#7c6ff0', letter: 'A' },
   { id: 'swiftfin', name: 'Swiftfin', platforms: 'iPhone, iPad, Apple TV', color: '#2a6df4', letter: 'S' },
-  { id: 'fladder', name: 'Fladder', platforms: 'Android, iPhone, desktop', color: '#1d9a8a', letter: 'F' },
-  { id: 'wholphin', name: 'Wholphin', platforms: 'Android TV', color: '#6b4bd6', letter: 'W' },
   { id: 'streamyfin', name: 'Streamyfin', platforms: 'iPhone, Android', color: '#9b3fd1', letter: 'S' },
   { id: 'infuse', name: 'Infuse', platforms: 'iPhone, Apple TV, Mac · titles in its own library', color: '#e46a2a', letter: 'I' },
 ];
+// Any app at all on iPhone, iPad or Mac: a Shortcut the person made once
+// ("Open App -> Odin") is run by its name. It opens the app, not the title.
+export const SHORTCUT_APP: OpenWithApp = { id: 'shortcut', name: 'Any app (through a Shortcut)', platforms: 'iPhone, iPad, Mac · opens the app, not the title', color: '#5b5b66', letter: '⌘' };
 export const WEB_APP: OpenWithApp = { id: 'web', name: 'The server’s own page', platforms: 'In a browser · works on any device', color: '#00a4dc', letter: 'J' };
 
 const STORAGE_KEY = 'slicksync-open-with';
@@ -48,6 +49,18 @@ export function rememberedApp(): OpenWithAppId | null {
 }
 export function rememberApp(id: OpenWithAppId) {
   try { localStorage.setItem(STORAGE_KEY, id); } catch { /* private mode: this visit only */ }
+}
+
+const SHORTCUT_KEY = 'slicksync-open-with-shortcut';
+export interface ShortcutChoice { app: string; shortcut: string }
+export function rememberedShortcut(): ShortcutChoice | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(SHORTCUT_KEY) || 'null');
+    return v && typeof v.app === 'string' && typeof v.shortcut === 'string' && v.shortcut.trim() ? v : null;
+  } catch { return null; }
+}
+export function rememberShortcut(choice: ShortcutChoice) {
+  try { localStorage.setItem(SHORTCUT_KEY, JSON.stringify(choice)); } catch { /* this visit only */ }
 }
 
 const plainId = (id: string | null) => (id ? id.replace(/-/g, '') : '');
@@ -61,6 +74,11 @@ export function linksFor(app: OpenWithAppId, t: OpenTargets, type: 'movie' | 'se
   const out: { label: string; detail: string; url: string }[] = [];
   const host = (a: string) => a.replace(/^https?:\/\//, '');
   const names = (s: OpenTargetServer) => s.people.map((p) => p.name).join(', ');
+  if (app === 'shortcut') {
+    const sc = rememberedShortcut();
+    if (sc && t.servers.length) out.push({ label: sc.app || 'Your app', detail: `Runs your Shortcut “${sc.shortcut}”`, url: `shortcuts://run-shortcut?name=${encodeURIComponent(sc.shortcut)}` });
+    return out;
+  }
   if (app === 'infuse') {
     if (t.tmdbId && t.servers.length) out.push({ label: 'Infuse', detail: 'Opens it in your Infuse library', url: `infuse://${type === 'movie' ? 'movie' : 'series'}/${t.tmdbId}` });
     return out;
@@ -73,10 +91,6 @@ export function linksFor(app: OpenWithAppId, t: OpenTargets, type: 'movie' | 'se
     } else if (app === 'swiftfin') {
       if (!s.serverId) continue;
       for (const p of s.people) if (p.userId) out.push({ label: p.name, detail: host(s.address), url: `swiftfin://${plainId(s.serverId)}/${plainId(p.userId)}/item/${plainId(id)}` });
-    } else if (app === 'fladder') {
-      out.push({ label: names(s), detail: host(s.address), url: `fladder://details?id=${encodeURIComponent(id)}` });
-    } else if (app === 'wholphin') {
-      out.push({ label: names(s), detail: host(s.address), url: `wholphin://view?itemId=${encodeURIComponent(id)}${s.serverId ? `&serverId=${encodeURIComponent(plainId(s.serverId))}` : ''}` });
     } else if (app === 'streamyfin') {
       out.push({ label: names(s), detail: host(s.address), url: `streamyfin://items/page?id=${encodeURIComponent(id)}` });
     } else if (app === 'web') {
@@ -89,5 +103,5 @@ export function linksFor(app: OpenWithAppId, t: OpenTargets, type: 'movie' | 'se
 
 /** Apps that can open this title here at all, in list order. */
 export function availableApps(t: OpenTargets, type: 'movie' | 'series'): OpenWithApp[] {
-  return [...OPEN_WITH_APPS, WEB_APP].filter((a) => linksFor(a.id, t, type).length > 0);
+  return [...OPEN_WITH_APPS, WEB_APP, SHORTCUT_APP].filter((a) => linksFor(a.id, t, type).length > 0);
 }
