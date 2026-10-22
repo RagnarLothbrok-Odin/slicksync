@@ -3433,9 +3433,11 @@ class ApiClient {
   // not whoever a search for the name finds first.
   async searchPerson(query: string, type: 'movie' | 'series', personId?: number | null) {
     try {
-      return await this.fetch<{ person: DiscoverPerson | null; results: PersonSearchResult[]; source?: 'lumiere' }>(`/discover/search-person?query=${encodeURIComponent(query)}&type=${type}${personId ? `&personId=${personId}` : ''}`);
-    } catch {
-      return null;
+      return await this.fetch<{ person: DiscoverPerson | null; results: PersonSearchResult[]; source?: 'lumiere'; nokey?: boolean }>(`/discover/search-person?query=${encodeURIComponent(query)}&type=${type}${personId ? `&personId=${personId}` : ''}`);
+    } catch (err) {
+      // 503: neither a TMDb key nor a LumiereDB to look people up in.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      return status === 503 ? { person: null, results: [], nokey: true } : null;
     }
   }
   // "More Like This" for the detail popup - real household affinity biases

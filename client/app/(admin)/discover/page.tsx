@@ -16,7 +16,7 @@
  * their own at the top: who they are, and everything they've been in.
  */
 
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { Header } from '@/components/layout/Header';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { MediaDetailModal, Badge, PosterCard, PosterCardItem, VirtualPosterGrid } from '@/components/ui';
@@ -47,10 +47,20 @@ type PersonResult = { person: DiscoverPerson; results: PersonSearchResult[]; sou
 const GRID = 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3';
 const SORT_STORE = 'slicksync-discover-sort';
 
-/** A panel that drops from its button and closes on a tap elsewhere or Escape. */
+/**
+ * A panel that drops from its button and closes on a tap elsewhere or
+ * Escape. `fit` goes on the panel: it never runs past the bottom of the
+ * window - it scrolls inside instead.
+ */
 function usePopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (!open || !el) return;
+    el.style.maxHeight = `${Math.max(220, window.innerHeight - el.getBoundingClientRect().top - 16)}px`;
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -59,7 +69,7 @@ function usePopover() {
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
-  return { open, setOpen, ref };
+  return { open, setOpen, ref, fit: panel };
 }
 
 /** D-pad reachable in TV mode, a plain element everywhere else. */
@@ -477,6 +487,7 @@ export default function DiscoverPage() {
 
   const [person, setPerson] = useState<PersonResult | null>(null);
   const [personLoading, setPersonLoading] = useState(false);
+  const [peopleNoKey, setPeopleNoKey] = useState(false);
   const [personSort, setPersonSort] = useState<'popular' | 'newest' | 'oldest'>('popular');
   const [unseenOnly, setUnseenOnly] = useState(false);
   useEffect(() => {
@@ -487,6 +498,7 @@ export default function DiscoverPage() {
       .then((answers) => {
         if (cancelled) return;
         const found = answers.filter((a) => a?.person && a.results.length > 0) as PersonResult[];
+        setPeopleNoKey(answers.some((a) => a?.nokey));
         setPerson(found.length ? { person: found[0].person, results: found.flatMap((f) => f.results), source: found[0].source } : null);
       })
       .catch(() => { if (!cancelled) setPerson(null); })
@@ -852,7 +864,7 @@ export default function DiscoverPage() {
                       <ChevronDownIcon className="w-3.5 h-3.5" />
                     </button>
                     {sortPop.open && (
-                      <div className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-52 p-1.5 rounded-2xl" style={panelStyle}>
+                      <div ref={sortPop.fit} className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-52 p-1.5 rounded-2xl overflow-y-auto" style={panelStyle}>
                         {sortOptions.map((o) => (
                           <button
                             key={o.key}
@@ -885,7 +897,7 @@ export default function DiscoverPage() {
                       )}
                     </button>
                     {filtersPop.open && (
-                      <div className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-[min(560px,92vw)] p-5 rounded-2xl flex flex-col gap-4 max-h-[70vh] overflow-y-auto" style={panelStyle}>
+                      <div ref={filtersPop.fit} data-filters-panel className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-[min(560px,92vw)] p-5 rounded-2xl flex flex-col gap-4 overflow-y-auto overscroll-contain" style={panelStyle}>
                         {filtersBody}
                       </div>
                     )}
@@ -976,6 +988,7 @@ export default function DiscoverPage() {
             <section className="mt-5" aria-label="People">
               {!debouncedQuery ? emptyNote('Type a name to see everything they’ve been in.', UserIcon)
                 : personLoading ? spinner
+                  : !person && peopleNoKey ? emptyNote('Looking people up needs a TMDb key or a LumiereDB - add one in Settings.', UserIcon)
                   : !person ? emptyNote(`No one found by that name${kind === 'both' ? '' : ` with ${kind === 'series' ? 'shows' : 'movies'} to show`}.`, UserIcon)
                     : (
                       <>
