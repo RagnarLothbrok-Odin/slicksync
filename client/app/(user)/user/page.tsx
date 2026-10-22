@@ -290,8 +290,7 @@ export default function UserHomePage() {
               <motion.p 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="text-xs"
-                style={{ color: syncMessage.includes('completed') ? 'var(--color-success)' : 'var(--color-error)' }}
+                className={`text-xs ${syncMessage.includes('completed') ? 'text-success' : 'text-error'}`}
               >
                 {syncMessage}
               </motion.p>

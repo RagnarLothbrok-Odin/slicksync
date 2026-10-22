@@ -38,14 +38,7 @@ export function ProviderKeyHealthBadge({ result }: ProviderKeyHealthBadgeProps) 
             becomes an outage. */}
         {result.usage && (
           <span
-            className="text-xs"
-            style={{
-              color: result.usage.percentUsed >= 90
-                ? 'var(--color-error)'
-                : result.usage.percentUsed >= 70
-                  ? 'var(--color-warning)'
-                  : 'var(--color-text-muted)',
-            }}
+            className={`text-xs ${result.usage.percentUsed >= 90 ? 'text-error' : result.usage.percentUsed >= 70 ? 'text-warning' : 'text-muted'}`}
             title={`${result.usage.used.toLocaleString()} of ${result.usage.limit.toLocaleString()} requests used${result.usage.plan ? ` (${result.usage.plan} plan)` : ''}${(result.usage as { approximate?: boolean }).approximate ? ' - counted by SlickSync (other apps using this key are not included), resets midnight UTC' : ''}`}
           >
             {result.usage.used.toLocaleString()}/{result.usage.limit.toLocaleString()} ({result.usage.percentUsed}%)
@@ -62,8 +55,7 @@ export function ProviderKeyHealthBadge({ result }: ProviderKeyHealthBadgeProps) 
   return (
     <span className="inline-flex flex-col items-end gap-0.5 max-w-[16rem] text-right">
       <span
-        className="inline-flex items-center gap-1 text-xs font-medium"
-        style={{ color: result.rateLimited ? 'var(--color-warning)' : 'var(--color-error)' }}
+        className={`inline-flex items-center gap-1 text-xs font-medium ${result.rateLimited ? 'text-warning' : 'text-error'}`}
         title={`Last checked ${checkedAgo}`}
       >
         <ExclamationTriangleIcon className="w-3.5 h-3.5" />

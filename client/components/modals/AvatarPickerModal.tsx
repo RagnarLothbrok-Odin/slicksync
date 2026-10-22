@@ -304,8 +304,7 @@ export function AvatarPickerModal({
             transparent defaults) is load-bearing here - without it,
             scrolled-past grid rows show through underneath while sticky. */}
         <div
-          className={tab === 'nuvio' && isMobile ? 'sticky top-0 z-10 -mx-6 px-6 pb-3 shadow-lg' : ''}
-          style={tab === 'nuvio' && isMobile ? { background: 'var(--color-surface)' } : undefined}
+          className={tab === 'nuvio' && isMobile ? 'sticky top-0 z-10 -mx-6 px-6 pb-3 shadow-lg bg-surface' : ''}
         >
         {previewShape === 'circle' ? (
           <div className="flex justify-center mb-2">
@@ -351,11 +350,7 @@ export function AvatarPickerModal({
                     key={t}
                     type="button"
                     onClick={() => setTab(t)}
-                    className="flex-1 py-2 text-sm font-medium rounded-lg capitalize transition-all whitespace-nowrap"
-                    style={{
-                      background: tab === t ? 'var(--color-primary)' : 'transparent',
-                      color: tab === t ? 'white' : 'var(--color-text-muted)',
-                    }}
+                    className={`flex-1 py-2 text-sm font-medium rounded-lg capitalize transition-all whitespace-nowrap ${tab === t ? 'seg-on' : 'seg-off'}`}
                   >
                     {tabLabel[t]}
                   </button>

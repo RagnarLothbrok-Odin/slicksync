@@ -1317,3 +1317,147 @@ body {
 .sync-chip-on { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 14%, transparent); }
 .sync-tile { border-color: var(--color-surface-border); background: color-mix(in srgb, var(--color-surface) 70%, transparent); }
 .sync-tile.is-on { border-color: color-mix(in srgb, var(--tile) 60%, transparent); background: color-mix(in srgb, var(--tile) 10%, var(--color-surface)); }
+
+/* Selected / active / on-off looks as classes, never an inline swap. A
+   browser extension that recolours pages (seen on a Firefox setup) freezes
+   the inline colours it has already rewritten, so an element that stays
+   mounted and swaps an inline colour kept its old look (a tab still lit
+   after another was picked). Same colours as the inline versions had. */
+.row-hl { background: var(--color-surface-hover); }
+.tab-drop-over { box-shadow: 0 0 0 2px var(--color-primary); background: var(--color-primary-muted); border-radius: 0.5rem; }
+.seg-on { background: var(--color-primary); color: white; }
+.seg-on-secondary { background: var(--color-secondary); color: white; }
+.seg-off { background: transparent; color: var(--color-text-muted); }
+.seg-off-subtle { background: var(--color-subtle); color: var(--color-text-muted); }
+.badge-flip { background: white; color: var(--color-primary); }
+.chip-solid-on { background: var(--color-primary); color: var(--color-bg); border: 1px solid var(--color-primary); }
+.chip-solid-off { background: var(--color-surface); color: var(--color-text-muted); border: 1px solid var(--color-surface-border); }
+.chip-solid-off-hover { background: var(--color-surface-hover); color: var(--color-text-muted); border: 1px solid var(--color-surface-border); }
+.pill-tint-on { color: var(--tint); background: color-mix(in srgb, var(--tint) 12%, transparent); border-color: color-mix(in srgb, var(--tint) 30%, transparent); }
+.pill-tint-off { color: var(--color-text-muted); border-color: var(--color-surface-border); }
+.ibtn-tint-on { color: var(--tint); background: color-mix(in srgb, var(--tint) 16%, transparent); }
+.ibtn-tint-off { color: var(--color-text-muted); background: var(--color-surface-hover); }
+.tint-ico-on { background: var(--tint); color: var(--color-bg); }
+.tint-ico-off { background: color-mix(in srgb, var(--tint) 16%, transparent); color: var(--tint); }
+.tint-lbl-on { color: var(--tint); }
+.ep-watched, .ep-watched:hover { background: color-mix(in srgb, var(--color-success) 8%, transparent); }
+.ep-unwatched, .ep-unwatched:hover { background: transparent; }
+.tgl-on { background: var(--color-primary); border: 1px solid var(--color-surface-border); }
+.tgl-off { background: var(--color-surface-hover); border: 1px solid var(--color-surface-border); }
+.tgl-knob-on { background: white; }
+.tgl-knob-off { background: var(--color-text-muted); }
+/* The checkbox's border tint carries primary even unchecked (the first
+   pass, a faint glow, rendered correctly but was too subtle to see) and
+   the glow ring is always on, re-coloured by whatever theme is active. */
+.selcb-on {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 14px var(--color-primary-muted), 0 0 0 1px var(--color-primary);
+}
+.selcb-off {
+  background-color: var(--color-surface);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-surface-border));
+  box-shadow: 0 0 4px color-mix(in srgb, var(--color-primary) 38%, transparent), 0 0 8px color-mix(in srgb, var(--color-secondary) 25%, transparent), inset 0 1px 3px rgba(0,0,0,0.2);
+}
+.selcb-on:hover { border-color: var(--color-primary); box-shadow: 0 0 16px var(--color-primary-muted); }
+.selcb-off:hover { border-color: var(--color-primary); box-shadow: 0 0 8px var(--color-primary-muted); }
+.card-bg-nebula { background: color-mix(in srgb, var(--color-surface) 55%, transparent); }
+.card-bg-plain { background: var(--color-surface); }
+.swatch-picked { box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary); }
+.notif-lit, .notif-lit:hover { background-color: var(--color-primary-muted); }
+.notif-read, .notif-read:hover { background-color: transparent; }
+.notif-dot-lit { background-color: var(--color-primary); }
+.notif-dot-read { background-color: transparent; }
+.user-tile-on { background: color-mix(in srgb, var(--color-primary) 16%, transparent); border: 1px solid var(--color-primary); }
+.user-tile-off { background: var(--color-surface-hover); border: 1px solid var(--color-surface-border); }
+.pin-hint-on { color: var(--color-warning, #f59e0b); }
+.quick-approved { color: var(--color-success, #22c55e); }
+.lm-row-nebula { background: color-mix(in srgb, var(--color-surface) 50%, transparent); border: 1px solid var(--color-surface-border); }
+.lm-row-hover { background: var(--color-surface-hover); border: 1px solid var(--color-surface-border); }
+.lm-row-surface { background: var(--color-surface); border: 1px solid var(--color-surface-border); }
+.bd-ok { border: 1px solid var(--color-surface-border); }
+.bd-err { border: 1px solid var(--color-error); }
+.bd-warn { border: 1px solid var(--color-warning); }
+.bd2-off { border: 2px solid var(--color-surface-border); }
+.bd2-sel { border: 2px solid var(--color-primary); }
+.bd3-sel { border: 3px solid var(--color-primary); }
+.chain-link-on { background: rgba(245, 158, 11, 0.15); border: 1.5px solid rgba(245, 158, 11, 0.4); color: #f59e0b; }
+.chain-link-off { background: var(--color-surface-hover); border: 1.5px solid var(--color-surface-border); color: var(--color-text-subtle); }
+.armed-on, .armed-on:hover { color: #fff; background: rgba(220, 38, 38, 0.75); }
+.armed-off { color: rgb(226, 232, 240); }
+.rank-1, .rank-2, .rank-3 { color: var(--color-bg); }
+.rank-1 { background: var(--color-warning); }
+.rank-2 { background: var(--color-text-muted); }
+.rank-3 { background: var(--color-text-subtle); }
+.rank-top-muted { background: var(--color-warning-muted); color: var(--color-warning); }
+.rank-rest-muted { background: var(--color-surface); color: var(--color-text-muted); }
+.health-bg-ok { background: linear-gradient(120deg, rgba(34,197,94,0.10) 0%, transparent 60%); }
+.health-bg-warn { background: linear-gradient(120deg, rgba(234,179,8,0.12) 0%, transparent 60%); }
+.usage-bar-hot { background: linear-gradient(180deg, rgba(239,68,68,0.9) 0%, rgba(220,38,38,0.95) 100%); }
+.usage-bar-ok { background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-secondary) 100%); }
+.usage-glow-hot { box-shadow: 0 0 20px rgba(239,68,68,0.4); }
+.usage-glow-ok { box-shadow: 0 0 20px var(--color-primary-muted); }
+.opt-row-on { background: color-mix(in srgb, var(--color-primary) 15%, transparent); border: 1px solid var(--color-primary); }
+.opt-row-off { background: var(--color-subtle); border: 1px solid var(--color-surface-border); }
+.opt-box-on { background: var(--color-primary); border: none; }
+.opt-box-off { background: transparent; border: 2px solid var(--color-surface-border); }
+.opt-card-on { background: var(--color-primary-muted); border-color: var(--color-primary); }
+.opt-card-off { background: var(--color-surface); border-color: var(--color-surface-border); }
+.keyset-on { background: var(--color-primary-muted); color: var(--color-primary); border: 1px solid transparent; }
+.keyset-ok { background: var(--color-successMuted); color: var(--color-success); border: 1px solid transparent; }
+.keyset-off { background: transparent; color: var(--color-text-muted); border: 1px solid var(--color-surface-border); }
+.rail-ico-on { color: #fff; }
+.rail-blurb-on { color: rgba(255,255,255,0.78); }
+.dot-off { background: var(--color-text-subtle); }
+.nebula-link-on, .nebula-link-on:hover {
+  color: #fff;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 55%, transparent), color-mix(in srgb, var(--color-secondary) 30%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+.panel-btn:hover { background: var(--color-surface-hover); }
+.panel-btn-open { background: var(--color-surface-elevated); }
+.side-link-over, .side-link-over:hover { background: var(--color-primary-muted); box-shadow: 0 0 0 2px var(--color-primary); }
+.auth-opt-on { background: var(--color-primary); border: 1px solid var(--color-primary); }
+.auth-opt-off { background: var(--color-surface-hover); border: 1px solid var(--color-surface-border); }
+.auth-opt-on .ao-icon, .auth-opt-on .ao-icon-grad { background: rgba(255,255,255,0.2); }
+.auth-opt-off .ao-icon { background: var(--color-subtle); }
+.auth-opt-off .ao-icon-grad { background: linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 80%, var(--color-secondary)) 100%); }
+.auth-opt-on .ao-glyph { color: white; }
+.auth-opt-off .ao-glyph { color: var(--color-text-muted); }
+.auth-opt-on .ao-title { color: white; }
+.auth-opt-off .ao-title { color: var(--color-text); }
+.auth-opt-on .ao-sub { color: rgba(255,255,255,0.8); }
+.auth-opt-off .ao-sub { color: var(--color-text-muted); }
+.auth-opt-on .ao-badge { background: rgba(255,255,255,0.3); color: white; }
+.auth-opt-off .ao-badge { background: var(--color-primary); color: white; }
+.oauth-bar-done { background: linear-gradient(90deg, var(--color-primary), var(--color-secondary)); }
+.oauth-bar-wait { background: linear-gradient(90deg, transparent, var(--color-primary), transparent); }
+.slot-on { border: 2px solid var(--slot); background: color-mix(in srgb, var(--slot) 9%, var(--color-surface)); box-shadow: 0 10px 30px -18px var(--slot); }
+.slot-off { border: 2px dashed var(--slot); background: transparent; }
+.state-unknown { outline: 1.5px dashed var(--color-primary); outline-offset: 1px; }
+.copy-btn-open { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+/* Button variants (components/ui/Button.tsx): colours and hover as classes.
+   They were inline styles repainted in mouse handlers, which a colour-
+   freezing extension could leave stuck on the hover colour. */
+.btn-v-primary { background: var(--color-primary); color: var(--color-bg); border: none; }
+.btn-v-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+.btn-v-secondary { background: transparent; color: var(--color-text); border: 1px solid var(--color-surface-border); }
+.btn-v-secondary:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-text-subtle); }
+.btn-v-ghost { background: transparent; color: var(--color-text-muted); border: none; }
+.btn-v-ghost:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.btn-v-danger { background: var(--color-error); color: white; border: none; }
+.btn-v-danger:hover:not(:disabled) { opacity: 0.9; }
+.btn-v-cyan { background: var(--color-secondary); color: var(--color-bg); border: none; }
+.btn-v-cyan:hover:not(:disabled) { background: var(--color-secondary-muted); }
+
+/* Hover looks that were painted from mouse handlers - classes now, so a
+   colour-freezing extension can't leave them stuck lit. */
+.hov-surface { background: transparent; }
+.hov-surface:hover { background: var(--color-surface-hover); }
+.hov-error { background: transparent; }
+.hov-error:hover { background: var(--color-error-muted); }
+.hov-outline-row { background: transparent; border: 1px solid var(--color-surface-border); }
+.hov-outline-row:hover { background: var(--color-surface-hover); border-color: var(--color-text-subtle); }
+.hov-amber-add { background: transparent; border-color: var(--color-surface-border); }
+.hov-amber-add:hover:not(:disabled) { background: rgba(245, 158, 11, 0.04); border-color: rgba(245, 158, 11, 0.4); }

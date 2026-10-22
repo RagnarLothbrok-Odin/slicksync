@@ -199,8 +199,8 @@ export function FilterTabs({
                     ? 'text-primary'
                     : 'text-muted nav-item-hover-pill'
                   }
+                  ${isOver ? 'tab-drop-over' : ''}
                 `}
-                style={isOver ? { boxShadow: '0 0 0 2px var(--color-primary)', background: 'var(--color-primary-muted)', borderRadius: '0.5rem' } : undefined}
               >
               {/* Icon */}
               {option.icon && (

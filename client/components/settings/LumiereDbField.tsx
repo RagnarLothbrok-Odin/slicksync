@@ -86,7 +86,7 @@ export function LumiereDbField({ value, onChange, onSave }: {
         className="input-base w-full px-3 py-2 text-sm"
       />
       {value.trim() && status && status.state !== 'ready' && status.state !== 'off' && (
-        <p className="text-xs mt-1.5 leading-snug" style={{ color: status.state === 'building' ? 'var(--color-text-muted)' : 'var(--color-warning)' }}>
+        <p className={`text-xs mt-1.5 leading-snug ${status.state === 'building' ? 'text-muted' : 'text-warning'}`}>
           {status.message}
         </p>
       )}

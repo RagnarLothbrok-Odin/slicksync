@@ -80,10 +80,8 @@ function SmallPill({ on, tint, onClick, busy, icon, label, title }: {
       disabled={busy}
       title={title}
       aria-pressed={on}
-      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-xs sm:text-[13px] font-medium whitespace-nowrap border transition-colors ${busy ? 'opacity-60 cursor-wait' : ''}`}
-      style={on
-        ? { color: tint, background: `color-mix(in srgb, ${tint} 12%, transparent)`, borderColor: `color-mix(in srgb, ${tint} 30%, transparent)` }
-        : { color: 'var(--color-text-muted)', borderColor: 'var(--color-surface-border)' }}
+      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-xs sm:text-[13px] font-medium whitespace-nowrap border transition-colors ${on ? 'pill-tint-on' : 'pill-tint-off'} ${busy ? 'opacity-60 cursor-wait' : ''}`}
+      style={{ '--tint': tint } as React.CSSProperties}
     >
       {icon}
       {label}
@@ -1370,10 +1368,8 @@ export function MediaDetailModal({
                     title={opts.title}
                     aria-label={opts.title}
                     aria-pressed={opts.on}
-                    className={`flex items-center justify-center gap-1.5 ${opts.label ? 'px-3' : 'w-10'} h-10 rounded-lg transition-colors shrink-0 ${opts.busy ? 'opacity-60 cursor-wait' : ''}`}
-                    style={opts.on
-                      ? { color: opts.tint, background: `color-mix(in srgb, ${opts.tint} 16%, transparent)` }
-                      : { color: 'var(--color-text-muted)', background: 'var(--color-surface-hover)' }}
+                    className={`flex items-center justify-center gap-1.5 ${opts.label ? 'px-3' : 'w-10'} h-10 rounded-lg transition-colors shrink-0 ${opts.on ? 'ibtn-tint-on' : 'ibtn-tint-off'} ${opts.busy ? 'opacity-60 cursor-wait' : ''}`}
+                    style={{ '--tint': opts.tint } as React.CSSProperties}
                   >
                     {opts.icon}
                     {opts.label && <span className="text-sm font-medium">{opts.label}</span>}
@@ -1598,8 +1594,7 @@ export function MediaDetailModal({
                                 key={s.season}
                                 type="button"
                                 onClick={() => setActiveSeason(s.season)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap ${activeSeason === s.season ? 'bg-primary text-white' : 'text-muted'}`}
-                                style={activeSeason === s.season ? undefined : { background: 'var(--color-surface)' }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap ${activeSeason === s.season ? 'bg-primary text-white' : 'text-muted bg-surface'}`}
                               >
                                 Season {s.season}
                                 {s.watchedCount > 0 && (
@@ -1612,8 +1607,7 @@ export function MediaDetailModal({
                             {seasons.find((s) => s.season === activeSeason)?.episodes.map((ep) => (
                               <div
                                 key={`${ep.season}-${ep.episode}`}
-                                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-surface-hover"
-                                style={{ background: ep.watched ? 'color-mix(in srgb, var(--color-success) 8%, transparent)' : 'transparent' }}
+                                className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-surface-hover ${ep.watched ? 'ep-watched' : 'ep-unwatched'}`}
                               >
                                 <span className="text-xs shrink-0 w-10 tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
                                   E{String(ep.episode).padStart(2, '0')}
@@ -1645,11 +1639,10 @@ export function MediaDetailModal({
                     onClick={() => { setWtOpen((v) => !v); if (!wtOpen) loadWatchTogether(); }}
                     className={wtOpen
                       ? 'w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left'
-                      : 'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-colors'}
-                    style={wtOpen ? undefined : { background: 'var(--color-surface-hover)' }}
+                      : 'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-colors bg-surface-hover'}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <ShieldCheckIcon className="w-4 h-4 shrink-0" style={{ color: wtHasPact ? 'var(--color-primary)' : 'var(--color-text-muted)' }} />
+                      <ShieldCheckIcon className={`w-4 h-4 shrink-0 ${wtHasPact ? 'text-primary' : 'text-muted'}`} />
                       <span className="text-sm font-medium text-default">Spoiler guard</span>
                       {wtHasPact && (
                         <span className="text-xs text-muted truncate">
@@ -1681,13 +1674,7 @@ export function MediaDetailModal({
                                   key={u.id}
                                   type="button"
                                   onClick={() => setWtSelected((prev) => { const n = new Set(prev); if (n.has(u.id)) n.delete(u.id); else n.add(u.id); return n; })}
-                                  className="px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
-                                  style={{
-                                    background: on ? 'var(--color-primary)' : 'var(--color-surface)',
-                                    color: on ? 'var(--color-bg)' : 'var(--color-text-muted)',
-                                    border: '1px solid',
-                                    borderColor: on ? 'var(--color-primary)' : 'var(--color-surface-border)',
-                                  }}
+                                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${on ? 'chip-solid-on' : 'chip-solid-off'}`}
                                 >
                                   {u.username}
                                 </button>
@@ -1820,10 +1807,8 @@ export function MediaDetailModal({
                               : personFollows[String(personView.id)].muted
                                 ? 'Alerts muted - tap to turn them back on'
                                 : 'Following - tap to mute'}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
-                            style={personFollows[String(personView.id)] && !personFollows[String(personView.id)].muted
-                              ? { color: 'var(--color-primary)', background: 'color-mix(in srgb, var(--color-primary) 16%, transparent)' }
-                              : { color: 'var(--color-text-muted)', background: 'var(--color-surface-hover)' }}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${personFollows[String(personView.id)] && !personFollows[String(personView.id)].muted ? 'ibtn-tint-on' : 'ibtn-tint-off'}`}
+                            style={{ '--tint': 'var(--color-primary)' } as React.CSSProperties}
                           >
                             <BellIcon className="w-3.5 h-3.5" />
                             {!personFollows[String(personView.id)]
@@ -1931,7 +1916,7 @@ export function MediaDetailModal({
                             const total = others.length + 1;
                             const done = watchedTotal >= total;
                             return (
-                              <span className="text-xs" style={{ color: done ? 'var(--color-success)' : undefined }}>
+                              <span className={`text-xs ${done ? 'text-success' : ''}`}>
                                 {done ? 'saga complete' : `watched ${watchedTotal} of ${total}`}
                               </span>
                             );

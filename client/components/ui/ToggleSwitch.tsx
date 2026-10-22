@@ -32,20 +32,13 @@ export function ToggleSwitch({
         if (!disabled) onChange();
       }}
       disabled={disabled}
-      className={`relative inline-flex items-center rounded-full transition-colors ${trackBase} disabled:opacity-50 ${className}`}
-      style={{
-        background: checked ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-        border: '1px solid var(--color-surface-border)'
-      }}
+      className={`relative inline-flex items-center rounded-full transition-colors ${trackBase} disabled:opacity-50 ${checked ? 'tgl-on' : 'tgl-off'} ${className}`}
       aria-pressed={checked}
       title={title}
       type="button"
     >
       <motion.span
-        className={`inline-block rounded-full ${knobBase}`}
-        style={{
-          background: checked ? 'white' : 'var(--color-text-muted)',
-        }}
+        className={`inline-block rounded-full ${knobBase} ${checked ? 'tgl-knob-on' : 'tgl-knob-off'}`}
         animate={{
           x: checked ? (size === 'sm' ? 16 : 20) : (size === 'sm' ? 2 : 4)
         }}

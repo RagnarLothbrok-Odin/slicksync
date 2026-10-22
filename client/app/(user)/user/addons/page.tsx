@@ -138,21 +138,13 @@ export default function UserAddonsPage() {
       >
         <button
           onClick={() => setActiveTab('group')}
-          className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all"
-          style={{
-            background: activeTab === 'group' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'group' ? 'white' : 'var(--color-text-muted)',
-          }}
+          className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'group' ? 'seg-on' : 'seg-off'}`}
         >
           Group Addons ({groupAddons.length})
         </button>
         <button
           onClick={() => setActiveTab('stremio')}
-          className="px-6 py-2.5 rounded-lg text-sm font-medium transition-all"
-          style={{
-            background: activeTab === 'stremio' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'stremio' ? 'white' : 'var(--color-text-muted)',
-          }}
+          className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'stremio' ? 'seg-on' : 'seg-off'}`}
         >
           {providerLabel} Addons ({stremioAddons.length})
         </button>
@@ -215,10 +207,9 @@ export default function UserAddonsPage() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className="flex items-center gap-4 p-4 rounded-xl"
+                  className={`flex items-center gap-4 p-4 rounded-xl ${isExcluded ? 'bd-warn' : 'bd-ok'}`}
                   style={{
                     background: 'var(--color-surface)',
-                    border: `1px solid ${isExcluded ? 'var(--color-warning)' : 'var(--color-surface-border)'}`,
                     opacity: isExcluded ? 0.7 : 1,
                   }}
                 >
@@ -272,10 +263,7 @@ export default function UserAddonsPage() {
                   <button
                     onClick={() => handleToggleExclude(addon.id, isExcluded)}
                     disabled={actionLoading === addon.id}
-                    className="p-2 rounded-lg transition-all"
-                    style={{
-                      background: isExcluded ? 'var(--color-success-muted)' : 'var(--color-warning-muted)',
-                    }}
+                    className={`p-2 rounded-lg transition-all ${isExcluded ? 'bg-success-muted' : 'bg-warning-muted'}`}
                     title={isExcluded ? 'Include addon' : 'Exclude addon'}
                   >
                     {actionLoading === addon.id ? (
@@ -400,10 +388,7 @@ export default function UserAddonsPage() {
                     <button
                       onClick={() => handleToggleProtect(addon.manifest.name, isProtected)}
                       disabled={actionLoading === addon.manifest.name}
-                      className="p-2 rounded-lg transition-all"
-                      style={{
-                        background: isProtected ? 'var(--color-warning-muted)' : 'var(--color-success-muted)',
-                      }}
+                      className={`p-2 rounded-lg transition-all ${isProtected ? 'bg-warning-muted' : 'bg-success-muted'}`}
                       title={isProtected ? 'Remove protection' : 'Protect addon'}
                     >
                       {actionLoading === addon.manifest.name ? (

@@ -157,11 +157,10 @@ export function AvatarColorSwatches({ value, onChange }: { value: number; onChan
             aria-label={c.name}
             title={c.name}
             aria-pressed={picked}
-            className="w-8 h-8 rounded-full transition-transform"
+            className={`w-8 h-8 rounded-full transition-transform ${picked ? 'swatch-picked' : ''}`}
             style={{
               background: c.gradient,
               transform: picked ? 'scale(1.15)' : 'scale(1)',
-              boxShadow: picked ? '0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary)' : 'none',
             }}
           />
         );
@@ -275,7 +274,8 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
       </motion.div>
 
       {status && (
-        <span 
+        <span
+          key={status}
           className={clsx(
             'absolute bottom-0 right-0 block rounded-full',
             size === 'xs' || size === 'sm' ? 'w-2 h-2' : 'w-3 h-3'

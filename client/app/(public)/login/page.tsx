@@ -767,22 +767,14 @@ function LoginContent() {
         >
           <button
             onClick={() => switchMode('user')}
-            className="flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2"
-            style={{
-              background: mode === 'user' ? 'var(--color-primary)' : 'transparent',
-              color: mode === 'user' ? 'white' : 'var(--color-text-muted)',
-            }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${mode === 'user' ? 'seg-on' : 'seg-off'}`}
           >
             <UserIcon className="w-4 h-4" />
             User
           </button>
           <button
             onClick={() => switchMode('admin')}
-            className="flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2"
-            style={{
-              background: mode === 'admin' ? 'var(--color-primary)' : 'transparent',
-              color: mode === 'admin' ? 'white' : 'var(--color-text-muted)',
-            }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${mode === 'admin' ? 'seg-on' : 'seg-off'}`}
           >
             <ShieldCheckIcon className="w-4 h-4" />
             Admin
@@ -799,10 +791,7 @@ function LoginContent() {
         >
           {/* Top accent */}
           <div
-            className="h-1"
-            style={{
-              background: mode === 'user' ? 'var(--color-success)' : 'var(--color-primary)',
-            }}
+            className={`h-1 ${mode === 'user' ? 'bg-success' : 'bg-primary'}`}
           />
 
           <div className="p-6">

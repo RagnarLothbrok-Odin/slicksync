@@ -47,11 +47,7 @@ const ThemeCard = memo(function ThemeCard({
       whileHover={{ scale: 1.02, y: -2 }}
       whileTap={{ scale: 0.98 }}
       onClick={onSelect}
-      className="relative p-3 rounded-xl border-2 transition-all text-left w-full"
-      style={{
-        background: isSelected ? 'var(--color-primary-muted)' : 'var(--color-surface)',
-        borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-surface-border)',
-      }}
+      className={`relative p-3 rounded-xl border-2 transition-all text-left w-full ${isSelected ? 'opt-card-on' : 'opt-card-off'}`}
     >
       {isSelected && (
         <div 
@@ -653,8 +649,7 @@ export default function UserSettingsPage() {
               {activityVisibilityLoaded && (
                 <div className="flex items-center gap-3">
                   <span 
-                    className="text-sm font-medium"
-                    style={{ color: isPublic ? 'var(--color-success)' : 'var(--color-text-muted)' }}
+                    className={`text-sm font-medium ${isPublic ? 'text-success' : 'text-muted'}`}
                   >
                     {isPublic ? 'Public' : 'Private'}
                   </span>
@@ -790,8 +785,7 @@ export default function UserSettingsPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span
-                    className="text-sm font-medium"
-                    style={{ color: notifyOnWatch ? 'var(--color-success)' : 'var(--color-text-muted)' }}
+                    className={`text-sm font-medium ${notifyOnWatch ? 'text-success' : 'text-muted'}`}
                   >
                     {notifyOnWatch ? 'On' : 'Off'}
                   </span>

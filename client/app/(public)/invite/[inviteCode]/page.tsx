@@ -477,8 +477,7 @@ export default function InviteRequestPage() {
               <div>
                 <div className="relative">
                   <div
-                    className="absolute left-4 top-1/2 -translate-y-1/2"
-                    style={{ color: usernameError ? 'var(--color-error)' : 'var(--color-text-subtle)' }}
+                    className={`absolute left-4 top-1/2 -translate-y-1/2 ${usernameError ? 'text-error' : 'text-subtle'}`}
                   >
                     <UserIcon className="w-5 h-5" />
                   </div>
@@ -499,11 +498,10 @@ export default function InviteRequestPage() {
                     placeholder="Username"
                     required
                     disabled={isSubmitting}
-                    className="slicksync-input w-full pl-12 pr-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
+                    className={`slicksync-input w-full pl-12 pr-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none ${usernameError ? 'bd-err' : 'bd-ok'}`}
                     style={{
                       backgroundColor: 'var(--color-bg-subtle)',
                       color: 'var(--color-text)',
-                      border: `1px solid ${usernameError ? 'var(--color-error)' : 'var(--color-surface-border)'}`,
                     }}
                   />
                 </div>

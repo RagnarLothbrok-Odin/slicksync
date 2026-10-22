@@ -90,11 +90,8 @@ function NavItem({ name, href, icon: Icon, isActive, index, onNavigate }: NavIte
       <Link
         href={href}
         onClick={onNavigate}
-        className="nav-item-hover-pill relative flex items-center gap-3 px-3 py-2.5 rounded-xl group overflow-hidden"
+        className={`nav-item-hover-pill relative flex items-center gap-3 px-3 py-2.5 rounded-xl group overflow-hidden ${isActive ? 'text-primary' : 'text-muted'} ${isOver ? 'side-link-over' : ''}`}
         style={{
-          background: isOver ? 'var(--color-primary-muted)' : 'transparent',
-          color: isActive ? 'var(--color-primary)' : 'var(--color-text-muted)',
-          boxShadow: isOver ? '0 0 0 2px var(--color-primary)' : 'none',
           transition: 'background 0.15s ease, box-shadow 0.15s ease',
         }}
       >
@@ -110,8 +107,8 @@ function NavItem({ name, href, icon: Icon, isActive, index, onNavigate }: NavIte
           className="nav-item-icon w-[18px] h-[18px] relative z-10 transition-colors"
         />
         <span
-          className="nav-item-label text-base font-medium relative z-10 font-display transition-colors"
-          style={{ color: isActive ? 'var(--color-text)' : undefined, fontWeight: isActive ? 600 : 500 }}
+          className={`nav-item-label text-base font-medium relative z-10 font-display transition-colors ${isActive ? 'text-default' : ''}`}
+          style={{ fontWeight: isActive ? 600 : 500 }}
         >
           {name}
         </span>

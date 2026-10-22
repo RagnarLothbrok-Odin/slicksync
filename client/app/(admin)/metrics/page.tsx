@@ -620,11 +620,7 @@ export default function MetricsPage() {
                             person in the list. */}
                         {topUsersData.length > 1 && (
                           <span
-                            className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{
-                              background: index === 0 ? 'var(--color-warning-muted)' : 'var(--color-surface)',
-                              color: index === 0 ? 'var(--color-warning)' : 'var(--color-text-muted)',
-                            }}
+                            className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold shrink-0 ${index === 0 ? 'rank-top-muted' : 'rank-rest-muted'}`}
                           >
                             {index + 1}
                           </span>
@@ -1159,12 +1155,7 @@ export default function MetricsPage() {
                 </div>
                 <Card
                   padding="lg"
-                  className={healthData.overall === 'healthy' ? 'border-success/30' : 'border-warning/30'}
-                  style={{
-                    background: healthData.overall === 'healthy'
-                      ? 'linear-gradient(120deg, rgba(34,197,94,0.10) 0%, transparent 60%)'
-                      : 'linear-gradient(120deg, rgba(234,179,8,0.12) 0%, transparent 60%)',
-                  }}
+                  className={healthData.overall === 'healthy' ? 'border-success/30 health-bg-ok' : 'border-warning/30 health-bg-warn'}
                 >
                   <div className="flex items-center gap-4">
                     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${healthData.overall === 'healthy' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>

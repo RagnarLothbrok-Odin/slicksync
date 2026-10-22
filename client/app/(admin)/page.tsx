@@ -1020,11 +1020,7 @@ export default function DashboardPage() {
                         <div className="relative shrink-0">
                           <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="sm" />
                           <div
-                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold"
-                            style={{
-                              background: index === 0 ? 'var(--color-warning)' : index === 1 ? 'var(--color-text-muted)' : 'var(--color-text-subtle)',
-                              color: 'var(--color-bg)',
-                            }}
+                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold ${index === 0 ? 'rank-1' : index === 1 ? 'rank-2' : 'rank-3'}`}
                           >
                             {index + 1}
                           </div>
@@ -1369,11 +1365,7 @@ export default function DashboardPage() {
                         <div className="relative">
                           <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="md" />
                           <div 
-                            className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
-                            style={{ 
-                              background: index === 0 ? 'var(--color-warning)' : index === 1 ? 'var(--color-text-muted)' : 'var(--color-text-subtle)',
-                              color: 'var(--color-bg)'
-                            }}
+                            className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${index === 0 ? 'rank-1' : index === 1 ? 'rank-2' : 'rank-3'}`}
                           >
                             {index + 1}
                           </div>

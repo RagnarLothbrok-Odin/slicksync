@@ -303,8 +303,8 @@ export function ScreenTimePanel({ userId, name, onPickGroup, onReconnect, onClos
         {limitMinutes > 0 && state?.appliesToday && (
           <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-subtle)' }}>
             <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${Math.max(share * 100, 2)}%`, background: reached ? 'var(--color-warning)' : 'var(--color-primary)' }}
+              className={`h-full rounded-full transition-all ${reached ? 'bg-warning' : 'bg-primary'}`}
+              style={{ width: `${Math.max(share * 100, 2)}%` }}
             />
           </div>
         )}

@@ -95,10 +95,9 @@ export function DateTimePicker({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-4 py-3 rounded-xl transition-all duration-300 focus:outline-none border border-theme-surface-border focus:border-theme-secondary flex items-center gap-2 justify-between"
+        className={`w-full px-4 py-3 rounded-xl transition-all duration-300 focus:outline-none border border-theme-surface-border focus:border-theme-secondary flex items-center gap-2 justify-between ${value ? 'text-default' : 'text-subtle'}`}
         style={{
           background: 'var(--color-bg-subtle)',
-          color: value ? 'var(--color-text)' : 'var(--color-text-subtle)',
         }}
       >
         <div className="flex items-center gap-2">

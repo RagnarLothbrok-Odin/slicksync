@@ -1221,12 +1221,7 @@ function ProxyHistoryView() {
           {proxyLogs.map((log, index) => (
             <div
               key={index}
-              className="flex items-center gap-4 p-3 rounded-lg transition-colors"
-              style={
-                layoutMode === 'nebula'
-                  ? { background: 'color-mix(in srgb, var(--color-surface) 50%, transparent)', border: '1px solid var(--color-surface-border)' }
-                  : { background: 'var(--color-surface-hover)', border: '1px solid var(--color-surface-border)' }
-              }
+              className={`flex items-center gap-4 p-3 rounded-lg transition-colors ${layoutMode === 'nebula' ? 'lm-row-nebula' : 'lm-row-hover'}`}
             >
                 <div className="flex-shrink-0">
                   {log.cacheHit ? (
@@ -1601,12 +1596,7 @@ function InviteHistoryRow({ invite }: { invite: InviteHistoryItem }) {
   return (
     <motion.div
       whileHover={{ x: 4 }}
-      className="flex items-start gap-4 p-4 rounded-xl transition-colors"
-      style={
-        layoutMode === 'nebula'
-          ? { background: 'color-mix(in srgb, var(--color-surface) 50%, transparent)', border: '1px solid var(--color-surface-border)' }
-          : { background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }
-      }
+      className={`flex items-start gap-4 p-4 rounded-xl transition-colors ${layoutMode === 'nebula' ? 'lm-row-nebula' : 'lm-row-surface'}`}
     >
       {/* Invite action icon */}
       <div className={`p-2 rounded-lg ${invite.action === 'created'

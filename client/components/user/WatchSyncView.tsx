@@ -226,10 +226,10 @@ function Slot({ role, choice, count, sides, others, person, other, onPick, compa
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="w-full text-left flex items-center gap-3 rounded-[18px]"
+        className={`w-full text-left flex items-center gap-3 rounded-[18px] ${choice ? 'slot-on' : 'slot-off'}`}
         style={choice
-          ? { padding: compact ? 12 : 16, border: `2px solid ${color}`, background: `color-mix(in srgb, ${color} 9%, var(--color-surface))`, boxShadow: `0 10px 30px -18px ${color}` }
-          : { padding: compact ? 12 : 16, minHeight: compact ? 72 : 88, border: `2px dashed ${color}`, background: 'transparent', justifyContent: 'center' }}
+          ? { padding: compact ? 12 : 16, '--slot': color } as React.CSSProperties
+          : { padding: compact ? 12 : 16, minHeight: compact ? 72 : 88, justifyContent: 'center', '--slot': color } as React.CSSProperties}
       >
         {choice ? <Logo kind={choice.sideInfo.kind} size={compact ? 40 : 48} /> : null}
         {!choice && <span className="font-semibold text-default flex items-center gap-1.5" style={{ fontSize: compact ? 15 : 16 }}>Pick a sign-in<ChevronDownIcon className="w-4 h-4 opacity-70" /></span>}
@@ -321,7 +321,7 @@ function StateAvatar({ has, pic, size, unknown }: { has: WatchCopyHas; pic: (siz
   const badge = Math.max(12, Math.round(size * 0.55));
   if (state === 'partial') {
     return (
-      <span title={has.text} className="shrink-0 rounded-full inline-flex items-center justify-center" style={{ width: size + 6, height: size + 6, background: `conic-gradient(${FROM_C} ${has.pct ?? 50}%, rgba(255,255,255,.18) 0)` }}>
+      <span key={has.pct ?? 50} title={has.text} className="shrink-0 rounded-full inline-flex items-center justify-center" style={{ width: size + 6, height: size + 6, background: `conic-gradient(${FROM_C} ${has.pct ?? 50}%, rgba(255,255,255,.18) 0)` }}>
         <span className="rounded-full inline-flex" style={{ boxShadow: '0 0 0 2px var(--color-background, #0b0d14)' }}>{pic(size)}</span>
       </span>
     );
@@ -329,8 +329,8 @@ function StateAvatar({ has, pic, size, unknown }: { has: WatchCopyHas; pic: (siz
   return (
     <span
       title={unknown ? 'No match yet' : has.text}
-      className="relative shrink-0 inline-flex rounded-full"
-      style={state === 'none' ? { opacity: 0.38, filter: 'grayscale(1)' } : state === 'unknown' ? { opacity: 0.5, outline: '1.5px dashed var(--color-primary)', outlineOffset: 1 } : undefined}
+      className={`relative shrink-0 inline-flex rounded-full ${state === 'unknown' ? 'state-unknown' : ''}`}
+      style={state === 'none' ? { opacity: 0.38, filter: 'grayscale(1)' } : state === 'unknown' ? { opacity: 0.5 } : undefined}
     >
       {pic(size)}
       {state === 'watched' && (
@@ -800,7 +800,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                       {/* Copy asks first, naming where it goes - one tap once wrote into
                           a real profile by accident. */}
                       <div ref={copyRef} className="sm:relative shrink-0">
-                        <button type="button" disabled={!toCopy.length || copying} onClick={() => setConfirmCopy((o) => !o)} aria-expanded={confirmCopy} className="px-4 sm:px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-50" style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 8px 22px -10px var(--color-primary)', outline: confirmCopy ? '2px solid var(--color-primary)' : undefined, outlineOffset: 2 }}>
+                        <button type="button" disabled={!toCopy.length || copying} onClick={() => setConfirmCopy((o) => !o)} aria-expanded={confirmCopy} className={`px-4 sm:px-5 py-2.5 rounded-xl font-semibold text-sm text-white disabled:opacity-50 ${confirmCopy ? 'copy-btn-open' : ''}`} style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 8px 22px -10px var(--color-primary)' }}>
                           {copying ? 'Copying…' : copyLabel}
                         </button>
                         {confirmCopy && (
