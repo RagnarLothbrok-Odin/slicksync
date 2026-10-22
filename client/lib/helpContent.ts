@@ -1222,12 +1222,23 @@ export const HELP_ENTRIES: HelpEntry[] = [
   },
   {
     id: 'open-in-aiostreams',
-    title: 'Open in AIOStreams from a title',
+    title: 'Open in your own app, or Play on a device',
     category: 'Watching & Discover',
-    keywords: ['open in aiostreams', 'aiostreams app', 'play in aiostreams', 'open title aiostreams'],
-    answer: 'When someone here uses AIOStreams, a title\'s popup has Open in AIOStreams next to Stremio and Nuvio. It opens that title in the AIOStreams app; with more than one AIOStreams server here, it asks which.',
-    tips: ['It needs the AIOStreams app (2.37 or newer) on the device.'],
-    related: ['now-playing-continue-watching'],
+    keywords: ['open in aiostreams', 'open in swiftfin', 'open in infuse', 'open with', 'jellyfin app', 'fladder', 'wholphin', 'streamyfin', 'play on tv', 'play on device', 'cast to tv', 'aiostreams app'],
+    answer: 'When someone here uses Jellyfin, AIOStreams or AIOMetadata, a title\'s popup has Open in … next to Stremio and Nuvio. The arrow beside it picks the app it opens - AIOStreams, Swiftfin, Fladder, Wholphin, Streamyfin, Infuse, or the server\'s own page in a browser - and each device remembers its own pick.',
+    steps: [
+      'Open a title and press the arrow beside Open in ….',
+      'Pick the app you use on this device. The button now says Open in that app, and this phone, tablet or TV keeps the choice.',
+      'With more than one server or person here, it asks which one to open it on.',
+      'On a real Jellyfin server, Play on a device lists screens that have a Jellyfin app open right now (the official apps too) and starts the title there.',
+    ],
+    tips: [
+      'The app needs to be signed in to that server already.',
+      'Infuse opens titles that are in its own library.',
+      'Only apps that can open straight to a title are offered - Odin and the official Jellyfin apps can\'t yet, but Play on reaches the official apps.',
+      'A title a Jellyfin library doesn\'t have isn\'t offered for that server.',
+    ],
+    related: ['now-playing-continue-watching', 'aiosync'],
   },
   {
     id: 'activity-filters',
