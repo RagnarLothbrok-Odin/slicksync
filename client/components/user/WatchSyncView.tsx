@@ -567,6 +567,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
 
   const fromPic = (size: number) => fromChoice ? <ProfilePic profile={fromChoice.profile} person={fromChoice.sideInfo.person || personInfo} kind={fromChoice.sideInfo.kind} size={size} /> : null;
   const toPic = (size: number) => toChoice ? <ProfilePic profile={toChoice.profile} person={toChoice.sideInfo.person || personInfo} kind={toChoice.sideInfo.kind} size={size} /> : null;
+  const enoughSides = !!sides && sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0) + others.length >= 2;
   const otherSignIns = (sides || []).filter((s) => s.provider !== fromChoice?.sideInfo.provider && s.provider !== toChoice?.sideInfo.provider);
   const backButton = (
     <Button variant="ghost" size="sm" leftIcon={<ArrowLeftIcon className="w-4 h-4" />} onClick={() => router.push(home === 'tasks' ? '/tasks' : `/users/${encodeURIComponent(userId)}`)}>
@@ -648,11 +649,11 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
               </>
             )}
             {userId && sides === null && !error && <div className="text-sm text-muted">Reading their sign-ins…</div>}
-            {sides && sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0) + others.length < 2 && (
+            {sides && !enoughSides && (
               <div className="text-sm text-muted">There’s nothing to copy between yet - add a second sign-in or profile, or another person.</div>
             )}
 
-            {sides && (
+            {sides && enoughSides && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 md:gap-4 items-start max-w-[70rem]">
                   <Slot role="from" choice={fromChoice} count={preview?.counts.from ?? null} sides={sides} others={others} person={personInfo} other={to} onPick={pickFrom} compact={compact} />
@@ -666,7 +667,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                   </div>
                   <Slot role="to" choice={toChoice} count={preview?.counts.to ?? null} sides={sides} others={others} person={personInfo} other={from} onPick={pickTo} compact={compact} />
                 </div>
-                {otherSignIns.length > 0 && (
+                {otherSignIns.length > 0 && (fromChoice || toChoice) && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="text-xs text-subtle">Their other sign-ins:</span>
                     {otherSignIns.map((s) => (
@@ -724,7 +725,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                         <MagnifyingGlassIcon className="w-4 h-4 text-muted" />
                         <input value={query} onChange={(e) => { setQuery(e.target.value); setShown(PAGE); }} placeholder="Search titles" className="flex-1 bg-transparent outline-none text-sm text-default placeholder:text-muted" />
                       </div>
-                      <div className="flex gap-1.5 overflow-x-auto">
+                      <div className="flex flex-wrap gap-1.5">
                         {([['all', `All ${totals!.found.toLocaleString()}`], ['copy', `Will copy ${totals!.copy.toLocaleString()}`], ['further', `Kept ${totals!.further.toLocaleString()}`], ['match', `Need a match ${totals!.match.toLocaleString()}`]] as const).map(([k, label]) => (
                           <OptionChip key={k} on={filter === k} onClick={() => setFilter(k)}>{label}</OptionChip>
                         ))}
