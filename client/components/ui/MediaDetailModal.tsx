@@ -9,6 +9,7 @@ import { Badge } from './Badge';
 import { AddToListButton } from './AddToListButton';
 import { buildAioStreamsAppUrl } from '@/lib/aiostreamsLink';
 import { OpenWithButton } from './OpenWithButton';
+import { CastMenu, type CastMenuTarget } from './CastMenu';
 import { metacriticColor as metacriticTextColor } from './RatingBadges';
 import { api, MediaDetails, DiscoverItem, SeriesSeason } from '@/lib/api';
 import { toast } from './Toast';
@@ -215,13 +216,14 @@ export function MediaDetailModal({
     }
   }, [onClose, router]);
 
-  const openPerson = useCallback(async (member: { name: string; tmdbId?: number | string | null }) => {
+  const openPerson = useCallback(async (member: { name: string; tmdbId?: number | string | null }, keepOpen = false) => {
     if (member.tmdbId == null || member.tmdbId === '') return;
     // Clicking the same cast member again closes the filmography row
     // instead of re-fetching the same data - reads as a toggle, same as
-    // any other disclosure in this modal.
+    // any other disclosure in this modal. "Show their titles here" from the
+    // cast menu only ever opens it.
     if (personView && personView.id === member.tmdbId) {
-      setPersonView(null);
+      if (!keepOpen) setPersonView(null);
       return;
     }
     setPersonView({ id: member.tmdbId, name: member.name, loading: true, credits: [] });
@@ -633,10 +635,11 @@ export function MediaDetailModal({
   // fights the page's own vertical touch scroll.
   const castRowRef = useRef<HTMLDivElement>(null);
 
-  // A cast member opens on a tap OR a finger held on them. On an iPhone a
-  // held finger is not a tap - no click ever comes - so holding on someone
-  // did nothing. The hold opens them itself, and the click that some
-  // browsers still send afterwards is ignored rather than closing it again.
+  // A tap on a cast member opens their titles under the cast; a finger held
+  // on them (or a right-click) opens the cast menu (components/ui/CastMenu).
+  // On an iPhone a held finger is not a tap - no click comes, and the phone
+  // starts selecting the name instead - so the hold is timed here, and the
+  // click some browsers still send afterwards is ignored.
   const castHold = useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({ timer: null, x: 0, y: 0, fired: false });
   const castHoldStart = useCallback((e: React.PointerEvent, open: () => void) => {
     if (e.pointerType === 'mouse') return;
@@ -658,6 +661,13 @@ export function MediaDetailModal({
 
   // The filmography opens under the cast row, which on a phone can be below
   // the screen - bring it into view so a tap visibly does something.
+  const [castMenu, setCastMenu] = useState<(CastMenuTarget & { tmdbId: string }) | null>(null);
+  const closeCastMenu = useCallback(() => setCastMenu(null), []);
+  const openCastMenu = useCallback((member: { name: string; character?: string | null; photo?: string | null; tmdbId?: number | string | null }, el: HTMLElement) => {
+    if (member.tmdbId == null || member.tmdbId === '') return;
+    const photo = (el.querySelector('img, div') as HTMLElement | null) || el;
+    setCastMenu({ id: String(member.tmdbId), tmdbId: String(member.tmdbId), name: member.name, character: member.character || null, photo: member.photo || null, anchor: photo.getBoundingClientRect() });
+  }, []);
   const personPanelRef = useRef<HTMLDivElement>(null);
   const personViewId = personView?.id;
   useEffect(() => {
@@ -1720,7 +1730,9 @@ export function MediaDetailModal({
                     onPointerDown={handleCastPointerDown}
                     onPointerMove={handleCastPointerMove}
                     onPointerUp={handleCastPointerUp}
-                    className="flex gap-4 overflow-x-auto pb-1 pr-6 no-scrollbar cursor-grab active:cursor-grabbing select-none"
+                    // Room above and left of the photos: the row hides what
+                    // overflows it, and the hover ring sits outside the photo.
+                    className="flex gap-4 overflow-x-auto pt-1.5 pl-1 pb-1 pr-6 -mt-1.5 -ml-1 no-scrollbar cursor-grab active:cursor-grabbing select-none"
                   >
                     {details.cast.slice(0, 10).map((member) => {
                       const clickable = member.tmdbId != null && member.tmdbId !== '';
@@ -1735,15 +1747,25 @@ export function MediaDetailModal({
                           if (castHold.current.fired) { castHold.current.fired = false; return; }
                           if (clickable) openPerson(member);
                         }}
-                        onPointerDown={(e) => { if (clickable) castHoldStart(e, () => openPerson(member)); }}
+                        onPointerDown={(e) => {
+                          if (!clickable) return;
+                          const el = e.currentTarget;
+                          castHoldStart(e, () => openCastMenu(member, el));
+                        }}
                         onPointerMove={castHoldMove}
                         onPointerUp={castHoldEnd}
                         onPointerCancel={castHoldEnd}
-                        onContextMenu={(e) => { if (clickable && castHold.current.fired) e.preventDefault(); }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          // Android sends this for a held finger too; the timer may already have opened it.
+                          if (clickable && !castHold.current.fired) openCastMenu(member, e.currentTarget);
+                        }}
                         disabled={!clickable}
                         title={clickable ? `See ${member.name}'s other titles` : member.name}
                         className={`shrink-0 w-24 text-center ${clickable ? 'cursor-pointer group/cast' : 'cursor-default'}`}
-                        style={{ WebkitTouchCallout: 'none' }}
+                        // No text selection or callout on a held finger - that
+                        // is the phone's Copy / Look Up bubble, not ours.
+                        style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
                       >
                         {member.photo ? (
                           <img
@@ -1786,6 +1808,17 @@ export function MediaDetailModal({
                       a context switch. Clicking a title resolves its IMDb id
                       and re-drives the whole modal to that title (setOverrideItem),
                       same navigation "More Like This" uses. */}
+                  {castMenu && (
+                    <CastMenu
+                      target={castMenu}
+                      title={details?.title || effectiveFallbackTitle || null}
+                      follow={personFollows[castMenu.tmdbId] || null}
+                      onClose={closeCastMenu}
+                      onSeeEverything={() => seeEverything(castMenu.tmdbId, castMenu.name)}
+                      onShowHere={() => openPerson({ name: castMenu.name, tmdbId: castMenu.tmdbId }, true)}
+                      onFollow={() => togglePersonFollow(castMenu.tmdbId, castMenu.name)}
+                    />
+                  )}
                   {personView && (
                     <div ref={personPanelRef} className="mt-4 rounded-xl border border-default bg-surface-hover/40 p-3 scroll-mt-4">
                       <div className="flex items-center justify-between mb-2">
