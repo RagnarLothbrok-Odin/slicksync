@@ -79,7 +79,7 @@ export function OpenWithButton({ imdbId, type, isTV = false }: { imdbId: string;
     if (!links.length) return null;
     return (
       <a href={links[0].url} tabIndex={-1} className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium" style={STYLE}>
-        <PlayIcon className="w-4 h-4" />{label}
+        <PlayIcon className="w-4 h-4" /><span>{label}</span>
       </a>
     );
   }
@@ -99,7 +99,7 @@ export function OpenWithButton({ imdbId, type, isTV = false }: { imdbId: string;
           style={STYLE}
         >
           <span className="inline-flex items-center gap-1.5 w-[11rem] sm:w-auto">
-            <PlayIcon className="w-4 h-4 shrink-0" />{label}
+            <PlayIcon className="w-4 h-4 shrink-0" /><span>{label}</span>
           </span>
         </button>
         <button
