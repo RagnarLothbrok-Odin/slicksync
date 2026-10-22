@@ -1127,14 +1127,18 @@ export default function UserDetailPage() {
           size="sm"
         />
       </div>
-      <Button
-        variant="glass"
-        leftIcon={<ArrowPathIcon className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />}
-        onClick={() => setIsSyncPreviewOpen(true)}
-        isLoading={isSyncing}
-      >
-        Sync
-      </Button>
+      {/* Sync puts the group's addons into a Stremio or Nuvio account; a
+          Jellyfin, AIOStreams or AIOMetadata sign-in has no addon list. */}
+      {user && hasAddonList(user) && (
+        <Button
+          variant="glass"
+          leftIcon={<ArrowPathIcon className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />}
+          onClick={() => setIsSyncPreviewOpen(true)}
+          isLoading={isSyncing}
+        >
+          Sync
+        </Button>
+      )}
       <Button
         variant="glass"
         leftIcon={<ArrowDownTrayIcon className="w-5 h-5" />}
