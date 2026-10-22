@@ -3429,9 +3429,11 @@ class ApiClient {
   // Person search (needs a TMDb key): type an actor/director's name, get their
   // titles of the requested type. Returns null on 503 (no key) so callers hide
   // the feature. Results carry tmdbId/mediaType for click-through resolution.
-  async searchPerson(query: string, type: 'movie' | 'series') {
+  // personId: that person (a cast member's "See everything they've been in"),
+  // not whoever a search for the name finds first.
+  async searchPerson(query: string, type: 'movie' | 'series', personId?: number | null) {
     try {
-      return await this.fetch<{ person: { id: number | null; name: string; profile: string | null } | null; results: PersonSearchResult[]; source?: 'lumiere' }>(`/discover/search-person?query=${encodeURIComponent(query)}&type=${type}`);
+      return await this.fetch<{ person: DiscoverPerson | null; results: PersonSearchResult[]; source?: 'lumiere' }>(`/discover/search-person?query=${encodeURIComponent(query)}&type=${type}${personId ? `&personId=${personId}` : ''}`);
     } catch {
       return null;
     }
@@ -3612,6 +3614,27 @@ class ApiClient {
       return await this.fetch<{ ready: boolean; attribution: string }>('/discover/lumiere');
     } catch {
       return { ready: false, attribution: '' };
+    }
+  }
+
+  // Discover's grid, a page at a time: movies, shows or both, with the
+  // filters a catalog can't apply itself (the server's, so paging works with
+  // any of them on). nextSkip is where the next page starts; failed is "not
+  // now", which the page asks again for rather than taking as the end.
+  async discoverPage(kind: DiscoverKind, options: DiscoverFacets & { catalog?: string; genre?: string; skip?: number; query?: string }): Promise<{ items: DiscoverItem[]; nextSkip: number | null; failed: boolean }> {
+    const params = new URLSearchParams({ type: kind, paged: '1' });
+    if (options.query) params.set('query', options.query);
+    if (options.catalog) params.set('catalog', options.catalog);
+    if (options.genre) params.set('genre', options.genre);
+    if (options.skip) params.set('skip', String(options.skip));
+    if (options.decade) params.set('decade', options.decade);
+    if (options.minRating) params.set('minRating', String(options.minRating));
+    if (options.length) params.set('length', options.length);
+    try {
+      const r = await this.fetch<{ items: DiscoverItem[]; nextSkip: number | null }>(`/discover/${options.query ? 'search' : 'browse'}?${params.toString()}`);
+      return { items: Array.isArray(r?.items) ? r.items : [], nextSkip: r?.nextSkip ?? null, failed: false };
+    } catch {
+      return { items: [], nextSkip: null, failed: true };
     }
   }
 
@@ -4934,6 +4957,29 @@ export interface PersonSearchResult {
   year: string | null;
   poster: string | null;
   role: string | null;
+  /** "Most popular" order: 1 is what they're best known for. */
+  rank?: number;
+}
+
+/** A person at the top of their page in Discover - see server/utils/personFacts.js. */
+export interface DiscoverPerson {
+  id: number | null;
+  name: string;
+  profile: string | null;
+  knownFor?: string[] | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  placeOfBirth?: string | null;
+  bio?: string | null;
+}
+
+export type DiscoverKind = 'movie' | 'series' | 'both';
+
+/** Discover's filters a catalog can't apply itself (server/utils/discoverFacets.js). */
+export interface DiscoverFacets {
+  decade?: '2020s' | '2010s' | '2000s' | '1990s' | '1980s' | 'older' | null;
+  minRating?: number | null;
+  length?: 'short' | 'mid' | 'long' | null;
 }
 
 export interface FollowedSubject {

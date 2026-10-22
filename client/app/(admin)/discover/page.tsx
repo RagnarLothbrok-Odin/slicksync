@@ -1,198 +1,369 @@
 'use client';
 
+/*
+ * DISCOVER, ONE PAGE OF POSTERS.
+ *
+ * The search across the top with Movies / Shows / Both, then what you are
+ * looking through - Titles, People, For you, Nobody's seen it, Watchlist -
+ * with the order and the filters beside it as two buttons, and a line that
+ * says what the grid holds: "Popular 1990s comedy movies rated 7+".
+ * Everything else is posters, opened in the title popup.
+ *
+ * The filters a catalog can't apply itself (decade, rating, length) and
+ * Movies + Shows together are the server's (utils/discoverFacets.js), so
+ * paging works the same with any of them on. A person - from People, or
+ * from "See everything they've been in" on a title's cast - gets a page of
+ * their own at the top: who they are, and everything they've been in.
+ */
+
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { Header } from '@/components/layout/Header';
-import { PageSection } from '@/components/layout/PageContainer';
-import { NebulaPageHeading, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
-import { PageToolbar, MediaDetailModal, PageToolbarProps, Badge, PosterCard, PosterCardItem, VirtualPosterGrid, DropdownSelect } from '@/components/ui';
-import { api, DiscoverItem, RecommendationRow, User, SimklDiscoverItem, SeasonalAnime, PersonSearchResult } from '@/lib/api';
+import { MediaDetailModal, Badge, PosterCard, PosterCardItem, VirtualPosterGrid } from '@/components/ui';
+import { api, DiscoverItem, RecommendationRow, User, SimklDiscoverItem, SeasonalAnime, PersonSearchResult, DiscoverPerson, DiscoverFacets } from '@/lib/api';
 import { useLastKnown } from '@/lib/hooks/useLastKnown';
 import { useRatingsBatch } from '@/lib/hooks/useRatingsBatch';
 import { useWatchlistState } from '@/lib/hooks/useWatchlistState';
 import { useWatchedStatusBatch } from '@/lib/hooks/useWatchedStatusBatch';
 import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
-import { FilmIcon, TvIcon, MagnifyingGlassIcon, SparklesIcon, UserIcon } from '@heroicons/react/24/outline';
+import {
+  GENRES, SORTS, WATCHLIST_SORTS, DECADES, RATINGS, LENGTHS, KINDS, describeGrid, uniqueById, mergeNew, retryDelay, pickSurprise,
+  type Kind, type SortKey, type Decade, type Length, type WatchedFilter, type WatchlistSort,
+} from '@/lib/discoverWords';
+import { workAsPerson, bornLine } from '@/lib/personFacts';
+import {
+  MagnifyingGlassIcon, SparklesIcon, UserIcon, ChevronDownIcon, AdjustmentsHorizontalIcon, XMarkIcon,
+  ArrowsRightLeftIcon, CheckIcon, CalendarDaysIcon, MapPinIcon, BellIcon,
+} from '@heroicons/react/24/outline';
 import { toast } from '@/components/ui/Toast';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVPageProvider } from '@/components/tv/TVPageProvider';
 import { TVFocusable } from '@/components/tv/TVFocusable';
 import { ScrollRow } from '@/components/ui/ScrollRow';
 
-// Only "top" (Popular) supports search per Cinemeta's own manifest - "year"
-// and "imdbRating" only support genre/skip. Browse-mode catalog picker is
-// hidden entirely once a search is active, since it wouldn't apply anyway.
-const CATALOGS = [
-  { key: 'top', label: 'Popular' },
-  { key: 'year', label: 'New' },
-  { key: 'imdbRating', label: 'Top Rated' },
-];
-// With a LumiereDB, Popular and Trending come from IMDb's own numbers.
-const LUMIERE_CATALOGS = [
-  { key: 'top', label: 'Popular' },
-  { key: 'trending', label: 'Trending' },
-  { key: 'year', label: 'New' },
-  { key: 'imdbRating', label: 'Top Rated' },
-];
+type Lens = 'titles' | 'people' | 'foryou' | 'nobody' | 'watchlist';
+type PersonResult = { person: DiscoverPerson; results: PersonSearchResult[]; source?: 'lumiere' };
 
-// Cinemeta's catalogs accept these genre extras verbatim (documented in the
-// v3-cinemeta manifest.json's genres array). Kept flat here rather than
-// fetching from the manifest at load time — the list is stable and adding
-// a network round-trip on every visit isn't worth the freshness.
-const GENRES = [
-  'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
-  'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery',
-  'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western',
-];
+const GRID = 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3';
+const SORT_STORE = 'slicksync-discover-sort';
 
-// Client-side re-sort options for whatever's currently loaded/filtered.
-// "Default" is server/catalog order (Popular/New/Top Rated already are a
-// sort, and Watchlist keeps the order items were added in). The others sort
-// in place — exact for Watchlist and search results (both fully loaded, no
-// pagination), and a "sort what's loaded so far" reorder for infinite-scroll
-// browse mode, same caveat any client-side sort over a paginated API has.
-const SORT_OPTIONS = [
-  { key: 'default', label: 'Default order' },
-  { key: 'title', label: 'Title (A-Z)' },
-  { key: 'year-desc', label: 'Year (Newest)' },
-  { key: 'year-asc', label: 'Year (Oldest)' },
-  { key: 'rating-desc', label: 'Rating (Highest)' },
-] as const;
-type SortKey = typeof SORT_OPTIONS[number]['key'];
-
-function extractYear(releaseInfo: string | null | undefined): number {
-  if (!releaseInfo) return 0;
-  const match = releaseInfo.match(/\d{4}/);
-  return match ? parseInt(match[0], 10) : 0;
+/** A panel that drops from its button and closes on a tap elsewhere or Escape. */
+function usePopover() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  return { open, setOpen, ref };
 }
 
-const PAGE_SIZE = 100; // Cinemeta serves 100 items per catalog page
-// Some catalog+genre combos have legitimately small pages (e.g. Western +
-// Top Rated has < 100 real IMDb items after our filter). A fixed high
-// threshold (was 50) prematurely stopped pagination for those. Trust
-// Cinemeta's own end-signal instead: as long as the previous page returned
-// ANYTHING, ask for more; only stop when a page comes back empty.
+/** D-pad reachable in TV mode, a plain element everywhere else. */
+function Focus({ tv, onEnter, children }: { tv: boolean; onEnter: () => void; children: React.ReactElement }) {
+  return tv ? <TVFocusable onEnterPress={onEnter}>{children}</TVFocusable> : children;
+}
+
+function Pill({ on, onClick, children, tv = false }: { on: boolean; onClick: () => void; children: React.ReactNode; tv?: boolean }) {
+  return (
+    <Focus tv={tv} onEnter={onClick}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={on}
+        className={`h-8 px-3 rounded-full text-[13px] font-medium transition-colors ${on ? 'text-default' : 'text-muted hover:text-default'}`}
+        style={on
+          ? { background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', boxShadow: 'inset 0 0 0 1px var(--color-primary)' }
+          : { background: 'var(--color-surface-hover)' }}
+      >
+        {children}
+      </button>
+    </Focus>
+  );
+}
+
+const panelStyle: React.CSSProperties = { background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' };
+
+/** A person asked for in the address: /discover?person=<TMDb id>&name=<name>. */
+function personFromAddress(): { id: number | null; name: string } | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const name = (params.get('name') ?? '').trim();
+  const id = Number(params.get('person'));
+  return name ? { id: Number.isFinite(id) && id > 0 ? id : null, name } : null;
+}
+
+const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const yearOf = (s: string | null | undefined) => parseInt(/\d{4}/.exec(s || '')?.[0] || '0', 10) || 0;
 
 export default function DiscoverPage() {
   const { layoutMode } = useLayoutMode();
   const isTV = useIsTV();
   const { enableWatchlist, enableWatchedIndicators, enableRecommendations } = usePersonalFeatures();
-  const [type, setType] = useState<'movie' | 'series'>('movie');
-  const [catalog, setCatalog] = useState('top');
-  // '' = all genres (no filter). Cinemeta's genre param is optional; sending
-  // an empty string omits it. Genre filtering isn't available on the "top"
-  // catalog with search active, but IS available on all catalogs in browse.
-  const [genre, setGenre] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
 
-  // Web Share Target: sharing a link/text from another app into the
-  // installed PWA lands here as /discover?st_title=&st_text=&st_url= (see
-  // site.webmanifest). Turn whatever was shared into a search: an IMDb
-  // link resolves to its real title by id; a TMDb link carries a slug; any
-  // other share just gets its URLs stripped and the remaining text used.
-  // Read once on mount - same pattern as Metrics' ?tab= (no useSearchParams,
-  // avoiding its Suspense requirement).
+  const [address] = useState(personFromAddress);
+  const [kind, setKind] = useState<Kind>('movie');
+  const [lens, setLens] = useState<Lens>(address ? 'people' : 'titles');
+  // Trending first where there is a LumiereDB to rank it - the server
+  // answers Popular for it without one, and the effect below says so.
+  const [sort, setSort] = useState<SortKey>(() => {
+    try {
+      const stored = localStorage.getItem(SORT_STORE) as SortKey | null;
+      if (stored && SORTS.some((s) => s.key === stored)) return stored;
+    } catch { /* storage blocked - the default */ }
+    return 'trending';
+  });
+  useEffect(() => { try { localStorage.setItem(SORT_STORE, sort); } catch { /* per device only */ } }, [sort]);
+  const [genre, setGenre] = useState('');
+  const [decade, setDecade] = useState<Decade | null>(null);
+  const [minRating, setMinRating] = useState<number | null>(null);
+  const [length, setLength] = useState<Length | null>(null);
+  const [watchedFilter, setWatchedFilter] = useState<WatchedFilter>('all');
+  const [watchlistSort, setWatchlistSort] = useState<WatchlistSort>('added');
+  const [searchQuery, setSearchQuery] = useState(address?.name ?? '');
+  const [debouncedQuery, setDebouncedQuery] = useState(address?.name ?? '');
+  // The person by id, dropped the moment the search box no longer holds their name.
+  const [personId, setPersonId] = useState<number | null>(address?.id ?? null);
+  const personName = useRef<string | null>(address?.name ?? null);
+  useEffect(() => {
+    if (personId && personName.current !== null && searchQuery.trim() !== personName.current) {
+      personName.current = null;
+      setPersonId(null);
+    }
+  }, [searchQuery, personId]);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
+
+  // "See everything they've been in" from a title's cast, while already here.
+  useEffect(() => {
+    const onPerson = (e: Event) => {
+      const detail = (e as CustomEvent<{ id: number | null; name: string }>).detail;
+      if (!detail?.name) return;
+      personName.current = detail.name;
+      setPersonId(detail.id);
+      setSearchQuery(detail.name);
+      setDebouncedQuery(detail.name);
+      setLens('people');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    window.addEventListener('slicksync:discover-person', onPerson);
+    return () => window.removeEventListener('slicksync:discover-person', onPerson);
+  }, []);
+
+  // Web Share Target and the command palette: /discover?q= (with t= for the
+  // type), or ?st_title=&st_text=&st_url= shared from another app. An IMDb
+  // link resolves to its title; a TMDb link carries a slug; anything else
+  // has its links stripped and the rest searched.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    // From the command palette: a title picked there lands here with the
-    // search box filled and the matching type selected.
     const q = params.get('q');
     if (q) {
       const t = params.get('t');
-      if (t === 'movie' || t === 'series') setType(t);
+      if (t === 'movie' || t === 'series') setKind(t);
       setSearchQuery(q);
       return;
     }
-    const shared = [params.get('st_title'), params.get('st_text'), params.get('st_url')]
-      .filter(Boolean).join(' ').trim();
+    const shared = [params.get('st_title'), params.get('st_text'), params.get('st_url')].filter(Boolean).join(' ').trim();
     if (!shared) return;
     const imdbId = shared.match(/tt\d{7,10}/)?.[0];
     const tmdbSlug = shared.match(/themoviedb\.org\/(?:movie|tv)\/\d+-([a-z0-9-]+)/i)?.[1];
     const plainText = shared.replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (plainText) {
-      setSearchQuery(plainText);
-    } else if (tmdbSlug) {
-      setSearchQuery(tmdbSlug.replace(/-/g, ' '));
-    } else if (imdbId) {
-      // A bare IMDb link has no words in it - resolve the id to its title
-      // first, since the text search can't match on tt ids.
-      api.getMediaDetails(imdbId, 'movie').then((d: any) => {
-        const name = d?.meta?.name || d?.name;
-        if (name) setSearchQuery(name);
-      }).catch(() => {
-        api.getMediaDetails(imdbId, 'series').then((d: any) => {
-          const name = d?.meta?.name || d?.name;
-          if (name) setSearchQuery(name);
-        }).catch(() => {});
-      });
+    if (plainText) setSearchQuery(plainText);
+    else if (tmdbSlug) setSearchQuery(tmdbSlug.replace(/-/g, ' '));
+    else if (imdbId) {
+      const nameOf = (d: { meta?: { name?: string }; name?: string } | null) => d?.meta?.name || d?.name;
+      api.getMediaDetails(imdbId, 'movie').then((d) => { const n = nameOf(d as never); if (n) setSearchQuery(n); })
+        .catch(() => api.getMediaDetails(imdbId, 'series').then((d) => { const n = nameOf(d as never); if (n) setSearchQuery(n); }).catch(() => {}));
     }
   }, []);
-  const [items, setItems] = useState<DiscoverItem[]>([]);
-  // Every id ever loaded this session - de-dupes the next page against the
-  // full history, since Cinemeta can repeat an item across pages (a real,
-  // documented occurrence) and duplicate ids would collide as React keys.
-  const seenIdsRef = useRef<Set<string>>(new Set());
-  const [isLoading, setIsLoading] = useState(true);
 
-  // Instant navigation: the last-known Popular grid shown at once while the
-  // first fetch below refreshes it - see useLastKnown's comment. Not when
-  // the page was opened with a search already in the address (the command
-  // palette, the share target): the search is what should appear first.
-  useLastKnown<DiscoverItem[]>('/discover/browse?type=movie&catalog=top', (cached) => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('q') || params.has('st_title') || params.has('st_text') || params.has('st_url')) return;
-    setItems(cached);
-    seenIdsRef.current = new Set(cached.map((r) => r.id));
-    setIsLoading(false);
-  });
-  // Narrowed to PosterCardItem, not the full DiscoverItem - this is the only
-  // shape MediaDetailModal's fallback* props below actually read, and it's
-  // also what PosterCard's onOpenDetails hands back (see its own comment on
-  // why it doesn't carry the full DiscoverItem shape).
-  const [detailItem, setDetailItem] = useState<PosterCardItem | null>(null);
-  // Person search: typing an actor/director's name surfaces their titles of
-  // the current type - from TMDb, or from LumiereDB when there's no TMDb key.
-  // Null when there's neither, no query, or no person match.
-  const [personSearch, setPersonSearch] = useState<{ person: { name: string; profile: string | null } | null; results: PersonSearchResult[]; source?: 'lumiere' } | null>(null);
-  // LumiereDB: Trending, IMDb's Popular and typo-proof search (its credit
-  // line lives in Settings -> About).
-  const [lumiere, setLumiere] = useState<{ ready: boolean; attribution: string }>({ ready: false, attribution: '' });
+  // Off with the feature: a lens nobody can use, or a filter that would hide
+  // everything, snaps back.
+  useEffect(() => {
+    if (!enableRecommendations && (lens === 'foryou' || lens === 'nobody')) setLens('titles');
+    if (!enableWatchlist && lens === 'watchlist') setLens('titles');
+  }, [enableRecommendations, enableWatchlist, lens]);
+  useEffect(() => {
+    if (!enableWatchedIndicators && watchedFilter !== 'all') setWatchedFilter('all');
+  }, [enableWatchedIndicators, watchedFilter]);
+  useEffect(() => {
+    if ((lens === 'foryou' || lens === 'nobody') && watchedFilter === 'only') setWatchedFilter('all');
+  }, [lens, watchedFilter]);
+
+  // LumiereDB: Trending, IMDb's Popular and typo-proof search.
+  const [lumiereReady, setLumiereReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    api.getDiscoverLumiere().then((r) => { if (!cancelled) setLumiere(r); });
+    api.getDiscoverLumiere().then((r) => {
+      if (cancelled) return;
+      setLumiereReady(!!r.ready);
+      if (!r.ready) setSort((current) => (current === 'trending' ? 'popular' : current));
+    });
     return () => { cancelled = true; };
   }, []);
-  const catalogs = lumiere.ready ? LUMIERE_CATALOGS : CATALOGS;
-  // Titles vs People search mode. These used to run in parallel and render
-  // together (a person's filmography row ABOVE the normal title-search grid)
-  // - for a query that also loosely matched unrelated title names, that read
-  // as "here's stuff this actor hasn't been in" stacked right under their
-  // real filmography. Splitting them into an explicit mode means Titles
-  // search never touches TMDb at all, and People search never shows a single
-  // title-search result that isn't actually a verified credit.
-  const [searchMode, setSearchMode] = useState<'titles' | 'people' | 'describe'>('titles');
-  // Describe-a-plot search is its own mode, not a variant of Titles: it costs
-  // an AI round-trip, so it runs only when explicitly asked for and only on
-  // submit (never per keystroke like the other two).
+  const sorts = lumiereReady ? SORTS : SORTS.filter((s) => s.key !== 'trending');
+  const sortInfo = SORTS.find((s) => s.key === sort) ?? SORTS[0];
+  const catalog = sortInfo.catalog;
+  const facets: DiscoverFacets = useMemo(() => ({ decade, minRating, length }), [decade, minRating, length]);
+
+  const [detailItem, setDetailItem] = useState<PosterCardItem | null>(null);
+  // Which poster's menu is open, across every grid on the page, so opening a
+  // second closes the first. One stable callback so PosterCard's memo holds.
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const handleMenuOpenChange = useCallback((open: boolean, key: string) => { setOpenMenuKey(open ? key : null); }, []);
+
+  // "/" puts the cursor in the search, as on most sites with one.
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /* ---------------- Titles ---------------- */
+
+  const [items, setItems] = useState<DiscoverItem[]>([]);
+  const itemsRef = useRef<DiscoverItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [skip, setSkip] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreLock = useRef(false);
+  // Which listing is on screen: a later page that arrives for one since
+  // replaced (another order, kind, search or filter) is dropped.
+  const listingId = useRef(0);
+  const pageRetries = useRef(0);
+  const retryTimer = useRef<number | null>(null);
+  const loadMoreRef = useRef<() => void>(() => {});
+  const forgetRetry = useCallback(() => {
+    if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+    pageRetries.current = 0;
+  }, []);
+  useEffect(() => forgetRetry, [forgetRetry]);
+
+  // The last-known first page, shown at once while the fetch refreshes it.
+  // Not when the page opened with a search in the address.
+  useLastKnown<{ items: DiscoverItem[]; nextSkip: number | null }>(`/discover/browse?type=movie&paged=1&catalog=${catalog}`, (cached) => {
+    const params = new URLSearchParams(window.location.search);
+    if (['q', 'st_title', 'st_text', 'st_url', 'person'].some((k) => params.has(k))) return;
+    if (!cached?.items?.length || itemsRef.current.length) return;
+    itemsRef.current = uniqueById(cached.items);
+    setItems(itemsRef.current);
+    setIsLoading(false);
+  });
+
+  const titlesKey = `${kind}|${catalog}|${genre}|${debouncedQuery}|${decade}|${minRating}|${length}`;
+  useEffect(() => {
+    listingId.current += 1;
+    forgetRetry();
+    if (lens !== 'titles') return;
+    let cancelled = false;
+    setIsLoading(true);
+    setSkip(0);
+    setHasMore(true);
+    loadMoreLock.current = false;
+    setIsLoadingMore(false);
+    api.discoverPage(kind, debouncedQuery ? { query: debouncedQuery, ...facets } : { catalog, genre: genre || undefined, ...facets })
+      .then(({ items: results, nextSkip }) => {
+        if (cancelled) return;
+        itemsRef.current = uniqueById(results);
+        setItems(itemsRef.current);
+        setIsLoading(false);
+        setHasMore(nextSkip !== null && nextSkip > 0 && results.length > 0);
+        setSkip(nextSkip ?? results.length);
+      });
+    return () => { cancelled = true; };
+    // titlesKey carries every input the request reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lens, titlesKey, forgetRetry]);
+
+  // The next page, joined to the grid. A page that failed is asked for again
+  // a few times before the list is taken as finished.
+  const loadMore = useCallback(async () => {
+    if (lens !== 'titles' || debouncedQuery || !hasMore || loadMoreLock.current) return;
+    loadMoreLock.current = true;
+    setIsLoadingMore(true);
+    const mine = listingId.current;
+    const { items: next, nextSkip, failed } = await api.discoverPage(kind, { catalog, genre: genre || undefined, skip, ...facets });
+    if (listingId.current !== mine) return;
+    loadMoreLock.current = false;
+    setIsLoadingMore(false);
+    if (failed) {
+      const wait = retryDelay(pageRetries.current);
+      if (wait === null) { setHasMore(false); return; }
+      pageRetries.current += 1;
+      retryTimer.current = window.setTimeout(() => loadMoreRef.current(), wait);
+      return;
+    }
+    pageRetries.current = 0;
+    const additions = mergeNew(itemsRef.current, next);
+    itemsRef.current = [...itemsRef.current, ...additions];
+    setItems(itemsRef.current);
+    setSkip((s) => nextSkip ?? s + next.length);
+    // A page that brings nothing new ends it: a source that ignores skip
+    // answers the same page for ever.
+    const sourceMoved = nextSkip !== null ? nextSkip > skip : next.length > 0;
+    setHasMore(additions.length > 0 && sourceMoved);
+  }, [lens, debouncedQuery, hasMore, kind, catalog, genre, skip, facets]);
+  useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); }, { rootMargin: '600px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore]);
+
+  // Instant matches: the household's own titles, fetched once, matched as you
+  // type, kept on screen when the wider search didn't find them too.
+  const [localIndex, setLocalIndex] = useState<Array<{ id: string; name: string; type: 'movie' | 'series'; poster: string | null }>>([]);
+  useEffect(() => {
+    api.getLocalIndex().then((r) => setLocalIndex(r.items || [])).catch(() => setLocalIndex([]));
+  }, []);
+  const instantOnly = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2 || lens !== 'titles') return [];
+    const shown = new Set(items.map((i) => i.id));
+    return localIndex
+      .filter((i) => (kind === 'both' || i.type === kind) && i.name.toLowerCase().includes(q) && !shown.has(i.id))
+      .slice(0, 12)
+      .map((i) => ({ id: i.id, type: i.type, name: i.name, poster: i.poster, releaseInfo: null, imdbRating: null, genres: [] } as DiscoverItem));
+  }, [searchQuery, localIndex, kind, lens, items]);
+
+  // Describe it: a plot or a feeling in, real titles out (checked against
+  // TMDb). An AI round trip, so it runs only when asked for.
   const [describeResults, setDescribeResults] = useState<DiscoverItem[] | null>(null);
   const [describeBusy, setDescribeBusy] = useState(false);
   const [describeError, setDescribeError] = useState<string | null>(null);
-  const runDescribeSearch = useCallback(async () => {
+  useEffect(() => { setDescribeResults(null); setDescribeError(null); }, [debouncedQuery, kind]);
+  const runDescribe = useCallback(async () => {
     const text = searchQuery.trim();
     if (!text || describeBusy) return;
     setDescribeBusy(true);
     setDescribeError(null);
     try {
-      const r = await api.searchByDescription(text, type);
-      setDescribeResults(r.items);
-      if (r.items.length === 0) {
-        setDescribeError(
-          r.filteredByType
-            ? `Those guesses were all ${r.filteredByType === 'series' ? 'films, not series' : 'series, not films'} - try the ${r.filteredByType === 'series' ? 'Movies' : 'Series'} tab.`
-            : r.candidates > 0
-              ? 'It had guesses, but none of them checked out against TMDb - try adding a detail you are sure about.'
-              : 'No match from that description - try naming something specific you remember.');
+      const types: Array<'movie' | 'series'> = kind === 'both' ? ['movie', 'series'] : [kind];
+      const answers = await Promise.all(types.map((t) => api.searchByDescription(text, t)));
+      const found = answers.flatMap((r) => r.items);
+      setDescribeResults(found);
+      if (found.length === 0) {
+        setDescribeError(answers.some((r) => r.candidates > 0)
+          ? 'It had guesses, but none of them checked out against TMDb - try adding a detail you’re sure about.'
+          : 'No match from that description - try naming something specific you remember.');
       }
     } catch (e) {
       setDescribeError(e instanceof Error ? e.message : 'Search failed');
@@ -200,126 +371,92 @@ export default function DiscoverPage() {
     } finally {
       setDescribeBusy(false);
     }
-  }, [searchQuery, describeBusy, type]);
-  // Which poster's right-click menu is open — shared across the whole page
-  // (both the main grid and the For You rows) so opening a second card's
-  // menu closes whichever one was open before, same as Continue Watching.
-  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
-  // One stable identity for every card's onMenuOpenChange, instead of each
-  // card getting its own `(open) => setOpenMenuKey(...)` closure on every
-  // render. A fresh function per card defeats PosterCard's React.memo
-  // entirely - every card in every grid on this page was re-rendering on any
-  // state change at all, including simply closing the detail modal.
-  const handleMenuOpenChange = useCallback((open: boolean, itemId: string) => {
-    setOpenMenuKey(open ? itemId : null);
-  }, []);
+  }, [searchQuery, describeBusy, kind]);
+  const describing = lens === 'titles' && (describeBusy || describeResults !== null);
 
-  // Pagination state — Cinemeta returns 100 items per page; ask for more via
-  // ?skip=N. hasMore flips false when a page returned <PAGE_SIZE (end of
-  // catalog) so the sentinel stops firing.
-  const [skip, setSkip] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  // Guards against the sentinel firing repeatedly while a fetch is in flight.
-  const loadMoreLock = useRef(false);
+  /* ---------------- For you / Nobody's seen it ---------------- */
 
-  // Discover source toggle: Cinemeta browse, personal Watchlist, or the
-  // "For You" rec rows (moved off the Dashboard so it's opt-in rather
-  // than always-in-your-face). Each source has its own SlickTrax gate — if
-  // the user disables the corresponding feature while viewing it, we snap
-  // back to plain Discover.
-  const [source, setSource] = useState<'discover' | 'watchlist' | 'foryou'>('discover');
-  useEffect(() => {
-    if (!enableWatchlist && source === 'watchlist') setSource('discover');
-    if (!enableRecommendations && source === 'foryou') setSource('discover');
-  }, [enableWatchlist, enableRecommendations, source]);
-
-  // For You state — fetched when the user picks the source (and the
-  // feature is enabled), and re-fetched whenever the mode/user picker
-  // below changes. This page has no single logged-in "current user" of its
-  // own (it's the admin's account-wide view), so there's no automatic "me"
-  // to default to - personal mode needs an explicit managed-user pick.
-  // Defaults to personal mode per explicit preference (over household-wide
-  // or picking a pairing) - remembered across visits the same way
-  // viewMode/theme choices are.
+  const kindsFor = (k: Kind): Array<'movie' | 'series'> => (k === 'both' ? ['movie', 'series'] : [k]);
   const [recRows, setRecRows] = useState<RecommendationRow[]>([]);
   const [recsLoaded, setRecsLoaded] = useState(false);
-  // Household picks: unwatched-by-anyone titles in the whole house's genres.
-  // Household-wide (not tied to the personal/shared user picker), so it only
-  // depends on the type toggle - a lead row above the personalized rows.
   const [householdPicks, setHouseholdPicks] = useState<{ items: DiscoverItem[]; genres: string[]; memberCount: number; sharedAppeal: boolean } | null>(null);
-  // Finish the Saga - franchises the household is mid-way through, served
-  // closest-to-finished first (server-cached 6h; see /users/finish-the-saga).
-  // Fetched once per For You visit - independent of the personal/shared
-  // picker because franchise progress is account-level, like watched status.
+  const [picksLoaded, setPicksLoaded] = useState(false);
+  const [recMode, setRecMode] = useState<'personal' | 'shared'>('personal');
+  const [recUserId, setRecUserId] = useState('');
+  const [recUserId2, setRecUserId2] = useState('');
+  const [recUsers, setRecUsers] = useState<User[]>([]);
+  useEffect(() => {
+    if (lens !== 'foryou' || recUsers.length > 0) return;
+    api.getUsers().then((users) => {
+      setRecUsers(users);
+      const validId = (id: string | null) => (id && users.some((u) => u.id === id) ? id : '');
+      setRecMode(localStorage.getItem('slicksync-foryou-mode') === 'shared' ? 'shared' : 'personal');
+      setRecUserId(validId(localStorage.getItem('slicksync-foryou-userId')) || users[0]?.id || '');
+      setRecUserId2(validId(localStorage.getItem('slicksync-foryou-userId2')) || (users[1]?.id ?? users[0]?.id ?? ''));
+    }).catch(() => {});
+  }, [lens, recUsers.length]);
+  useEffect(() => {
+    if (lens !== 'foryou' || !enableRecommendations) return;
+    if (recMode === 'personal' && !recUserId) return;
+    if (recMode === 'shared' && (!recUserId || !recUserId2 || recUserId === recUserId2)) return;
+    let cancelled = false;
+    setRecsLoaded(false);
+    Promise.all(kindsFor(kind).map((t) => api.getRecommendations(
+      recMode === 'personal' ? { mode: 'personal', userId: recUserId, type: t } : { mode: 'shared', userId: recUserId, userId2: recUserId2, type: t },
+    ).then((r) => (Array.isArray(r?.rows) ? r.rows : [])).catch(() => [] as RecommendationRow[])))
+      .then((all) => { if (!cancelled) setRecRows(all.flat()); })
+      .finally(() => { if (!cancelled) setRecsLoaded(true); });
+    return () => { cancelled = true; };
+  }, [lens, enableRecommendations, recMode, recUserId, recUserId2, kind]);
+  useEffect(() => {
+    if (lens !== 'nobody' || !enableRecommendations) return;
+    let cancelled = false;
+    setPicksLoaded(false);
+    Promise.all(kindsFor(kind).map((t) => api.getHouseholdPicks(t).catch(() => null)))
+      .then((all) => {
+        if (cancelled) return;
+        const found = all.filter(Boolean) as NonNullable<typeof householdPicks>[];
+        setHouseholdPicks(found.length ? {
+          items: found.flatMap((f) => f.items),
+          genres: [...new Set(found.flatMap((f) => f.genres))],
+          memberCount: Math.max(...found.map((f) => f.memberCount)),
+          sharedAppeal: found.some((f) => f.sharedAppeal),
+        } : null);
+      })
+      .finally(() => { if (!cancelled) setPicksLoaded(true); });
+    return () => { cancelled = true; };
+  }, [lens, enableRecommendations, kind]);
+  useEffect(() => { if (recUsers.length > 0) localStorage.setItem('slicksync-foryou-mode', recMode); }, [recMode, recUsers.length]);
+  useEffect(() => { if (recUserId) localStorage.setItem('slicksync-foryou-userId', recUserId); }, [recUserId]);
+  useEffect(() => { if (recUserId2) localStorage.setItem('slicksync-foryou-userId2', recUserId2); }, [recUserId2]);
+  useEffect(() => {
+    if (recUserId2 && recUserId2 !== recUserId) return;
+    const next = recUsers.find((u) => u.id !== recUserId);
+    if (next) setRecUserId2(next.id);
+  }, [recUserId, recUserId2, recUsers]);
+
+  // Finish the saga - franchises the household is part way through, closest
+  // to finished first. Account-wide, movies only.
   const [sagas, setSagas] = useState<Awaited<ReturnType<typeof api.getFinishTheSaga>>>([]);
   const [sagasLoaded, setSagasLoaded] = useState(false);
   useEffect(() => {
-    if (source !== 'foryou' || sagasLoaded) return;
-    api.getFinishTheSaga()
-      .then((r) => setSagas(r))
-      .catch(() => setSagas([]))
-      .finally(() => setSagasLoaded(true));
-  }, [source, sagasLoaded]);
-  // SIMKL Trending row - independent of everything else on this page (no
-  // linked user needed, just a SIMKL Client ID in Settings), so a plain
-  // fetch-once-on-mount rather than tied to the type/catalog/genre state
-  // the main grid reacts to. Empty array (not an error state) when SIMKL
-  // isn't configured or the request fails - see getSimklDiscoverRow's own
-  // comment on why this fails silently.
-  const [simklTrending, setSimklTrending] = useState<SimklDiscoverItem[]>([]);
-  // Same shape SimklDiscoverItem already has, plus PosterCardItem's
-  // releaseInfo field, computed once per simklTrending change rather than as
-  // a fresh `{ ...item, releaseInfo: item.year }` literal on every render of
-  // every card - an inline literal here is exactly the kind of new-object-
-  // per-render prop that defeats PosterCard's React.memo.
-  const simklTrendingCardItems = useMemo(
-    () => new Map(simklTrending.map((item) => [item.id, { ...item, releaseInfo: item.year }])),
-    [simklTrending]
-  );
+    if (lens !== 'foryou' || sagasLoaded) return;
+    api.getFinishTheSaga().then(setSagas).catch(() => setSagas([])).finally(() => setSagasLoaded(true));
+  }, [lens, sagasLoaded]);
+
+  // Trending on SIMKL - needs only a SIMKL Client ID; empty when there isn't one.
+  const [simklTrending, setSimklTrending] = useState<Array<SimklDiscoverItem & { releaseInfo: string | null }>>([]);
   useEffect(() => {
-    api.getSimklDiscoverRow('trending', type === 'series' ? 'shows' : 'movies').then(setSimklTrending);
-  }, [type]);
+    if (lens !== 'foryou') return;
+    let cancelled = false;
+    Promise.all(kindsFor(kind).map((t) => api.getSimklDiscoverRow('trending', t === 'series' ? 'shows' : 'movies')))
+      .then((rows) => { if (!cancelled) setSimklTrending(rows.flat().map((i) => ({ ...i, releaseInfo: i.year }))); });
+    return () => { cancelled = true; };
+  }, [lens, kind]);
 
-  // Seasonal anime row (AniList, no key needed) - opt-in per account, so a
-  // household that doesn't watch anime never sees it. These items carry
-  // AniList ids rather than IMDb ones, so they deliberately do NOT pretend
-  // to be PosterCards: clicking one searches Discover for the title, which
-  // hands off to the normal flow where the item has real Cinemeta data and
-  // every action works. Faking an id here would break watchlist/watched.
-  // Instant search: the household's own titles, fetched once, matched in
-  // memory as you type. Network search still runs exactly as before - these
-  // just appear immediately above it instead of after a round-trip, which is
-  // what makes search feel instant for the things you already know about.
-  const [localIndex, setLocalIndex] = useState<Array<{ id: string; name: string; type: 'movie' | 'series'; poster: string | null }>>([]);
-  useEffect(() => {
-    api.getLocalIndex().then((r) => setLocalIndex(r.items || [])).catch(() => setLocalIndex([]));
-  }, []);
-  const instantMatches = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length < 2 || searchMode !== 'titles') return [];
-    return localIndex
-      .filter((i) => i.type === type && i.name.toLowerCase().includes(q))
-      .slice(0, 12)
-      .map((i) => ({ id: i.id, type: i.type, name: i.name, poster: i.poster, releaseInfo: null } as DiscoverItem));
-  }, [searchQuery, localIndex, type, searchMode]);
-
-  // What the wider search did NOT already return. These used to disappear the
-  // moment results arrived, which is why a title you had put on your own
-  // watchlist could flash up and then vanish - the household's own copy of it
-  // is exactly the match worth keeping on screen. Anything the search also
-  // found is dropped here so the same title never appears twice.
-  const instantOnly = useMemo(() => {
-    if (instantMatches.length === 0) return [];
-    const shown = new Set(items.map((i) => i.id));
-    return instantMatches.filter((i) => !shown.has(i.id));
-  }, [instantMatches, items]);
-
+  // Airing this season (AniList) - opt-in per account. These carry AniList
+  // ids, so a tap searches Discover for the title rather than faking a card.
   const [seasonalAnime, setSeasonalAnime] = useState<SeasonalAnime[]>([]);
-  // Why the row is empty, when it is empty and the feature is switched on.
-  // "AniList is down" and "nothing is airing" look identical otherwise, and
-  // the first is not something to leave someone guessing about - AniList
-  // disabled their public API outright once already.
   const [seasonalUnavailable, setSeasonalUnavailable] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -332,1153 +469,745 @@ export default function DiscoverPage() {
           setSeasonalUnavailable(r.unavailable ? (r.reason || 'AniList is unavailable right now.') : null);
         });
       })
-      .catch(() => { /* row simply doesn't appear */ });
+      .catch(() => { /* the row simply doesn't appear */ });
     return () => { cancelled = true; };
   }, []);
-  const [recMode, setRecMode] = useState<'personal' | 'shared'>('personal');
-  const [recUserId, setRecUserId] = useState<string>('');
-  const [recUserId2, setRecUserId2] = useState<string>('');
-  const [recUsers, setRecUsers] = useState<User[]>([]);
+
+  /* ---------------- People ---------------- */
+
+  const [person, setPerson] = useState<PersonResult | null>(null);
+  const [personLoading, setPersonLoading] = useState(false);
+  const [personSort, setPersonSort] = useState<'popular' | 'newest' | 'oldest'>('popular');
+  const [unseenOnly, setUnseenOnly] = useState(false);
   useEffect(() => {
-    if (source !== 'foryou' || recUsers.length > 0) return;
-    api.getUsers().then((users) => {
-      setRecUsers(users);
-      const stored = localStorage.getItem('slicksync-foryou-mode');
-      const storedUserId = localStorage.getItem('slicksync-foryou-userId');
-      const storedUserId2 = localStorage.getItem('slicksync-foryou-userId2');
-      const mode = stored === 'shared' ? 'shared' : 'personal';
-      setRecMode(mode);
-      // Fall back to the first managed user if a previously-stored pick no
-      // longer exists (deleted user, or first time ever) - always resolve
-      // to SOME valid selection rather than leaving the picker empty.
-      const validId = (id: string | null) => id && users.some((u) => u.id === id) ? id : '';
-      setRecUserId(validId(storedUserId) || users[0]?.id || '');
-      setRecUserId2(validId(storedUserId2) || (users[1]?.id ?? users[0]?.id ?? ''));
-    }).catch(() => {});
-  }, [source, recUsers.length]);
-  useEffect(() => {
-    if (source !== 'foryou' || !enableRecommendations) return;
-    // Personal mode needs a user; shared mode needs two distinct users.
-    // Wait for the picker to resolve (recUsers fetch above) rather than
-    // firing once with empty ids and falling back to the old household-wide
-    // behavior, which would flash the wrong rows before the real fetch.
-    if (recMode === 'personal' && !recUserId) return;
-    if (recMode === 'shared' && (!recUserId || !recUserId2 || recUserId === recUserId2)) return;
-    setRecsLoaded(false);
-    api.getRecommendations(
-      recMode === 'personal'
-        ? { mode: 'personal', userId: recUserId, type }
-        : { mode: 'shared', userId: recUserId, userId2: recUserId2, type }
-    )
-      .then((r) => setRecRows(Array.isArray(r?.rows) ? r.rows : []))
-      .catch(() => setRecRows([]))
-      .finally(() => setRecsLoaded(true));
-  }, [source, enableRecommendations, recMode, recUserId, recUserId2, type]);
-  // Household picks - household-wide, so only re-fetch on type change (not on
-  // mode/user-picker changes). Independent of the personal/shared rows below.
-  useEffect(() => {
-    if (source !== 'foryou' || !enableRecommendations) { setHouseholdPicks(null); return; }
+    if (lens !== 'people' || !debouncedQuery) { setPerson(null); setPersonLoading(false); return; }
     let cancelled = false;
-    api.getHouseholdPicks(type)
-      .then((r) => { if (!cancelled) setHouseholdPicks(r && r.items.length > 0 ? r : null); })
-      .catch(() => { if (!cancelled) setHouseholdPicks(null); });
+    setPersonLoading(true);
+    Promise.all(kindsFor(kind).map((t) => api.searchPerson(debouncedQuery, t, personId)))
+      .then((answers) => {
+        if (cancelled) return;
+        const found = answers.filter((a) => a?.person && a.results.length > 0) as PersonResult[];
+        setPerson(found.length ? { person: found[0].person, results: found.flatMap((f) => f.results), source: found[0].source } : null);
+      })
+      .catch(() => { if (!cancelled) setPerson(null); })
+      .finally(() => { if (!cancelled) setPersonLoading(false); });
     return () => { cancelled = true; };
-  }, [source, enableRecommendations, type]);
-  useEffect(() => { if (recUsers.length > 0) localStorage.setItem('slicksync-foryou-mode', recMode); }, [recMode, recUsers.length]);
-  useEffect(() => { if (recUserId) localStorage.setItem('slicksync-foryou-userId', recUserId); }, [recUserId]);
-  useEffect(() => { if (recUserId2) localStorage.setItem('slicksync-foryou-userId2', recUserId2); }, [recUserId2]);
-  // Second picker's own options exclude whoever's picked first (can't share
-  // with yourself) - if that leaves the second picker's current value
-  // stale, snap it to the next available person instead of leaving a
-  // filtered-out value selected.
-  useEffect(() => {
-    if (recUserId2 && recUserId2 !== recUserId) return;
-    const next = recUsers.find((u) => u.id !== recUserId);
-    if (next) setRecUserId2(next.id);
-  }, [recUserId, recUserId2, recUsers]);
-  const { watchlist, watchlistLoaded, inWatchlistIds, toggleWatchlist: handleToggleWatchlist, applyWatchlistChange } = useWatchlistState();
-  // Watched-status filter for the Discover grid — hide things you've seen,
-  // OR flip it to only see things you have. Snap back to 'all' if the
-  // indicator feature is turned off (a hidden filter that still applied
-  // would be a nasty confusion).
-  const [watchedFilter, setWatchedFilter] = useState<'all' | 'hide' | 'only'>('all');
-  useEffect(() => {
-    if (!enableWatchedIndicators && watchedFilter !== 'all') setWatchedFilter('all');
-  }, [enableWatchedIndicators, watchedFilter]);
-  const [sortBy, setSortBy] = useState<SortKey>('default');
+  }, [lens, debouncedQuery, kind, personId]);
 
-  // Convert saved WatchlistItem[] into DiscoverItem[] so the same grid + card
-  // component renders both sources with no branching in the render tree.
-  const watchlistAsDiscover: DiscoverItem[] = watchlist.map((w) => ({
-    id: w.itemId, type: w.itemType, name: w.name, poster: w.poster,
-    releaseInfo: null, imdbRating: null, genres: [],
-  }));
-
-  // Source + type filter applied (watched filter comes after the hook below,
-  // which needs sourceItems' ids as its input — not the other way around).
-  // Watchlist mode filters by the Movies/Series tab client-side and search
-  // box; browse mode uses items fetched from Cinemeta directly.
-  const sourceItems = source === 'watchlist'
-    ? watchlistAsDiscover.filter((i) => i.type === type && (!debouncedQuery || i.name.toLowerCase().includes(debouncedQuery.toLowerCase())))
-    : items;
-  const { watchedStatus, toggleWatched: handleToggleWatched } = useWatchedStatusBatch(sourceItems.map((i) => i.id), enableWatchedIndicators);
-  // Watched status for the For You rows - previously the watched filter
-  // deliberately skipped this view ("renders as personalized rows, not a
-  // single filterable list"), which meant recommendations happily kept
-  // resurfacing things the household had already seen with no way to hide
-  // them. Separate hook call because the id set is disjoint from the grid's.
-  const recItemIds = useMemo(() => {
-    const ids = recRows.flatMap((r) => r.items.map((i) => i.id));
-    if (householdPicks?.items) ids.push(...householdPicks.items.map((i) => i.id));
-    return ids;
-  }, [recRows, householdPicks]);
-  const { watchedStatus: recWatchedStatus } = useWatchedStatusBatch(recItemIds, enableWatchedIndicators && source === 'foryou');
-  const hideRecWatched = source === 'foryou' && watchedFilter === 'hide';
-  const displayedItems = sourceItems.filter((i) => {
-    if (watchedFilter === 'all') return true;
-    const seen = !!watchedStatus[i.id];
-    return watchedFilter === 'hide' ? !seen : seen;
-  });
-  const loading = source === 'watchlist' ? !watchlistLoaded : isLoading;
-  const ratingsById = useRatingsBatch(displayedItems.map((i) => i.id));
-  const sortedItems = sortBy === 'default' ? displayedItems : [...displayedItems].sort((a, b) => {
-    if (sortBy === 'title') return a.name.localeCompare(b.name);
-    if (sortBy === 'year-desc') return extractYear(b.releaseInfo) - extractYear(a.releaseInfo);
-    if (sortBy === 'year-asc') return extractYear(a.releaseInfo) - extractYear(b.releaseInfo);
-    const ratingOf = (i: DiscoverItem) => parseFloat(ratingsById[i.id]?.imdbRating || i.imdbRating || '0') || 0;
-    return ratingOf(b) - ratingOf(a);
-  });
-  // Person-credit results have no rating field (TMDb's credits endpoint
-  // doesn't return one here), so 'rating-desc' is meaningless for this list -
-  // the effect below resets away from it when switching into People mode.
-  const sortedPersonResults = !personSearch ? [] : sortBy === 'default' || sortBy === 'rating-desc' ? personSearch.results : [...personSearch.results].sort((a, b) => {
-    if (sortBy === 'title') return a.title.localeCompare(b.title);
-    if (sortBy === 'year-desc') return (parseInt(b.year || '0', 10) || 0) - (parseInt(a.year || '0', 10) || 0);
-    return (parseInt(a.year || '0', 10) || 0) - (parseInt(b.year || '0', 10) || 0);
-  });
+  // Following a person - the same follows the title popup's cast panel uses.
+  const [personFollow, setPersonFollow] = useState<{ id: string; muted: boolean } | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
+  const followId = person?.person.id ? String(person.person.id) : null;
   useEffect(() => {
-    if (searchMode === 'people' && sortBy === 'rating-desc') setSortBy('default');
-  }, [searchMode, sortBy]);
-
-  // Debounce typing so search isn't firing a request per keystroke.
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 300);
-    return () => clearTimeout(id);
-  }, [searchQuery]);
-
-  const handleMarkNotInterested = useCallback(async (item: PosterCardItem) => {
-    // Optimistic — splice it out of the current rows immediately rather than
-    // refetching /recommendations, which would rerun seed selection and can
-    // reshuffle every row for one dismissal.
-    setRecRows((prev) => prev.map((row) => ({ ...row, items: row.items.filter((i) => i.id !== item.id) })));
+    if (!followId) { setPersonFollow(null); return; }
+    let cancelled = false;
+    api.getFollows().then((r) => {
+      if (cancelled) return;
+      const hit = (Array.isArray(r) ? r : []).find((f) => f.kind === 'person' && String(f.subjectId) === followId);
+      setPersonFollow(hit ? { id: hit.id, muted: hit.muted } : null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [followId]);
+  const toggleFollow = async () => {
+    if (!followId || !person || followBusy) return;
+    const name = person.person.name;
+    setFollowBusy(true);
     try {
-      await api.markNotInterested(item.id, item.type);
-      toast.success(`Won't recommend "${item.name}" again`);
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to update');
+      if (!personFollow) {
+        const row = await api.followSubject('person', followId, name, person.person.profile);
+        setPersonFollow({ id: row.id, muted: row.muted });
+        toast.success(`Following ${name} - you'll hear when they have something new out`);
+      } else {
+        // Mute rather than unfollow, as everywhere: the row survives, so
+        // turning it back on doesn't replay news already announced.
+        await api.muteFollow(personFollow.id, !personFollow.muted);
+        setPersonFollow({ ...personFollow, muted: !personFollow.muted });
+        toast.success(personFollow.muted ? `Alerts for ${name} turned back on` : `Muted ${name} - still followed, just quiet`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not update following');
+    } finally {
+      setFollowBusy(false);
     }
-  }, []);
+  };
 
-  // Open a person-search result: TMDb titles have no tt id, so resolve the
-  // IMDb id first, then open the normal Cinemeta-backed detail modal.
-  // LumiereDB's already carry theirs.
-  const openPersonResult = useCallback(async (r: PersonSearchResult) => {
+  const openCredit = useCallback(async (r: PersonSearchResult) => {
     if (r.imdbId) {
       setDetailItem({ id: r.imdbId, type: r.mediaType === 'tv' ? 'series' : 'movie', name: r.title, poster: r.poster } as PosterCardItem);
       return;
     }
     if (r.tmdbId == null) return;
     const res = await api.resolveImdbId(r.tmdbId, r.mediaType);
-    if (res?.imdbId) {
-      setDetailItem({ id: res.imdbId, type: res.type, name: r.title, poster: r.poster } as PosterCardItem);
-    } else {
-      toast.error('Couldn\'t open that title');
+    if (res?.imdbId) setDetailItem({ id: res.imdbId, type: res.type, name: r.title, poster: r.poster } as PosterCardItem);
+    else toast.error('Couldn’t open that title');
+  }, []);
+
+  // A credit's IMDb id: its own when LumiereDB gave one, otherwise the
+  // household's copy of that title, matched by name - which is all "watched"
+  // can be known for.
+  const localByName = useMemo(() => new Map(localIndex.map((i) => [`${i.type}|${fold(i.name)}`, i.id])), [localIndex]);
+  const creditImdb = useCallback((r: PersonSearchResult) => r.imdbId || localByName.get(`${r.mediaType === 'tv' ? 'series' : 'movie'}|${fold(r.title)}`) || null, [localByName]);
+
+  /* ---------------- Watchlist ---------------- */
+
+  const { watchlist, watchlistLoaded, inWatchlistIds, toggleWatchlist: handleToggleWatchlist, applyWatchlistChange } = useWatchlistState();
+  const watchlistItems = useMemo(() => {
+    const q = debouncedQuery.toLowerCase();
+    const list: DiscoverItem[] = watchlist
+      .filter((w) => (kind === 'both' || w.itemType === kind) && (!q || w.name.toLowerCase().includes(q)))
+      .map((w) => ({ id: w.itemId, type: w.itemType, name: w.name, poster: w.poster, releaseInfo: null, imdbRating: null, genres: [] }));
+    if (watchlistSort === 'az') return [...list].sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [watchlist, kind, debouncedQuery, watchlistSort]);
+
+  /* ---------------- What is on screen ---------------- */
+
+  const creditIds = useMemo(() => (person?.results ?? []).map(creditImdb).filter(Boolean) as string[], [person, creditImdb]);
+  const statusIds = useMemo(() => [
+    ...items.map((i) => i.id),
+    ...instantOnly.map((i) => i.id),
+    ...(describeResults ?? []).map((i) => i.id),
+    ...watchlistItems.map((i) => i.id),
+    ...(householdPicks?.items ?? []).map((i) => i.id),
+    ...recRows.flatMap((r) => r.items.map((i) => i.id)),
+    ...simklTrending.map((i) => i.id),
+    ...creditIds,
+  ], [items, instantOnly, describeResults, watchlistItems, householdPicks, recRows, simklTrending, creditIds]);
+  const { watchedStatus, toggleWatched: handleToggleWatched } = useWatchedStatusBatch(statusIds, enableWatchedIndicators);
+  const ratingsById = useRatingsBatch(statusIds);
+  const keepByWatched = useCallback(<T extends { id: string }>(list: T[]) => (
+    watchedFilter === 'all' ? list : list.filter((i) => (watchedFilter === 'hide' ? !watchedStatus[i.id] : !!watchedStatus[i.id]))
+  ), [watchedFilter, watchedStatus]);
+
+  const shownItems = useMemo(() => {
+    const kept = keepByWatched(items);
+    return sort === 'az' && !debouncedQuery ? [...kept].sort((a, b) => a.name.localeCompare(b.name)) : kept;
+  }, [items, keepByWatched, sort, debouncedQuery]);
+  const shownWatchlist = useMemo(() => {
+    const kept = keepByWatched(watchlistItems);
+    return watchlistSort === 'first' ? [...kept].reverse() : kept;
+  }, [watchlistItems, keepByWatched, watchlistSort]);
+  const credits = useMemo(() => {
+    const list = (person?.results ?? []).filter((r) => { const id = creditImdb(r); return !unseenOnly || !(id && watchedStatus[id]); });
+    if (personSort === 'popular') return [...list].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
+    return [...list].sort((a, b) => (personSort === 'newest' ? yearOf(b.year) - yearOf(a.year) : yearOf(a.year) - yearOf(b.year)));
+  }, [person, unseenOnly, watchedStatus, personSort, creditImdb]);
+
+  const handleMarkNotInterested = useCallback(async (item: PosterCardItem) => {
+    // Out of the rows at once, rather than refetching and reshuffling them all.
+    setRecRows((prev) => prev.map((row) => ({ ...row, items: row.items.filter((i) => i.id !== item.id) })));
+    setHouseholdPicks((prev) => (prev ? { ...prev, items: prev.items.filter((i) => i.id !== item.id) } : prev));
+    try {
+      await api.markNotInterested(item.id, item.type);
+      toast.success(`Won't recommend "${item.name}" again`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update');
     }
   }, []);
 
-  // In People mode, a query searches TMDb for a person only - the title
-  // grid/browse fetch below is skipped entirely so there's never a stray
-  // title-search result mixed into someone's filmography.
-  const isPeopleSearch = source === 'discover' && searchMode === 'people' && !!debouncedQuery;
-
-  // First-page fetch — reruns whenever type/catalog/genre/search changes.
-  // Search hits a different endpoint and doesn't support pagination, so it
-  // just replaces items and marks the list as complete.
-  useEffect(() => {
-    let cancelled = false;
-
-    if (isPeopleSearch) {
-      // People mode: no title fetch at all.
-      setItems([]);
-      seenIdsRef.current = new Set();
-      setIsLoading(false);
-      setHasMore(false);
-      return;
+  // Surprise me: something from what is showing that nobody here has
+  // watched, and when everything showing has been seen, something Popular.
+  const surpriseSeen = useRef(new Set<string>());
+  const surprise = useCallback(async () => {
+    const pool: PosterCardItem[] = (lens === 'nobody' ? householdPicks?.items
+      : lens === 'foryou' ? recRows.flatMap((r) => r.items)
+        : lens === 'watchlist' ? watchlistItems : items) ?? [];
+    let pick = pickSurprise(pool.filter((i) => !watchedStatus[i.id]), surpriseSeen.current);
+    if (!pick) {
+      const { items: popular } = await api.discoverPage(kind, { catalog: 'top' });
+      pick = pickSurprise(popular.filter((i) => !watchedStatus[i.id]), surpriseSeen.current);
     }
+    if (!pick) { toast.error('Nothing new to suggest right now'); return; }
+    surpriseSeen.current.add(pick.id);
+    setDetailItem(pick);
+  }, [lens, householdPicks, recRows, watchlistItems, items, watchedStatus, kind]);
 
-    setIsLoading(true);
-    setSkip(0);
-    setHasMore(true);
-    loadMoreLock.current = false;
+  /* ---------------- Controls ---------------- */
 
-    const request = debouncedQuery
-      ? api.discoverSearch(type, debouncedQuery)
-      : api.discoverBrowse(type, { catalog, genre: genre || undefined });
-
-    request.then((results) => {
-      if (cancelled) return;
-      setItems(results);
-      // Fresh search/filter - past this point's seen-ids are irrelevant to a
-      // completely different result set, and starting over here (rather than
-      // accumulating across filter changes) keeps this Set from growing
-      // unbounded across a long session of changing catalogs/genres.
-      seenIdsRef.current = new Set(results.map((r) => r.id));
-      setIsLoading(false);
-      // Search endpoint doesn't paginate; browse pages are exactly PAGE_SIZE.
-      const gotFullPage = !debouncedQuery && results.length > 0;
-      setHasMore(gotFullPage);
-      setSkip(results.length);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [type, catalog, genre, debouncedQuery, isPeopleSearch]);
-
-  // People-mode search: only runs when the toggle is explicitly set to
-  // People, never alongside a Titles search.
-  const [personSearchLoading, setPersonSearchLoading] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    if (isPeopleSearch) {
-      setPersonSearchLoading(true);
-      api.searchPerson(debouncedQuery, type)
-        .then((r) => { if (!cancelled) setPersonSearch(r && r.person && r.results.length > 0 ? r : null); })
-        .catch(() => { if (!cancelled) setPersonSearch(null); })
-        .finally(() => { if (!cancelled) setPersonSearchLoading(false); });
-    } else {
-      setPersonSearch(null);
-      setPersonSearchLoading(false);
-    }
-    return () => { cancelled = true; };
-  }, [isPeopleSearch, debouncedQuery, type]);
-
-  // Load the next page and append. No-op if already loading, search-mode
-  // (no pagination on Cinemeta's search), or the last page came back short.
-  const loadMore = useCallback(async () => {
-    if (debouncedQuery || !hasMore || loadMoreLock.current) return;
-    loadMoreLock.current = true;
-    setIsLoadingMore(true);
-    try {
-      const next = await api.discoverBrowse(type, { catalog, genre: genre || undefined, skip });
-      // Cinemeta occasionally repeats an item across pages when its catalog
-      // reshuffles between requests - de-dupe against everything already
-      // loaded so a repeat can't collide as a duplicate React key.
-      const additions = next.filter((n) => !seenIdsRef.current.has(n.id));
-      for (const a of additions) seenIdsRef.current.add(a.id);
-      setItems((prev) => [...prev, ...additions]);
-      setSkip((s) => s + next.length);
-      setHasMore(next.length > 0);
-    } finally {
-      setIsLoadingMore(false);
-      loadMoreLock.current = false;
-    }
-  }, [debouncedQuery, hasMore, type, catalog, genre, skip]);
-
-  // Infinite scroll — an IntersectionObserver watches a sentinel element
-  // rendered just below the grid; when it enters the viewport, fire loadMore.
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMore();
-    }, { rootMargin: '400px' /* start fetching before it's actually in view */ });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [loadMore]);
-
-  const searchConfig: PageToolbarProps['searchConfig'] = {
-    value: searchQuery,
-    onChange: setSearchQuery,
-    placeholder: searchMode === 'people'
-      ? 'Search for an actor or director...'
-      : searchMode === 'describe'
-        ? 'Describe what you remember, then press Enter...'
-        : `Search ${type === 'movie' ? 'movies' : 'series'}...`,
-    onSubmit: searchMode === 'describe' ? runDescribeSearch : undefined,
+  const sortPop = usePopover();
+  const filtersPop = usePopover();
+  const titleFilters = lens === 'titles';
+  const hasFilters = lens !== 'people' && enableWatchedIndicators || titleFilters;
+  const watchedOptions: Array<{ key: WatchedFilter; label: string }> = lens === 'foryou' || lens === 'nobody'
+    ? [{ key: 'all', label: 'Show everything' }, { key: 'hide', label: 'Hide watched' }]
+    : [{ key: 'all', label: 'Show everything' }, { key: 'hide', label: 'Hide watched' }, { key: 'only', label: 'Only watched' }];
+  const filterCount = (titleFilters ? (genre ? 1 : 0) + (decade ? 1 : 0) + (minRating ? 1 : 0) + (length ? 1 : 0) : 0) + (watchedFilter !== 'all' ? 1 : 0);
+  const clearFilters = () => { setGenre(''); setDecade(null); setMinRating(null); setLength(null); setWatchedFilter('all'); };
+  const applied: Array<{ key: string; label: string; clear: () => void }> = [
+    ...(titleFilters && genre ? [{ key: 'genre', label: genre, clear: () => setGenre('') }] : []),
+    ...(titleFilters && decade ? [{ key: 'decade', label: DECADES.find((d) => d.key === decade)?.label ?? decade, clear: () => setDecade(null) }] : []),
+    ...(titleFilters && minRating ? [{ key: 'rating', label: `Rated ${minRating}+`, clear: () => setMinRating(null) }] : []),
+    ...(titleFilters && length ? [{ key: 'length', label: LENGTHS.find((l) => l.key === length)?.label ?? length, clear: () => setLength(null) }] : []),
+    ...(watchedFilter !== 'all' && lens !== 'people' ? [{ key: 'watched', label: watchedFilter === 'hide' ? 'Hide watched' : 'Only watched', clear: () => setWatchedFilter('all') }] : []),
+  ];
+  const sortOptions: Array<{ key: string; label: string }> | null = lens === 'titles' && !debouncedQuery ? sorts : lens === 'watchlist' ? WATCHLIST_SORTS : null;
+  const sortValue = lens === 'watchlist' ? watchlistSort : sort;
+  const sortLabel = sortOptions?.find((o) => o.key === sortValue)?.label ?? '';
+  const pickSort = (key: string) => {
+    if (lens === 'watchlist') setWatchlistSort(key as WatchlistSort);
+    else setSort(key as SortKey);
+    sortPop.setOpen(false);
   };
 
-  // TV mode wraps the whole page in the D-pad focus root; PC/mobile get a
-  // plain Fragment, same tree either way with no separate render path.
+  const lenses: Array<{ key: Lens; label: string; count?: number }> = [
+    { key: 'titles', label: 'Titles' },
+    { key: 'people', label: 'People' },
+    ...(enableRecommendations ? [{ key: 'foryou' as const, label: 'For you' }, { key: 'nobody' as const, label: 'Nobody’s seen it' }] : []),
+    ...(enableWatchlist ? [{ key: 'watchlist' as const, label: 'Watchlist', count: watchlist.length }] : []),
+  ];
+  // On a phone the tabs sit in rows of equal buttons, never a strip to swipe:
+  // five go three and two, four go two and two.
+  const lensSpan = (i: number) => {
+    const n = lenses.length;
+    if (n === 5) return i < 3 ? 2 : 3;
+    if (n === 4) return 3;
+    return 6 / Math.max(1, n);
+  };
+
+  const filtersBody = (
+    <>
+      {titleFilters && (
+        <>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Genre</span>
+            <div className="flex flex-wrap gap-1.5">
+              <Pill on={!genre} onClick={() => setGenre('')}>Any</Pill>
+              {GENRES.map((g) => <Pill key={g} on={genre === g} onClick={() => setGenre(g)}>{g}</Pill>)}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Decade</span>
+            <div className="flex flex-wrap gap-1.5">
+              <Pill on={!decade} onClick={() => setDecade(null)}>Any</Pill>
+              {DECADES.map((d) => <Pill key={d.key} on={decade === d.key} onClick={() => setDecade(d.key)}>{d.label}</Pill>)}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Rating</span>
+            <div className="flex flex-wrap gap-1.5">
+              <Pill on={!minRating} onClick={() => setMinRating(null)}>Any</Pill>
+              {RATINGS.map((r) => <Pill key={r} on={minRating === r} onClick={() => setMinRating(r)}>{r}+</Pill>)}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Length</span>
+            <div className="flex flex-wrap gap-1.5">
+              <Pill on={!length} onClick={() => setLength(null)}>Any</Pill>
+              {LENGTHS.map((l) => <Pill key={l.key} on={length === l.key} onClick={() => setLength(l.key)}>{l.label}</Pill>)}
+            </div>
+          </div>
+        </>
+      )}
+      {enableWatchedIndicators && (
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Watched</span>
+          <div className="flex flex-wrap gap-1.5">
+            {watchedOptions.map((o) => <Pill key={o.key} on={watchedFilter === o.key} onClick={() => setWatchedFilter(o.key)}>{o.label}</Pill>)}
+          </div>
+        </div>
+      )}
+      <div className="flex items-center justify-between pt-3" style={{ borderTop: '1px solid var(--color-surface-border)' }}>
+        <button type="button" onClick={clearFilters} disabled={filterCount === 0} className="text-sm font-medium disabled:opacity-40" style={{ color: 'var(--color-primary)' }}>Clear all</button>
+        <button type="button" onClick={() => filtersPop.setOpen(false)} className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white" style={{ background: 'var(--color-primary)' }}>Done</button>
+      </div>
+    </>
+  );
+
   const Wrapper = isTV ? TVPageProvider : Fragment;
+  const spinner = (
+    <div className="flex items-center justify-center py-24 text-muted">
+      <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+  const card = (item: PosterCardItem, key: string, notInterested = false) => (
+    <PosterCard
+      key={key}
+      item={item}
+      ratings={ratingsById[item.id]}
+      watched={watchedStatus[item.id]}
+      inWatchlist={inWatchlistIds.has(item.id)}
+      showWatchlistMenu={enableWatchlist}
+      showWatchlistBadge={enableWatchlist}
+      showWatchedMenu={enableWatchedIndicators}
+      showWatchedBadge={enableWatchedIndicators}
+      showNotInterested={notInterested}
+      onMarkNotInterested={notInterested ? handleMarkNotInterested : undefined}
+      onOpenDetails={setDetailItem}
+      onToggleWatchlist={handleToggleWatchlist}
+      onToggleWatched={handleToggleWatched}
+      isMenuOpen={openMenuKey === key}
+      menuKey={key}
+      onMenuOpenChange={handleMenuOpenChange}
+      focusable={isTV}
+    />
+  );
+  const emptyNote = (text: string, Icon = MagnifyingGlassIcon) => (
+    <div className="text-center py-24 text-muted">
+      <Icon className="w-10 h-10 mx-auto mb-3 text-subtle" />
+      <p>{text}</p>
+      {filterCount > 0 && <button type="button" onClick={clearFilters} className="mt-3 text-sm font-medium" style={{ color: 'var(--color-primary)' }}>Clear filters</button>}
+    </div>
+  );
+  const watchedNote = watchedFilter === 'hide' ? 'Hiding what you’ve watched' : watchedFilter === 'only' ? 'Only what you’ve watched' : enableWatchedIndicators ? '✓ marks what you’ve seen' : '';
+  const rowHeading = (title: React.ReactNode, note?: React.ReactNode) => (
+    <div className="flex items-baseline gap-2 mb-3 flex-wrap">
+      <h3 className="text-base font-semibold font-display text-default">{title}</h3>
+      {note}
+    </div>
+  );
 
   return (
     <Wrapper>
       {layoutMode !== 'nebula' && (
-        <Header
-          title="Discover"
-          subtitle="Browse or search for something to watch, then open it straight in Stremio or Nuvio"
-        />
+        <Header title="Discover" subtitle="Browse or search for something to watch, then open it straight in Stremio or Nuvio" />
       )}
+      <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-4 md:p-8'}>
+        <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+          {layoutMode === 'nebula' && <h1 className="sr-only">Discover</h1>}
 
-      <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
-      {layoutMode === 'nebula' && (
-        <NebulaPageHeading
-          title="Discover"
-          subtitle="Browse or search for something to watch, then open it straight in Stremio or Nuvio"
-        />
-      )}
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
-      {layoutMode === 'nebula' && <NebulaGlassStripe />}
-        <PageSection delay={0.05} className="mb-6">
-          {isTV ? (
-            // PageToolbar's filterTabs render through FilterTabs, which has
-            // no D-pad wiring - same reason the genre <select> gets swapped
-            // out below. Search is skipped entirely on TV (typing on a
-            // remote isn't worth building for yet), so this is just the
-            // Movies/Series toggle, D-pad reachable.
-            <div className="flex gap-2">
-              {([['movie', 'Movies', FilmIcon], ['series', 'Series', TvIcon]] as const).map(([key, label, Icon]) => (
-                <TVFocusable key={key} onEnterPress={() => setType(key)}>
-                  <button
-                    type="button"
-                    onClick={() => setType(key)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${
-                      type === key ? 'bg-primary text-white' : 'bg-surface-hover text-muted nav-item-hover-pill'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {label}
-                  </button>
-                </TVFocusable>
-              ))}
-            </div>
-          ) : (
-            <PageToolbar
-              animate={false}
-              searchConfig={searchConfig}
-              filterTabs={{
-                options: [
-                  { key: 'movie', label: 'Movies', icon: <FilmIcon className="w-4 h-4" /> },
-                  { key: 'series', label: 'Series', icon: <TvIcon className="w-4 h-4" /> },
-                ],
-                activeKey: type,
-                onChange: (key) => setType(key as 'movie' | 'series'),
-                layoutId: 'discover-type-tabs',
-              }}
-            />
-          )}
-
-          {/* Titles vs People search mode - only relevant to the plain
-              Discover source (Watchlist/For You have no person search).
-              Explicitly separate, not run in parallel: a Titles search never
-              touches TMDb, and a People search only ever shows that person's
-              actual verified credits - no stray title-search result can
-              land next to a filmography it doesn't belong to. */}
-          {!isTV && source === 'discover' && (
-            <div className="flex items-center gap-2 mt-3">
-              <span className="text-xs text-muted">Search:</span>
-              <button
-                type="button"
-                onClick={() => setSearchMode('titles')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                  searchMode === 'titles' ? 'bg-primary text-white' : 'bg-surface-hover text-muted nav-item-hover-pill'
-                }`}
-              >
-                <MagnifyingGlassIcon className="w-3.5 h-3.5" />
-                Titles
-              </button>
-              <button
-                type="button"
-                onClick={() => setSearchMode('people')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                  searchMode === 'people' ? 'bg-primary text-white' : 'bg-surface-hover text-muted nav-item-hover-pill'
-                }`}
-              >
-                <UserIcon className="w-3.5 h-3.5" />
-                People
-              </button>
-              <button
-                type="button"
-                onClick={() => { setSearchMode('describe'); setDescribeResults(null); setDescribeError(null); }}
-                title="Describe a plot you half-remember - results are verified against TMDb, never invented"
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                  searchMode === 'describe' ? 'bg-primary text-white' : 'bg-surface-hover text-muted nav-item-hover-pill'
-                }`}
-              >
-                <SparklesIcon className="w-3.5 h-3.5" />
-                Describe it
-              </button>
-            </div>
-          )}
-        </PageSection>
-
-        {/* Source: Cinemeta catalogs vs. your own Watchlist + optional
-            watched filter. Each half is independently gated by the
-            personal-features settings — if BOTH are disabled the whole
-            row disappears (no visual weight from an empty control bar). */}
-        {(enableWatchlist || enableWatchedIndicators || enableRecommendations) && (
-          <PageSection delay={0.07} className="mb-4">
-            <div className="flex gap-2 flex-wrap items-center">
-              {/* Discover source is always shown when any SlickTrax feature is
-                  on — otherwise the toggle row disappears entirely. Watchlist
-                  and For You each appear only when their feature is enabled. */}
-              {(enableWatchlist || enableRecommendations) && (() => {
-                const btn = (
-                  <button
-                    type="button"
-                    onClick={() => setSource('discover')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      source === 'discover'
-                        ? 'bg-primary text-white'
-                        : 'bg-surface-hover text-muted nav-item-hover-pill'
-                    }`}
-                  >
-                    Discover
-                  </button>
-                );
-                return isTV ? <TVFocusable onEnterPress={() => setSource('discover')}>{btn}</TVFocusable> : btn;
-              })()}
-              {enableWatchlist && (() => {
-                const btn = (
-                  <button
-                    type="button"
-                    onClick={() => setSource('watchlist')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      source === 'watchlist'
-                        ? 'bg-primary text-white'
-                        : 'bg-surface-hover text-muted nav-item-hover-pill'
-                    }`}
-                  >
-                    ★ Watchlist
-                    {watchlist.length > 0 && (
-                      <span className={`ml-1.5 text-xs ${source === 'watchlist' ? 'opacity-80' : 'opacity-60'}`}>({watchlist.length})</span>
-                    )}
-                  </button>
-                );
-                return isTV ? <TVFocusable onEnterPress={() => setSource('watchlist')}>{btn}</TVFocusable> : btn;
-              })()}
-              {enableRecommendations && (() => {
-                const btn = (
-                  <button
-                    type="button"
-                    onClick={() => setSource('foryou')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      source === 'foryou'
-                        ? 'bg-primary text-white'
-                        : 'bg-surface-hover text-muted nav-item-hover-pill'
-                    }`}
-                  >
-                    ✨ For You
-                  </button>
-                );
-                return isTV ? <TVFocusable onEnterPress={() => setSource('foryou')}>{btn}</TVFocusable> : btn;
-              })()}
-
-              {/* Watched filter + sort — right side of the same row, stacked
-                  (Show above Sort). Sort applies to the flat grid views only
-                  (browse/search/Watchlist); the watched filter now ALSO
-                  covers For You - recommendations kept resurfacing titles
-                  the household had already seen with no way to hide them.
-                  Watched filter still hides in People mode - watchedStatus
-                  is keyed by IMDb id, and person credits only carry TMDb
-                  ids, so it could never match anything there. */}
-              <div className="ml-auto flex flex-col items-end gap-1.5">
-                {enableWatchedIndicators && searchMode !== 'people' && (
-                  <div className="flex gap-1 items-center">
-                    <span className="text-xs text-muted mr-1 hidden sm:inline">Show:</span>
-                    {/* For You gets All/Unwatched only - "Watched" as a
-                        recommendations filter would mean "recommend me
-                        things I've seen", which is nobody's intent. */}
-                    {(source === 'foryou'
-                      ? ([['all', 'All'], ['hide', 'Unwatched']] as const)
-                      : ([['all', 'All'], ['hide', 'Unwatched'], ['only', 'Watched']] as const)
-                    ).map(([key, label]) => {
-                      const btn = (
-                        <button
-                          type="button"
-                          onClick={() => setWatchedFilter(key)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                            watchedFilter === key
-                              ? 'bg-primary/20 text-primary'
-                              : 'text-muted hover:text-default'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                      return isTV ? (
-                        <TVFocusable key={key} onEnterPress={() => setWatchedFilter(key)}>{btn}</TVFocusable>
-                      ) : (
-                        <Fragment key={key}>{btn}</Fragment>
-                      );
-                    })}
-                  </div>
-                )}
-                {source !== 'foryou' && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted hidden sm:inline">Sort:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as SortKey)}
-                    aria-label="Sort results"
-                    className="px-2.5 py-1 rounded-md text-xs font-medium bg-surface-hover text-muted nav-item-hover-pill border border-default cursor-pointer"
-                  >
-                    {SORT_OPTIONS.filter((opt) => searchMode !== 'people' || opt.key !== 'rating-desc').map((opt) => (
-                      <option key={opt.key} value={opt.key}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                )}
-              </div>
-            </div>
-          </PageSection>
-        )}
-
-        {source === 'discover' && !debouncedQuery && seasonalAnime.length === 0 && seasonalUnavailable && (
-          <PageSection delay={0.05} className="mb-6">
-            <div className="flex items-baseline gap-2 mb-2 flex-wrap">
-              <h3 className="text-base font-semibold font-display text-default">🌸 Airing this season</h3>
-            </div>
-            <p className="text-xs text-muted">{seasonalUnavailable}</p>
-          </PageSection>
-        )}
-
-        {source === 'discover' && !debouncedQuery && seasonalAnime.length > 0 && (
-          <PageSection delay={0.05} className="mb-6">
-            <div className="flex items-baseline gap-2 mb-3 flex-wrap">
-              <h3 className="text-base font-semibold font-display text-default">🌸 Airing this season</h3>
-              <span className="text-xs text-muted">Anime currently airing, newest episodes first</span>
-            </div>
-            <ScrollRow className="flex gap-3 pb-2 -mx-1 px-1">
-              {seasonalAnime.map((a) => (
-                <button
-                  key={a.anilistId}
-                  type="button"
-                  onClick={() => { setSearchQuery(a.name); setSearchMode('titles'); }}
-                  className="w-32 sm:w-36 shrink-0 text-left group"
-                  title={`Search SlickSync for ${a.name}`}
-                >
-                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 shadow-xl">
-                    {a.poster ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={a.poster} alt={a.name} loading="lazy" decoding="async" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-xs text-subtle">No art</div>
-                    )}
-                    {a.nextEpisode && (
-                      <span className="absolute bottom-1 left-1 right-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-center truncate" style={{ background: 'rgba(0,0,0,0.72)', color: '#fff' }}>
-                        Ep {a.nextEpisode.episode} in {a.nextEpisode.label}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs mt-1.5 truncate text-default">{a.name}</p>
-                  <p className="text-[11px] text-muted truncate">
-                    {a.episodes ? `${a.episodes} eps` : a.format || ''}{a.score ? ` · ${a.score}%` : ''}
-                  </p>
-                </button>
-              ))}
-            </ScrollRow>
-          </PageSection>
-        )}
-
-        {source === 'discover' && !debouncedQuery && simklTrending.length > 0 && (
-          <PageSection delay={0.06} className="mb-6">
-            <div className="flex items-baseline gap-2 mb-3 flex-wrap">
-              <h3 className="text-base font-semibold font-display text-default">🔥 Trending on SIMKL</h3>
-            </div>
-            <ScrollRow className="flex gap-3 pb-2 -mx-1 px-1">
-              {simklTrending.map((item) => (
-                <div key={item.id} className="w-32 sm:w-36 shrink-0">
-                  <PosterCard
-                    item={simklTrendingCardItems.get(item.id) ?? item}
-                    ratings={ratingsById[item.id]}
-                    watched={watchedStatus[item.id]}
-                    inWatchlist={inWatchlistIds.has(item.id)}
-                    showWatchlistMenu={enableWatchlist}
-                    showWatchlistBadge={enableWatchlist}
-                    showWatchedMenu={enableWatchedIndicators}
-                    showWatchedBadge={enableWatchedIndicators}
-                    onOpenDetails={setDetailItem}
-                    onToggleWatchlist={handleToggleWatchlist}
-                    onToggleWatched={handleToggleWatched}
-                    isMenuOpen={openMenuKey === 'trend:' + item.id}
-                    menuKey={'trend:' + item.id}
-                    onMenuOpenChange={handleMenuOpenChange}
-                    focusable={isTV}
-                  />
-                </div>
-              ))}
-            </ScrollRow>
-          </PageSection>
-        )}
-
-        {source === 'discover' && !debouncedQuery && (
-          <PageSection delay={0.08} className="mb-6">
-            {/* Catalog picker + genre dropdown on the SAME row: catalog is
-                the primary filter (Popular / New / Top Rated), genre is a
-                secondary refinement sitting immediately after it. On a
-                narrow screen the dropdown wraps below thanks to flex-wrap. */}
-            <div className="flex gap-2 flex-wrap items-center">
-              {catalogs.map((c) => {
-                const btn = (
-                  <button
-                    type="button"
-                    onClick={() => setCatalog(c.key)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      catalog === c.key
-                        ? 'bg-primary text-white'
-                        : 'bg-surface-hover text-muted nav-item-hover-pill'
-                    }`}
-                  >
-                    {c.label}
-                  </button>
-                );
-                return isTV ? (
-                  <TVFocusable key={c.key} onEnterPress={() => setCatalog(c.key)}>{btn}</TVFocusable>
-                ) : (
-                  <Fragment key={c.key}>{btn}</Fragment>
-                );
-              })}
-
-              {/* Genre picker — always enabled. Server-side, catalog+genre
-                  combos that return empty from Cinemeta (New+anything,
-                  imdbRating+Documentary, etc.) transparently fall back to
-                  Popular in that genre so the grid isn't stuck empty.
-                  TV mode swaps the native <select> for a focusable chip
-                  row — Norigin's spatial nav has no way to reach into (or
-                  drive) an OS-native dropdown popup, same reason the
-                  catalog tabs above are plain buttons rather than a select
-                  in the first place. */}
-              {isTV ? (
-                <div className="flex gap-2 flex-wrap items-center">
-                  {[{ key: '', label: 'All genres' }, ...GENRES.map((g) => ({ key: g, label: g }))].map((g) => {
-                    const chip = (
-                      <button
-                        type="button"
-                        onClick={() => setGenre(g.key)}
-                        className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                          genre === g.key
-                            ? 'bg-primary text-white border-transparent'
-                            : 'bg-surface-hover text-muted nav-item-hover-pill border-default'
-                        }`}
-                      >
-                        {g.label}
-                      </button>
-                    );
-                    return (
-                      <TVFocusable key={g.key || 'all'} onEnterPress={() => setGenre(g.key)}>
-                        {chip}
-                      </TVFocusable>
-                    );
-                  })}
-                </div>
-              ) : (
-                <DropdownSelect
-                  value={genre}
-                  onChange={setGenre}
-                  ariaLabel="Filter by genre"
-                  options={[{ value: '', label: 'All genres' }, ...GENRES.map((g) => ({ value: g, label: g }))]}
-                  // Same trigger styling the native <select> used, plus the
-                  // flex/gap the chevron needs now that it's a real element
-                  // rather than the OS-drawn arrow.
-                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
-                    genre
-                      ? 'bg-primary-muted text-primary border-primary'
-                      : 'bg-surface-hover text-muted nav-item-hover-pill border-default'
-                  }`}
+          {/* The search, what kind, and Surprise me. TV has no search - typing on a remote isn't worth it. */}
+          <div className="flex flex-wrap items-center gap-3">
+            {!isTV && (
+              <label className="flex-1 min-w-0 sm:min-w-[16rem] basis-full sm:basis-auto h-[52px] flex items-center gap-3 pl-4 pr-3 rounded-2xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }}>
+                <MagnifyingGlassIcon className="w-5 h-5 text-muted shrink-0" />
+                <input
+                  ref={searchRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // A sentence rather than a title is a description: Enter
+                    // looks for what it describes.
+                    if (e.key === 'Enter' && lens === 'titles' && searchQuery.trim().split(/\s+/).length >= 4) { e.preventDefault(); void runDescribe(); }
+                  }}
+                  placeholder={lens === 'people' ? 'Search a person' : lens === 'watchlist' ? 'Search your watchlist' : 'Search a title or a person, or describe it'}
+                  aria-label="Search"
+                  className="flex-1 min-w-0 bg-transparent outline-none text-default text-base"
                 />
-              )}
+                {searchQuery ? (
+                  <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear search" className="p-1 rounded-md text-muted hover:text-default">
+                    <XMarkIcon className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <kbd className="h-[22px] min-w-[22px] px-1.5 rounded-md text-xs text-muted hidden sm:inline-flex items-center justify-center" style={{ border: '1px solid var(--color-surface-border)' }}>/</kbd>
+                )}
+              </label>
+            )}
+            <div role="group" aria-label="Kind" className="flex w-full sm:w-auto p-1 rounded-xl" style={{ background: 'var(--color-surface-hover)' }}>
+              {KINDS.map((k) => (
+                <Focus key={k.key} tv={isTV} onEnter={() => setKind(k.key)}>
+                  <button
+                    type="button"
+                    onClick={() => setKind(k.key)}
+                    aria-pressed={kind === k.key}
+                    className={`h-10 px-4 flex-1 sm:flex-none rounded-[10px] text-sm font-medium transition-colors ${kind === k.key ? 'text-default' : 'text-muted hover:text-default'}`}
+                    style={kind === k.key ? { background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 60%, transparent)' } : undefined}
+                  >
+                    {k.label}
+                  </button>
+                </Focus>
+              ))}
             </div>
-          </PageSection>
-        )}
+            <Focus tv={isTV} onEnter={() => { void surprise(); }}>
+              <button type="button" onClick={() => { void surprise(); }} className="h-10 px-3.5 rounded-xl text-sm font-medium text-default hidden sm:inline-flex items-center gap-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }}>
+                <ArrowsRightLeftIcon className="w-4 h-4" />
+                Surprise me
+              </button>
+            </Focus>
+          </div>
 
-        {source === 'foryou' ? (
-          <PageSection delay={0.1}>
-            {/* Personal (one managed user's own watch history) vs Shared
-                (combined signal + real overlap from exactly two picked
-                users) - this page has no single "current user" of its own,
-                so there's no automatic default beyond picking Personal mode
-                itself. Mirrors the Movies/Series and catalog picker's own
-                pill-row + native-select pattern used elsewhere on this
-                page rather than introducing a new control style. TV mode
-                swaps both native <select>s for focusable chip rows, same
-                reason (and same pattern) as the genre picker below. */}
-            {recUsers.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 mb-4">
-                {(recUsers.length > 1 ? (['personal', 'shared'] as const) : (['personal'] as const)).map((m) => {
-                  const btn = (
+          {/* What you are looking through, and in what order and with what filters. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-6 gap-1.5 w-full sm:w-auto sm:flex sm:flex-wrap sm:gap-2">
+              {lenses.map((l, i) => (
+                <Focus key={l.key} tv={isTV} onEnter={() => setLens(l.key)}>
+                  <button
+                    type="button"
+                    onClick={() => setLens(l.key)}
+                    aria-pressed={lens === l.key}
+                    className={`px-1.5 sm:px-4 py-2 sm:py-1.5 rounded-full text-[14px] sm:text-[15px] font-medium text-center whitespace-nowrap transition-colors ${lens === l.key ? 'text-default' : 'text-muted hover:text-default'}`}
+                    style={{
+                      gridColumn: `span ${lensSpan(i)}`,
+                      ...(lens === l.key ? { background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 60%, transparent)' } : {}),
+                    }}
+                  >
+                    {l.label}
+                    {l.count ? <span className="ml-1.5 text-[11px] px-1.5 py-px rounded-full" style={{ background: 'rgba(255,255,255,.08)' }}>{l.count}</span> : null}
+                  </button>
+                </Focus>
+              ))}
+            </div>
+
+            {!isTV && (sortOptions || hasFilters) && (
+              <div className="relative flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
+                {sortOptions && (
+                  <div ref={sortPop.ref} className="flex-1 sm:flex-none sm:relative">
                     <button
                       type="button"
-                      onClick={() => setRecMode(m)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        recMode === m
-                          ? 'bg-primary text-white'
-                          : 'bg-surface-hover text-muted nav-item-hover-pill'
-                      }`}
+                      onClick={() => sortPop.setOpen(!sortPop.open)}
+                      aria-expanded={sortPop.open}
+                      className="w-full h-10 sm:h-9 px-3.5 sm:px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center justify-between sm:justify-start gap-1.5"
+                      style={{ background: 'var(--color-surface-hover)' }}
                     >
-                      {m === 'personal' ? 'Personal' : 'Shared with…'}
+                      <span><span className="text-muted">Sort</span> {sortLabel}</span>
+                      <ChevronDownIcon className="w-3.5 h-3.5" />
                     </button>
-                  );
-                  return isTV ? (
-                    <TVFocusable key={m} onEnterPress={() => setRecMode(m)}>{btn}</TVFocusable>
-                  ) : (
-                    <Fragment key={m}>{btn}</Fragment>
-                  );
-                })}
-                {isTV ? (
-                  <div className="flex gap-2 flex-wrap items-center">
-                    {recUsers.map((u) => {
-                      const chip = (
-                        <button
-                          type="button"
-                          onClick={() => setRecUserId(u.id)}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                            recUserId === u.id
-                              ? 'bg-primary text-white border-transparent'
-                              : 'bg-surface-hover text-muted nav-item-hover-pill border-default'
-                          }`}
-                        >
-                          {u.name || u.username}
-                        </button>
-                      );
-                      return (
-                        <TVFocusable key={u.id} onEnterPress={() => setRecUserId(u.id)}>
-                          {chip}
-                        </TVFocusable>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <select
-                    value={recUserId}
-                    onChange={(e) => setRecUserId(e.target.value)}
-                    aria-label={recMode === 'personal' ? 'Show recommendations for' : 'First person'}
-                    className="px-3 py-2 rounded-lg text-sm font-medium border transition-colors cursor-pointer bg-surface-hover text-default border-default"
-                  >
-                    {recUsers.map((u) => (
-                      <option key={u.id} value={u.id}>{u.name || u.username}</option>
-                    ))}
-                  </select>
-                )}
-                {recMode === 'shared' && (
-                  <>
-                    <span className="text-sm text-muted">and</span>
-                    {isTV ? (
-                      <div className="flex gap-2 flex-wrap items-center">
-                        {recUsers.filter((u) => u.id !== recUserId).map((u) => {
-                          const chip = (
-                            <button
-                              type="button"
-                              onClick={() => setRecUserId2(u.id)}
-                              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                                recUserId2 === u.id
-                                  ? 'bg-primary text-white border-transparent'
-                                  : 'bg-surface-hover text-muted nav-item-hover-pill border-default'
-                              }`}
-                            >
-                              {u.name || u.username}
-                            </button>
-                          );
-                          return (
-                            <TVFocusable key={u.id} onEnterPress={() => setRecUserId2(u.id)}>
-                              {chip}
-                            </TVFocusable>
-                          );
-                        })}
+                    {sortPop.open && (
+                      <div className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-52 p-1.5 rounded-2xl" style={panelStyle}>
+                        {sortOptions.map((o) => (
+                          <button
+                            key={o.key}
+                            type="button"
+                            onClick={() => pickSort(o.key)}
+                            className={`w-full h-10 px-3 rounded-lg text-sm text-left flex items-center justify-between ${sortValue === o.key ? 'text-default' : 'text-muted hover:text-default hover:bg-surface-hover'}`}
+                          >
+                            {o.label}
+                            {sortValue === o.key && <CheckIcon className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />}
+                          </button>
+                        ))}
                       </div>
-                    ) : (
-                    <select
-                      value={recUserId2}
-                      onChange={(e) => setRecUserId2(e.target.value)}
-                      aria-label="Second person"
-                      className="px-3 py-2 rounded-lg text-sm font-medium border transition-colors cursor-pointer bg-surface-hover text-default border-default"
-                    >
-                      {recUsers.filter((u) => u.id !== recUserId).map((u) => (
-                        <option key={u.id} value={u.id}>{u.name || u.username}</option>
-                      ))}
-                    </select>
                     )}
-                  </>
+                  </div>
                 )}
-              </div>
-            )}
-            {/* Household picks - unwatched by ANYONE, in genres the whole
-                house likes. Lead row, above the personal/shared rows, and
-                independent of them (shows even if the personal picker's own
-                rows are empty). Something single-user Trakt can't do. */}
-            {householdPicks && householdPicks.items.length > 0 && (
-              <div className="mb-8">
-                <div className="flex items-baseline gap-2 mb-3 flex-wrap">
-                  <h3 className="text-base font-semibold font-display text-default">✨ Nobody&apos;s seen it yet</h3>
-                  {householdPicks.sharedAppeal && householdPicks.memberCount > 1 && (
-                    <Badge
-                      variant="primary"
-                      size="sm"
-                      icon={<SparklesIcon className="w-3 h-3" />}
-                      title="In genres shared across multiple household members - broad appeal, and no one's watched it"
+                {hasFilters && (
+                  <div ref={filtersPop.ref} className={sortOptions ? 'sm:relative' : 'flex-1 sm:flex-none sm:relative'}>
+                    <button
+                      type="button"
+                      onClick={() => filtersPop.setOpen(!filtersPop.open)}
+                      aria-expanded={filtersPop.open}
+                      aria-label={filterCount > 0 ? `Filters, ${filterCount} on` : 'Filters'}
+                      className={`relative h-10 sm:h-9 ${sortOptions ? 'w-10 sm:w-auto justify-center' : 'w-full sm:w-auto justify-between sm:justify-start'} sm:pl-3 sm:pr-2 px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center gap-2`}
+                      style={{ background: 'color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-hover))', boxShadow: filtersPop.open ? 'inset 0 0 0 1px var(--color-primary)' : undefined }}
                     >
-                      House pick
-                    </Badge>
-                  )}
-                  <span className="text-xs text-muted">· {householdPicks.genres.join(', ')} the whole house likes</span>
-                </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
-                  {(hideRecWatched ? householdPicks.items.filter((i) => !recWatchedStatus[i.id]) : householdPicks.items).map((item) => (
-                    <PosterCard
-                      key={item.id}
-                      item={item}
-                      ratings={ratingsById[item.id]}
-                      watched={watchedStatus[item.id]}
-                      inWatchlist={inWatchlistIds.has(item.id)}
-                      showWatchlistMenu={enableWatchlist}
-                      showWatchlistBadge={enableWatchlist}
-                      showWatchedMenu={enableWatchedIndicators}
-                      showWatchedBadge={enableWatchedIndicators}
-                      showNotInterested
-                      onMarkNotInterested={handleMarkNotInterested}
-                      onOpenDetails={setDetailItem}
-                      onToggleWatchlist={handleToggleWatchlist}
-                      onToggleWatched={handleToggleWatched}
-                      isMenuOpen={openMenuKey === 'picks:' + item.id}
-                      menuKey={'picks:' + item.id}
-                      onMenuOpenChange={handleMenuOpenChange}
-                      focusable={isTV}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {sagas.length > 0 && (
-              <div className="space-y-8 mb-8">
-                {sagas.map((saga) => (
-                  <div key={saga.collectionId}>
-                    <div className="flex items-baseline gap-2 mb-3 flex-wrap">
-                      <h3 className="text-base font-semibold font-display text-default">Finish the saga: {saga.name}</h3>
-                      <span className="text-xs text-muted">· watched {saga.watchedCount} of {saga.total}{saga.unwatched.length === 1 ? ' - one to go' : ''}</span>
-                    </div>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
-                      {saga.unwatched.map((part) => (
-                        <PosterCard
-                          key={part.id}
-                          item={{ id: part.id, type: 'movie', name: part.title, poster: part.poster, releaseInfo: part.releaseYear }}
-                          inWatchlist={inWatchlistIds.has(part.id)}
-                          showWatchlistMenu={enableWatchlist}
-                          showWatchlistBadge={enableWatchlist}
-                          onOpenDetails={setDetailItem}
-                          onToggleWatchlist={handleToggleWatchlist}
-                          onToggleWatched={handleToggleWatched}
-                          showWatchedMenu={enableWatchedIndicators}
-                          isMenuOpen={openMenuKey === 'saga:' + part.id}
-                          menuKey={'saga:' + part.id}
-                          onMenuOpenChange={handleMenuOpenChange}
-                          focusable={isTV}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!recsLoaded ? (
-              <div className="flex items-center justify-center py-24 text-muted">
-                <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : recRows.length === 0 ? (
-              // Only show the empty message when there's ALSO no household-
-              // picks row above - otherwise the page isn't actually empty.
-              !householdPicks || householdPicks.items.length === 0 ? (
-                <div className="text-center py-24 text-muted">
-                  <p>No recommendations yet — watch a few things first, and we&apos;ll suggest more.</p>
-                </div>
-              ) : null
-            ) : (
-              <div className="space-y-8">
-                {recRows.map((row) => {
-                  // "Unwatched" filter applied per row - a row whose every
-                  // suggestion is already watched disappears entirely rather
-                  // than leaving an empty header.
-                  const visibleItems = hideRecWatched ? row.items.filter((i) => !recWatchedStatus[i.id]) : row.items;
-                  if (visibleItems.length === 0) return null;
-                  return (
-                  <div key={row.seedId}>
-                    <div className="flex items-baseline gap-2 mb-3 flex-wrap">
-                      <h3 className="text-base font-semibold font-display text-default">{row.reason}</h3>
-                      {/* Confidence-visible recommendations: the reason text
-                          alone only reads differently when a real pairwise
-                          match was found ("X and Y both loved Z") - a row
-                          resting on just this seed's own score with zero
-                          real cross-item affinity behind it still gets the
-                          same-looking generic "Because you watched X" text.
-                          This badge surfaces that distinction directly
-                          instead of leaving it invisible, using the same
-                          hasRealSignal signal "More Like This" already
-                          computes - no new data, just showing what's
-                          already there. */}
-                      {row.hasRealSignal && (
-                        <Badge
-                          variant="primary"
-                          size="sm"
-                          icon={<SparklesIcon className="w-3 h-3" />}
-                          title="Backed by real watch-time overlap in your household, not just this title's own score"
-                        >
-                          Real match
-                        </Badge>
+                      <AdjustmentsHorizontalIcon className="w-5 h-5 sm:w-4 sm:h-4" />
+                      <span className={sortOptions ? 'hidden sm:inline' : ''}>Filters</span>
+                      {filterCount > 0 && (
+                        <span className={`min-w-5 h-5 px-1.5 rounded-full text-[11px] font-bold inline-flex items-center justify-center text-white ${sortOptions ? 'absolute -top-1.5 -right-1.5 sm:static' : ''}`} style={{ background: 'var(--color-primary)' }}>{filterCount}</span>
                       )}
-                      <span className="text-xs text-muted">· Top Rated {row.genre}</span>
-                    </div>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
-                      {visibleItems.map((item) => (
-                        <PosterCard
-                          key={item.id}
-                          item={item}
-                          ratings={ratingsById[item.id]}
-                          watched={recWatchedStatus[item.id]}
-                          inWatchlist={inWatchlistIds.has(item.id)}
-                          showWatchlistMenu={enableWatchlist}
-                          showWatchlistBadge={enableWatchlist}
-                          showWatchedMenu={enableWatchedIndicators}
-                          showWatchedBadge={enableWatchedIndicators}
-                          showNotInterested
-                          onMarkNotInterested={handleMarkNotInterested}
-                          onOpenDetails={setDetailItem}
-                          onToggleWatchlist={handleToggleWatchlist}
-                          onToggleWatched={handleToggleWatched}
-                          isMenuOpen={openMenuKey === row.seedId + ':' + item.id}
-                          menuKey={row.seedId + ':' + item.id}
-                          onMenuOpenChange={handleMenuOpenChange}
-                          focusable={isTV}
-                        />
-                      ))}
-                    </div>
+                    </button>
+                    {filtersPop.open && (
+                      <div className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-[min(560px,92vw)] p-5 rounded-2xl flex flex-col gap-4 max-h-[70vh] overflow-y-auto" style={panelStyle}>
+                        {filtersBody}
+                      </div>
+                    )}
                   </div>
-                  );
-                })}
-                <p className="text-xs text-muted italic text-center pt-2">
-                  Powered by SlickTrax — rows are based on the genres you actually spend the most time watching (weighted toward recent viewing), plus what's on your Watchlist. Up to three at a time, and they shift as your habits do.
-                </p>
+                )}
+                <button type="button" onClick={() => { void surprise(); }} aria-label="Surprise me" className="sm:hidden h-10 w-10 shrink-0 rounded-xl inline-flex items-center justify-center text-default" style={{ background: 'var(--color-surface-hover)' }}>
+                  <ArrowsRightLeftIcon className="w-5 h-5" />
+                </button>
               </div>
             )}
-          </PageSection>
-        ) : (
-        <PageSection delay={0.1}>
-          {/* Instant matches from your own watchlist/history - rendered
-              while the network search is still loading, and only when it
-              actually has something the results don't already show. */}
-          {source === 'discover' && searchMode === 'titles' && instantOnly.length > 0 && (
-            <div className="mb-5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                From your library
-              </p>
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-                {instantOnly.map((item) => (
-                  <PosterCard
-                    key={'inst:' + item.id}
-                    item={item}
-                    ratings={ratingsById[item.id]}
-                    watched={watchedStatus[item.id]}
-                    inWatchlist={inWatchlistIds.has(item.id)}
-                    showWatchlistMenu={enableWatchlist}
-                    showWatchlistBadge={enableWatchlist}
-                    showWatchedMenu={enableWatchedIndicators}
-                    showWatchedBadge={enableWatchedIndicators}
-                    onOpenDetails={setDetailItem}
-                    onToggleWatchlist={handleToggleWatchlist}
-                    onToggleWatched={handleToggleWatched}
-                    isMenuOpen={openMenuKey === 'inst:' + item.id}
-                    menuKey={'inst:' + item.id}
-                    onMenuOpenChange={handleMenuOpenChange}
-                    focusable={isTV}
-                  />
-                ))}
+          </div>
+
+          {/* TV: the order and genre as rows of pills - a remote can't drive a popup. */}
+          {isTV && lens === 'titles' && (
+            <div className="mt-3 flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2">{sorts.map((o) => <Pill key={o.key} tv on={sort === o.key} onClick={() => setSort(o.key)}>{o.label}</Pill>)}</div>
+              <div className="flex flex-wrap gap-2">
+                <Pill tv on={!genre} onClick={() => setGenre('')}>All genres</Pill>
+                {GENRES.map((g) => <Pill key={g} tv on={genre === g} onClick={() => setGenre(g)}>{g}</Pill>)}
               </div>
             </div>
           )}
 
-          {source === 'discover' && searchMode === 'describe' ? (
-            // Describe mode: results are TMDb-verified real records, so they
-            // render as ordinary PosterCards with every normal action.
-            <>
-              {describeBusy && <p className="text-sm text-muted py-8 text-center">Working out what that could be...</p>}
-              {!describeBusy && describeError && (
-                <p className="text-sm text-muted py-8 text-center max-w-lg mx-auto">{describeError}</p>
+          {applied.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {applied.map((a) => (
+                <button key={a.key} type="button" onClick={a.clear} aria-label={`Remove ${a.label}`} className="h-7 pl-3 pr-1.5 rounded-full text-[13px] inline-flex items-center gap-1" style={{ background: 'color-mix(in srgb, var(--color-primary) 16%, transparent)', color: 'color-mix(in srgb, var(--color-primary) 40%, #ffffff)' }}>
+                  {a.label}
+                  <XMarkIcon className="w-3.5 h-3.5" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ---------- Titles ---------- */}
+          {lens === 'titles' && (
+            <section className="mt-5" aria-label="Titles">
+              {instantOnly.length > 0 && !describing && (
+                <div className="mb-6">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-muted">From your library</p>
+                  <div className={GRID}>{instantOnly.map((item) => card(item, `inst:${item.id}`))}</div>
+                </div>
               )}
-              {!describeBusy && !describeError && !describeResults && (
-                <div className="py-8 text-center max-w-lg mx-auto">
-                  <p className="text-sm text-default mb-1">Describe a film or show you can&apos;t name</p>
-                  <p className="text-xs text-muted">
-                    e.g. &quot;the one where the guy relives the same day at war&quot;. Press Enter to search. Every
-                    result is checked against TMDb first, so nothing invented can show up here.
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h2 className="text-lg sm:text-xl font-semibold font-display text-default [text-wrap:balance]">
+                  {describing ? 'From your description' : describeGrid({ sort, kind, genre, decade, minRating, length, query: debouncedQuery })}
+                </h2>
+                {debouncedQuery && !isTV && (
+                  describing ? (
+                    <button type="button" onClick={() => { setDescribeResults(null); setDescribeError(null); }} className="text-sm font-medium" style={{ color: 'var(--color-primary)' }}>Back to title matches</button>
+                  ) : (
+                    <button type="button" onClick={() => { void runDescribe(); }} title="Describe a plot you half-remember - results are checked against TMDb, never invented" className="text-sm font-medium inline-flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
+                      <SparklesIcon className="w-4 h-4" />Not it? Describe it instead
+                    </button>
+                  )
+                )}
+              </div>
+              <p className="text-[13px] text-muted mt-1 mb-4">{[describing ? 'Every one checked against TMDb, so nothing invented shows up' : debouncedQuery ? '' : sortInfo.about, watchedNote].filter(Boolean).join(' · ')}</p>
+              {describing ? (
+                describeBusy ? <p className="text-sm text-muted py-8 text-center">Working out what that could be…</p>
+                  : describeError ? <p className="text-sm text-muted py-8 text-center max-w-lg mx-auto">{describeError}</p>
+                    : <div className={GRID}>{keepByWatched(describeResults ?? []).map((item) => card(item, `desc:${item.id}`))}</div>
+              ) : isLoading ? spinner : shownItems.length === 0 ? (
+                emptyNote(filterCount > 0 ? 'Nothing here with these filters.' : 'No results found.')
+              ) : (
+                <>
+                  {/* The one unbounded grid here - windowed, so only rows near the screen are real. */}
+                  <VirtualPosterGrid items={shownItems} getKey={(item) => item.id} gridClassName={GRID} disabled={isTV} renderItem={(item) => card(item, `grid:${item.id}`)} />
+                  {!debouncedQuery && (
+                    <div className="mt-8 flex flex-col items-center justify-center gap-3 py-6">
+                      {isLoadingMore && (
+                        <div className="flex items-center gap-2 text-sm text-muted">
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          Loading more…
+                        </div>
+                      )}
+                      {!hasMore && shownItems.length >= 40 && <p className="text-xs text-muted">That’s everything this list has here.</p>}
+                      <div ref={sentinelRef} aria-hidden className="h-px w-full" />
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
+          {/* ---------- People ---------- */}
+          {lens === 'people' && (
+            <section className="mt-5" aria-label="People">
+              {!debouncedQuery ? emptyNote('Type a name to see everything they’ve been in.', UserIcon)
+                : personLoading ? spinner
+                  : !person ? emptyNote(`No one found by that name${kind === 'both' ? '' : ` with ${kind === 'series' ? 'shows' : 'movies'} to show`}.`, UserIcon)
+                    : (
+                      <>
+                        {/* Who they are, on the card itself: what they do, born
+                            when and where, and two or three sentences. */}
+                        <div className="relative overflow-hidden flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 p-5 sm:p-6 mb-5 rounded-2xl border border-default text-center sm:text-left" style={{ background: 'linear-gradient(120deg, color-mix(in srgb, var(--color-primary) 22%, var(--color-surface)), var(--color-surface) 60%)' }}>
+                          {person.person.profile ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={person.person.profile} alt={person.person.name} className="w-[104px] h-[104px] sm:w-[132px] sm:h-[132px] rounded-full object-cover shrink-0" />
+                          ) : (
+                            <div className="w-[104px] h-[104px] sm:w-[132px] sm:h-[132px] rounded-full flex items-center justify-center text-4xl font-bold shrink-0" style={{ background: 'var(--color-surface-hover)' }}>{person.person.name.slice(0, 1)}</div>
+                          )}
+                          <div className="min-w-0 flex-1 flex flex-col gap-3">
+                            <h2 className="text-[28px] sm:text-[38px] leading-tight font-bold text-default font-display" style={{ letterSpacing: '-0.01em' }}>{person.person.name}</h2>
+                            {(() => {
+                              const facts = [
+                                { text: workAsPerson(person.person.knownFor), Icon: UserIcon },
+                                { text: bornLine(person.person), Icon: CalendarDaysIcon },
+                                { text: person.person.placeOfBirth ?? null, Icon: MapPinIcon },
+                              ].filter((f) => f.text);
+                              return facts.length > 0 && (
+                                <div className="flex flex-wrap justify-center sm:justify-start gap-x-6 gap-y-2">
+                                  {facts.map(({ text, Icon }) => (
+                                    <span key={text} className="flex items-center gap-2 text-[15px] sm:text-[17px] font-medium text-default">
+                                      <Icon className="w-[18px] h-[18px] shrink-0" style={{ color: 'var(--color-primary)' }} aria-hidden />
+                                      {text}
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                            {person.person.bio && <p className="text-[15px] sm:text-[17px] leading-relaxed text-default" style={{ maxWidth: 720, opacity: 0.9 }}>{person.person.bio}</p>}
+                          </div>
+                          <div className="flex flex-col items-center sm:items-end gap-3 shrink-0">
+                            <span className="text-[17px] font-semibold text-default">{person.results.length} title{person.results.length === 1 ? '' : 's'}</span>
+                            <div className="flex flex-wrap justify-center sm:justify-end gap-2">
+                              {(['popular', 'newest', 'oldest'] as const).map((k) => (
+                                <Pill key={k} tv={isTV} on={personSort === k} onClick={() => setPersonSort(k)}>{k === 'popular' ? 'Most popular' : k === 'newest' ? 'Newest' : 'Oldest'}</Pill>
+                              ))}
+                            </div>
+                            {enableWatchedIndicators && <Pill tv={isTV} on={unseenOnly} onClick={() => setUnseenOnly(!unseenOnly)}>Only what I haven’t seen</Pill>}
+                            {followId && (
+                              <Focus tv={isTV} onEnter={() => { void toggleFollow(); }}>
+                                <button
+                                  type="button"
+                                  onClick={() => { void toggleFollow(); }}
+                                  disabled={followBusy}
+                                  title={!personFollow ? `Follow ${person.person.name} - hear when they have something new out` : personFollow.muted ? 'Alerts muted - tap to turn them back on' : 'Following - tap to mute'}
+                                  className="h-8 px-3 rounded-full text-[13px] font-semibold inline-flex items-center gap-1.5"
+                                  style={personFollow && !personFollow.muted
+                                    ? { color: 'var(--color-primary)', background: 'color-mix(in srgb, var(--color-primary) 16%, transparent)' }
+                                    : { color: 'color-mix(in srgb, var(--color-primary) 40%, #ffffff)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 55%, transparent)' }}
+                                >
+                                  <BellIcon className="w-4 h-4" />
+                                  {!personFollow ? 'Follow' : personFollow.muted ? 'Muted' : 'Following'}
+                                </button>
+                              </Focus>
+                            )}
+                          </div>
+                        </div>
+                        {credits.length === 0 ? emptyNote('You’ve seen everything they’ve been in.') : (
+                          <div className={GRID}>
+                            {credits.map((r) => {
+                              const id = creditImdb(r);
+                              const seen = !!(id && watchedStatus[id]);
+                              return (
+                                <Focus key={`${r.mediaType}-${r.imdbId ?? r.tmdbId}`} tv={isTV} onEnter={() => { void openCredit(r); }}>
+                                  <button type="button" onClick={() => { void openCredit(r); }} title={`${r.title}${r.role ? ` · ${r.role}` : ''}`} className="text-left group/pr min-w-0">
+                                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden shadow-lg" style={{ background: 'var(--color-surface-hover)' }}>
+                                      {r.poster ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={r.poster} alt={r.title} loading="lazy" className="w-full h-full object-cover transition-transform group-hover/pr:scale-105" />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-muted text-xs p-2 text-center">{r.title}</div>
+                                      )}
+                                      {seen && enableWatchedIndicators && (
+                                        <span className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'var(--color-success)' }} aria-label="Watched">
+                                          <CheckIcon className="w-4 h-4 text-white" />
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="mt-1.5 text-[13px] font-medium text-default leading-tight line-clamp-2 text-center group-hover/pr:text-primary transition-colors">{r.title}</p>
+                                    <p className="text-[11px] text-subtle text-center">{[r.year, r.mediaType === 'tv' ? 'Show' : 'Movie'].filter(Boolean).join(' · ')}</p>
+                                  </button>
+                                </Focus>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
+            </section>
+          )}
+
+          {/* ---------- For you ---------- */}
+          {lens === 'foryou' && (
+            <section className="mt-5" aria-label="For you">
+              {recUsers.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mb-5">
+                  {(recUsers.length > 1 ? (['personal', 'shared'] as const) : (['personal'] as const)).map((m) => (
+                    <Pill key={m} tv={isTV} on={recMode === m} onClick={() => setRecMode(m)}>{m === 'personal' ? 'Personal' : 'Shared with…'}</Pill>
+                  ))}
+                  {isTV ? recUsers.map((u) => <Pill key={u.id} tv on={recUserId === u.id} onClick={() => setRecUserId(u.id)}>{u.name || u.username}</Pill>) : (
+                    <select value={recUserId} onChange={(e) => setRecUserId(e.target.value)} aria-label={recMode === 'personal' ? 'Show recommendations for' : 'First person'} className="h-8 px-3 rounded-full text-[13px] font-medium cursor-pointer bg-surface-hover text-default border-0">
+                      {recUsers.map((u) => <option key={u.id} value={u.id}>{u.name || u.username}</option>)}
+                    </select>
+                  )}
+                  {recMode === 'shared' && (
+                    <>
+                      <span className="text-sm text-muted">and</span>
+                      {isTV ? recUsers.filter((u) => u.id !== recUserId).map((u) => <Pill key={u.id} tv on={recUserId2 === u.id} onClick={() => setRecUserId2(u.id)}>{u.name || u.username}</Pill>) : (
+                        <select value={recUserId2} onChange={(e) => setRecUserId2(e.target.value)} aria-label="Second person" className="h-8 px-3 rounded-full text-[13px] font-medium cursor-pointer bg-surface-hover text-default border-0">
+                          {recUsers.filter((u) => u.id !== recUserId).map((u) => <option key={u.id} value={u.id}>{u.name || u.username}</option>)}
+                        </select>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {seasonalAnime.length === 0 && seasonalUnavailable && (
+                <div className="mb-6">{rowHeading('Airing this season')}<p className="text-xs text-muted -mt-2">{seasonalUnavailable}</p></div>
+              )}
+              {seasonalAnime.length > 0 && (
+                <div className="mb-8">
+                  {rowHeading('Airing this season', <span className="text-xs text-muted">Anime airing now, newest episodes first</span>)}
+                  <ScrollRow className="flex gap-3 pb-2 -mx-1 px-1">
+                    {seasonalAnime.map((a) => (
+                      <button key={a.anilistId} type="button" onClick={() => { setSearchQuery(a.name); setLens('titles'); }} className="w-32 sm:w-36 shrink-0 text-left group" title={`Search Discover for ${a.name}`}>
+                        <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-surface-hover shadow-xl">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          {a.poster ? <img src={a.poster} alt={a.name} loading="lazy" decoding="async" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" /> : <div className="w-full h-full flex items-center justify-center text-xs text-subtle">No art</div>}
+                          {a.nextEpisode && (
+                            <span className="absolute bottom-1 left-1 right-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-center truncate" style={{ background: 'rgba(0,0,0,0.72)', color: '#fff' }}>
+                              Ep {a.nextEpisode.episode} in {a.nextEpisode.label}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs mt-1.5 truncate text-default">{a.name}</p>
+                        <p className="text-[11px] text-muted truncate">{a.episodes ? `${a.episodes} eps` : a.format || ''}{a.score ? ` · ${a.score}%` : ''}</p>
+                      </button>
+                    ))}
+                  </ScrollRow>
+                </div>
+              )}
+
+              {keepByWatched(simklTrending).length > 0 && (
+                <div className="mb-8">
+                  {rowHeading('Trending on SIMKL')}
+                  <ScrollRow className="flex gap-3 pb-2 -mx-1 px-1">
+                    {keepByWatched(simklTrending).map((item) => <div key={item.id} className="w-32 sm:w-36 shrink-0">{card(item, `trend:${item.id}`)}</div>)}
+                  </ScrollRow>
+                </div>
+              )}
+
+              {kind !== 'series' && sagas.length > 0 && (
+                <div className="space-y-8 mb-8">
+                  {sagas.map((saga) => (
+                    <div key={saga.collectionId}>
+                      {rowHeading(`Finish the saga: ${saga.name}`, <span className="text-xs text-muted">· watched {saga.watchedCount} of {saga.total}{saga.unwatched.length === 1 ? ' - one to go' : ''}</span>)}
+                      <div className={GRID}>
+                        {saga.unwatched.map((part) => card({ id: part.id, type: 'movie', name: part.title, poster: part.poster, releaseInfo: part.releaseYear }, `saga:${part.id}`))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!recsLoaded ? spinner : recRows.length === 0 ? (
+                <div className="text-center py-16 text-muted"><p>No recommendations yet - watch a few things first, and we’ll suggest more.</p></div>
+              ) : (
+                <div className="space-y-8">
+                  {recRows.map((row, ri) => {
+                    const visible = keepByWatched(row.items);
+                    if (visible.length === 0) return null;
+                    return (
+                      <div key={`${row.seedId}-${ri}`}>
+                        {rowHeading(row.reason, (
+                          <>
+                            {row.hasRealSignal && (
+                              <Badge variant="primary" size="sm" icon={<SparklesIcon className="w-3 h-3" />} title="Backed by real watch-time overlap in your household, not just this title's own score">Real match</Badge>
+                            )}
+                            <span className="text-xs text-muted">· Top rated {row.genre}</span>
+                          </>
+                        ))}
+                        <div className={GRID}>{visible.map((item) => card(item, `rec:${ri}:${item.id}`, true))}</div>
+                      </div>
+                    );
+                  })}
+                  <p className="text-xs text-muted italic text-center pt-2">
+                    Rows come from the genres you actually spend the most time watching (weighted toward recent viewing), plus what’s on your Watchlist, and they shift as your habits do.
                   </p>
                 </div>
               )}
-              {!describeBusy && describeResults && describeResults.length > 0 && (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-                  {describeResults.map((item) => (
-                    <PosterCard
-                      key={item.id}
-                      item={item}
-                      ratings={ratingsById[item.id]}
-                      watched={watchedStatus[item.id]}
-                      inWatchlist={inWatchlistIds.has(item.id)}
-                      showWatchlistMenu={enableWatchlist}
-                      showWatchlistBadge={enableWatchlist}
-                      showWatchedMenu={enableWatchedIndicators}
-                      showWatchedBadge={enableWatchedIndicators}
-                      onOpenDetails={setDetailItem}
-                      onToggleWatchlist={handleToggleWatchlist}
-                      onToggleWatched={handleToggleWatched}
-                      isMenuOpen={openMenuKey === 'desc:' + item.id}
-                      menuKey={'desc:' + item.id}
-                      onMenuOpenChange={handleMenuOpenChange}
-                      focusable={isTV}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          ) : source === 'discover' && searchMode === 'people' ? (
-            // People mode: exclusively a person's own verified TMDb credits -
-            // never a title-search result mixed in (see the searchMode
-            // comment above for why that combination was removed).
-            <>
-              {!debouncedQuery ? (
-                <div className="text-center py-24 text-muted">
-                  <UserIcon className="w-10 h-10 mx-auto mb-3 text-subtle" />
-                  <p>Type an actor or director&apos;s name to see what they&apos;ve been in.</p>
-                </div>
-              ) : personSearchLoading ? (
-                <div className="flex items-center justify-center py-24 text-muted">
-                  <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                </div>
-              ) : !personSearch || !personSearch.person || personSearch.results.length === 0 ? (
-                <div className="text-center py-24 text-muted">
-                  <UserIcon className="w-10 h-10 mx-auto mb-3 text-subtle" />
-                  <p>No match for &quot;{debouncedQuery}&quot; — or nothing of that type ({type === 'series' ? 'series' : 'movies'}) in their credits.</p>
-                </div>
+            </section>
+          )}
+
+          {/* ---------- Nobody's seen it ---------- */}
+          {lens === 'nobody' && (
+            <section className="mt-5" aria-label="Nobody's seen it">
+              {!picksLoaded ? spinner : !householdPicks || keepByWatched(householdPicks.items).length === 0 ? (
+                <div className="text-center py-24 text-muted"><p>Nothing to suggest yet - once a few people here have watched things, this fills with what none of you has seen.</p></div>
               ) : (
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    {personSearch.person.profile && (
-                      <img src={personSearch.person.profile} alt={personSearch.person.name} className="w-8 h-8 rounded-full object-cover" />
+                <>
+                  <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+                    <h2 className="text-lg sm:text-xl font-semibold font-display text-default">Nobody here has seen these</h2>
+                    {householdPicks.sharedAppeal && householdPicks.memberCount > 1 && (
+                      <Badge variant="primary" size="sm" icon={<SparklesIcon className="w-3 h-3" />} title="In genres several people here like">House pick</Badge>
                     )}
-                    <h3 className="text-base font-semibold font-display text-default">
-                      {personSearch.person.name}
-                      <span className="text-muted font-normal"> — {type === 'series' ? 'series' : 'movies'} they&apos;re {personSearch.source === 'lumiere' ? 'best known for' : 'in'}</span>
-                    </h3>
                   </div>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
-                    {sortedPersonResults.map((r) => (
-                      <button
-                        key={`${r.mediaType}-${r.tmdbId ?? r.imdbId}`}
-                        type="button"
-                        onClick={() => openPersonResult(r)}
-                        title={`${r.title}${r.role ? ` · ${r.role}` : ''}`}
-                        className="text-left group/pr"
-                      >
-                        <div className="aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 shadow-lg">
-                          {r.poster ? (
-                            <img src={r.poster} alt={r.title} loading="lazy" className="w-full h-full object-cover transition-transform group-hover/pr:scale-105" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-muted text-xs p-2 text-center">{r.title}</div>
-                          )}
-                        </div>
-                        <p className="mt-1 text-xs font-medium text-default leading-tight line-clamp-2 group-hover/pr:text-primary transition-colors text-center">{r.title}</p>
-                        {r.year && <p className="text-[10px] text-subtle text-center">{r.year}</p>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                  <p className="text-[13px] text-muted mb-4">{householdPicks.genres.join(', ')}, the genres the house likes</p>
+                  <div className={GRID}>{keepByWatched(householdPicks.items).map((item) => card(item, `house:${item.id}`, true))}</div>
+                </>
               )}
-            </>
-          ) : (
-          <>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-24 text-muted">
-              <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : displayedItems.length === 0 ? (
-            <div className="text-center py-24 text-muted">
-              <MagnifyingGlassIcon className="w-10 h-10 mx-auto mb-3 text-subtle" />
-              <p>
-                {source === 'watchlist' && watchlist.length === 0
-                  ? 'Your watchlist is empty. Add items with the bookmark button on any title.'
-                  : source === 'watchlist'
-                    ? `Nothing in your watchlist matches this view.`
-                    : watchedFilter !== 'all'
-                      ? `Nothing matches the "${watchedFilter === 'hide' ? 'Unwatched' : 'Watched'}" filter here.`
-                      : 'No results found.'}
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* The one unbounded grid on this page (infinite scroll keeps
-                  appending) - windowed so only near-viewport rows are real
-                  DOM. The small fixed rows elsewhere (For You, person
-                  credits) stay plain grids on purpose. TV disables the
-                  windowing - see VirtualPosterGrid's own comment. */}
-              <VirtualPosterGrid
-                items={sortedItems}
-                getKey={(item) => item.id}
-                gridClassName="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3"
-                disabled={isTV}
-                renderItem={(item) => (
-                  <PosterCard
-                    item={item}
-                    ratings={ratingsById[item.id]}
-                    watched={watchedStatus[item.id]}
-                    inWatchlist={inWatchlistIds.has(item.id)}
-                    showWatchlistMenu={enableWatchlist}
-                    showWatchlistBadge={enableWatchlist}
-                    showWatchedMenu={enableWatchedIndicators}
-                    showWatchedBadge={enableWatchedIndicators}
-                    onOpenDetails={setDetailItem}
-                    onToggleWatchlist={handleToggleWatchlist}
-                    onToggleWatched={handleToggleWatched}
-                    isMenuOpen={openMenuKey === 'grid:' + item.id}
-                    menuKey={'grid:' + item.id}
-                    onMenuOpenChange={handleMenuOpenChange}
-                    focusable={isTV}
-                  />
-                )}
-              />
-
-              {/* Infinite-scroll sentinel + spinner. Discover browse-mode only
-                  — Watchlist is fully-loaded client-side and search doesn't
-                  paginate. Sentinel sits ~400px below the grid's end so we
-                  start fetching before the user hits true bottom. */}
-              {source === 'discover' && !debouncedQuery && (
-                <div className="mt-8 flex flex-col items-center justify-center gap-3 py-6">
-                  {isLoadingMore && (
-                    <div className="flex items-center gap-2 text-sm text-muted">
-                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                      Loading more…
-                    </div>
-                  )}
-                  {!hasMore && displayedItems.length >= PAGE_SIZE && (
-                    <p className="text-xs text-muted">
-                      {lumiere.ready && (catalog === 'top' || catalog === 'trending')
-                        ? `That's all of IMDb's ${catalog === 'trending' ? 'Trending' : 'Popular'} list${genre ? ` in ${genre}` : ''}.`
-                        : `That's everything Cinemeta has for this catalog${genre ? ` in ${genre}` : ''}.`}
-                    </p>
-                  )}
-                  {/* The observer target — a zero-height marker. */}
-                  <div ref={sentinelRef} aria-hidden className="h-px w-full" />
-                </div>
-              )}
-            </>
+            </section>
           )}
-          </>
+
+          {/* ---------- Watchlist ---------- */}
+          {lens === 'watchlist' && (
+            <section className="mt-5" aria-label="Watchlist">
+              {!watchlistLoaded ? spinner : watchlist.length === 0 ? emptyNote('Your watchlist is empty. Add titles with the bookmark on any poster.')
+                : shownWatchlist.length === 0 ? emptyNote('Nothing on your watchlist matches this view.')
+                  : (
+                    <>
+                      <h2 className="text-lg sm:text-xl font-semibold font-display text-default">Your watchlist</h2>
+                      <p className="text-[13px] text-muted mt-1 mb-4">{[`${shownWatchlist.length} title${shownWatchlist.length === 1 ? '' : 's'}`, watchedNote].filter(Boolean).join(' · ')}</p>
+                      <div className={GRID}>{shownWatchlist.map((item) => card(item, `wl:${item.id}`))}</div>
+                    </>
+                  )}
+            </section>
           )}
-        </PageSection>
-        )}
-      </div>
-      </div>
+        </div>
       </div>
 
       {detailItem && (

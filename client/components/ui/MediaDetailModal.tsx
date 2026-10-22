@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { StarIcon, ClockIcon, FilmIcon, PlayIcon, XMarkIcon, BookmarkIcon as BookmarkSolidIcon, ShieldCheckIcon } from '@heroicons/react/24/solid';
 import { BookmarkIcon as BookmarkOutlineIcon, ChevronLeftIcon, ChevronDownIcon, HandThumbUpIcon, HandThumbDownIcon, CheckCircleIcon, CheckIcon as CheckIconMini, BellIcon } from '@heroicons/react/24/outline';
 import { Modal } from './Modal';
@@ -203,6 +204,18 @@ export function MediaDetailModal({
       setPersonFollowBusy(null);
     }
   }, [personFollows, personFollowBusy]);
+
+  // Their page in Discover: who they are, and everything they've been in.
+  // Already on Discover, the page is told who instead of reloading.
+  const router = useRouter();
+  const seeEverything = useCallback((id: number | string, name: string) => {
+    onClose();
+    if (window.location.pathname.startsWith('/discover')) {
+      window.dispatchEvent(new CustomEvent('slicksync:discover-person', { detail: { id: Number(id) || null, name } }));
+    } else {
+      router.push(`/discover?person=${encodeURIComponent(String(id))}&name=${encodeURIComponent(name)}`);
+    }
+  }, [onClose, router]);
 
   const openPerson = useCallback(async (member: { name: string; tmdbId?: number | string | null }) => {
     if (member.tmdbId == null || member.tmdbId === '') return;
@@ -1823,6 +1836,16 @@ export function MediaDetailModal({
                             </button>
                           ))}
                         </div>
+                      )}
+                      {!personView.loading && !personView.unavailable && (
+                        <button
+                          type="button"
+                          onClick={() => seeEverything(personView.id, personView.name)}
+                          className="mt-2.5 text-sm font-semibold transition-opacity hover:opacity-80"
+                          style={{ color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)' }}
+                        >
+                          See everything they&apos;ve been in →
+                        </button>
                       )}
                     </div>
                   )}

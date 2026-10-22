@@ -180,6 +180,7 @@ function toItem(row, type) {
     year,
     imdbRating: Number.isFinite(rating) && rating > 0 ? rating.toFixed(1) : null,
     votes: Number(row.numVotes) || null,
+    runtime: Number(row.runtimeMinutes) > 0 ? `${Number(row.runtimeMinutes)} min` : null,
     genres: Array.isArray(row.genres) ? row.genres.map(genreLabel) : [],
     ...(Array.isArray(row.roles) ? { roles: row.roles } : {}),
   }
