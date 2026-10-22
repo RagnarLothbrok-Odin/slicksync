@@ -216,14 +216,33 @@ async function fetchOriginWithRetry(src, { followRedirects = true } = {}) {
   throw lastErr || new Error('upstream fetch failed')
 }
 
+// Sources fetched in the last minute, so the request that arrives while a
+// poster's resize is still running doesn't fetch it from the CDN again.
+const recentSources = new Map() // src -> { at, buf }
+const RECENT_SOURCE_MS = 60 * 1000
+const RECENT_SOURCE_MAX = 64
+
 // The source bytes, wherever they live.
 async function readSource(src, localFile, followRedirects = true) {
   if (localFile) return fs.promises.readFile(localFile)
+  const held = recentSources.get(src)
+  if (held && Date.now() - held.at < RECENT_SOURCE_MS) return held.buf
   const upstream = await fetchOriginWithRetry(src, { followRedirects })
   const type = (upstream.headers.get('content-type') || '').toLowerCase()
   if (type.includes('gif') || type.includes('svg')) throw new Error('passthrough type')
-  return Buffer.from(await upstream.arrayBuffer())
+  const buf = Buffer.from(await upstream.arrayBuffer())
+  recentSources.set(src, { at: Date.now(), buf })
+  while (recentSources.size > RECENT_SOURCE_MAX) recentSources.delete(recentSources.keys().next().value)
+  return buf
 }
+
+// A first-ever request for a poster that needs resizing is answered with the
+// original at once when it is small enough to send as it is - the resize
+// joins the encode queue behind the response. A freshly opened grid of new
+// posters used to wait in that queue (three at a time, 100-200ms each): a
+// screenful took 1.5-2 seconds to fill. The next request gets the resized file.
+const QUICK_MAX_BYTES = 300 * 1024
+const QUICK_TYPES = { jpeg: 'image/jpeg', webp: 'image/webp', png: 'image/png' }
 
 /**
  * What is on disk for this source+width, if anything. `exact` is false
@@ -243,11 +262,13 @@ async function findCached(src, w, wantsWebp) {
 /**
  * Produce the requested output (or an acceptable one) for source+width and
  * return where it is. Concurrent callers for the same output share one
- * piece of work.
+ * piece of work. With `quick`, a source that would have to wait for an
+ * encode comes back as { buf, contentType, provisional } instead, and the
+ * encode runs behind it (see QUICK_MAX_BYTES).
  */
-function produce(src, { w, wantsWebp, localFile = null, followRedirects = true }) {
+function produce(src, { w, wantsWebp, localFile = null, followRedirects = true, quick = false }) {
   const p = pathsFor(src, w)
-  const key = wantsWebp ? p.webp : p.jpg
+  const key = `${wantsWebp ? p.webp : p.jpg}${quick ? ':quick' : ''}`
   if (inFlight.has(key)) return inFlight.get(key)
 
   const work = (async () => {
@@ -266,6 +287,10 @@ function produce(src, { w, wantsWebp, localFile = null, followRedirects = true }
 
     const enc = await getEncoder()
     const wanted = wantsWebp && enc.webp ? 'webp' : 'jpeg'
+    if (quick && !localFile && buf.length <= QUICK_MAX_BYTES && QUICK_TYPES[fmt]) {
+      scheduleEncode(wanted === 'webp' ? p.webp : p.jpg, buf, { w, format: wanted })
+      return { buf, contentType: QUICK_TYPES[fmt], provisional: true }
+    }
     // The encoder says what it actually produced; a WebP that could not be
     // encoded comes back as a JPEG and is filed as one.
     const { buf: out, format } = await pool.encode(buf, { w, format: wanted })

@@ -97,7 +97,14 @@ module.exports = ({ prisma } = {}) => {
     }
 
     try {
-      const out = await core.produce(src, { w, wantsWebp, localFile, followRedirects });
+      const out = await core.produce(src, { w, wantsWebp, localFile, followRedirects, quick: true });
+      if (out.provisional) {
+        // The original, while the resized copy is made: kept briefly, so a
+        // later visit picks up the smaller file under the same address.
+        res.setHeader('Cache-Control', 'public, max-age=600');
+        res.setHeader('Content-Type', out.contentType);
+        return res.end(out.buf);
+      }
       return serve(res, out);
     } catch {
       return fallback();

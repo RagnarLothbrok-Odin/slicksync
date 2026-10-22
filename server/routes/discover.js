@@ -55,6 +55,13 @@ async function fetchOut(url, options = {}) {
   }
 }
 
+// The posters a page is about to ask for, produced while its answer is on
+// the way - the first screenfuls of every list, page and search, not only
+// the default ones warmed on a timer (utils/discover.js).
+function warmShown(items) {
+  try { require('../utils/posterWarm').warmPosters((items || []).slice(0, 60)) } catch { /* optimisation only */ }
+}
+
 module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
   const router = express.Router();
 
@@ -110,8 +117,9 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
       const { items, cursor } = type === 'both'
         ? await bothPage((oneType, at) => filteredPage(pageOf(oneType), at, facets), from)
         : await filteredPage(pageOf(type), from, facets)
-      if (req.query.paged) return res.json({ items, nextSkip: cursor })
-      res.json(items)
+      if (req.query.paged) res.json({ items, nextSkip: cursor })
+      else res.json(items)
+      warmShown(items)
     } catch (error) {
       console.error('Error fetching discover catalog:', error)
       res.status(500).json({ error: 'Failed to fetch catalog' })
@@ -151,7 +159,9 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
       const items = type === 'both'
         ? interleave(...(await Promise.all([searchOne('movie'), searchOne('series')])))
         : await searchOne(type)
-      send(facets ? items.filter((i) => matchesFacets(i, facets)) : items)
+      const shown = facets ? items.filter((i) => matchesFacets(i, facets)) : items
+      send(shown)
+      warmShown(shown)
     } catch (error) {
       console.error('Error searching discover catalog:', error)
       res.status(500).json({ error: 'Failed to search catalog' })

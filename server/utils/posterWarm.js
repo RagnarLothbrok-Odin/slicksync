@@ -6,7 +6,7 @@
  * in the background, means the browser's requests a beat later are disk
  * reads instead of fetches and encodes - the grid fills at once rather
  * than poster by poster. Sizes match what the cards actually request: 342
- * for desktop and the pass-through case, 185 for phones.
+ * for desktop and the pass-through case, 185 and 154 for phones.
  *
  * Strictly best-effort and deliberately gentle: two at a time, a bounded
  * queue, and a source+width that was queued in the last ten minutes is not
@@ -15,7 +15,7 @@
  */
 const { warm } = require('./imageCacheCore')
 
-const WIDTHS = [342, 185]
+const WIDTHS = [342, 185, 154]
 const CONCURRENCY = 2
 const MAX_QUEUE = 400
 const RECENT_TTL_MS = 10 * 60 * 1000

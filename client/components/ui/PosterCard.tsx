@@ -79,6 +79,9 @@ export interface PosterCardProps {
   /** TV mode: wraps the card in a D-pad-focusable container with a visible
    *  focus ring, Enter/OK opens details the same way a click does. */
   focusable?: boolean;
+  /** One of the first posters on screen: fetched at once, ahead of the rest,
+   *  instead of waiting for the browser to work out it is visible. */
+  priority?: boolean;
 }
 
 export const PosterCard = memo(function PosterCard({
@@ -101,6 +104,7 @@ export const PosterCard = memo(function PosterCard({
   onMenuOpenChange,
   menuKey,
   focusable = false,
+  priority = false,
 }: PosterCardProps) {
   const [imageError, setImageError] = useState(false);
   // Timer for the hover prefetch below; cleared on leave and on unmount so
@@ -178,7 +182,8 @@ export const PosterCard = memo(function PosterCard({
               srcSet={posterSrcSet(item, rpdbEnabled)}
               sizes="(max-width: 640px) 33vw, (max-width: 1024px) 22vw, 170px"
               alt={item.name}
-              loading="lazy"
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : undefined}
               decoding="async"
               className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
               onError={() => setImageError(true)}

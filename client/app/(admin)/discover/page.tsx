@@ -736,10 +736,19 @@ export default function DiscoverPage() {
       <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
     </div>
   );
+  // The first two rows of the grid on screen: fetched at once, ahead of the rest.
+  const firstIds = useMemo(() => {
+    const lead = lens === 'titles' ? (describing ? describeResults ?? [] : shownItems)
+      : lens === 'watchlist' ? shownWatchlist
+        : lens === 'nobody' ? householdPicks?.items ?? []
+          : recRows[0]?.items ?? [];
+    return new Set(lead.slice(0, 16).map((i) => i.id));
+  }, [lens, describing, describeResults, shownItems, shownWatchlist, householdPicks, recRows]);
   const card = (item: PosterCardItem, key: string, notInterested = false) => (
     <PosterCard
       key={key}
       item={item}
+      priority={firstIds.has(item.id)}
       ratings={ratingsById[item.id]}
       watched={watchedStatus[item.id]}
       inWatchlist={inWatchlistIds.has(item.id)}

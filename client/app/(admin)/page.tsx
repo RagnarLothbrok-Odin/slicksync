@@ -146,8 +146,11 @@ const ContinueWatchingCard = memo(function ContinueWatchingCard({
   onOpenDetails,
   isMenuOpen,
   onMenuOpenChange,
+  priority = false,
 }: {
   item: ContinueWatchingItem;
+  /** The first cards in the row: fetched at once rather than when seen. */
+  priority?: boolean;
   wasDraggedRef: React.RefObject<boolean>;
   onRemove: (item: ContinueWatchingItem) => void;
   onOpenDetails: (item: ContinueWatchingItem) => void;
@@ -244,7 +247,8 @@ const ContinueWatchingCard = memo(function ContinueWatchingCard({
               src={cachedImageUrl(item.nextEpisode?.thumbnail || item.background || item.poster) || ''}
               alt={item.showName}
               draggable={false}
-              loading="lazy"
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : undefined}
               decoding="async"
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 pointer-events-none"
             />
@@ -895,10 +899,11 @@ export default function DashboardPage() {
                   onPointerLeave={handleRowPointerUp}
                   className="flex gap-3 overflow-x-auto pb-1 cursor-grab active:cursor-grabbing no-scrollbar paint-isolated"
                 >
-                  {continueWatching.map((item) => {
+                  {continueWatching.map((item, index) => {
                     const card = (
                       <ContinueWatchingCard
                         item={item}
+                        priority={index < 6}
                         wasDraggedRef={wasDraggedRef}
                         onRemove={handleDismissContinueWatching}
                         onOpenDetails={setDetailModalItem}
@@ -1222,10 +1227,11 @@ export default function DashboardPage() {
                 onPointerLeave={handleRowPointerUp}
                 className="flex gap-3 overflow-x-auto pb-1 cursor-grab active:cursor-grabbing no-scrollbar paint-isolated"
               >
-                {continueWatching.map((item) => (
+                {continueWatching.map((item, index) => (
                   <ContinueWatchingCard
                     key={`${item.userId}-${item.showId}`}
                     item={item}
+                    priority={index < 6}
                     wasDraggedRef={wasDraggedRef}
                     onRemove={handleDismissContinueWatching}
                     onOpenDetails={setDetailModalItem}
