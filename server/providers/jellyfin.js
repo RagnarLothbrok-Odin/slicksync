@@ -382,6 +382,12 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
     for (const entry of entries.values()) {
       if (favorites.some((f) => normId(f.Id) === entry._jf.itemId || normId(f.Id) === entry._jf.seriesId)) entry._jf.favorite = true
     }
+    // AIOStreams names an item by its IMDb id when its metadata has no
+    // title; everything downstream (history, Activity, the bell) would show
+    // "tt4468740". Real titles from utils/titleNames.
+    await require('../utils/titleNames').fillNames([...entries.values()], {
+      getName: (e) => e.name, setName: (e, name) => { e.name = name }, getId: (e) => e._id, getType: (e) => e.type,
+    }).catch(() => {})
     return entries
   }
 
@@ -595,7 +601,16 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
         }
         out.set(itemId, entry)
       }
-      return [...out.values()]
+      // Same id-for-a-name repair as readViewer, for AIOSync's reads.
+      const list = [...out.values()]
+      const names = require('../utils/titleNames')
+      await names.fillNames(list.filter((e) => e.type === 'movie'), {
+        getName: (e) => e.name, setName: (e, name) => { e.name = name }, getId: (e) => e.id, getType: () => 'movie',
+      }).catch(() => {})
+      await names.fillNames(list.filter((e) => e.type === 'episode'), {
+        getName: (e) => e.seriesName, setName: (e, name) => { e.seriesName = name }, getId: (e) => e.id, getType: () => 'series',
+      }).catch(() => {})
+      return list
     },
 
     /**
