@@ -7,6 +7,7 @@ import { Modal } from './Modal';
 import { Badge } from './Badge';
 import { AddToListButton } from './AddToListButton';
 import { buildAioStreamsAppUrl } from '@/lib/aiostreamsLink';
+import { OpenWithButton } from './OpenWithButton';
 import { metacriticColor as metacriticTextColor } from './RatingBadges';
 import { api, MediaDetails, DiscoverItem, SeriesSeason } from '@/lib/api';
 import { toast } from './Toast';
@@ -1376,8 +1377,9 @@ export function MediaDetailModal({
                       border: '1px solid rgba(167, 139, 250, 0.25)',
                     }}
                   >
-                    <PlayIcon className="w-4 h-4" />
-                    Open in Stremio
+                    {/* Fixed-width block on a phone, centred in the full-width
+                        button, so every app button's play icon lines up. */}
+                    <span className="inline-flex items-center gap-1.5 w-[11rem] sm:w-auto"><PlayIcon className="w-4 h-4 shrink-0" />Open in Stremio</span>
                   </a>
                 );
                 const nuvioBtn = (
@@ -1393,8 +1395,7 @@ export function MediaDetailModal({
                       border: '1px solid rgba(255, 152, 0, 0.18)',
                     }}
                   >
-                    <PlayIcon className="w-4 h-4" />
-                    Open in Nuvio
+                    <span className="inline-flex items-center gap-1.5 w-[11rem] sm:w-auto"><PlayIcon className="w-4 h-4 shrink-0" />Open in Nuvio</span>
                   </a>
                 );
 
@@ -1482,7 +1483,9 @@ export function MediaDetailModal({
                   <div className="flex items-center gap-2 flex-wrap">
                     {stremioBtn}
                     {nuvioBtn}
-                    {aioBtn}
+                    {/* Jellyfin, AIOStreams or AIOMetadata people here: open it
+                        in the app this device picked (components/ui/OpenWithButton). */}
+                    <OpenWithButton imdbId={details.imdb_id!} type={aioType} />
                     <span className="hidden sm:block w-px h-6 mx-0.5" style={{ background: 'var(--color-surface-border)' }} />
                     <div className="flex items-center gap-1.5">
                       {followBtn}

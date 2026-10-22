@@ -619,6 +619,27 @@ function createJellyfinProvider({ serverUrl, token, userId, serverKind = 'jellyf
       return index
     },
 
+    /**
+     * Devices this sign-in can start a title on: its own sessions in any
+     * Jellyfin app that takes remote commands (the official apps included),
+     * seen in the last 15 minutes. A real Jellyfin only - AIOStreams and
+     * AIOMetadata accept the commands but do nothing with them.
+     */
+    async controllableSessions() {
+      if (isAio) return []
+      const sessions = await call(`/Sessions?${new URLSearchParams({ ControllableByUserId: userId, ActiveWithinSeconds: '900' })}`)
+      return (Array.isArray(sessions) ? sessions : [])
+        .filter((s) => s?.Id && s.SupportsRemoteControl && s.DeviceId !== device)
+        .map((s) => ({ id: s.Id, device: s.DeviceName || 'A device', client: s.Client || null, playing: s.NowPlayingItem?.Name || null }))
+    },
+
+    /** Starts an item on one of controllableSessions(). */
+    async playOn(sessionId, itemId) {
+      if (isAio) throw Object.assign(new Error('Only a Jellyfin server can start a title on a device'), { status: 400 })
+      await call(`/Sessions/${encodeURIComponent(sessionId)}/Playing?${new URLSearchParams({ playCommand: 'PlayNow', itemIds: itemId })}`, { method: 'POST' })
+      return true
+    },
+
     /** A show's episodes by the show's item id: [{ itemId, season, episode }]. */
     async episodesOf(seriesItemId) {
       const data = await call(`/Shows/${seriesItemId}/Episodes?${new URLSearchParams({ userId })}`)

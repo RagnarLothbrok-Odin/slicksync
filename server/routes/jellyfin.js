@@ -582,6 +582,105 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
   });
 
   // A person's household, and - for someone separated out of one - whose it is.
+  // Everything a title's "Open in …" button needs (components/ui/OpenWith):
+  // per Jellyfin, AIOStreams or AIOMetadata server people here use, its
+  // address and id, who uses it (their user id there - Swiftfin's link names
+  // the user), and the server's own item for this title. On a real Jellyfin,
+  // also the devices each of them has open in a Jellyfin app, for Play on.
+  const openItemCache = new Map() // "<address>|<id>|<type>" -> { at, itemId }
+  router.get('/open-targets', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      const id = String(req.query.id || '')
+      const type = req.query.type === 'movie' ? 'movie' : 'series'
+      if (!/^(tt\d+|tmdb:\d+|tvdb:\d+|kitsu:\d+)$/.test(id)) return res.json({ servers: [], devices: [] })
+      const people = await prisma.user.findMany({ where: { accountId } })
+      const creds = await prisma.userProviderCredential.findMany({ where: { userId: { in: people.map((p) => p.id) }, providerType: 'jellyfin' } }).catch(() => [])
+      const rows = [
+        ...people.filter((p) => p.providerType === 'jellyfin' && p.jellyfinServerUrl && p.jellyfinToken),
+        ...creds.filter((c) => c.jellyfinServerUrl && c.jellyfinToken).map((c) => {
+          const p = people.find((x) => x.id === c.userId)
+          return p && { ...p, providerType: 'jellyfin', jellyfinServerUrl: c.jellyfinServerUrl, jellyfinServerId: c.jellyfinServerId, jellyfinServerKind: c.jellyfinServerKind, jellyfinUserId: c.jellyfinUserId, jellyfinUserName: c.jellyfinUserName, jellyfinToken: c.jellyfinToken, __credentialId: c.id }
+        }).filter(Boolean),
+      ]
+      const { makeCreateProvider } = require('../providers')
+      const create = makeCreateProvider({ prisma, encrypt })
+      const providerFor = (row) => create(row, { decrypt: (t) => decrypt(t, req), req })
+      const { encodePackedId } = require('../providers/jellyfin')
+      const servers = new Map()
+      const devices = []
+      for (const row of rows) {
+        const address = String(row.jellyfinServerUrl).replace(/\/+$/, '')
+        const kind = row.jellyfinServerKind || 'jellyfin'
+        let s = servers.get(address)
+        if (!s) {
+          s = { address, kind, serverId: row.jellyfinServerId || null, people: [], itemId: null }
+          servers.set(address, s)
+          if (kind === 'aiostreams' || kind === 'aiometadata') {
+            s.itemId = encodePackedId({ kind: type, base: id }) || null
+          } else {
+            const key = `${address}|${id}|${type}`
+            const hit = openItemCache.get(key)
+            if (hit && Date.now() - hit.at < 10 * 60 * 1000) s.itemId = hit.itemId
+            else {
+              s.itemId = await providerFor(row)?.findItem(id, type).catch(() => null) || null
+              openItemCache.set(key, { at: Date.now(), itemId: s.itemId })
+              if (openItemCache.size > 2000) openItemCache.delete(openItemCache.keys().next().value)
+            }
+          }
+        }
+        if (!s.people.some((x) => x.userId === row.jellyfinUserId)) s.people.push({ name: row.username, userId: row.jellyfinUserId || null })
+        if (kind === 'jellyfin' && s.itemId) {
+          const list = await providerFor(row)?.controllableSessions().catch(() => []) || []
+          for (const d of list) devices.push({ personId: row.id, credentialId: row.__credentialId || null, person: row.username, address, itemId: s.itemId, sessionId: d.id, device: d.device, client: d.client })
+        }
+      }
+      // Infuse opens a title by its TMDB id; Cinemeta carries it for IMDb ids.
+      let tmdbId = id.startsWith('tmdb:') ? id.slice(5) : null
+      if (!tmdbId && /^tt\d+$/.test(id) && servers.size) {
+        const key = `tmdb|${type}|${id}`
+        const hit = openItemCache.get(key)
+        if (hit && Date.now() - hit.at < 24 * 60 * 60 * 1000) tmdbId = hit.itemId
+        else {
+          try {
+            const r = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${id}.json`, { signal: AbortSignal.timeout(5000) })
+            const m = r.ok ? (await r.json())?.meta : null
+            tmdbId = m?.moviedb_id ? String(m.moviedb_id) : null
+          } catch { tmdbId = null }
+          openItemCache.set(key, { at: Date.now(), itemId: tmdbId })
+        }
+      }
+      res.json({ servers: [...servers.values()], devices, tmdbId })
+    } catch (error) {
+      console.warn('[jellyfin] open targets failed:', error?.message)
+      res.json({ servers: [], devices: [] })
+    }
+  })
+
+  // Play on: start a title on one of the devices /open-targets listed.
+  router.post('/play-on', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      const { personId, credentialId, sessionId, itemId } = req.body || {}
+      if (!personId || !sessionId || !itemId) return res.status(400).json({ message: 'Pick a device' })
+      const person = await prisma.user.findFirst({ where: { id: String(personId), accountId } })
+      if (!person) return res.status(404).json({ message: 'Person not found' })
+      let row = person
+      if (credentialId) {
+        const c = await prisma.userProviderCredential.findFirst({ where: { id: String(credentialId), userId: person.id, providerType: 'jellyfin' } })
+        if (!c) return res.status(404).json({ message: 'That sign-in is gone' })
+        row = { ...person, providerType: 'jellyfin', jellyfinServerUrl: c.jellyfinServerUrl, jellyfinServerId: c.jellyfinServerId, jellyfinServerKind: c.jellyfinServerKind, jellyfinUserId: c.jellyfinUserId, jellyfinUserName: c.jellyfinUserName, jellyfinToken: c.jellyfinToken, __credentialId: c.id }
+      }
+      if (row.providerType !== 'jellyfin') return res.status(400).json({ message: 'They have no Jellyfin sign-in' })
+      const provider = require('../providers').makeCreateProvider({ prisma, encrypt })(row, { decrypt: (t) => decrypt(t, req), req })
+      await provider.playOn(String(sessionId), String(itemId))
+      res.json({ success: true })
+    } catch (error) {
+      const status = error?.status && error.status < 500 ? error.status : 502
+      res.status(status).json({ message: status < 500 ? error.message : 'That device did not answer - it may have closed the app' })
+    }
+  })
+
   // The AIOStreams servers people here sign in to, for "Open in AIOStreams"
   // on a title: its apps open aiostreams://item/<id>?server=<address> links,
   // where the address is the API base the app saved - the one SlickSync signs

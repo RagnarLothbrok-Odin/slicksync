@@ -2559,6 +2559,15 @@ class ApiClient {
   }
 
   // AIOStreams servers people here sign in to, for "Open in AIOStreams".
+  // "Open in …" on a title (lib/openWith.ts): servers, item ids, Play on devices.
+  async getOpenTargets(id: string, type: 'movie' | 'series') {
+    return this.fetch<import('./openWith').OpenTargets>(`/jellyfin/open-targets?id=${encodeURIComponent(id)}&type=${type}`);
+  }
+
+  async playOnDevice(body: { personId: string; credentialId: string | null; sessionId: string; itemId: string }) {
+    return this.fetch<{ success: boolean }>('/jellyfin/play-on', { method: 'POST', body: JSON.stringify(body) });
+  }
+
   async getAioStreamsServers() {
     return this.fetch<{ servers: { address: string; people: string[] }[] }>(`/jellyfin/aiostreams-servers`);
   }
