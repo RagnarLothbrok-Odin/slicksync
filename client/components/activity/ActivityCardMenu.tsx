@@ -12,8 +12,9 @@ import {
   InformationCircleIcon, FunnelIcon, UserIcon, BookmarkIcon, CheckCircleIcon, ArchiveBoxIcon, XCircleIcon,
 } from '@heroicons/react/24/outline';
 import { ContextMenu } from '@/components/ui/ContextMenu';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 
-export interface MenuWatcher { userId: string; userName: string }
+export interface MenuWatcher { userId: string; userName: string; userEmail?: string; userAvatarUrl?: string | null; userUseGravatar?: boolean; userColorIndex?: number }
 export interface MenuTarget {
   x: number;
   y: number;
@@ -78,9 +79,19 @@ export function ActivityCardMenu({ target, onClose, actions }: {
       <div className="w-[min(296px,calc(100vw-1.5rem))]">
         <div className="px-3.5 pt-2 pb-2.5 mb-1 border-b border-default">
           <div className="text-[15px] font-semibold text-default truncate">{target.title}</div>
-          <div className="text-[13px] text-muted truncate mt-0.5">
-            Watched by {target.watchers.map((w) => w.userName).join(', ')}{target.detail ? ` · ${target.detail}` : ''}
+          {/* Who watched it, each with their picture, in the theme's accent
+              lightened for reading; when and how long underneath. */}
+          <div className="mt-1.5 flex flex-col gap-1">
+            {target.watchers.map((w) => (
+              <div key={w.userId} className="flex items-center gap-2 min-w-0 text-[14px] font-semibold" style={{ color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)' }}>
+                <UserAvatar userId={w.userId} name={w.userName} email={w.userEmail} src={w.userAvatarUrl || undefined} useGravatar={w.userUseGravatar} colorIndex={w.userColorIndex} size="xs" />
+                <span className="truncate">{w.userName}</span>
+              </div>
+            ))}
           </div>
+          {target.detail && (
+            <div className="text-[13px] truncate mt-1" style={{ color: 'color-mix(in srgb, var(--color-text) 78%, transparent)' }}>Watched {target.detail}</div>
+          )}
         </div>
         {confirm ? (
           <div className="px-3 py-2">

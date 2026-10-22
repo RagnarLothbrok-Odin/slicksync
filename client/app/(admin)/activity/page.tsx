@@ -2621,7 +2621,10 @@ function ActivityPageContent() {
 
       {menuFor && (() => {
         const a = menuFor.activity;
-        const watchers: MenuWatcher[] = [{ userId: a.userId, userName: a.userName }, ...(a.additionalWatchers || []).map((w) => ({ userId: w.userId, userName: w.userName }))];
+        const watchers: MenuWatcher[] = [
+          { userId: a.userId, userName: a.userName, userEmail: a.userEmail, userAvatarUrl: a.userAvatarUrl, userUseGravatar: a.userUseGravatar, userColorIndex: a.userColorIndex },
+          ...(a.additionalWatchers || []).map((w) => ({ userId: w.userId, userName: w.userName, userEmail: w.userEmail, userAvatarUrl: w.userAvatarUrl, userUseGravatar: w.userUseGravatar, userColorIndex: w.userColorIndex })),
+        ];
         const ep = a.season != null && a.episode != null ? ` · S${a.season} E${a.episode}` : '';
         const when = a.dateOnly ? a.timestamp.toLocaleDateString() : a.timestamp.toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
         const target: MenuTarget = {
