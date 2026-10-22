@@ -1123,6 +1123,13 @@ body {
   * {
     backdrop-filter: none !important;
   }
+  /* With no blur, the see-through top bar showed the page scrolling under it
+     sharp (posters and text through the open menu). Solid on touch screens;
+     a computer keeps the blurred glass. !important beats the bar's inline
+     background. */
+  .nebula-bar-panel {
+    background: var(--color-surface) !important;
+  }
 }
 
 /* Every scroll bar slim and rounded, without the arrow buttons Windows draws
