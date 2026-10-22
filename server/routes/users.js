@@ -1615,7 +1615,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
       // shows (episode still, then backdrop, then poster), at the card's size.
       try {
         const shown = items.map((i) => i?.nextEpisode?.thumbnail || i?.background || i?.poster).filter(Boolean)
-        require('../utils/posterWarm').warmPosters(shown, { widths: [342] })
+        require('../utils/posterWarm').warmPosters(shown, { widths: [342], urgent: true })
       } catch { /* optimisation only */ }
     } catch (error) {
       console.error('Error fetching continue watching:', error)

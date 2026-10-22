@@ -59,7 +59,7 @@ async function fetchOut(url, options = {}) {
 // the way - the first screenfuls of every list, page and search, not only
 // the default ones warmed on a timer (utils/discover.js).
 function warmShown(items) {
-  try { require('../utils/posterWarm').warmPosters((items || []).slice(0, 60)) } catch { /* optimisation only */ }
+  try { require('../utils/posterWarm').warmPosters((items || []).slice(0, 60), { urgent: true }) } catch { /* optimisation only */ }
 }
 
 module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
