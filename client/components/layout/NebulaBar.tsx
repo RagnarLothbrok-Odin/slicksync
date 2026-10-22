@@ -184,7 +184,8 @@ export function NebulaBar({
           Layers spec) that silently no-ops every max-w-* class in the
           app. An inline style always wins over both. */}
       <div
-        className={isTV ? 'mx-auto rounded-2xl p-2' : 'mx-auto rounded-3xl p-5 md:p-6'}
+        // nebula-bar-panel: solid on touch screens (globals.css), where the blur is off.
+        className={isTV ? 'nebula-bar-panel mx-auto rounded-2xl p-2' : 'nebula-bar-panel mx-auto rounded-3xl p-5 md:p-6'}
         style={{
           maxWidth: 'min(120rem, 92vw)',
           background: 'color-mix(in srgb, var(--color-surface) 70%, transparent)',
