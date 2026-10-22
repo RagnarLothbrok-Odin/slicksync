@@ -14,6 +14,8 @@ const DEPARTMENT_WORK = {
 
 // A bracket worth dropping from a biography: a pronunciation (/.../ or IPA),
 // a "born"/"née", a semicolon, or another script. "Top Gun (1986)" stays.
+// The range is "anything outside Latin and its punctuation", so it starts at the first code point.
+// eslint-disable-next-line no-control-regex
 const BIO_ASIDE = /\/[^/]+\/|\bborn\b|\bn[ée]e\b|;|[^\u0000-ɏḀ-ỿ‐-‟]/i
 
 /**
