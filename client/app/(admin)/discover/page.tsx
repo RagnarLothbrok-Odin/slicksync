@@ -667,7 +667,8 @@ export default function DiscoverPage() {
 
   const lenses: Array<{ key: Lens; label: string; count?: number }> = [
     { key: 'titles', label: 'Titles' },
-    { key: 'people', label: 'People' },
+    // TV has no search box to type a name in; a person opened from a title's cast still shows.
+    ...(!isTV || lens === 'people' ? [{ key: 'people' as const, label: 'People' }] : []),
     ...(enableRecommendations ? [{ key: 'foryou' as const, label: 'For you' }, { key: 'nobody' as const, label: 'Nobody’s seen it' }] : []),
     ...(enableWatchlist ? [{ key: 'watchlist' as const, label: 'Watchlist', count: watchlist.length }] : []),
   ];
