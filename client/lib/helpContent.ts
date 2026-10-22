@@ -2477,7 +2477,7 @@ export const HELP_ENTRIES: HelpEntry[] = [
     title: 'An actor\'s page: who they are and everything they\'ve been in',
     category: 'Watching & Discover',
     keywords: ['actor', 'actress', 'director', 'filmography', 'cast', 'person', 'people search', 'everything they have been in', 'born', 'biography', 'known for'],
-    answer: 'Discover → People, then type a name - or tap someone in a title\'s cast and press See everything they\'ve been in. Their page shows their photo, what they do, when and where they were born, a short biography, and every title they\'ve been in.',
+    answer: 'Discover → People, then type a name - or tap someone in a title\'s cast and press See more about followed by their name - or hold them (right-click on a computer) for a menu with the same option. Their page shows their photo, what they do, when and where they were born, a short biography, and every title they\'ve been in.',
     steps: [
       'Sort their titles by Most popular (what they\'re best known for), Newest or Oldest.',
       'Only what I haven\'t seen hides the titles your household has already watched.',
@@ -2536,7 +2536,7 @@ export const HELP_ENTRIES: HelpEntry[] = [
     keywords: ['follow actor', 'follow director', 'follow show', 'renewed', 'canceled', 'new release alert', 'mute follow', 'unfollow'],
     answer: 'Follow a person and get told when they have something new out; follow a show and get told when it is renewed, canceled, or gets a premiere date. Both alert through push and the bell, and both can be muted individually.',
     steps: [
-      'A person: press Follow on their page in Discover (search them under People, or tap them in a title\'s cast and press See everything they\'ve been in), or on the cast panel in a title\'s popup.',
+      'A person: press Follow on their page in Discover (search them under People, or tap them in a title\'s cast and press See more about followed by their name), or hold them in a title\'s cast and choose Follow.',
       'A show: press Follow in its popup.',
     ],
     details: [

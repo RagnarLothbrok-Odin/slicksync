@@ -3429,7 +3429,7 @@ class ApiClient {
   // Person search (needs a TMDb key): type an actor/director's name, get their
   // titles of the requested type. Returns null on 503 (no key) so callers hide
   // the feature. Results carry tmdbId/mediaType for click-through resolution.
-  // personId: that person (a cast member's "See everything they've been in"),
+  // personId: that person (a cast member's "See more about"),
   // not whoever a search for the name finds first.
   async searchPerson(query: string, type: 'movie' | 'series', personId?: number | null) {
     try {
