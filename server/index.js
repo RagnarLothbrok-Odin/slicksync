@@ -117,6 +117,7 @@ const prisma = new PrismaClient();
 require('./utils/sqlitePragmas').applySqlitePragmas(prisma)
   .then((applied) => { if (applied) console.log('[SQLite] runtime settings:', JSON.stringify(applied)) })
   .catch((e) => console.warn('[SQLite] could not apply runtime settings:', e?.message));
+require('./utils/sqlitePragmas').scheduleSqliteOptimize(prisma);
 console.log('Prisma client initialized:', !!prisma);
 
 // Provider factory: routes addon operations to Stremio or Nuvio based on user.providerType
@@ -735,6 +736,11 @@ async function bootstrap() {
     // Keep Discover's own catalogs warm. Six small requests on a timer, so
     // opening Discover reads them out of memory instead of waiting on
     // Cinemeta - see utils/discover.js.
+    try {
+      require('./utils/watchCopy/keepInStep').scheduleKeepInStep(prisma, { decrypt, encrypt })
+    } catch (err) {
+      console.error('Keep in step scheduler failed to start:', err?.message)
+    }
     try {
       require('./utils/discover').scheduleDiscoverWarm()
     } catch (err) {

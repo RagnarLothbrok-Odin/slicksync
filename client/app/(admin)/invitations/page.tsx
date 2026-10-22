@@ -925,14 +925,7 @@ function InvitationCard({
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[10px] uppercase tracking-widest font-semibold text-muted">Usage</span>
                       <span
-                        className="text-[10px] font-bold tabular-nums"
-                        style={{
-                          color: usagePercentage >= 80
-                            ? 'var(--color-error)'
-                            : usagePercentage >= 50
-                              ? 'var(--color-warning)'
-                              : 'var(--color-primary)'
-                        }}
+                        className={`text-[10px] font-bold tabular-nums ${usagePercentage >= 80 ? 'text-error' : usagePercentage >= 50 ? 'text-warning' : 'text-primary'}`}
                       >
                         {Math.round(usagePercentage)}%
                       </span>
@@ -952,15 +945,10 @@ function InvitationCard({
 
                       {/* Filled bar with color-coded gradient */}
                       <motion.div
-                        className="h-full rounded-lg relative flex items-center justify-center"
+                        className={`h-full rounded-lg relative flex items-center justify-center ${usagePercentage >= 80 ? 'usage-bar-hot' : 'usage-bar-ok'}`}
                         initial={{ width: 0 }}
                         animate={{ width: `${Math.min(usagePercentage, 100)}%` }}
                         transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-                        style={{
-                          background: usagePercentage >= 80
-                            ? 'linear-gradient(180deg, rgba(239,68,68,0.9) 0%, rgba(220,38,38,0.95) 100%)'
-                            : 'linear-gradient(180deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
-                        }}
                       >
                         {/* Uses count in center of used portion (only show if > 0) */}
                         {(invitation.uses || 0) > 0 && (
@@ -976,12 +964,7 @@ function InvitationCard({
 
                         {/* Glow on hover */}
                         <div
-                          className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                          style={{
-                            boxShadow: usagePercentage >= 80
-                              ? '0 0 20px rgba(239,68,68,0.4)'
-                              : '0 0 20px var(--color-primary-muted)'
-                          }}
+                          className={`absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${usagePercentage >= 80 ? 'usage-glow-hot' : 'usage-glow-ok'}`}
                         />
                       </motion.div>
                     </div>
@@ -1611,15 +1594,7 @@ function CreateInvitationModal({
                                   whileHover={{ scale: 1.05 }}
                                   whileTap={{ scale: 0.95 }}
                                   onClick={() => handlePresetClick(preset.minutes)}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                                  style={{
-                                    background: selectedPreset === preset.minutes && !useCustomExpiration
-                                      ? 'var(--color-primary)'
-                                      : 'var(--color-subtle)',
-                                    color: selectedPreset === preset.minutes && !useCustomExpiration
-                                      ? 'white'
-                                      : 'var(--color-text-muted)'
-                                  }}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedPreset === preset.minutes && !useCustomExpiration ? 'seg-on' : 'seg-off-subtle'}`}
                                 >
                                   {preset.label}
                                 </motion.button>
@@ -1633,15 +1608,7 @@ function CreateInvitationModal({
                                   setSelectedPreset(null);
                                   setUseCustomExpiration(false);
                                 }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                                style={{
-                                  background: !formData.expiresAt && !useCustomExpiration
-                                    ? 'var(--color-secondary)'
-                                    : 'var(--color-subtle)',
-                                  color: !formData.expiresAt && !useCustomExpiration
-                                    ? 'white'
-                                    : 'var(--color-text-muted)'
-                                }}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${!formData.expiresAt && !useCustomExpiration ? 'seg-on-secondary' : 'seg-off-subtle'}`}
                               >
                                 Never
                               </motion.button>
@@ -1664,15 +1631,7 @@ function CreateInvitationModal({
                                   whileHover={{ scale: 1.05 }}
                                   whileTap={{ scale: 0.95 }}
                                   onClick={() => handleMembershipPresetClick(preset.days)}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                                  style={{
-                                    background: (preset.days === 0 && !formData.membershipDuration) || formData.membershipDuration === preset.days.toString()
-                                      ? 'var(--color-primary)'
-                                      : 'var(--color-subtle)',
-                                    color: (preset.days === 0 && !formData.membershipDuration) || formData.membershipDuration === preset.days.toString()
-                                      ? 'white'
-                                      : 'var(--color-text-muted)'
-                                  }}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${(preset.days === 0 && !formData.membershipDuration) || formData.membershipDuration === preset.days.toString() ? 'seg-on' : 'seg-off-subtle'}`}
                                 >
                                   {preset.label}
                                 </motion.button>
@@ -1686,19 +1645,11 @@ function CreateInvitationModal({
                             whileHover={{ scale: 1.01 }}
                             whileTap={{ scale: 0.99 }}
                             onClick={() => formData.groupId && setFormData({ ...formData, syncOnJoin: !formData.syncOnJoin })}
-                            className={`w-full flex items-center gap-3 p-4 rounded-xl transition-all cursor-pointer ${!formData.groupId ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            style={{
-                              background: formData.syncOnJoin && formData.groupId ? 'color-mix(in srgb, var(--color-primary) 15%, transparent)' : 'var(--color-subtle)',
-                              border: `1px solid ${formData.syncOnJoin && formData.groupId ? 'var(--color-primary)' : 'var(--color-surface-border)'}`
-                            }}
+                            className={`w-full flex items-center gap-3 p-4 rounded-xl transition-all cursor-pointer ${!formData.groupId ? 'opacity-50 cursor-not-allowed' : ''} ${formData.syncOnJoin && formData.groupId ? 'opt-row-on' : 'opt-row-off'}`}
                             disabled={!formData.groupId}
                           >
                             <div
-                              className="w-5 h-5 rounded-md flex items-center justify-center transition-all"
-                              style={{
-                                background: formData.syncOnJoin && formData.groupId ? 'var(--color-primary)' : 'transparent',
-                                border: formData.syncOnJoin && formData.groupId ? 'none' : '2px solid var(--color-surface-border)'
-                              }}
+                              className={`w-5 h-5 rounded-md flex items-center justify-center transition-all ${formData.syncOnJoin && formData.groupId ? 'opt-box-on' : 'opt-box-off'}`}
                             >
                               {formData.syncOnJoin && formData.groupId && <CheckIcon className="w-3 h-3 text-white" />}
                             </div>

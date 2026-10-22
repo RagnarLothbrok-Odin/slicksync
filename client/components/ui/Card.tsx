@@ -45,14 +45,13 @@ export function Card({
         'rounded-2xl relative overflow-hidden',
         paddingStyles[padding],
         variant === 'bordered' && 'accent-border',
+        !isAurora && (isNebula ? 'card-bg-nebula' : 'card-bg-plain'),
         className
       )}
       style={{
         background: isAurora
           ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
-          : isNebula
-            ? 'color-mix(in srgb, var(--color-surface) 55%, transparent)'
-            : 'var(--color-surface)',
+          : undefined,
         backdropFilter: isNebula ? 'blur(18px)' : undefined,
         WebkitBackdropFilter: isNebula ? 'blur(18px)' : undefined,
         border: isAurora ? 'none' : '1px solid var(--color-surface-border)',
@@ -95,9 +94,8 @@ export function StatCard({ label, value, icon, trend, delay = 0, onClick }: Stat
       transition={{ duration: 0.4, delay }}
       whileHover={{ y: -2, scale: onClick ? 1.02 : 1 }}
       onClick={onClick}
-      className={`rounded-xl p-4 relative overflow-hidden h-[100px] group ${onClick ? 'cursor-pointer' : ''}`}
+      className={`rounded-xl p-4 relative overflow-hidden h-[100px] group ${onClick ? 'cursor-pointer' : ''} ${isNebula ? 'card-bg-nebula' : 'card-bg-plain'}`}
       style={{
-        background: isNebula ? 'color-mix(in srgb, var(--color-surface) 55%, transparent)' : 'var(--color-surface)',
         backdropFilter: isNebula ? 'blur(18px)' : undefined,
         WebkitBackdropFilter: isNebula ? 'blur(18px)' : undefined,
         border: '1px solid var(--color-surface-border)',
@@ -133,8 +131,7 @@ export function StatCard({ label, value, icon, trend, delay = 0, onClick }: Stat
             </motion.p>
             {trend ? (
               <div 
-                className="flex items-center gap-1 text-xs font-medium mt-0.5"
-                style={{ color: trend.isPositive ? 'var(--color-success)' : 'var(--color-error)' }}
+                className={`flex items-center gap-1 text-xs font-medium mt-0.5 ${trend.isPositive ? 'text-success' : 'text-error'}`}
               >
                 <span>{trend.isPositive ? '↑' : '↓'}</span>
                 <span>{Math.abs(trend.value)}%</span>

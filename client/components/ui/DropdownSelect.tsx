@@ -239,10 +239,9 @@ export function DropdownSelect({ value, onChange, options, ariaLabel, className,
                 aria-selected={isSelected}
                 onClick={() => commit(opt.value)}
                 onMouseEnter={() => setActiveIndex(i)}
-                className="w-full text-left px-3 py-2 text-sm transition-colors truncate"
+                className={`w-full text-left px-3 py-2 text-sm transition-colors truncate ${isActive ? 'row-hl' : ''}`}
                 style={{
                   color: isSelected ? 'var(--color-primary)' : 'var(--color-text)',
-                  background: isActive ? 'var(--color-surface-hover)' : 'transparent',
                   fontWeight: isSelected ? 600 : 400,
                 }}
               >

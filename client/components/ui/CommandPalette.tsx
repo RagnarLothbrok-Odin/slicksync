@@ -337,8 +337,7 @@ export function CommandPalette() {
                             key={r.id}
                             onClick={() => handleSelect(r)}
                             onMouseEnter={() => setActiveIndex(i)}
-                            className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
-                            style={{ background: i === activeIndex ? 'var(--color-surface-hover)' : 'transparent' }}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${i === activeIndex ? 'row-hl' : ''}`}
                           >
                             {r.poster ? (
                               <img src={r.poster} alt="" className="w-5 h-7 rounded-sm object-cover shrink-0" loading="lazy" decoding="async" />
@@ -366,8 +365,7 @@ export function CommandPalette() {
                             key={h.id}
                             onClick={() => handleSelectHelp(h)}
                             onMouseEnter={() => setActiveIndex(idx)}
-                            className="w-full flex items-start gap-3 px-2 py-2.5 rounded-lg text-left transition-colors"
-                            style={{ background: idx === activeIndex ? 'var(--color-surface-hover)' : 'transparent' }}
+                            className={`w-full flex items-start gap-3 px-2 py-2.5 rounded-lg text-left transition-colors ${idx === activeIndex ? 'row-hl' : ''}`}
                           >
                             <SparklesIcon className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
                             <span className="flex-1 min-w-0">

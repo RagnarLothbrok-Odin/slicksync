@@ -275,11 +275,7 @@ export default function JellyfinSignIn({ api, onSubmit, submitLabel = 'Sign in',
                           key={u.id}
                           type="button"
                           onClick={() => { setLoginName(u.name); setError(null); }}
-                          className="flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all"
-                          style={{
-                            background: selected ? 'color-mix(in srgb, var(--color-primary) 16%, transparent)' : 'var(--color-surface-hover)',
-                            border: `1px solid ${selected ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
-                          }}
+                          className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all ${selected ? 'user-tile-on' : 'user-tile-off'}`}
                         >
                           <span className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: 'var(--color-subtle)', color: 'var(--color-text)' }}>
                             {initials(u.name)}
@@ -346,7 +342,7 @@ export default function JellyfinSignIn({ api, onSubmit, submitLabel = 'Sign in',
                   </button>
                 </div>
                 {(isAio || pinHint) && (
-                  <p className="text-xs mt-2" style={{ color: pinHint ? 'var(--color-warning, #f59e0b)' : 'var(--color-text-muted)' }}>
+                  <p className={`text-xs mt-2 ${pinHint ? 'pin-hint-on' : 'text-muted'}`}>
                     {isAio ? 'The configuration password. ' : ''}A user with a PIN: add it after the password, like password/1234.
                   </p>
                 )}
@@ -381,7 +377,7 @@ export default function JellyfinSignIn({ api, onSubmit, submitLabel = 'Sign in',
                       ? 'Approve this code in a Jellyfin app that is already signed in: Settings, then Quick Connect.'
                       : 'Approve this code on the configure page, under Jellyfin apps, then Quick Connect.'}
                   </p>
-                  <div className="flex items-center justify-center gap-2 text-sm" style={{ color: quickStatus === 'approved' ? 'var(--color-success, #22c55e)' : 'var(--color-text-muted)' }}>
+                  <div className={`flex items-center justify-center gap-2 text-sm ${quickStatus === 'approved' ? 'quick-approved' : 'text-muted'}`}>
                     {quickStatus === 'approved'
                       ? <><CheckCircleIcon className="w-5 h-5" /> Approved, signing in…</>
                       : <><span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> Waiting for approval</>}

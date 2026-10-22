@@ -51,17 +51,42 @@ function trimIfNeeded(filePath) {
   }
 }
 
+// Lines waiting to be written, per file. Callers write dozens of heartbeat
+// lines a minute; each used to be its own synchronous disk write on the
+// request path. They're now gathered and written together, off it.
+const pending = new Map()
+let flushTimer = null
+
+function flush() {
+  flushTimer = null
+  const batch = [...pending]
+  pending.clear()
+  for (const [filePath, lines] of batch) {
+    try {
+      const text = lines.join('')
+      const since = (bytesSinceCheck.get(filePath) || 0) + Buffer.byteLength(text)
+      if (since >= CHECK_EVERY_BYTES) {
+        bytesSinceCheck.set(filePath, 0)
+        trimIfNeeded(filePath)
+      } else {
+        bytesSinceCheck.set(filePath, since)
+      }
+      fs.promises.appendFile(filePath, text).catch(() => {})
+    } catch {
+      // Never let a debug write break its caller.
+    }
+  }
+}
+
 /** Appends one line, trimming the file first if it has grown past the cap. */
 function appendCapped(filePath, line) {
   try {
-    const since = (bytesSinceCheck.get(filePath) || 0) + Buffer.byteLength(line)
-    if (since >= CHECK_EVERY_BYTES) {
-      bytesSinceCheck.set(filePath, 0)
-      trimIfNeeded(filePath)
-    } else {
-      bytesSinceCheck.set(filePath, since)
+    if (!pending.has(filePath)) pending.set(filePath, [])
+    pending.get(filePath).push(line)
+    if (!flushTimer) {
+      flushTimer = setTimeout(flush, 1000)
+      flushTimer.unref?.()
     }
-    fs.appendFileSync(filePath, line)
   } catch {
     // Never let a debug write break its caller.
   }

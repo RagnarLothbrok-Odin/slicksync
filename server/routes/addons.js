@@ -738,6 +738,12 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
         } catch { return new Set() }
       })()
 
+      // Who is active, read once - not one query per addon.
+      const activeUserIds = new Set((await prisma.user.findMany({
+        where: { accountId: getAccountId(req), isActive: true },
+        select: { id: true }
+      })).map((u) => u.id))
+
       const transformedAddons = await Promise.all(addons.map(async addon => {
         // Filter groupAddons to only include those from the current account
         const currentAccountId = getAccountId(req)
@@ -766,25 +772,19 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           }
 
           // Count active users
-          if (allUserIds.size > 0) {
-            const activeUsers = await prisma.user.findMany({
-              where: {
-                id: { in: Array.from(allUserIds) },
-                isActive: true,
-                accountId: getAccountId(req)
-              },
-              select: { id: true }
-            })
-            totalUsers = activeUsers.length
-          }
+          for (const userId of allUserIds) if (activeUserIds.has(userId)) totalUsers++
         }
+
+        // Decrypted once, used three times below.
+        let manifestUrl = null
+        try { manifestUrl = getDecryptedManifestUrl(addon, req) } catch { manifestUrl = null }
 
         return {
           id: addon.id,
           name: addon.name,
           description: addon.description,
-          manifestUrl: getDecryptedManifestUrl(addon, req),
-          url: getDecryptedManifestUrl(addon, req), // Keep both for compatibility
+          manifestUrl,
+          url: manifestUrl, // Keep both for compatibility
           version: addon.version,
           iconUrl: addon.iconUrl,
           customLogo: addon.customLogo || null,
@@ -804,7 +804,7 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
           proxyManifestUrl: addon.proxyEnabled && addon.proxyUuid
             ? `${req.protocol}://${req.get('host')}/proxy/${addon.proxyUuid}/manifest.json`
             : null,
-          vaultified: (() => { try { return (getDecryptedManifestUrl(addon, req) || '').includes('{{vault:') } catch { return false } })(),
+          vaultified: (manifestUrl || '').includes('{{vault:'),
           // Health check info
           isOnline: addon.isOnline,
           lastHealthCheck: addon.lastHealthCheck,
@@ -1226,8 +1226,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
       let filtered = manifestData
       if (Array.isArray(manifestData?.resources) && manifestData.resources.length > 0) {
         filtered = filterManifestByResources(manifestData, manifestData.resources)
-        console.log('🔍 DEBUG: After filtering, catalogs count:', filtered?.catalogs?.length || 0)
-        console.log('🔍 DEBUG: Original catalogs count:', manifestData?.catalogs?.length || 0)
       }
 
       // Extract simplified resources and catalogs for storage
@@ -1244,13 +1242,8 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
 
       const simplifiedCatalogs = (() => {
         try {
-          // DEBUG: Trace catalog processing
-          console.log('[DEBUG] 1. catalogs from req.body:', catalogs)
-
           // Use the UI state (catalogs parameter) if available, otherwise fall back to manifest data
           const src = Array.isArray(catalogs) && catalogs.length > 0 ? catalogs : (Array.isArray(manifestData?.catalogs) ? manifestData.catalogs : [])
-          console.log('[DEBUG] 2. src after fallback logic:', src)
-          console.log('[DEBUG] 3. Number of catalogs in src:', src.length)
 
           const processedCatalogs = []
 
@@ -1294,8 +1287,6 @@ module.exports = ({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifest
             }
           }
 
-          console.log('[DEBUG] 4. Number of catalogs in processedCatalogs:', processedCatalogs.length)
-          console.log('[DEBUG] 5. Final simplifiedCatalogs result:', processedCatalogs)
 
           return processedCatalogs
         } catch { return [] }

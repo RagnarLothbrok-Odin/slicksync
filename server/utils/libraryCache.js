@@ -5,6 +5,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 // Use /app/data/libraries in Docker, or relative path in development
 // In Docker, __dirname will be /app/server/utils, so ../../data/libraries = /app/data/libraries
@@ -127,13 +128,34 @@ function getCachedLibrary(accountId, user, { allowLegacyEmailFile = false } = {}
  * @param {object|string} user - User object {id, email} or userId string
  * @param {Array} library - Library data to cache
  */
+// What each file last had written, so an unchanged library (most of them,
+// most minutes) isn't written again.
+const lastWritten = new Map() // path -> sha1 of the JSON
+let writeSeq = 0
+
 function setCachedLibrary(accountId, user, library) {
   try {
     const cachePath = getCacheFilePath(accountId, user)
-    
-    // Store as plain array (compatible with stremthru restore format)
+
+    // Store as plain array (compatible with stremthru restore format).
+    // Compact, not pretty-printed - a third of the size for the same data.
     const data = Array.isArray(library) ? library : []
-    fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), 'utf8')
+    const json = JSON.stringify(data)
+    const hash = crypto.createHash('sha1').update(json).digest('hex')
+    if (lastWritten.get(cachePath) === hash && fs.existsSync(cachePath)) return
+    lastWritten.set(cachePath, hash)
+    // Written in the background - the activity monitor calls this for every
+    // person every minute, and a synchronous write of a large library held
+    // up every request meanwhile. A temporary file renamed into place means
+    // a reader never sees half a file.
+    const tmp = `${cachePath}.${process.pid}.${++writeSeq}.tmp`
+    fs.promises.writeFile(tmp, json, 'utf8')
+      .then(() => fs.promises.rename(tmp, cachePath))
+      .catch((error) => {
+        lastWritten.delete(cachePath)
+        fs.promises.unlink(tmp).catch(() => {})
+        console.warn(`Failed to write cache for user ${user.id || user} in account ${accountId}:`, error.message)
+      })
     
     // The old email-keyed file is deliberately NOT deleted here. When two
     // users share an email they also shared that one file, so removing it as

@@ -25,6 +25,8 @@ import { AioHistoryButton } from '@/components/jellyfin/AioHistoryButton';
 import { LimitsButton } from '@/components/user/LimitsButton';
 import { SignInNuvioTvButton } from '@/components/nuvio/SignInNuvioTvButton';
 import { NuvioServersTile } from '@/components/nuvio/NuvioServersTile';
+import { CopyHistoryTile } from '@/components/user/CopyHistoryTile';
+import { SignInOfferBanner } from '@/components/user/SignInOfferBanner';
 import { CatchUpButton } from '@/components/user/CatchUpButton';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
@@ -1747,6 +1749,10 @@ export default function UserDetailPage() {
                     style={{ transform: openSections.history ? 'rotate(180deg)' : 'none' }}
                   />
                 </button>
+                {/* A new, nearly empty sign-in: offer to bring their history over. */}
+                <SignInOfferBanner userId={user.id} />
+                {/* AIOSync between their sign-ins (its own page; also on Tasks). */}
+                <CopyHistoryTile userId={user.id} name={user.username} />
 
                 {openSections.history && (<div className="mt-4">
                 <div className="flex items-center justify-between mb-4">

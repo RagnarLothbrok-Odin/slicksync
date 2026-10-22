@@ -37,7 +37,27 @@ function extractSeasonFromTitle(title) {
  * @param {string} kitsuId - The Kitsu anime ID (e.g., "46676")
  * @returns {Promise<{baseTitle: string, season: number|null, titleEn: string}|null>}
  */
+// An anime's titles don't change: each answer is kept a day (a failed lookup
+// ten minutes), and lookups already on their way are shared. The activity
+// monitor asks for every anime in every library once a minute.
+const kitsuCache = new Map() // id -> { at, ttl, value | promise }
+const KITSU_TTL_MS = 24 * 60 * 60 * 1000
+const KITSU_MISS_TTL_MS = 10 * 60 * 1000
+
 async function fetchKitsuMetadata(kitsuId) {
+  const key = String(kitsuId)
+  const hit = kitsuCache.get(key)
+  if (hit && (hit.promise || Date.now() - hit.at < hit.ttl)) return hit.promise || hit.value
+  const promise = fetchKitsuMetadataLive(key).then((value) => {
+    if (kitsuCache.size > 5000) kitsuCache.delete(kitsuCache.keys().next().value)
+    kitsuCache.set(key, { at: Date.now(), ttl: value ? KITSU_TTL_MS : KITSU_MISS_TTL_MS, value })
+    return value
+  })
+  kitsuCache.set(key, { promise })
+  return promise
+}
+
+async function fetchKitsuMetadataLive(kitsuId) {
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout

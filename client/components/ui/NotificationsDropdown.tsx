@@ -66,6 +66,12 @@ function useRememberedList(key: string): [any[], (next: ListUpdate) => void] {
   return [value, set];
 }
 
+// When each feed was last fetched. Pages with their own header mount a new
+// bell on every visit; one that fetched moments ago shows what it has (above)
+// instead of asking again, and its poll carries on from there.
+const fetchedAt: Record<string, number> = {};
+const fetchedRecently = (key: string, ms = 30000) => Date.now() - (fetchedAt[key] || 0) < ms;
+
 const DISMISSED_STORAGE_KEY = 'notifications-dismissed-ids';
 const READ_STORAGE_KEY = 'notifications-read-ids';
 
@@ -207,12 +213,13 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
       // itself catches back up on its own next tick once it's visible again.
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
+        fetchedAt.stored = Date.now();
         setStoredNotifications(await api.getNotifications());
       } catch {
         // Endpoint may not exist yet on an older backend - stay silent.
       }
     };
-    const initialDelay = setTimeout(fetchStored, 200 + Math.random() * 600);
+    const initialDelay = fetchedRecently('stored') ? undefined : setTimeout(fetchStored, 200 + Math.random() * 600);
     const stopPoll = startAdaptivePoll(fetchStored, 30000, 180000);
     // SSE accelerant: a server-side notification refetches the bell right
     // now instead of on the next tick. Polling above stays as the fallback.
@@ -226,30 +233,11 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     const fetchRequests = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
-        const invitations = await api.getInvitations();
-
-        // One round-trip per invitation without its own `requests` array,
-        // fired concurrently rather than awaited one at a time in a loop -
-        // a household with several invitations was serializing N sequential
-        // fetches on every 30s poll tick, all on the shared api.ts request
-        // path every other in-flight call also uses.
-        const perInvitation = await Promise.all(invitations.map(async (inv) => {
-          const invName = inv.name || inv.code || inv.inviteCode || 'Invitation';
-          const groupName = (inv as any).groupName || 'a group';
-          if (inv.requests && Array.isArray(inv.requests)) {
-            return inv.requests.map((req: any) => ({ ...req, invitationName: invName, groupName }));
-          }
-          try {
-            const reqs = await api.getInvitationRequests(inv.id);
-            return Array.isArray(reqs) ? reqs.map((req: any) => ({ ...req, invitationName: invName, groupName })) : [];
-          } catch {
-            return [];
-          }
-        }));
-        const allRequests: any[] = perInvitation.flat();
-
-        setPendingRequests(allRequests.filter((r: any) => r.status === 'pending'));
-        setAcceptedRequests(allRequests.filter((r: any) => r.status === 'accepted'));
+        // One small read of just the requests the bell shows.
+        fetchedAt.requests = Date.now();
+        const { pending, accepted } = await api.getInvitationBell();
+        setPendingRequests(pending);
+        setAcceptedRequests(accepted);
       } catch (e) {
         console.error('Failed to fetch pending requests', e);
       }
@@ -264,7 +252,7 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     // dedupe/cache in api.ts covers repeat calls to these same two
     // endpoints, but a fresh page load fires plenty of genuinely different
     // endpoints too, which that cache can't help with.
-    const initialDelay = setTimeout(fetchRequests, 200 + Math.random() * 600);
+    const initialDelay = fetchedRecently('requests') ? undefined : setTimeout(fetchRequests, 200 + Math.random() * 600);
     const stopPoll = startAdaptivePoll(fetchRequests, 30000, 180000);
     return () => { clearTimeout(initialDelay); stopPoll(); };
   }, []);
@@ -282,12 +270,13 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     const fetchAlerts = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
+        fetchedAt.episodes = Date.now();
         setEpisodeAlerts(await api.getEpisodeAlerts());
       } catch {
         // Endpoint may not exist yet on an older backend - stay silent.
       }
     };
-    fetchAlerts();
+    if (!fetchedRecently('episodes', 5 * 60 * 1000)) fetchAlerts();
     const interval = setInterval(fetchAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -300,12 +289,13 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
     const fetchAddonAlerts = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
+        fetchedAt.addons = Date.now();
         setAddonHealthAlerts(await api.getAddonHealthAlerts());
       } catch {
         // Endpoint may not exist yet on an older backend - stay silent.
       }
     };
-    fetchAddonAlerts();
+    if (!fetchedRecently('addons', 5 * 60 * 1000)) fetchAddonAlerts();
     const interval = setInterval(fetchAddonAlerts, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -615,14 +605,8 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative p-2 transition-colors ${floating ? 'rounded-full' : 'rounded-lg'}`}
+        className={`relative p-2 transition-colors ${floating ? 'rounded-full' : 'rounded-lg hov-surface'}`}
         style={{ color: 'var(--color-text-muted)', ...(floating ? FLOATING_ICON_STYLE : {}) }}
-        onMouseEnter={(e) => {
-          if (!floating) e.currentTarget.style.background = 'var(--color-surface-hover)';
-        }}
-        onMouseLeave={(e) => {
-          if (!floating) e.currentTarget.style.background = 'transparent';
-        }}
         aria-label="Notifications"
       >
         <BellIcon className="w-5 h-5" />
@@ -732,35 +716,14 @@ export function NotificationsDropdown({ activities = [], inviteHistory = [], tas
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           onClick={() => handleNotificationClick(notification)}
-                          className={`p-4 hover:bg-surface-hover transition-colors duration-500 ${getNotificationUrl(notification) ? 'cursor-pointer' : ''}`}
-                          // Explicit value for BOTH states (not undefined for
-                          // "read") - the underlying read state was already
-                          // updating instantly on "Mark all read" (confirmed:
-                          // the DOM attribute flips the instant you click,
-                          // no delay), but going from a real background value
-                          // to no inline style AT ALL doesn't reliably
-                          // cross-fade the same way toggling between two
-                          // concrete values does, so the (already-correct)
-                          // change was easy to miss and looked "stuck" until
-                          // closing/reopening replayed the entrance animation
-                          // and made the end state obvious. Confirmed real
-                          // case, 2026-07-30.
-                          // backgroundColor (not the `background` shorthand) so
-                          // Tailwind's transition-colors actually animates the
-                          // lit->read flip. The state was already updating
-                          // instantly on "Mark all read" (verified in the DOM:
-                          // 5 lit rows -> 0 within 100ms of the click), but the
-                          // shorthand isn't a transitioned property, so the
-                          // change snapped invisibly on a subtle tint and only
-                          // "looked" applied once reopening replayed the
-                          // entrance animation. Now it visibly fades.
-                          style={{ backgroundColor: notification.read ? 'transparent' : 'var(--color-primary-muted)' }}
+                          className={`p-4 hover:bg-surface-hover transition-colors duration-500 ${getNotificationUrl(notification) ? 'cursor-pointer' : ''} ${notification.read ? 'notif-read' : 'notif-lit'}`}
+                          // Lit/read look is a class pair (see globals.css) so it
+                          // fades via transition-colors and survives recolouring extensions.
                         >
                           <div className="flex flex-col gap-3">
                             <div className="flex items-start gap-3">
                               <span
-                                className="w-1.5 h-1.5 rounded-full shrink-0 mt-2 transition-colors duration-500"
-                                style={{ backgroundColor: notification.read ? 'transparent' : 'var(--color-primary)' }}
+                                className={`w-1.5 h-1.5 rounded-full shrink-0 mt-2 transition-colors duration-500 ${notification.read ? 'notif-dot-read' : 'notif-dot-lit'}`}
                                 aria-hidden="true"
                               />
                               {notification.poster ? (

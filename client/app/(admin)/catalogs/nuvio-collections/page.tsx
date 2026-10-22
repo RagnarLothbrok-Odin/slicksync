@@ -1487,10 +1487,7 @@ export default function NuvioCollectionsPage() {
                                   type="button"
                                   disabled={homeRowsBusy}
                                   onClick={() => copyHomeRows(p.profile_index)}
-                                  className="w-full text-left px-3 py-2 rounded-xl text-xs transition-colors hover:bg-white/10"
-                                  style={homeRowsArmed === p.profile_index
-                                    ? { color: '#fff', background: 'rgba(220,38,38,0.75)' }
-                                    : { color: 'rgb(226,232,240)' }}
+                                  className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-colors hover:bg-white/10 ${homeRowsArmed === p.profile_index ? 'armed-on' : 'armed-off'}`}
                                 >
                                   {homeRowsBusy && homeRowsArmed === null
                                     ? 'Copying...'

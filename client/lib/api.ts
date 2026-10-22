@@ -145,6 +145,9 @@ class ApiClient {
   // recoloured from the Groups list opened its own page in the old colour.
   private lastKnown = new Map<string, unknown>();
   private lastKnownRestored = false;
+  // Set when a response lands, so going to the background only writes the
+  // snapshot again when something in it changed.
+  private lastKnownDirty = false;
   private static readonly LAST_KNOWN_STORAGE_KEY = 'slicksync-last-known';
   private static readonly LAST_KNOWN_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -169,21 +172,19 @@ class ApiClient {
   }
 
   private persistLastKnown() {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !this.lastKnownDirty) return;
     try {
-      let entries = Array.from(this.lastKnown.entries());
-      let raw = JSON.stringify(entries);
       // Size cap: drop the LARGEST entries first until it fits - one huge
-      // metrics snapshot shouldn't evict twenty small lists.
-      while (raw.length > ApiClient.LAST_KNOWN_MAX_BYTES && entries.length > 0) {
-        let biggest = 0;
-        for (let i = 1; i < entries.length; i++) {
-          if (JSON.stringify(entries[i][1]).length > JSON.stringify(entries[biggest][1]).length) biggest = i;
-        }
-        entries = entries.filter((_, i) => i !== biggest);
-        raw = JSON.stringify(entries);
-      }
-      localStorage.setItem(ApiClient.LAST_KNOWN_STORAGE_KEY, raw);
+      // metrics snapshot shouldn't evict twenty small lists. Each entry is
+      // measured once (this runs as the app goes to the background, where a
+      // phone notices every millisecond).
+      const sized = Array.from(this.lastKnown.entries()).map((e) => ({ e, size: JSON.stringify(e).length + 1 }));
+      let total = sized.reduce((sum, x) => sum + x.size, 1);
+      sized.sort((a, b) => b.size - a.size);
+      let drop = 0;
+      while (total > ApiClient.LAST_KNOWN_MAX_BYTES && drop < sized.length) total -= sized[drop++].size;
+      localStorage.setItem(ApiClient.LAST_KNOWN_STORAGE_KEY, JSON.stringify(sized.slice(drop).map((x) => x.e)));
+      this.lastKnownDirty = false;
     } catch {
       // Quota/private mode - instant nav still works in-memory this session.
     }
@@ -196,6 +197,14 @@ class ApiClient {
   peekGet<T>(endpoint: string): T | undefined {
     this.restoreLastKnown();
     return this.lastKnown.get(this.getKey(endpoint)) as T | undefined;
+  }
+
+  /** Whether this device was signed in last time (the snapshot is cleared on
+   * sign-out and on an expired session) - the app opens straight away then,
+   * and checks the session in the background. */
+  wasSignedIn(): boolean {
+    if (typeof window === 'undefined') return false;
+    try { return !!localStorage.getItem(ApiClient.LAST_KNOWN_STORAGE_KEY) || !!localStorage.getItem('slicksync_token'); } catch { return false; }
   }
 
   constructor() {
@@ -279,7 +288,7 @@ class ApiClient {
         this.recentGets.clear();
         const path = endpoint.split('?')[0];
         for (const k of Array.from(this.lastKnown.keys())) {
-          if (k.startsWith(`${path}::`) || k.startsWith(`${path}?`)) this.lastKnown.delete(k);
+          if (k.startsWith(`${path}::`) || k.startsWith(`${path}?`)) { this.lastKnown.delete(k); this.lastKnownDirty = true; }
         }
       });
     }
@@ -297,6 +306,7 @@ class ApiClient {
       .then((value) => {
         this.recentGets.set(key, { value, at: Date.now() });
         this.lastKnown.set(key, value);
+        this.lastKnownDirty = true;
         return value;
       })
       .finally(() => {
@@ -1360,6 +1370,12 @@ class ApiClient {
   // Invitations
   async getInvitations() {
     return this.fetch<Invitation[]>('/invitations');
+  }
+
+  // Just what the notification bell shows: waiting requests and the last
+  // month's accepted ones.
+  async getInvitationBell() {
+    return this.fetch<{ pending: any[]; accepted: any[] }>('/invitations/bell');
   }
 
   async createInvitation(data: CreateInvitationData) {
@@ -2497,6 +2513,74 @@ class ApiClient {
     return this.fetch<{ job: CatchUpJob | null }>(`/users/${encodeURIComponent(userId)}/catch-up/status`);
   }
 
+  // Copy watch history between a person's sign-ins (server/utils/watchCopy).
+  async getWatchCopySides(userId: string, withOthers = false) {
+    return this.fetch<{ sides: WatchCopySide[]; others: WatchCopySide[]; person: WatchCopyPerson; lastRun: WatchCopyRun | null; job: WatchCopyJob | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/sides${withOthers ? '?others=1' : ''}`);
+  }
+
+  async previewWatchCopy(userId: string, body: WatchCopyRequest) {
+    return this.fetch<WatchCopyPreview>(`/users/${encodeURIComponent(userId)}/watch-copy/preview`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async runWatchCopy(userId: string, body: WatchCopyRequest & { keys?: string[]; matches?: Record<string, string>; fromName?: string; toName?: string }) {
+    return this.fetch<WatchCopyJob>(`/users/${encodeURIComponent(userId)}/watch-copy/run`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async getWatchCopyStatus(userId: string) {
+    return this.fetch<{ job: WatchCopyJob | null; lastRun: WatchCopyRun | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/status`);
+  }
+
+  async undoWatchCopy(userId: string, runId: string) {
+    return this.fetch<{ restored: number; kept: number }>(`/users/${encodeURIComponent(userId)}/watch-copy/undo`, { method: 'POST', body: JSON.stringify({ runId }) });
+  }
+
+  async getWatchCopyCandidates(userId: string, name: string, type: string) {
+    return this.fetch<{ candidates: { id: string; name: string; year: string | null; poster: string | null }[] }>(`/users/${encodeURIComponent(userId)}/watch-copy/candidates?name=${encodeURIComponent(name)}&type=${encodeURIComponent(type)}`);
+  }
+
+  // "Just added a sign-in - bring their history over?" (server/utils/watchCopy/offer.js).
+  async getWatchCopyOffer(userId: string) {
+    return this.fetch<{ offer: WatchCopyOffer | null }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer`);
+  }
+
+  async dismissWatchCopyOffer(userId: string, provider: string) {
+    return this.fetch<{ success: boolean }>(`/users/${encodeURIComponent(userId)}/watch-copy/offer/dismiss`, { method: 'POST', body: JSON.stringify({ provider }) });
+  }
+
+  // "Remove from Activity": one viewing (person, title or episode, one day)
+  // out of the page and their watch time and history; Undo via the Trash.
+  async removeActivityViewing(userId: string, body: { itemId: string; videoId?: string | null; day: string; from: string; to: string }) {
+    return this.fetch<{ trashId: string; label: string; removed: { history: number; watchTimeSeconds: number; sessions: number } }>(`/users/${encodeURIComponent(userId)}/activity/remove`, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  // Who has Keep in step on (the AIOSync card on Tasks).
+  async getWatchSyncOverview() {
+    return this.fetch<{ keepInStep: string[]; synced: { userId: string; name: string; places: string[] }[] }>('/users/watch-sync/overview');
+  }
+
+  // AIOStreams servers people here sign in to, for "Open in AIOStreams".
+  // "Open in …" on a title (lib/openWith.ts): servers, item ids, Play on devices.
+  async getOpenTargets(id: string, type: 'movie' | 'series') {
+    return this.fetch<import('./openWith').OpenTargets>(`/jellyfin/open-targets?id=${encodeURIComponent(id)}&type=${type}`);
+  }
+
+  async playOnDevice(body: { personId: string; credentialId: string | null; sessionId: string; itemId: string }) {
+    return this.fetch<{ success: boolean }>('/jellyfin/play-on', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async getAioStreamsServers() {
+    return this.fetch<{ servers: { address: string; people: string[] }[] }>(`/jellyfin/aiostreams-servers`);
+  }
+
+  // Keep in step (server/utils/watchCopy/keepInStep.js).
+  async getKeepInStep(userId: string) {
+    return this.fetch<KeepInStep>(`/users/${encodeURIComponent(userId)}/keep-in-step`);
+  }
+
+  async saveKeepInStep(userId: string, body: { enabled?: boolean; members?: { side: string; mode: KeepInStepMode }[] }) {
+    return this.fetch<KeepInStep>(`/users/${encodeURIComponent(userId)}/keep-in-step`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
   // Their AIOStreams configuration's history (server/utils/aioConfigHistory.js).
   async getAioHistory(userId: string) {
     return this.fetch<AioHistory>(`/jellyfin/users/${encodeURIComponent(userId)}/aio-history`);
@@ -3345,11 +3429,15 @@ class ApiClient {
   // Person search (needs a TMDb key): type an actor/director's name, get their
   // titles of the requested type. Returns null on 503 (no key) so callers hide
   // the feature. Results carry tmdbId/mediaType for click-through resolution.
-  async searchPerson(query: string, type: 'movie' | 'series') {
+  // personId: that person (a cast member's "See everything they've been in"),
+  // not whoever a search for the name finds first.
+  async searchPerson(query: string, type: 'movie' | 'series', personId?: number | null) {
     try {
-      return await this.fetch<{ person: { id: number | null; name: string; profile: string | null } | null; results: PersonSearchResult[]; source?: 'lumiere' }>(`/discover/search-person?query=${encodeURIComponent(query)}&type=${type}`);
-    } catch {
-      return null;
+      return await this.fetch<{ person: DiscoverPerson | null; results: PersonSearchResult[]; source?: 'lumiere'; nokey?: boolean }>(`/discover/search-person?query=${encodeURIComponent(query)}&type=${type}${personId ? `&personId=${personId}` : ''}`);
+    } catch (err) {
+      // 503: neither a TMDb key nor a LumiereDB to look people up in.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      return status === 503 ? { person: null, results: [], nokey: true } : null;
     }
   }
   // "More Like This" for the detail popup - real household affinity biases
@@ -3531,6 +3619,27 @@ class ApiClient {
     }
   }
 
+  // Discover's grid, a page at a time: movies, shows or both, with the
+  // filters a catalog can't apply itself (the server's, so paging works with
+  // any of them on). nextSkip is where the next page starts; failed is "not
+  // now", which the page asks again for rather than taking as the end.
+  async discoverPage(kind: DiscoverKind, options: DiscoverFacets & { catalog?: string; genre?: string; skip?: number; query?: string }): Promise<{ items: DiscoverItem[]; nextSkip: number | null; failed: boolean }> {
+    const params = new URLSearchParams({ type: kind, paged: '1' });
+    if (options.query) params.set('query', options.query);
+    if (options.catalog) params.set('catalog', options.catalog);
+    if (options.genre) params.set('genre', options.genre);
+    if (options.skip) params.set('skip', String(options.skip));
+    if (options.decade) params.set('decade', options.decade);
+    if (options.minRating) params.set('minRating', String(options.minRating));
+    if (options.length) params.set('length', options.length);
+    try {
+      const r = await this.fetch<{ items: DiscoverItem[]; nextSkip: number | null }>(`/discover/${options.query ? 'search' : 'browse'}?${params.toString()}`);
+      return { items: Array.isArray(r?.items) ? r.items : [], nextSkip: r?.nextSkip ?? null, failed: false };
+    } catch {
+      return { items: [], nextSkip: null, failed: true };
+    }
+  }
+
   async discoverBrowse(type: 'movie' | 'series', options?: { catalog?: string; genre?: string; skip?: number }) {
     const params = new URLSearchParams({ type });
     if (options?.catalog) params.set('catalog', options.catalog);
@@ -3656,6 +3765,103 @@ export interface CatchUpEpisodes {
   poster: string | null;
   /** kind: a filler or recap episode, where the server says so (AIOStreams, for anime). */
   episodes: { season: number; episode: number; title: string | null; released: string | null; watched: boolean; kind?: 'filler' | 'recap' }[];
+}
+
+/** One of a person's sign-ins, with the profiles inside it (Copy watch history). */
+export interface WatchCopySide {
+  side: string;
+  provider: 'stremio' | 'nuvio' | 'jellyfin';
+  kind: 'stremio' | 'nuvio' | 'jellyfin' | 'aiostreams' | 'aiometadata';
+  name: string;
+  detail: string | null;
+  profiles: { side: string; name: string; avatar?: string | null; color?: string | null; isPerson?: boolean }[];
+  /** Set on another person's sign-in (the "Other people" part of the picker). */
+  person?: WatchCopyPerson;
+}
+
+/** The person whose sign-ins these are - their picture, as everywhere else. */
+export interface WatchCopyPerson {
+  id: string;
+  username: string;
+  email: string | null;
+  avatarUrl: string | null;
+  useGravatar: boolean;
+  colorIndex: number;
+}
+
+export interface WatchCopyRequest {
+  from: string;
+  to: string;
+  watched?: boolean;
+  resume?: boolean;
+  library?: boolean;
+  sinceDays?: number;
+}
+
+export type WatchCopyOutcome = 'copy' | 'there' | 'further' | 'match' | 'missing';
+
+export interface WatchCopyItem {
+  key: string;
+  id: string | null;
+  type: 'movie' | 'series';
+  name: string | null;
+  poster: string | null;
+  outcome: WatchCopyOutcome;
+  from: WatchCopyHas;
+  to: WatchCopyHas;
+  // What's specific to this title on its card: "62 episodes", "from 1 h 13 m".
+  detail?: string | null;
+}
+
+// What one side has of a title. state + pct drive the avatar on the card.
+export interface WatchCopyHas { text: string; none?: boolean; state?: 'watched' | 'partial' | 'none'; pct?: number }
+
+export interface WatchCopyPreview {
+  items: WatchCopyItem[];
+  totals: { found: number; copy: number; there: number; further: number; match: number; missing: number };
+  options: { watched: boolean; resume: boolean; library: boolean; libraryAvailable: boolean };
+  counts: { from: number; to: number };
+  limits: string[];
+}
+
+export interface WatchCopyJob {
+  state: 'running' | 'done' | 'failed';
+  total: number;
+  done: number;
+  failed: number;
+  runId: string | null;
+  error: string | null;
+}
+
+export interface WatchCopyRun {
+  id: string;
+  from: string;
+  to: string;
+  createdAt: string;
+  undoUntil: string;
+  copied?: number;
+  failed?: number;
+  fromName?: string | null;
+  toName?: string | null;
+}
+
+/** A new, nearly empty sign-in, and the one whose titles could fill it. */
+export interface WatchCopyOffer {
+  name: string;
+  to: { provider: string; kind: string; side: string; label: string };
+  from: { provider: string; side: string; label: string; count: number };
+}
+
+export type KeepInStepMode = 'both' | 'receive' | 'off';
+
+/** Keep in step for one person: the switch, each place's mode, and what moved. */
+export interface KeepInStep {
+  enabled: boolean;
+  since: string | null;
+  lastPass: string | null;
+  lastError: string | null;
+  places: { side: string; provider: string; kind: string; name: string; profile: string | null; first: boolean; mode: KeepInStepMode }[];
+  moves: { at: string; title: string; what: string; from: string; to: string[] }[];
 }
 
 /** One "Caught up to here" run, as it goes. */
@@ -4753,6 +4959,29 @@ export interface PersonSearchResult {
   year: string | null;
   poster: string | null;
   role: string | null;
+  /** "Most popular" order: 1 is what they're best known for. */
+  rank?: number;
+}
+
+/** A person at the top of their page in Discover - see server/utils/personFacts.js. */
+export interface DiscoverPerson {
+  id: number | null;
+  name: string;
+  profile: string | null;
+  knownFor?: string[] | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  placeOfBirth?: string | null;
+  bio?: string | null;
+}
+
+export type DiscoverKind = 'movie' | 'series' | 'both';
+
+/** Discover's filters a catalog can't apply itself (server/utils/discoverFacets.js). */
+export interface DiscoverFacets {
+  decade?: '2020s' | '2010s' | '2000s' | '1990s' | '1980s' | 'older' | null;
+  minRating?: number | null;
+  length?: 'short' | 'mid' | 'long' | null;
 }
 
 export interface FollowedSubject {

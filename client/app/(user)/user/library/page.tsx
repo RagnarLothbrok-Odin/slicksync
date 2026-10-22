@@ -65,10 +65,7 @@ function LibraryCardItem({ item, isSelected, isDeleting, onToggle, onDelete, can
     >
       {/* Poster Card */}
       <div 
-        className="relative aspect-[2/3] rounded-xl overflow-hidden shadow-xl"
-        style={{
-          border: isSelected ? '3px solid var(--color-primary)' : '1px solid var(--color-surface-border)',
-        }}
+        className={`relative aspect-[2/3] rounded-xl overflow-hidden shadow-xl ${isSelected ? 'bd3-sel' : 'bd-ok'}`}
       >
         {item.poster && !imageError ? (
           <>
@@ -187,10 +184,9 @@ function LibraryListItem({ item, isSelected, isDeleting, onToggle, onDelete, can
       animate={{ opacity: 1, x: 0 }}
       whileHover={{ x: 4 }}
       onClick={onToggle}
-      className="flex items-start gap-4 p-4 rounded-xl cursor-pointer transition-colors"
+      className={`flex items-start gap-4 p-4 rounded-xl cursor-pointer transition-colors ${isSelected ? 'bd2-sel' : 'bd-ok'}`}
       style={{
         background: 'var(--color-surface)',
-        border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--color-surface-border)',
       }}
     >
       {/* Poster */}

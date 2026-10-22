@@ -17,7 +17,7 @@ export function PageContainer({ children, className, noSidebarOffset }: PageCont
   const offsetClass = noSidebarOffset ? '' : 'ml-0 md:ml-60';
   return (
     <motion.main
-      initial={{ opacity: 0 }}
+      initial={false} // shown at once - no fade on every page open
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
       className={`${offsetClass} min-h-screen ${className || ''}`}
@@ -56,31 +56,20 @@ export function PageContainer({ children, className, noSidebarOffset }: PageCont
                 hue the instant --color-primary changes, while everything
                 else (checkmark, cards) updates in step - not a lag, a real
                 jarring flash, worse the further apart two themes' hues are.
-                The `transition: background-color` below (added to all four
+                The background-color transition (.glow in globals.css, all four
                 blobs, both layouts) is the fix: eases the swap instead of
                 snapping it, and as a side effect smooths over any leftover
                 one-frame Firefox compositor lag on this blurred, animated
                 layer specifically (blur filters get their own compositor
                 path) without another forceRepaint()-style hack. */}
-            <div
-              className="absolute -top-32 -left-32 w-[560px] h-[560px] rounded-full blur-[110px] opacity-20 animate-float-slow"
-              style={{ background: 'var(--color-primary)', transition: 'background-color 0.6s ease-out' }}
-            />
-            <div
-              className="absolute -bottom-32 -right-32 w-[520px] h-[520px] rounded-full blur-[110px] opacity-15 animate-float-slow-reverse"
-              style={{ background: 'var(--color-secondary)', transition: 'background-color 0.6s ease-out' }}
-            />
+            {/* Drawn without a blur filter - see .glow in globals.css. */}
+            <div className="glow glow-nebula-a animate-float-slow" />
+            <div className="glow glow-nebula-b animate-float-slow-reverse" />
           </>
         ) : (
           <>
-            <div
-              className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full blur-[120px] opacity-30"
-              style={{ background: 'var(--color-primaryMuted)', transition: 'background-color 0.6s ease-out' }}
-            />
-            <div
-              className="absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full blur-[100px] opacity-20"
-              style={{ background: 'var(--color-secondaryMuted)', transition: 'background-color 0.6s ease-out' }}
-            />
+            <div className="glow glow-corner-a" />
+            <div className="glow glow-corner-b" />
           </>
         )}
       </div>
@@ -103,7 +92,7 @@ interface PageSectionProps {
 export function PageSection({ children, delay = 0, className }: PageSectionProps) {
   return (
     <motion.section
-      initial={{ opacity: 0, y: 20 }}
+      initial={false} // at once, not one section after another
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay }}
       className={className}
@@ -154,7 +143,7 @@ export function StaggerItem({ children, className, animateLayout = false }: Stag
   return (
     <motion.div
       layout={animateLayout}
-      initial={{ opacity: 0, scale: 0.95 }}
+      initial={false} // at once; the exit below still plays when a row is removed
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}

@@ -718,29 +718,22 @@ export function CreateUserModal({
                           whileHover={{ scale: 1.02, y: -2 }}
                           whileTap={{ scale: 0.98 }}
                           onClick={() => setAuthMethod('credentials')}
-                          className="w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden"
-                          style={{
-                            background: authMethod === 'credentials' ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-                            border: `1px solid ${authMethod === 'credentials' ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
-                            opacity: authMethod === 'credentials' ? 1 : 0.85
-                          }}
+                          className={`w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden ${authMethod === 'credentials' ? 'auth-opt-on' : 'auth-opt-off'}`}
+                          style={{ opacity: authMethod === 'credentials' ? 1 : 0.85 }}
                         >
                           <div className="relative flex items-center gap-4">
                             <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                              style={{
-                                background: authMethod === 'credentials' ? 'rgba(255,255,255,0.2)' : 'var(--color-subtle)'
-                              }}
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ao-icon"
                             >
-                              <svg className="w-5 h-5" style={{ color: authMethod === 'credentials' ? 'white' : 'var(--color-text-muted)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg className="w-5 h-5 ao-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold" style={{ color: authMethod === 'credentials' ? 'white' : 'var(--color-text)' }}>
+                              <span className="font-semibold ao-title">
                                 Credentials
                               </span>
-                              <p className="text-sm mt-0.5" style={{ color: authMethod === 'credentials' ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)' }}>
+                              <p className="text-sm mt-0.5 ao-sub">
                                 Email and password
                               </p>
                             </div>
@@ -753,29 +746,22 @@ export function CreateUserModal({
                           whileHover={{ scale: 1.02, y: -2 }}
                           whileTap={{ scale: 0.98 }}
                           onClick={() => setAuthMethod('authKey')}
-                          className="w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden"
-                          style={{
-                            background: authMethod === 'authKey' ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-                            border: `1px solid ${authMethod === 'authKey' ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
-                            opacity: authMethod === 'authKey' ? 1 : 0.85
-                          }}
+                          className={`w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden ${authMethod === 'authKey' ? 'auth-opt-on' : 'auth-opt-off'}`}
+                          style={{ opacity: authMethod === 'authKey' ? 1 : 0.85 }}
                         >
                           <div className="relative flex items-center gap-4">
                             <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                              style={{
-                                background: authMethod === 'authKey' ? 'rgba(255,255,255,0.2)' : 'var(--color-subtle)'
-                              }}
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ao-icon"
                             >
-                              <svg className="w-5 h-5" style={{ color: authMethod === 'authKey' ? 'white' : 'var(--color-text-muted)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <svg className="w-5 h-5 ao-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold" style={{ color: authMethod === 'authKey' ? 'white' : 'var(--color-text)' }}>
+                              <span className="font-semibold ao-title">
                                 Auth Key
                               </span>
-                              <p className="text-sm mt-0.5" style={{ color: authMethod === 'authKey' ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)' }}>
+                              <p className="text-sm mt-0.5 ao-sub">
                                 Paste from Stremio settings
                               </p>
                             </div>
@@ -792,12 +778,8 @@ export function CreateUserModal({
                             setStep('oauth');
                             handleStartOAuth();
                           }}
-                          className="w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden"
-                          style={{
-                            background: authMethod === 'oauth' ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-                            border: `1px solid ${authMethod === 'oauth' ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
-                            opacity: authMethod === 'oauth' ? 1 : 0.85
-                          }}
+                          className={`w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden ${authMethod === 'oauth' ? 'auth-opt-on' : 'auth-opt-off'}`}
+                          style={{ opacity: authMethod === 'oauth' ? 1 : 0.85 }}
                         >
                           <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
                             style={{
@@ -806,10 +788,7 @@ export function CreateUserModal({
                           />
                           <div className="relative flex items-center gap-4">
                             <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                              style={{
-                                background: authMethod === 'oauth' ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 80%, var(--color-secondary)) 100%)'
-                              }}
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ao-icon-grad"
                             >
                               <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
@@ -817,20 +796,16 @@ export function CreateUserModal({
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold" style={{ color: authMethod === 'oauth' ? 'white' : 'var(--color-text)' }}>
+                                <span className="font-semibold ao-title">
                                   Stremio OAuth
                                 </span>
                                 <span
-                                  className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full"
-                                  style={{
-                                    background: authMethod === 'oauth' ? 'rgba(255,255,255,0.3)' : 'var(--color-primary)',
-                                    color: authMethod === 'oauth' ? 'white' : 'white'
-                                  }}
+                                  className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full ao-badge"
                                 >
                                   Recommended
                                 </span>
                               </div>
-                              <p className="text-sm mt-0.5" style={{ color: authMethod === 'oauth' ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)' }}>
+                              <p className="text-sm mt-0.5 ao-sub">
                                 Securely link via OAuth
                               </p>
                             </div>
@@ -980,16 +955,12 @@ export function CreateUserModal({
                           <button
                             type="button"
                             onClick={() => setNuvioAuthMethod('credentials')}
-                            className="w-full p-4 rounded-2xl text-left transition-all"
-                            style={{
-                              background: nuvioAuthMethod === 'credentials' ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-                              border: `1px solid ${nuvioAuthMethod === 'credentials' ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
-                            }}
+                            className={`w-full p-4 rounded-2xl text-left transition-all ${nuvioAuthMethod === 'credentials' ? 'auth-opt-on' : 'auth-opt-off'}`}
                           >
-                            <span className="font-semibold" style={{ color: nuvioAuthMethod === 'credentials' ? 'white' : 'var(--color-text)' }}>
+                            <span className="font-semibold ao-title">
                               Credentials
                             </span>
-                            <p className="text-sm mt-0.5" style={{ color: nuvioAuthMethod === 'credentials' ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)' }}>
+                            <p className="text-sm mt-0.5 ao-sub">
                               Email and password
                             </p>
                           </button>
@@ -1001,24 +972,19 @@ export function CreateUserModal({
                               setNuvioAuthMethod('oauth');
                               handleStartNuvioOAuth();
                             }}
-                            className="w-full p-4 rounded-2xl text-left transition-all"
-                            style={{
-                              background: nuvioAuthMethod === 'oauth' ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-                              border: `1px solid ${nuvioAuthMethod === 'oauth' ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
-                            }}
+                            className={`w-full p-4 rounded-2xl text-left transition-all ${nuvioAuthMethod === 'oauth' ? 'auth-opt-on' : 'auth-opt-off'}`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold" style={{ color: nuvioAuthMethod === 'oauth' ? 'white' : 'var(--color-text)' }}>
+                              <span className="font-semibold ao-title">
                                 Nuvio OAuth
                               </span>
                               <span
-                                className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full"
-                                style={{ background: nuvioAuthMethod === 'oauth' ? 'rgba(255,255,255,0.3)' : 'var(--color-primary)', color: 'white' }}
+                                className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full ao-badge"
                               >
                                 Recommended
                               </span>
                             </div>
-                            <p className="text-sm mt-0.5" style={{ color: nuvioAuthMethod === 'oauth' ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)' }}>
+                            <p className="text-sm mt-0.5 ao-sub">
                               Approve on your device — no password shared
                             </p>
                           </button>
@@ -1130,14 +1096,7 @@ export function CreateUserModal({
                             transition={{
                               x: oauthStatus === 'waiting' ? { duration: 1, repeat: Infinity, ease: 'linear' } : { duration: 0.3 },
                             }}
-                            className="h-full w-full"
-                            style={{
-                              background: oauthStatus === 'completed'
-                                ? 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))'
-                                : oauthStatus === 'error'
-                                ? 'var(--color-error)'
-                                : 'linear-gradient(90deg, transparent, var(--color-primary), transparent)'
-                            }}
+                            className={`h-full w-full ${oauthStatus === 'completed' ? 'oauth-bar-done' : oauthStatus === 'error' ? 'bg-error' : 'oauth-bar-wait'}`}
                           />
                         </div>
 

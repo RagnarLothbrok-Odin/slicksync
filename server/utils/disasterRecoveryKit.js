@@ -106,6 +106,8 @@ async function restoreKit(prisma, accountId, passphrase, kit, req, { encrypt }) 
     headers: {
       'Content-Type': 'application/json',
       ...(req.headers?.cookie ? { cookie: req.headers.cookie } : {}),
+      ...(req.headers?.authorization ? { authorization: req.headers.authorization } : {}),
+      ...(req.headers?.['x-csrf-token'] ? { 'x-csrf-token': req.headers['x-csrf-token'] } : {}),
     },
     body: JSON.stringify({ jsonData: JSON.stringify(bundle.config) }),
   });

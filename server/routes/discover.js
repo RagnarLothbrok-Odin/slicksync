@@ -55,6 +55,13 @@ async function fetchOut(url, options = {}) {
   }
 }
 
+// The posters a page is about to ask for, produced while its answer is on
+// the way - the first screenfuls of every list, page and search, not only
+// the default ones warmed on a timer (utils/discover.js).
+function warmShown(items) {
+  try { require('../utils/posterWarm').warmPosters((items || []).slice(0, 60), { urgent: true }) } catch { /* optimisation only */ }
+}
+
 module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
   const router = express.Router();
 
@@ -69,68 +76,92 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
     res.json({ ready: !!(await lumiereFor(req)), attribution: ATTRIBUTION })
   })
 
-  // GET /api/discover/browse?type=movie|series&catalog=top|trending|year|imdbRating&genre=X&skip=N
+  // GET /api/discover/browse?type=movie|series|both&catalog=top|trending|year|imdbRating&genre=X&skip=N
+  //   &decade=2020s..1980s|older &minRating=6|7|8 &length=short|mid|long  (utils/discoverFacets.js)
+  //   &paged=1 answers { items, nextSkip } instead of the bare array, so the
+  //   page knows where the next page starts - a filtered page reads ahead and
+  //   "Both" packs two positions into one number.
   router.get('/browse', async (req, res) => {
     try {
       const { type = 'movie', catalog = 'top', genre, skip } = req.query
-      if (type !== 'movie' && type !== 'series') {
-        return res.status(400).json({ error: 'type must be movie or series' })
+      if (type !== 'movie' && type !== 'series' && type !== 'both') {
+        return res.status(400).json({ error: 'type must be movie, series or both' })
       }
-      // Popular and Trending come from IMDb's own numbers when there's a
-      // LumiereDB: Popular 500 deep, Trending 100, both leaving out titles
-      // few people have voted on. Paged here, as Cinemeta's are.
-      if (catalog === 'top' || catalog === 'trending') {
-        const base = await lumiereFor(req)
+      const { parseFacets, filteredPage, bothPage } = require('../utils/discoverFacets')
+      const facets = parseFacets(req.query)
+      const from = Math.max(0, Math.floor(Number(skip) || 0))
+      // The length filter reads Cinemeta's runtimes; LumiereDB's lists may not carry one.
+      const base = (catalog === 'top' || catalog === 'trending') && !facets?.length ? await lumiereFor(req) : ''
+      // One page of one type: { items, cursor }, the cursor where the next starts.
+      const pageOf = (oneType) => async (at) => {
+        // Popular and Trending come from IMDb's own numbers when there's a
+        // LumiereDB: Popular 500 deep, Trending 100, both leaving out titles
+        // few people have voted on. Paged here, as Cinemeta's are.
         if (base) {
           try {
             const lumiere = require('../utils/lumiere')
-            const all = await lumiere.listIds(base, catalog === 'trending' ? 'trending' : 'popular', type, genre ? lumiere.genreSlug(genre) : '')
-            const from = Math.max(0, Number(skip) || 0)
-            return res.json(all.slice(from, from + 100))
+            const all = await lumiere.listIds(base, catalog === 'trending' ? 'trending' : 'popular', oneType, genre ? lumiere.genreSlug(genre) : '')
+            const page = all.slice(at, at + 100)
+            return { items: page, cursor: at + page.length }
           } catch (e) {
             console.warn('[Discover] LumiereDB list failed, using Cinemeta:', e?.message || e)
           }
         }
+        const items = await fetchCatalog(oneType, {
+          catalog: catalog === 'trending' ? 'top' : catalog,
+          genre: genre || undefined,
+          skip: at || undefined,
+        })
+        return { items, cursor: at + items.length }
       }
-      const items = await fetchCatalog(type, {
-        catalog: catalog === 'trending' ? 'top' : catalog,
-        genre: genre || undefined,
-        skip: skip ? Number(skip) : undefined
-      })
-      res.json(items)
+      const { items, cursor } = type === 'both'
+        ? await bothPage((oneType, at) => filteredPage(pageOf(oneType), at, facets), from)
+        : await filteredPage(pageOf(type), from, facets)
+      if (req.query.paged) res.json({ items, nextSkip: cursor })
+      else res.json(items)
+      warmShown(items)
     } catch (error) {
       console.error('Error fetching discover catalog:', error)
       res.status(500).json({ error: 'Failed to fetch catalog' })
     }
   })
 
-  // GET /api/discover/search?type=movie|series&query=X
+  // GET /api/discover/search?type=movie|series|both&query=X (+ the filters above, &paged=1)
   // Search only works against the "top" catalog - that's the only one
-  // Cinemeta's own manifest advertises search support for.
+  // Cinemeta's own manifest advertises search support for. A search is one
+  // answer, never paged: nextSkip is always null.
   router.get('/search', async (req, res) => {
     try {
       const { type = 'movie', query } = req.query
-      if (type !== 'movie' && type !== 'series') {
-        return res.status(400).json({ error: 'type must be movie or series' })
+      if (type !== 'movie' && type !== 'series' && type !== 'both') {
+        return res.status(400).json({ error: 'type must be movie, series or both' })
       }
-      if (!query || !query.trim()) {
-        return res.json([])
-      }
-      // LumiereDB reads what was meant: typos ("intersteller"), words run
-      // together ("spiderman"), a sequel number or a year on the end, a
-      // nickname ("lotr") and the title in another language. Cinemeta's
-      // search only matches what's typed.
+      const send = (items) => (req.query.paged ? res.json({ items, nextSkip: null }) : res.json(items))
+      if (!query || !query.trim()) return send([])
+      const { parseFacets, matchesFacets, interleave } = require('../utils/discoverFacets')
+      const facets = parseFacets(req.query)
       const base = await lumiereFor(req)
-      if (base) {
-        try {
-          const found = await require('../utils/lumiere').searchTitles(base, type, query, { limit: 40 })
-          if (found.length > 0) return res.json(found)
-        } catch (e) {
-          console.warn('[Discover] LumiereDB search failed, using Cinemeta:', e?.message || e)
+      const searchOne = async (oneType) => {
+        // LumiereDB reads what was meant: typos ("intersteller"), words run
+        // together ("spiderman"), a sequel number or a year on the end, a
+        // nickname ("lotr") and the title in another language. Cinemeta's
+        // search only matches what's typed.
+        if (base) {
+          try {
+            const found = await require('../utils/lumiere').searchTitles(base, oneType, query, { limit: 40 })
+            if (found.length > 0) return found
+          } catch (e) {
+            console.warn('[Discover] LumiereDB search failed, using Cinemeta:', e?.message || e)
+          }
         }
+        return fetchCatalog(oneType, { catalog: 'top', search: query.trim() })
       }
-      const items = await fetchCatalog(type, { catalog: 'top', search: query.trim() })
-      res.json(items)
+      const items = type === 'both'
+        ? interleave(...(await Promise.all([searchOne('movie'), searchOne('series')])))
+        : await searchOne(type)
+      const shown = facets ? items.filter((i) => matchesFacets(i, facets)) : items
+      send(shown)
+      warmShown(shown)
     } catch (error) {
       console.error('Error searching discover catalog:', error)
       res.status(500).json({ error: 'Failed to search catalog' })
@@ -927,55 +958,72 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
     }
   })
 
-  // GET /api/discover/person/:id - a TMDb person's film/TV credits, newest
-  // first, deduped, with poster + year + role. tmdbId/mediaType are returned
-  // so the frontend can resolve an IMDb id on click (see /imdb-id below) and
-  // open the existing Cinemeta-backed detail modal.
+  // A TMDb person with their credits, in one call, kept an hour. Their page
+  // in Discover and the cast panel both read it.
+  const tmdbPersonCache = new Map() // id -> { at, data }
+  const TMDB_PERSON_TTL = 60 * 60 * 1000
+  async function fetchTmdbPerson(key, personId) {
+    const id = String(personId).replace(/[^0-9]/g, '')
+    if (!id) return null
+    const hit = tmdbPersonCache.get(id)
+    if (hit && Date.now() - hit.at < TMDB_PERSON_TTL) return hit.data
+    const rsp = await fetchOut(`https://api.themoviedb.org/3/person/${id}?api_key=${encodeURIComponent(key)}&append_to_response=combined_credits`)
+    if (!rsp.ok) return null
+    const data = await rsp.json()
+    if (tmdbPersonCache.size > 500) tmdbPersonCache.delete(tmdbPersonCache.keys().next().value)
+    tmdbPersonCache.set(id, { at: Date.now(), data })
+    return data
+  }
+
+  // A person's credits as Discover shows them, newest first, each title once.
+  // `rank` is "Most popular": 1 is the title the most people rated on TMDb.
+  // No cap - TMDb's combined_credits is a person's whole filmography in one
+  // bounded answer, and an old .slice(0, 60) once hid most of Tom Cruise's
+  // early work.
+  function creditsOf(person, mediaType) {
+    const data = person?.combined_credits || {}
+    const seen = new Set()
+    const credits = [...(data.cast || []), ...(data.crew || [])]
+      .filter((c) => c && (mediaType ? c.media_type === mediaType : (c.media_type === 'movie' || c.media_type === 'tv')) && (c.poster_path || c.title || c.name))
+      .map((c) => {
+        const date = c.release_date || c.first_air_date || ''
+        return {
+          tmdbId: c.id,
+          mediaType: c.media_type, // 'movie' | 'tv'
+          title: c.title || c.name || 'Untitled',
+          year: date ? date.slice(0, 4) : null,
+          poster: c.poster_path ? `${TMDB_IMG}${c.poster_path}` : null,
+          role: c.character || c.job || null,
+          _sort: date || '0000',
+          _votes: c.vote_count || 0,
+        }
+      })
+      .filter((c) => { const k = `${c.mediaType}:${c.tmdbId}`; if (seen.has(k)) return false; seen.add(k); return true })
+    ;[...credits].sort((a, b) => b._votes - a._votes).forEach((c, i) => { c.rank = i + 1 })
+    credits.sort((a, b) => b._sort.localeCompare(a._sort))
+    for (const c of credits) { delete c._sort; delete c._votes }
+    return credits
+  }
+
+  const personCard = (person) => ({
+    id: person.id,
+    name: person.name || null,
+    profile: person.profile_path ? `${TMDB_IMG}${person.profile_path}` : null,
+    ...require('../utils/personFacts').personFacts(person),
+  })
+
+  // GET /api/discover/person/:id - a TMDb person and all their film/TV
+  // credits. tmdbId/mediaType are returned so the page can resolve an IMDb id
+  // on click (see /imdb-id below) and open the usual detail popup.
   router.get('/person/:id', async (req, res) => {
     try {
       const key = await resolveTmdbKey(req)
       if (!key) return res.status(503).json({ error: 'TMDb key not configured' })
       const personId = String(req.params.id).replace(/[^0-9]/g, '')
       if (!personId) return res.status(400).json({ error: 'Invalid person id' })
-
-      const url = `https://api.themoviedb.org/3/person/${personId}/combined_credits?api_key=${encodeURIComponent(key)}`
-      const rsp = await fetchOut(url)
-      if (!rsp.ok) return res.status(502).json({ error: 'TMDb request failed' })
-      const data = await rsp.json()
-
-      const seen = new Set()
-      const credits = [...(data.cast || []), ...(data.crew || [])]
-        .filter((c) => c && (c.media_type === 'movie' || c.media_type === 'tv') && (c.poster_path || c.title || c.name))
-        .map((c) => {
-          const date = c.release_date || c.first_air_date || ''
-          return {
-            tmdbId: c.id,
-            mediaType: c.media_type, // 'movie' | 'tv'
-            title: c.title || c.name || 'Untitled',
-            year: date ? date.slice(0, 4) : null,
-            poster: c.poster_path ? `${TMDB_IMG}${c.poster_path}` : null,
-            role: c.character || c.job || null,
-            popularity: typeof c.popularity === 'number' ? c.popularity : 0,
-            _sort: date || '0000',
-          }
-        })
-        .filter((c) => { const k = `${c.mediaType}:${c.tmdbId}`; if (seen.has(k)) return false; seen.add(k); return true })
-        .sort((a, b) => b._sort.localeCompare(a._sort))
-        // No cap here on purpose - TMDb's combined_credits already returns a
-        // person's full filmography in one bounded response (it's not
-        // paginated upstream), and this feed renders as a horizontal scroll
-        // row, not a paginated grid. An earlier `.slice(0, 60)` silently
-        // dropped everything older than a prolific actor's most recent ~60
-        // credits (confirmed real case: Tom Cruise has well over 60 combined
-        // movie+TV credits across a 40+ year career, so most of his early
-        // filmography never showed up here at all).
-        .map(({ _sort, popularity, ...rest }) => rest)
-
-      // combined_credits carries no `name` of its own, so this is always
-      // null in practice. Left in rather than fetched separately because the
-      // caller already knows the name it clicked - the cast panel falls back
-      // to it. Don't remove that fallback expecting a name from here.
-      res.json({ person: { id: Number(personId), name: data.name || null }, credits })
+      const person = await fetchTmdbPerson(key, personId)
+      if (!person) return res.status(502).json({ error: 'TMDb request failed' })
+      res.json({ person: personCard(person), credits: creditsOf(person, null) })
     } catch (error) {
       console.error('Error fetching person credits:', error)
       res.status(500).json({ error: 'Failed to fetch person credits' })
@@ -1188,22 +1236,23 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
     }
   })
 
-  // GET /api/discover/search-person?query=X&type=movie|series
-  // Person search for Discover: type an actor/director's name and get what
-  // they've been in, filtered to the current Movies/Series toggle. Same TMDb
-  // key + credits pipeline as the cast deep-dive; returns the best-matching
-  // person plus their titles of the requested type. Results carry tmdbId +
-  // mediaType so a click resolves the IMDb id (/imdb-id) and opens the normal
-  // Cinemeta-backed detail modal.
+  // GET /api/discover/search-person?query=X&type=movie|series[&personId=N]
+  // Discover's People: a name in, the best-matching person and what they've
+  // been in, of the type asked for, with the facts for their card. With
+  // personId (a cast member's "See everything they've been in") it is that
+  // person, not whoever a search for the name finds first.
   router.get('/search-person', async (req, res) => {
     try {
       const key = await resolveTmdbKey(req)
-      const query = String(req.query.query || '').trim()
+      let query = String(req.query.query || '').trim()
       const wantTv = req.query.type === 'series'
+      const byId = key ? String(req.query.personId || '').replace(/[^0-9]/g, '') : ''
+      const known = byId ? await fetchTmdbPerson(key, byId) : null
+      if (known?.name) query = known.name
       if (!query) return res.json({ person: null, results: [] })
 
       // Without a TMDb key, LumiereDB answers: a full name, and the titles
-      // that person is best known for, already carrying their IMDb ids.
+      // that person is best known for, in that order, with their IMDb ids.
       if (!key) {
         const base = await lumiereFor(req)
         if (!base) return res.status(503).json({ error: 'TMDb key not configured' })
@@ -1211,7 +1260,7 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
         if (!found) return res.json({ person: null, results: [] })
         return res.json({
           person: { id: null, name: found.person.name, profile: null },
-          results: found.items.map((i) => ({
+          results: found.items.map((i, n) => ({
             tmdbId: null,
             imdbId: i.id,
             mediaType: wantTv ? 'tv' : 'movie',
@@ -1219,48 +1268,24 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
             year: i.year ? String(i.year) : null,
             poster: i.poster,
             role: i.roles?.length ? i.roles.join(', ') : null,
+            rank: n + 1,
           })),
           source: 'lumiere',
         })
       }
 
-      const sr = await fetchOut(`https://api.themoviedb.org/3/search/person?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}`)
-      if (!sr.ok) return res.status(502).json({ error: 'TMDb request failed' })
-      const sd = await sr.json()
-      // Highest-billed match (TMDb sorts by popularity); require a real name
-      // match-ish by taking the top result, which is TMDb's own best guess.
-      const person = (sd.results || [])[0]
-      if (!person) return res.json({ person: null, results: [] })
-
-      const cr = await fetchOut(`https://api.themoviedb.org/3/person/${person.id}/combined_credits?api_key=${encodeURIComponent(key)}`)
-      if (!cr.ok) return res.status(502).json({ error: 'TMDb request failed' })
-      const cd = await cr.json()
-
-      const seen = new Set()
-      const results = [...(cd.cast || []), ...(cd.crew || [])]
-        .filter((c) => c && c.media_type === (wantTv ? 'tv' : 'movie') && (c.poster_path || c.title || c.name))
-        .map((c) => {
-          const date = c.release_date || c.first_air_date || ''
-          return {
-            tmdbId: c.id,
-            mediaType: c.media_type,
-            title: c.title || c.name || 'Untitled',
-            year: date ? date.slice(0, 4) : null,
-            poster: c.poster_path ? `${TMDB_IMG}${c.poster_path}` : null,
-            role: c.character || c.job || null,
-            _sort: date || '0000',
-          }
-        })
-        .filter((c) => { const k = c.tmdbId; if (seen.has(k)) return false; seen.add(k); return true })
-        .sort((a, b) => b._sort.localeCompare(a._sort))
-        // Same reasoning as /person/:id above - no artificial cap on a
-        // person's real filmography.
-        .map(({ _sort, ...rest }) => rest)
-
-      res.json({
-        person: { id: person.id, name: person.name, profile: person.profile_path ? `${TMDB_IMG}${person.profile_path}` : null },
-        results,
-      })
+      let person = known
+      if (!person) {
+        const sr = await fetchOut(`https://api.themoviedb.org/3/search/person?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}`)
+        if (!sr.ok) return res.status(502).json({ error: 'TMDb request failed' })
+        const sd = await sr.json()
+        // TMDb's own best guess, which it sorts by popularity.
+        const top = (sd.results || [])[0]
+        if (!top) return res.json({ person: null, results: [] })
+        person = await fetchTmdbPerson(key, top.id)
+        if (!person) return res.status(502).json({ error: 'TMDb request failed' })
+      }
+      res.json({ person: personCard(person), results: creditsOf(person, wantTv ? 'tv' : 'movie') })
     } catch (error) {
       console.error('Error searching person:', error)
       res.status(500).json({ error: 'Failed to search person' })

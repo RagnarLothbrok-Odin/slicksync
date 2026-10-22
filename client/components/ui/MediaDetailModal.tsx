@@ -1,11 +1,15 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { StarIcon, ClockIcon, FilmIcon, PlayIcon, XMarkIcon, BookmarkIcon as BookmarkSolidIcon, ShieldCheckIcon } from '@heroicons/react/24/solid';
 import { BookmarkIcon as BookmarkOutlineIcon, ChevronLeftIcon, ChevronDownIcon, HandThumbUpIcon, HandThumbDownIcon, CheckCircleIcon, CheckIcon as CheckIconMini, BellIcon } from '@heroicons/react/24/outline';
 import { Modal } from './Modal';
 import { Badge } from './Badge';
 import { AddToListButton } from './AddToListButton';
+import { buildAioStreamsAppUrl } from '@/lib/aiostreamsLink';
+import { OpenWithButton } from './OpenWithButton';
+import { CastMenu, type CastMenuTarget } from './CastMenu';
 import { metacriticColor as metacriticTextColor } from './RatingBadges';
 import { api, MediaDetails, DiscoverItem, SeriesSeason } from '@/lib/api';
 import { toast } from './Toast';
@@ -55,6 +59,35 @@ interface MediaDetailModalProps {
   // Watchlist tab (both reading from the page's own already-fetched list,
   // not a fresh request) kept showing the old state until a full reload.
   onWatchlistChange?: (itemId: string, inWatchlist: boolean) => void;
+}
+
+// The account's AIOStreams servers, read once per page load (see
+// lib/aiostreamsLink.ts). An empty list hides Open in AIOStreams.
+let aioServersPromise: Promise<{ address: string; people: string[] }[]> | null = null;
+function loadAioServers() {
+  if (!aioServersPromise) aioServersPromise = api.getAioStreamsServers().then((r) => r.servers || []).catch(() => []);
+  return aioServersPromise;
+}
+
+// Bookmark and Watched as small soft pills - under the title on a computer,
+// after the ratings on a phone (with + Catalog beside them).
+function SmallPill({ on, tint, onClick, busy, icon, label, title }: {
+  on: boolean; tint: string; onClick: () => void; busy?: boolean; icon: React.ReactNode; label: string; title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      title={title}
+      aria-pressed={on}
+      className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-xs sm:text-[13px] font-medium whitespace-nowrap border transition-colors ${on ? 'pill-tint-on' : 'pill-tint-off'} ${busy ? 'opacity-60 cursor-wait' : ''}`}
+      style={{ '--tint': tint } as React.CSSProperties}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 }
 
 export function MediaDetailModal({
@@ -171,13 +204,26 @@ export function MediaDetailModal({
     }
   }, [personFollows, personFollowBusy]);
 
-  const openPerson = useCallback(async (member: { name: string; tmdbId?: number | string | null }) => {
+  // Their page in Discover: who they are, and everything they've been in.
+  // Already on Discover, the page is told who instead of reloading.
+  const router = useRouter();
+  const seeEverything = useCallback((id: number | string, name: string) => {
+    onClose();
+    if (window.location.pathname.startsWith('/discover')) {
+      window.dispatchEvent(new CustomEvent('slicksync:discover-person', { detail: { id: Number(id) || null, name } }));
+    } else {
+      router.push(`/discover?person=${encodeURIComponent(String(id))}&name=${encodeURIComponent(name)}`);
+    }
+  }, [onClose, router]);
+
+  const openPerson = useCallback(async (member: { name: string; tmdbId?: number | string | null }, keepOpen = false) => {
     if (member.tmdbId == null || member.tmdbId === '') return;
     // Clicking the same cast member again closes the filmography row
     // instead of re-fetching the same data - reads as a toggle, same as
-    // any other disclosure in this modal.
+    // any other disclosure in this modal. "Show their titles here" from the
+    // cast menu only ever opens it.
     if (personView && personView.id === member.tmdbId) {
-      setPersonView(null);
+      if (!keepOpen) setPersonView(null);
       return;
     }
     setPersonView({ id: member.tmdbId, name: member.name, loading: true, credits: [] });
@@ -588,6 +634,47 @@ export function MediaDetailModal({
   // native scroll already handles those, and capturing every pointer type
   // fights the page's own vertical touch scroll.
   const castRowRef = useRef<HTMLDivElement>(null);
+
+  // A tap on a cast member opens their titles under the cast; a finger held
+  // on them (or a right-click) opens the cast menu (components/ui/CastMenu).
+  // On an iPhone a held finger is not a tap - no click comes, and the phone
+  // starts selecting the name instead - so the hold is timed here, and the
+  // click some browsers still send afterwards is ignored.
+  const castHold = useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({ timer: null, x: 0, y: 0, fired: false });
+  const castHoldStart = useCallback((e: React.PointerEvent, open: () => void) => {
+    if (e.pointerType === 'mouse') return;
+    const h = castHold.current;
+    if (h.timer) clearTimeout(h.timer);
+    h.fired = false;
+    h.x = e.clientX;
+    h.y = e.clientY;
+    h.timer = setTimeout(() => { h.timer = null; h.fired = true; open(); }, 450);
+  }, []);
+  const castHoldMove = useCallback((e: React.PointerEvent) => {
+    const h = castHold.current;
+    if (h.timer && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 10) { clearTimeout(h.timer); h.timer = null; }
+  }, []);
+  const castHoldEnd = useCallback(() => {
+    const h = castHold.current;
+    if (h.timer) { clearTimeout(h.timer); h.timer = null; }
+  }, []);
+
+  // The filmography opens under the cast row, which on a phone can be below
+  // the screen - bring it into view so a tap visibly does something.
+  const [castMenu, setCastMenu] = useState<(CastMenuTarget & { tmdbId: string }) | null>(null);
+  const closeCastMenu = useCallback(() => setCastMenu(null), []);
+  const openCastMenu = useCallback((member: { name: string; character?: string | null; photo?: string | null; tmdbId?: number | string | null }, el: HTMLElement) => {
+    if (member.tmdbId == null || member.tmdbId === '') return;
+    const photo = (el.querySelector('img, div') as HTMLElement | null) || el;
+    setCastMenu({ id: String(member.tmdbId), tmdbId: String(member.tmdbId), name: member.name, character: member.character || null, photo: member.photo || null, anchor: photo.getBoundingClientRect() });
+  }, []);
+  const personPanelRef = useRef<HTMLDivElement>(null);
+  const personViewId = personView?.id;
+  useEffect(() => {
+    if (personViewId == null) return;
+    const t = setTimeout(() => personPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
+    return () => clearTimeout(t);
+  }, [personViewId]);
   const isCastPointerDownRef = useRef(false);
   const castDragStartXRef = useRef(0);
   const castDragStartScrollLeftRef = useRef(0);
@@ -863,6 +950,45 @@ export function MediaDetailModal({
   // TV mode: one focus group for the whole modal body, so D-pad navigation
   // moves between the trailer button and the action row by actual on-
   // screen position instead of needing separate scopes stitched together.
+  // Open in AIOStreams needs to know which AIOStreams servers people here use.
+  const [aioServers, setAioServers] = useState<{ address: string; people: string[] }[]>([]);
+  const [aioPickerOpen, setAioPickerOpen] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    loadAioServers().then((list) => { if (!cancelled) setAioServers(list); });
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Bookmark and Watched as small pills (see SmallPill above).
+  const personalPills = (
+    <>
+      {enableWatchlist && (
+        <SmallPill
+          on={inWatchlist}
+          tint="var(--color-primary)"
+          onClick={toggleWatchlist}
+          busy={watchlistBusy}
+          title={inWatchlist ? 'In your Watchlist - tap to remove' : 'Add to Watchlist'}
+          icon={inWatchlist ? <BookmarkSolidIcon className="w-3.5 h-3.5" /> : <BookmarkOutlineIcon className="w-3.5 h-3.5" />}
+          label={inWatchlist ? 'Bookmarked' : 'Bookmark'}
+        />
+      )}
+      {enableWatchedIndicators && selfWatched !== null && (
+        <SmallPill
+          on={!!selfWatched}
+          tint="var(--color-success)"
+          onClick={toggleSelfWatched}
+          busy={selfWatchedBusy}
+          title={selfWatched ? 'Watched - tap to mark unwatched (the underlying history is kept)' : 'Mark as watched for the household'}
+          icon={<CheckCircleIcon className="w-3.5 h-3.5" />}
+          label={selfWatched ? 'Watched' : 'Not watched'}
+        />
+      )}
+    </>
+  );
+  const hasPersonalPills = enableWatchlist || (enableWatchedIndicators && selfWatched !== null);
+
   const TVScope = isTV ? FocusContext.Provider : Fragment;
   const tvScopeProps = isTV ? { value: modalFocusKey } : {};
 
@@ -1010,6 +1136,11 @@ export function MediaDetailModal({
             </button>
           ))}
           <h2 className="text-2xl font-bold font-display text-default">{title}</h2>
+          {/* On a computer, Bookmark and Watched sit right under the title,
+              where the eye lands first - not mixed in with the app buttons. */}
+          {!isTV && !isLoading && details?.imdb_id && hasPersonalPills && (
+            <div className="hidden sm:flex items-center gap-2 mt-2">{personalPills}</div>
+          )}
 
           {isLoading && (
             <div className="flex items-center gap-2 mt-4 text-base text-muted">
@@ -1137,6 +1268,18 @@ export function MediaDetailModal({
                 )}
               </div>
 
+              {/* On a phone, Bookmark, Watched and + Catalog are one row of
+                  small pills straight after the ratings. */}
+              {!isTV && details.imdb_id && (
+                <div className="flex sm:hidden items-center gap-1 flex-nowrap">
+                  {personalPills}
+                  <AddToListButton
+                    item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
+                    pill
+                  />
+                </div>
+              )}
+
               {/* "You might not even need an addon for this" - shown
                   unconditionally (not behind a disclosure like Collection
                   below) since it's meant to be seen at a glance, not opted
@@ -1235,10 +1378,8 @@ export function MediaDetailModal({
                     title={opts.title}
                     aria-label={opts.title}
                     aria-pressed={opts.on}
-                    className={`flex items-center justify-center gap-1.5 ${opts.label ? 'px-3' : 'w-10'} h-10 rounded-lg transition-colors shrink-0 ${opts.busy ? 'opacity-60 cursor-wait' : ''}`}
-                    style={opts.on
-                      ? { color: opts.tint, background: `color-mix(in srgb, ${opts.tint} 16%, transparent)` }
-                      : { color: 'var(--color-text-muted)', background: 'var(--color-surface-hover)' }}
+                    className={`flex items-center justify-center gap-1.5 ${opts.label ? 'px-3' : 'w-10'} h-10 rounded-lg transition-colors shrink-0 ${opts.on ? 'ibtn-tint-on' : 'ibtn-tint-off'} ${opts.busy ? 'opacity-60 cursor-wait' : ''}`}
+                    style={{ '--tint': opts.tint } as React.CSSProperties}
                   >
                     {opts.icon}
                     {opts.label && <span className="text-sm font-medium">{opts.label}</span>}
@@ -1288,8 +1429,9 @@ export function MediaDetailModal({
                       border: '1px solid rgba(167, 139, 250, 0.25)',
                     }}
                   >
-                    <PlayIcon className="w-4 h-4" />
-                    Open in Stremio
+                    {/* Fixed-width block on a phone, centred in the full-width
+                        button, so every app button's play icon lines up. */}
+                    <span className="inline-flex items-center gap-1.5 w-[11rem] sm:w-auto"><PlayIcon className="w-4 h-4 shrink-0" />Open in Stremio</span>
                   </a>
                 );
                 const nuvioBtn = (
@@ -1305,9 +1447,50 @@ export function MediaDetailModal({
                       border: '1px solid rgba(255, 152, 0, 0.18)',
                     }}
                   >
-                    <PlayIcon className="w-4 h-4" />
-                    Open in Nuvio
+                    <span className="inline-flex items-center gap-1.5 w-[11rem] sm:w-auto"><PlayIcon className="w-4 h-4 shrink-0" />Open in Nuvio</span>
                   </a>
+                );
+
+                // AIOStreams: B2's soft lavender-to-indigo, "AIO" in white.
+                // One server opens straight away; more than one asks which.
+                const aioType: 'movie' | 'series' = effectiveType === 'movie' ? 'movie' : 'series';
+                const aioLinks = aioServers
+                  .map((srv) => ({ ...srv, url: buildAioStreamsAppUrl(srv.address, details.imdb_id!, aioType) }))
+                  .filter((srv): srv is { address: string; people: string[]; url: string } => !!srv.url);
+                const aioStyle = {
+                  background: 'linear-gradient(110deg, rgba(212, 208, 255, 0.13), rgba(124, 111, 240, 0.22))',
+                  color: 'rgb(212, 208, 255)',
+                  border: '1px solid rgba(159, 146, 255, 0.25)',
+                };
+                const aioLabel = (
+                  <>
+                    <PlayIcon className="w-4 h-4" />
+                    <span className="whitespace-nowrap">{'Open in '}<span style={{ color: '#ffffff', fontWeight: 600 }}>AIO</span>Streams</span>
+                  </>
+                );
+                const aioClass = 'flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors w-full sm:w-auto';
+                const aioBtn = aioLinks.length === 0 ? null : aioLinks.length === 1 ? (
+                  <a href={aioLinks[0].url} tabIndex={isTV ? -1 : undefined} className={aioClass} style={aioStyle}>{aioLabel}</a>
+                ) : (
+                  <div className="relative w-full sm:w-auto">
+                    <button type="button" onClick={() => setAioPickerOpen((o) => !o)} aria-expanded={aioPickerOpen} className={aioClass} style={aioStyle}>{aioLabel}</button>
+                    {aioPickerOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setAioPickerOpen(false)} />
+                        <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] z-50 rounded-xl bg-surface border border-default shadow-xl p-2">
+                          <p className="text-sm font-semibold text-default px-1.5 pb-1">Open in AIOStreams on…</p>
+                          {aioLinks.map((srv) => (
+                            <a key={srv.address} href={srv.url} onClick={() => setAioPickerOpen(false)} className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-hover">
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-sm text-default truncate">{srv.people.join(', ') || 'AIOStreams'}</span>
+                                <span className="block text-xs text-muted truncate">{srv.address.replace(/^https?:\/\//, '')}</span>
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 );
 
                 // TV mode: Norigin owns keyboard focus/activation itself
@@ -1335,6 +1518,11 @@ export function MediaDetailModal({
                       <TVFocusable onEnterPress={() => { window.location.href = buildNuvioAppUrl(details.imdb_id!, effectiveType); }}>
                         {nuvioBtn}
                       </TVFocusable>
+                      {aioLinks.length === 1 && (
+                        <TVFocusable onEnterPress={() => { window.location.href = aioLinks[0].url; }}>
+                          {aioBtn}
+                        </TVFocusable>
+                      )}
                     </div>
                   );
                 }
@@ -1347,15 +1535,19 @@ export function MediaDetailModal({
                   <div className="flex items-center gap-2 flex-wrap">
                     {stremioBtn}
                     {nuvioBtn}
+                    {/* Jellyfin, AIOStreams or AIOMetadata people here: open it
+                        in the app this device picked (components/ui/OpenWithButton). */}
+                    <OpenWithButton imdbId={details.imdb_id!} type={aioType} />
                     <span className="hidden sm:block w-px h-6 mx-0.5" style={{ background: 'var(--color-surface-border)' }} />
                     <div className="flex items-center gap-1.5">
-                      {watchlistBtn}
-                      {watchedBtn}
                       {followBtn}
-                      <AddToListButton
-                        item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
-                        compact
-                      />
+                      {/* On a phone + Catalog is a pill after the ratings instead. */}
+                      <div className="hidden sm:block">
+                        <AddToListButton
+                          item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
+                          compact
+                        />
+                      </div>
                     </div>
                   </div>
                 );
@@ -1412,8 +1604,7 @@ export function MediaDetailModal({
                                 key={s.season}
                                 type="button"
                                 onClick={() => setActiveSeason(s.season)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap ${activeSeason === s.season ? 'bg-primary text-white' : 'text-muted'}`}
-                                style={activeSeason === s.season ? undefined : { background: 'var(--color-surface)' }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap ${activeSeason === s.season ? 'bg-primary text-white' : 'text-muted bg-surface'}`}
                               >
                                 Season {s.season}
                                 {s.watchedCount > 0 && (
@@ -1426,8 +1617,7 @@ export function MediaDetailModal({
                             {seasons.find((s) => s.season === activeSeason)?.episodes.map((ep) => (
                               <div
                                 key={`${ep.season}-${ep.episode}`}
-                                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-surface-hover"
-                                style={{ background: ep.watched ? 'color-mix(in srgb, var(--color-success) 8%, transparent)' : 'transparent' }}
+                                className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-surface-hover ${ep.watched ? 'ep-watched' : 'ep-unwatched'}`}
                               >
                                 <span className="text-xs shrink-0 w-10 tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
                                   E{String(ep.episode).padStart(2, '0')}
@@ -1459,11 +1649,10 @@ export function MediaDetailModal({
                     onClick={() => { setWtOpen((v) => !v); if (!wtOpen) loadWatchTogether(); }}
                     className={wtOpen
                       ? 'w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left'
-                      : 'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-colors'}
-                    style={wtOpen ? undefined : { background: 'var(--color-surface-hover)' }}
+                      : 'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-colors bg-surface-hover'}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <ShieldCheckIcon className="w-4 h-4 shrink-0" style={{ color: wtHasPact ? 'var(--color-primary)' : 'var(--color-text-muted)' }} />
+                      <ShieldCheckIcon className={`w-4 h-4 shrink-0 ${wtHasPact ? 'text-primary' : 'text-muted'}`} />
                       <span className="text-sm font-medium text-default">Spoiler guard</span>
                       {wtHasPact && (
                         <span className="text-xs text-muted truncate">
@@ -1495,13 +1684,7 @@ export function MediaDetailModal({
                                   key={u.id}
                                   type="button"
                                   onClick={() => setWtSelected((prev) => { const n = new Set(prev); if (n.has(u.id)) n.delete(u.id); else n.add(u.id); return n; })}
-                                  className="px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
-                                  style={{
-                                    background: on ? 'var(--color-primary)' : 'var(--color-surface)',
-                                    color: on ? 'var(--color-bg)' : 'var(--color-text-muted)',
-                                    border: '1px solid',
-                                    borderColor: on ? 'var(--color-primary)' : 'var(--color-surface-border)',
-                                  }}
+                                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${on ? 'chip-solid-on' : 'chip-solid-off'}`}
                                 >
                                   {u.username}
                                 </button>
@@ -1547,7 +1730,9 @@ export function MediaDetailModal({
                     onPointerDown={handleCastPointerDown}
                     onPointerMove={handleCastPointerMove}
                     onPointerUp={handleCastPointerUp}
-                    className="flex gap-4 overflow-x-auto pb-1 pr-6 no-scrollbar cursor-grab active:cursor-grabbing select-none"
+                    // Room above and left of the photos: the row hides what
+                    // overflows it, and the hover ring sits outside the photo.
+                    className="flex gap-4 overflow-x-auto pt-1.5 pl-1 pb-1 pr-6 -mt-1.5 -ml-1 no-scrollbar cursor-grab active:cursor-grabbing select-none"
                   >
                     {details.cast.slice(0, 10).map((member) => {
                       const clickable = member.tmdbId != null && member.tmdbId !== '';
@@ -1558,10 +1743,29 @@ export function MediaDetailModal({
                         // Only a real click (not a drag) fires - the cast row's
                         // drag-scroll only captures the pointer after 5px of
                         // movement, so a stationary click still reaches here.
-                        onClick={() => { if (clickable) openPerson(member); }}
+                        onClick={() => {
+                          if (castHold.current.fired) { castHold.current.fired = false; return; }
+                          if (clickable) openPerson(member);
+                        }}
+                        onPointerDown={(e) => {
+                          if (!clickable) return;
+                          const el = e.currentTarget;
+                          castHoldStart(e, () => openCastMenu(member, el));
+                        }}
+                        onPointerMove={castHoldMove}
+                        onPointerUp={castHoldEnd}
+                        onPointerCancel={castHoldEnd}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          // Android sends this for a held finger too; the timer may already have opened it.
+                          if (clickable && !castHold.current.fired) openCastMenu(member, e.currentTarget);
+                        }}
                         disabled={!clickable}
                         title={clickable ? `See ${member.name}'s other titles` : member.name}
                         className={`shrink-0 w-24 text-center ${clickable ? 'cursor-pointer group/cast' : 'cursor-default'}`}
+                        // No text selection or callout on a held finger - that
+                        // is the phone's Copy / Look Up bubble, not ours.
+                        style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
                       >
                         {member.photo ? (
                           <img
@@ -1604,8 +1808,23 @@ export function MediaDetailModal({
                       a context switch. Clicking a title resolves its IMDb id
                       and re-drives the whole modal to that title (setOverrideItem),
                       same navigation "More Like This" uses. */}
+                  {castMenu && (
+                    <CastMenu
+                      target={castMenu}
+                      title={details?.title || effectiveFallbackTitle || null}
+                      follow={personFollows[castMenu.tmdbId] || null}
+                      titlesOpen={!!personView && String(personView.id) === castMenu.tmdbId}
+                      onClose={closeCastMenu}
+                      onSeeEverything={() => seeEverything(castMenu.tmdbId, castMenu.name)}
+                      onShowHere={() => {
+                        if (personView && String(personView.id) === castMenu.tmdbId) setPersonView(null);
+                        else openPerson({ name: castMenu.name, tmdbId: castMenu.tmdbId }, true);
+                      }}
+                      onFollow={() => togglePersonFollow(castMenu.tmdbId, castMenu.name)}
+                    />
+                  )}
                   {personView && (
-                    <div className="mt-4 rounded-xl border border-default bg-surface-hover/40 p-3">
+                    <div ref={personPanelRef} className="mt-4 rounded-xl border border-default bg-surface-hover/40 p-3 scroll-mt-4">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-sm font-semibold text-default">
                           {personView.name}
@@ -1625,10 +1844,8 @@ export function MediaDetailModal({
                               : personFollows[String(personView.id)].muted
                                 ? 'Alerts muted - tap to turn them back on'
                                 : 'Following - tap to mute'}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
-                            style={personFollows[String(personView.id)] && !personFollows[String(personView.id)].muted
-                              ? { color: 'var(--color-primary)', background: 'color-mix(in srgb, var(--color-primary) 16%, transparent)' }
-                              : { color: 'var(--color-text-muted)', background: 'var(--color-surface-hover)' }}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${personFollows[String(personView.id)] && !personFollows[String(personView.id)].muted ? 'ibtn-tint-on' : 'ibtn-tint-off'}`}
+                            style={{ '--tint': 'var(--color-primary)' } as React.CSSProperties}
                           >
                             <BellIcon className="w-3.5 h-3.5" />
                             {!personFollows[String(personView.id)]
@@ -1684,6 +1901,16 @@ export function MediaDetailModal({
                           ))}
                         </div>
                       )}
+                      {!personView.loading && !personView.unavailable && (
+                        <button
+                          type="button"
+                          onClick={() => seeEverything(personView.id, personView.name)}
+                          className="mt-2.5 text-sm font-semibold transition-opacity hover:opacity-80"
+                          style={{ color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)' }}
+                        >
+                          See everything they&apos;ve been in →
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1726,7 +1953,7 @@ export function MediaDetailModal({
                             const total = others.length + 1;
                             const done = watchedTotal >= total;
                             return (
-                              <span className="text-xs" style={{ color: done ? 'var(--color-success)' : undefined }}>
+                              <span className={`text-xs ${done ? 'text-success' : ''}`}>
                                 {done ? 'saga complete' : `watched ${watchedTotal} of ${total}`}
                               </span>
                             );

@@ -79,6 +79,8 @@ async function fetchCatalogRaw(type, catalog, extraParts) {
       poster: m.poster || null,
       releaseInfo: m.releaseInfo || (m.year ? String(m.year) : null),
       imdbRating: m.imdbRating || null,
+      // "109 min" - what Discover's length filter reads (discoverFacets).
+      runtime: m.runtime || null,
       genres: Array.isArray(m.genres) ? m.genres : []
     })).filter((m) => m.id && m.id.startsWith('tt')) // only IMDb-backed items work with our modal/app links
   } catch (error) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -24,8 +24,10 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
       }
     };
 
-    // Close on scroll
+    // Close on scroll - but not while typing in a box inside the menu: a
+    // phone's keyboard opening scrolls the page.
     const handleScroll = () => {
+      if (menuRef.current && menuRef.current.contains(document.activeElement)) return;
       onClose();
     };
 
@@ -43,23 +45,38 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
   // Adjust position to keep within viewport
   const [adjustedPosition, setAdjustedPosition] = useState(position);
 
-  useEffect(() => {
-    if (isOpen && menuRef.current) {
-      const rect = menuRef.current.getBoundingClientRect();
-      let { x, y } = position;
+  // Kept whole on screen, and again whenever the menu changes size (a confirm
+  // step inside it makes it taller): near the right edge it moves left, near
+  // the bottom it opens upwards from the click, and it never goes past any
+  // edge. Taller than the screen, it scrolls inside (maxHeight below).
+  const fit = useCallback(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const pad = 10;
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = window.innerHeight;
+    // Its real size - the opening animation scales it, which the on-screen
+    // box would include.
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let { x, y } = position;
+    if (x + width > vw - pad) x = position.x - width >= pad ? position.x - width : vw - width - pad;
+    if (y + height > vh - pad) y = position.y - height >= pad ? position.y - height : vh - height - pad;
+    x = Math.min(x, vw - width - pad);
+    y = Math.min(y, vh - height - pad);
+    setAdjustedPosition({ x: Math.max(pad, x), y: Math.max(pad, y) });
+  }, [position]);
 
-      if (x + rect.width > window.innerWidth) {
-        x = window.innerWidth - rect.width - 10;
-      }
-      if (y + rect.height > window.innerHeight) {
-        y = window.innerHeight - rect.height - 10;
-      }
-
-      setAdjustedPosition({ x, y });
-    } else {
-      setAdjustedPosition(position);
-    }
-  }, [isOpen, position]);
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- placed before paint, measured from the drawn menu
+    if (!isOpen) { setAdjustedPosition(position); return; }
+    fit();
+    const el = menuRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isOpen, position, fit]);
 
   if (!isOpen) return null;
 
@@ -76,8 +93,12 @@ export function ContextMenu({ isOpen, position, onClose, children }: ContextMenu
           top: adjustedPosition.y,
           left: adjustedPosition.x,
           zIndex: 9999, // High z-index to be on top of everything
+          maxHeight: 'calc(100vh - 20px)',
+          overflowY: 'auto',
         }}
-        className="min-w-[180px] py-1.5 rounded-xl shadow-xl bg-surface border border-default backdrop-blur-xl"
+        // Options a step bigger than body text in every menu (15px, more room,
+        // 18px icons) - set here so all of them stay alike.
+        className="min-w-[180px] py-1.5 rounded-xl shadow-xl bg-surface border border-default backdrop-blur-xl [&_button]:text-[15px] [&_button]:py-2.5 [&_button>svg]:w-[18px] [&_button>svg]:h-[18px]"
         onClick={(e) => e.stopPropagation()} // Prevent click from bubbling
         onContextMenu={(e) => e.preventDefault()} // Prevent native context menu on the menu itself
       >

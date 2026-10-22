@@ -1384,6 +1384,7 @@ function AddonCard({
     <>
       {addon.customTag && (
         <span
+          key={addonTagColors?.[addon.customTag] || 'default'}
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-muted text-primary"
           style={
             addonTagColors?.[addon.customTag]
@@ -1569,6 +1570,7 @@ function AddonCard({
             )}
             {addon.customTag && (
               <span
+                key={addonTagColors?.[addon.customTag] || 'default'}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-primary-muted text-primary"
                 style={
                   addonTagColors?.[addon.customTag]
@@ -1730,7 +1732,7 @@ function AddonCard({
               className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-default hover:bg-surface-hover transition-colors"
             >
               <span className="flex items-center gap-2 truncate">
-                <TagIcon className="w-4 h-4 shrink-0" style={addon.customTag && addonTagColors?.[addon.customTag] ? { color: addonTagColors[addon.customTag] } : undefined} />
+                <TagIcon key={(addon.customTag && addonTagColors?.[addon.customTag]) || 'default'} className="w-4 h-4 shrink-0" style={addon.customTag && addonTagColors?.[addon.customTag] ? { color: addonTagColors[addon.customTag] } : undefined} />
                 <span className="truncate">{addon.customTag ? `Label: ${addon.customTag}` : 'Label'}</span>
               </span>
               <span className="text-muted shrink-0">›</span>
@@ -2094,10 +2096,9 @@ function AddAddonModal({
                                 placeholder="https://addon.example.com/manifest.json"
                                 value={manifestUrl}
                                 onChange={(e) => setManifestUrl(e.target.value)}
-                                className="w-full pl-12 pr-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none"
+                                className={`w-full pl-12 pr-4 py-3.5 rounded-xl transition-all duration-200 focus:outline-none ${error || urlError ? 'bd-err' : 'bd-ok'}`}
                                 style={{
                                   background: 'var(--color-subtle)',
-                                  border: `1px solid ${error || urlError ? 'var(--color-error)' : 'var(--color-surface-border)'}`,
                                   color: 'var(--color-text)'
                                 }}
                               />

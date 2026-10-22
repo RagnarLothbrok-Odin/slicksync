@@ -236,6 +236,13 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
 
   async function ensureAuth() {
     const cached = tokenCache.get(userId)
+    if (cached?.unsaved && !cached.saving && onTokenRefresh) {
+      cached.saving = true
+      Promise.resolve(onTokenRefresh(cached.refreshToken))
+        .then(() => { cached.unsaved = false })
+        .catch(() => {})
+        .finally(() => { cached.saving = false })
+    }
     if (cached?.accessToken && !isTokenExpired(cached.accessToken)) {
       return cached.accessToken
     }
@@ -252,8 +259,17 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
 
         tokenCache.set(userId, { accessToken: newAccessToken, refreshToken: newRefreshToken })
 
+        // The old refresh token is spent the moment Nuvio answers, so the new
+        // one has to reach the database. A failed save is retried, and is not
+        // reported as an expired sign-in - the sign-in works, and the token
+        // kept in memory is saved on the next use.
         if (result.refresh_token && onTokenRefresh) {
           await onTokenRefresh(newRefreshToken)
+            .catch(() => onTokenRefresh(newRefreshToken))
+            .catch((saveError) => {
+              tokenCache.set(userId, { accessToken: newAccessToken, refreshToken: newRefreshToken, unsaved: true })
+              console.warn(`[NuvioProvider] Could not save the new sign-in token for user ${userId}, will retry:`, saveError?.message)
+            })
         }
         return newAccessToken
       } catch (e) {
@@ -662,6 +678,28 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
       return Array.isArray(rows) ? rows : []
     },
 
+    // Each profile's picture: the avatar it picked from Nuvio's catalogue (a
+    // public file on the backend), else null - callers fall back to the
+    // profile's colour (avatar_color_hex).
+    async getProfileAvatars() {
+      const accessToken = await ensureAuth()
+      const config = await getServerConfig()
+      const [profiles, catalog] = await Promise.all([
+        supabaseRpc('sync_pull_profiles', {}, accessToken, config),
+        supabaseRpc('get_avatar_catalog', {}, accessToken, config).catch(() => []),
+      ])
+      const base = require('./supabase').backendUrl(config)
+      const paths = new Map((Array.isArray(catalog) ? catalog : []).map((a) => [a.id, a.storage_path]))
+      const out = new Map()
+      for (const p of Array.isArray(profiles) ? profiles : []) {
+        const idx = Number(p.profile_index ?? p.profileIndex)
+        if (!Number.isInteger(idx)) continue
+        const path = p.avatar_id ? paths.get(p.avatar_id) : null
+        out.set(idx, { url: path ? `${base}/storage/v1/object/public/avatars/${String(path).split('/').map(encodeURIComponent).join('/')}` : null, color: p.avatar_color_hex || null })
+      }
+      return out
+    },
+
     // A Nuvio TV or computer that isn't signed in shows a 6-character code.
     // A signed-in account looks the code up (which device is asking) and
     // approves it; the device is then signed in to this account and picks
@@ -678,6 +716,66 @@ function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profil
       const accessToken = await ensureAuth()
       const rows = await supabaseRpc('approve_device_login_session', { p_user_code: code }, accessToken, await getServerConfig())
       return (Array.isArray(rows) ? rows[0] : rows) || null
+    },
+
+    // One profile's watch state as Nuvio keeps it, unmerged: finished titles
+    // and episodes (watched_items, with the date), resume points
+    // (watch_progress) and the library. Read a page at a time - the backend
+    // may cap one answer below what a long history holds.
+    async getWatchState(profileId) {
+      const accessToken = await ensureAuth()
+      const config = await getServerConfig()
+      const PAGE = 1000
+      const watched = []
+      for (let page = 1; page <= 200; page++) {
+        const rows = await supabaseRpc('sync_pull_watched_items', { p_profile_id: profileId, p_page: page, p_page_size: PAGE }, accessToken, config)
+        const list = Array.isArray(rows) ? rows : []
+        watched.push(...list)
+        if (list.length < PAGE) break
+      }
+      const progress = await supabaseRpc('sync_pull_watch_progress', { p_profile_id: profileId }, accessToken, config)
+      const library = []
+      for (let offset = 0; offset < 100000; offset += 500) {
+        const rows = await supabaseRpc('sync_pull_library', { p_profile_id: profileId, p_limit: 500, p_offset: offset }, accessToken, config)
+        const list = Array.isArray(rows) ? rows : []
+        library.push(...list)
+        if (list.length < 500) break
+      }
+      return { watched, progress: Array.isArray(progress) ? progress : [], library }
+    },
+
+    // Writes for Copy watch history and Keep in step. Each is an upsert (or a
+    // delete by key) on one profile, tagged with SlickSync as the origin so
+    // Nuvio's apps pick the change up as coming from elsewhere.
+    async pushWatchedItems(profileId, items) {
+      if (!items?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_watched_items', { p_items: items, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async deleteWatchedItems(profileId, keys) {
+      if (!keys?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_delete_watched_items', { p_keys: keys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async pushWatchProgress(profileId, entries) {
+      if (!entries?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_watch_progress', { p_entries: entries, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async deleteWatchProgress(profileId, progressKeys) {
+      if (!progressKeys?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_delete_watch_progress', { p_keys: progressKeys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async pushLibraryItems(profileId, items) {
+      if (!items?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_push_library_items', { p_items: items, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
+    },
+    async deleteLibraryItems(profileId, keys) {
+      if (!keys?.length) return
+      const accessToken = await ensureAuth()
+      await supabaseRpc('sync_delete_library_items', { p_keys: keys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
     },
 
     // A profile's media servers (Jellyfin / Emby) - the list Nuvio's apps

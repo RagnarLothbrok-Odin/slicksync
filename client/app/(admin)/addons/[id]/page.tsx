@@ -2313,19 +2313,7 @@ function BackupAddonPickerModal({ isOpen, onClose, onSelect, currentAddonId, exc
               whileHover={{ scale: 1.005 }}
               whileTap={{ scale: 0.995 }}
               onClick={() => { onSelect(addon.id); onClose(); }}
-              className="w-full flex items-center gap-4 p-3.5 rounded-xl text-left transition-all group"
-              style={{
-                background: 'transparent',
-                border: '1px solid var(--color-surface-border)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--color-surface-hover)';
-                e.currentTarget.style.borderColor = 'var(--color-text-subtle)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.borderColor = 'var(--color-surface-border)';
-              }}
+              className="w-full flex items-center gap-4 p-3.5 rounded-xl text-left transition-all group hov-outline-row"
             >
               {/* Addon icon */}
               <div
@@ -2367,8 +2355,7 @@ function BackupAddonPickerModal({ isOpen, onClose, onSelect, currentAddonId, exc
               {/* Status dot */}
               <div className="flex items-center gap-2 shrink-0">
                 <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ background: addon.isOnline ? 'var(--color-success)' : 'var(--color-error)' }}
+                  className={`w-2 h-2 rounded-full ${addon.isOnline ? 'bg-success' : 'bg-error'}`}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
                   {addon.isOnline ? 'Online' : 'Offline'}
@@ -2550,7 +2537,7 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: addon?.isOnline !== false ? 'var(--color-success)' : 'var(--color-error)' }} />
+                    <div className={`w-1.5 h-1.5 rounded-full ${addon?.isOnline !== false ? 'bg-success' : 'bg-error'}`} />
                     <span className="text-[11px]" style={{ color: 'var(--color-text-subtle)' }}>
                       {addon?.isOnline !== false ? 'Online' : 'Offline'}
                     </span>
@@ -2562,13 +2549,9 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
           {/* Connector - Arrow only, no lines */}
           <div className="flex items-center justify-center py-1">
             <div
-              className="w-6 h-6 rounded-full flex items-center justify-center"
-              style={{
-                background: backupChain.length > 0 ? 'rgba(245, 158, 11, 0.15)' : 'var(--color-surface-hover)',
-                border: `1.5px solid ${backupChain.length > 0 ? 'rgba(245, 158, 11, 0.4)' : 'var(--color-surface-border)'}`,
-              }}
+              className={`w-6 h-6 rounded-full flex items-center justify-center ${backupChain.length > 0 ? 'chain-link-on' : 'chain-link-off'}`}
             >
-              <svg className="w-3 h-3" style={{ color: backupChain.length > 0 ? '#f59e0b' : 'var(--color-text-subtle)' }} fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
               </svg>
             </div>
@@ -2639,7 +2622,7 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${backup.isOnline ? 'animate-pulse' : ''}`} style={{ background: backup.isOnline ? 'var(--color-success)' : 'var(--color-error)' }} />
+                    <div className={`w-1.5 h-1.5 rounded-full ${backup.isOnline ? 'animate-pulse bg-success' : 'bg-error'}`} />
                     <span className="text-[11px]" style={{ color: 'var(--color-text-subtle)' }}>
                       {backup.isOnline ? 'Online' : 'Offline'}
                     </span>
@@ -2669,20 +2652,8 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
             whileTap={{ scale: 0.99 }}
             onClick={() => openPickerForAddon(lastAddonInChain.id)}
             disabled={loading}
-            className="w-full p-4 rounded-xl border-2 border-dashed transition-all flex items-center justify-center gap-3 group"
-            style={{
-              borderColor: 'var(--color-surface-border)',
-              background: 'transparent',
-              minHeight: backupChain.length === 0 ? '96px' : '64px',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(245, 158, 11, 0.4)';
-              e.currentTarget.style.background = 'rgba(245, 158, 11, 0.04)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--color-surface-border)';
-              e.currentTarget.style.background = 'transparent';
-            }}
+            className="w-full p-4 rounded-xl border-2 border-dashed transition-all flex items-center justify-center gap-3 group hov-amber-add"
+            style={{ minHeight: backupChain.length === 0 ? '96px' : '64px' }}
           >
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors"

@@ -22,7 +22,7 @@ type TrashRow = Awaited<ReturnType<typeof api.getTrash>>[number];
 // inverts the verb: "restoring" it REMOVES the rows that import created.
 const KIND_LABELS: Record<string, string> = {
   catalog: 'Catalog', addon: 'Addon', user: 'User', group: 'Group',
-  membership: 'Group removal', vault: 'Vault entry', wipe: 'Graveyard wipe', import: 'History import',
+  membership: 'Group removal', vault: 'Vault entry', wipe: 'Graveyard wipe', import: 'History import', viewing: 'Removed viewing',
 };
 
 export function TrashPanel() {

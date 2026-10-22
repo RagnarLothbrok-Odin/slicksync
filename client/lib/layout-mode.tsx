@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useState, ReactNode } from 'react';
 import { useIsTV } from './hooks/useIsTV';
 
 // Layout mode is independent of Theme (lib/theme.tsx) - Theme picks colors,
@@ -51,7 +51,10 @@ export function LayoutModeProvider({ children }: { children: ReactNode }) {
   // at all" - TV mode ignores both the default and any saved preference.
   const isTV = useIsTV();
 
-  useEffect(() => {
+  // Read before the first paint after hydration (a layout effect, not a
+  // plain one): with a plain effect someone on Original saw Top Navi drawn
+  // first and then the whole page rebuilt in the other layout.
+  useLayoutEffect(() => {
     const saved = localStorage.getItem('slicksync-layout-mode') as LayoutModeId | null;
     const initial = saved && layoutModeIds.includes(saved) ? saved : 'nebula';
     setLayoutModeState(initial);
@@ -105,7 +108,7 @@ const NEBULA_ELIGIBLE_PATHS = [
 // opening a guide from the command palette snapped you into the other layout
 // mid-session, which reads as the layout setting resetting itself.
 // '/invitations/' is an invitation's own page - it was missed the same way.
-const NEBULA_ELIGIBLE_PREFIXES = ['/users/', '/groups/', '/addons/', '/catalogs/', '/guides/', '/invitations/'];
+const NEBULA_ELIGIBLE_PREFIXES = ['/users/', '/groups/', '/addons/', '/catalogs/', '/guides/', '/invitations/', '/tasks/'];
 
 export function isNebulaEligiblePath(pathname: string): boolean {
   return NEBULA_ELIGIBLE_PATHS.includes(pathname)

@@ -183,7 +183,7 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                 style={{ backgroundColor: 'var(--color-bg-subtle)', border: '1px solid var(--color-surface-border)' }}
             >
                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: hasUuid ? 'var(--color-success)' : 'var(--color-text-subtle)' }} />
+                    <div className={`w-2 h-2 rounded-full ${hasUuid ? 'bg-success' : 'dot-off'}`} />
                     <span className="text-sm" style={{ color: 'var(--color-text)' }}>
                         {/* Full value lives on the Settings page now (with a copy
                             button) - this is just the linking-status indicator that
@@ -192,7 +192,7 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: (hasStremio && linkedProvider === 'stremio') ? 'var(--color-success)' : 'var(--color-text-subtle)' }} />
+                    <div className={`w-2 h-2 rounded-full ${(hasStremio && linkedProvider === 'stremio') ? 'bg-success' : 'dot-off'}`} />
                     <span className="text-sm" style={{ color: 'var(--color-text)' }}>
                         Stremio: {(hasStremio && linkedProvider === 'stremio') ? (
                             <span className="opacity-70">
@@ -204,7 +204,7 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: (hasStremio && linkedProvider === 'nuvio') ? 'var(--color-success)' : 'var(--color-text-subtle)' }} />
+                    <div className={`w-2 h-2 rounded-full ${(hasStremio && linkedProvider === 'nuvio') ? 'bg-success' : 'dot-off'}`} />
                     <span className="text-sm" style={{ color: 'var(--color-text)' }}>
                         Nuvio: {(hasStremio && linkedProvider === 'nuvio') ? (
                             <span className="opacity-70">
@@ -355,11 +355,10 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                         value={password}
                         onChange={(e) => { setPassword(e.target.value); setError(null); }}
                         placeholder="Password"
-                        className="w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none"
+                        className={`w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none ${error ? 'bd-err' : 'bd-ok'}`}
                         style={{
                             backgroundColor: 'var(--color-bg-subtle)',
                             color: 'var(--color-text)',
-                            border: `1px solid ${error ? 'var(--color-error)' : 'var(--color-surface-border)'}`,
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter') handleUnlinkStremio(); }}
                     />
@@ -463,11 +462,10 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                         value={password}
                         onChange={(e) => { setPassword(e.target.value); setError(null); }}
                         placeholder="At least 4 characters"
-                        className="w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none"
+                        className={`w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none ${error ? 'bd-err' : 'bd-ok'}`}
                         style={{
                             backgroundColor: 'var(--color-bg-subtle)',
                             color: 'var(--color-text)',
-                            border: `1px solid ${error ? 'var(--color-error)' : 'var(--color-surface-border)'}`,
                         }}
                     />
                     <PasswordToggleButton visible={passwordVisible} onToggle={() => setPasswordVisible((v) => !v)} />
@@ -484,11 +482,10 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                         value={confirmPassword}
                         onChange={(e) => { setConfirmPassword(e.target.value); setError(null); }}
                         placeholder="Repeat password"
-                        className="w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none"
+                        className={`w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none ${error?.includes('match') ? 'bd-err' : 'bd-ok'}`}
                         style={{
                             backgroundColor: 'var(--color-bg-subtle)',
                             color: 'var(--color-text)',
-                            border: `1px solid ${error?.includes('match') ? 'var(--color-error)' : 'var(--color-surface-border)'}`,
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter') handleSetCredentials(); }}
                     />
@@ -621,10 +618,8 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                                 </h3>
                                 <button
                                     onClick={handleClose}
-                                    className="p-1.5 rounded-lg transition-all"
+                                    className="p-1.5 rounded-lg transition-all hov-surface"
                                     style={{ color: 'var(--color-text-muted)' }}
-                                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface-hover)'; }}
-                                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                                 >
                                     <XMarkIcon className="w-5 h-5" />
                                 </button>

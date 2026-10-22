@@ -352,10 +352,9 @@ export default function UserSharesPage() {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={() => handleToggleSelect(share.id)}
-        className="relative rounded-xl overflow-hidden cursor-pointer group"
+        className={`relative rounded-xl overflow-hidden cursor-pointer group ${isSelected ? 'bd2-sel' : 'bd2-off'}`}
         style={{
           background: 'var(--color-surface)',
-          border: `2px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
         }}
       >
         {/* Selection indicator */}
@@ -428,9 +427,8 @@ export default function UserSharesPage() {
           <button
             onClick={() => handleAddToLibrary(share)}
             disabled={actionLoading === share.id}
-            className="flex-1 py-2 flex items-center justify-center transition-colors hover:bg-surface-hover"
+            className={`flex-1 py-2 flex items-center justify-center transition-colors hover:bg-surface-hover ${inLibrary ? 'text-primary' : 'text-muted'}`}
             title={inLibrary ? 'In library' : 'Add to library'}
-            style={{ color: inLibrary ? 'var(--color-primary)' : 'var(--color-text-muted)' }}
           >
             {inLibrary ? (
               <BookmarkIconSolid className="w-4 h-4" />
@@ -487,10 +485,9 @@ export default function UserSharesPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         onClick={() => handleToggleSelect(share.id)}
-        className="flex items-center gap-4 p-3 rounded-xl cursor-pointer"
+        className={`flex items-center gap-4 p-3 rounded-xl cursor-pointer ${isSelected ? 'bd2-sel' : 'bd2-off'}`}
         style={{
           background: 'var(--color-surface)',
-          border: `2px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-surface-border)'}`,
         }}
       >
         {/* Poster */}
@@ -568,10 +565,9 @@ export default function UserSharesPage() {
           <button
             onClick={() => handleAddToLibrary(share)}
             disabled={actionLoading === share.id}
-            className="p-2 rounded-lg transition-colors"
-            style={{ 
+            className={`p-2 rounded-lg transition-colors ${inLibrary ? 'text-primary' : 'text-muted'}`}
+            style={{
               background: 'var(--color-surface-elevated)',
-              color: inLibrary ? 'var(--color-primary)' : 'var(--color-text-muted)',
             }}
             title={inLibrary ? 'In library' : 'Add to library'}
           >
@@ -636,21 +632,13 @@ export default function UserSharesPage() {
         >
           <button
             onClick={() => { setActiveTab('received'); setSelectedShares(new Set()); }}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
-            style={{
-              background: activeTab === 'received' ? 'var(--color-primary)' : 'transparent',
-              color: activeTab === 'received' ? 'white' : 'var(--color-text-muted)',
-            }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'received' ? 'seg-on' : 'seg-off'}`}
           >
             <InboxIcon className="w-4 h-4" />
             Received
             {unviewedCount > 0 && (
               <span
-                className="px-1.5 py-0.5 rounded-full text-xs font-bold"
-                style={{
-                  background: activeTab === 'received' ? 'white' : 'var(--color-primary)',
-                  color: activeTab === 'received' ? 'var(--color-primary)' : 'white',
-                }}
+                className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${activeTab === 'received' ? 'badge-flip' : 'seg-on'}`}
               >
                 {unviewedCount}
               </span>
@@ -658,11 +646,7 @@ export default function UserSharesPage() {
           </button>
           <button
             onClick={() => { setActiveTab('sent'); setSelectedShares(new Set()); }}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
-            style={{
-              background: activeTab === 'sent' ? 'var(--color-primary)' : 'transparent',
-              color: activeTab === 'sent' ? 'white' : 'var(--color-text-muted)',
-            }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'sent' ? 'seg-on' : 'seg-off'}`}
           >
             <PaperAirplaneIcon className="w-4 h-4" />
             Sent ({sentShares.length})

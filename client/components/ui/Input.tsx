@@ -114,8 +114,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         </div>
         {(error || hint) && (
           <p
-            className="mt-2 text-sm"
-            style={{ color: error ? 'var(--color-error)' : 'var(--color-text-subtle)' }}
+            className={`mt-2 text-sm ${error ? 'text-error' : 'text-subtle'}`}
           >
             {error || hint}
           </p>
@@ -190,8 +189,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         />
         {(error || hint) && (
           <p 
-            className="mt-2 text-sm"
-            style={{ color: error ? 'var(--color-error)' : 'var(--color-text-subtle)' }}
+            className={`mt-2 text-sm ${error ? 'text-error' : 'text-subtle'}`}
           >
             {error || hint}
           </p>

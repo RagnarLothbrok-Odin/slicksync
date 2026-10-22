@@ -377,14 +377,7 @@ export default function InvitationDetailPage() {
                   </div>
                 </div>
                 <span 
-                  className="text-sm font-bold tabular-nums"
-                  style={{ 
-                    color: usagePercentage >= 80 
-                      ? 'var(--color-error)' 
-                      : usagePercentage >= 50 
-                        ? 'var(--color-warning)' 
-                        : 'var(--color-primary)'
-                  }}
+                  className={`text-sm font-bold tabular-nums ${usagePercentage >= 80 ? 'text-error' : usagePercentage >= 50 ? 'text-warning' : 'text-primary'}`}
                 >
                   {Math.round(usagePercentage)}%
                 </span>
@@ -401,15 +394,10 @@ export default function InvitationDetailPage() {
                 </div>
                 
                 <motion.div 
-                  className="h-full rounded-lg relative flex items-center justify-center"
+                  className={`h-full rounded-lg relative flex items-center justify-center ${usagePercentage >= 80 ? 'usage-bar-hot' : 'usage-bar-ok'}`}
                   initial={{ width: 0 }}
                   animate={{ width: `${Math.min(usagePercentage, 100)}%` }}
                   transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-                  style={{ 
-                    background: usagePercentage >= 80
-                      ? 'linear-gradient(180deg, rgba(239,68,68,0.9) 0%, rgba(220,38,38,0.95) 100%)'
-                      : 'linear-gradient(180deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
-                  }}
                 >
                   {/* Used count in center of used portion (only show if > 0) */}
                   {(invitation.currentUses || invitation.uses || 0) > 0 && (

@@ -312,17 +312,7 @@ export function NebulaBar({
                     href={link.href}
                     tabIndex={isTV ? -1 : undefined}
                     onClick={closeMobileNav}
-                    className={isTV ? 'nav-item-hover-pill flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap' : 'nav-item-hover-pill flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full whitespace-nowrap'}
-                    style={
-                      isActive
-                        ? {
-                            color: '#fff',
-                            background:
-                              'linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 55%, transparent), color-mix(in srgb, var(--color-secondary) 30%, transparent))',
-                            boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 40%, transparent)',
-                          }
-                        : { color: 'var(--color-text-muted)' }
-                    }
+                    className={`${isTV ? 'nav-item-hover-pill flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap' : 'nav-item-hover-pill flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full whitespace-nowrap'} ${isActive ? 'nebula-link-on' : 'text-muted'}`}
                   >
                     <Icon className={isTV ? 'w-3.5 h-3.5 shrink-0' : 'w-4 h-4 shrink-0'} />
                     {link.label}

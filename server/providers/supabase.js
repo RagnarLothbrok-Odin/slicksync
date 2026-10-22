@@ -481,6 +481,8 @@ module.exports = {
   isTransientFailure,
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  // The backend's own address for an account's config - public files (avatars) live under it.
+  backendUrl: (serverConfig) => resolveConfig(serverConfig).url,
   _test: {
     // Puts every breaker back to closed, so one test's failures do not hold
     // back the next one's calls.

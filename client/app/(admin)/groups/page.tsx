@@ -1328,18 +1328,10 @@ function CloneGroupModal({
                       whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setIncludeUsers(!includeUsers)}
-                      className="w-full flex items-center gap-3 p-4 rounded-xl transition-all cursor-pointer"
-                      style={{
-                        background: includeUsers ? 'color-mix(in srgb, var(--color-primary) 15%, transparent)' : 'var(--color-subtle)',
-                        border: `1px solid ${includeUsers ? 'var(--color-primary)' : 'var(--color-surface-border)'}`
-                      }}
+                      className={`w-full flex items-center gap-3 p-4 rounded-xl transition-all cursor-pointer ${includeUsers ? 'opt-row-on' : 'opt-row-off'}`}
                     >
                       <div
-                        className="w-5 h-5 rounded-md flex items-center justify-center transition-all"
-                        style={{
-                          background: includeUsers ? 'var(--color-primary)' : 'transparent',
-                          border: includeUsers ? 'none' : '2px solid var(--color-surface-border)'
-                        }}
+                        className={`w-5 h-5 rounded-md flex items-center justify-center transition-all ${includeUsers ? 'opt-box-on' : 'opt-box-off'}`}
                       >
                         {includeUsers && <CheckIcon className="w-3 h-3 text-white" />}
                       </div>

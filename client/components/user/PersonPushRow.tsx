@@ -91,7 +91,7 @@ export function PersonPushRow({ userId, authKey }: { userId: string | null; auth
       </div>
       {supported && (
         <div className="flex items-center gap-3 shrink-0">
-          <span className="text-sm font-medium" style={{ color: on ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+          <span className={`text-sm font-medium ${on ? 'text-success' : 'text-muted'}`}>
             {on ? 'On' : 'Off'}
           </span>
           <ToggleSwitch checked={on} onChange={() => (on ? turnOff() : turnOn())} disabled={busy || available !== true} />

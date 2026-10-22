@@ -73,6 +73,34 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assig
     }
   })
 
+  // What the notification bell needs, every 30 seconds: requests waiting for
+  // an answer, and the last month's accepted ones - not every invitation with
+  // every request it ever had (sign-in tokens included).
+  router.get('/bell', async (req, res) => {
+    try {
+      const accountId = getAccountId(req)
+      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      const rows = await prisma.inviteRequest.findMany({
+        where: { accountId, OR: [{ status: 'pending' }, { status: 'accepted', createdAt: { gte: since } }] },
+        select: {
+          id: true, username: true, email: true, status: true, createdAt: true, respondedAt: true,
+          invitation: { select: { name: true, inviteCode: true, groupName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      })
+      const shape = ({ invitation, ...r }) => ({ ...r, invitationName: invitation?.name || invitation?.inviteCode || 'Invitation', groupName: invitation?.groupName || 'a group' })
+      res.json({
+        pending: rows.filter((r) => r.status === 'pending').map(shape),
+        accepted: rows.filter((r) => r.status === 'accepted').map(shape),
+      })
+    } catch (error) {
+      console.error('Error fetching invite requests for the bell:', error)
+      res.status(500).json({ error: 'Failed to fetch invite requests' })
+    }
+  })
+
   router.post('/', async (req, res) => {
     try {
       const accountId = getAccountId(req)

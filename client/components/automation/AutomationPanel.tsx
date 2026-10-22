@@ -540,12 +540,7 @@ function RuleEditorModal({
                           type="button"
                           onClick={() => toggle(day)}
                           aria-pressed={on}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                          style={{
-                            background: on ? 'var(--color-primary)' : 'var(--color-surface-hover)',
-                            color: on ? 'var(--color-bg)' : 'var(--color-text-muted)',
-                            border: '1px solid ' + (on ? 'var(--color-primary)' : 'var(--color-surface-border)'),
-                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${on ? 'chip-solid-on' : 'chip-solid-off-hover'}`}
                         >
                           {label}
                         </button>

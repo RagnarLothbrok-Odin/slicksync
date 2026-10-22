@@ -46,6 +46,7 @@ function ProfileMark({ profile, size, ring }: { profile: Profile; size: number; 
   const tracked = !!profile.ownerId;
   return (
     <span
+      key={`${hex ?? ''}|${ring ?? ''}`}
       className={`shrink-0 rounded-full flex items-center justify-center font-semibold ${tracked ? '' : 'opacity-40 grayscale'}`}
       style={{
         width: size,

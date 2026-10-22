@@ -37,6 +37,7 @@ import {
 import dynamic from 'next/dynamic';
 import type { SyncStatusData } from '@/components/admin/SyncActivityChart';
 import { providerTypeLabel, providerBadgeVariant } from '@/lib/providers';
+import { cachedImageUrl } from '@/lib/posterUrl';
 
 // The chart's library (recharts) is loaded on demand - see the component
 // file for why it is not in the dashboard's first-load bundle.
@@ -64,7 +65,7 @@ const RecentAddonItem = memo(function RecentAddonItem({
   return (
     <TVLink href={`/addons/${addon.id}`} className="block" focusWrapperClassName="block">
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
+        initial={false}
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ scale: 1.01 }}
         className="flex items-center gap-4 p-3.5 rounded-xl transition-colors bg-surface-hover hover:bg-surface cursor-pointer group border border-transparent hover:border-default"
@@ -145,8 +146,11 @@ const ContinueWatchingCard = memo(function ContinueWatchingCard({
   onOpenDetails,
   isMenuOpen,
   onMenuOpenChange,
+  priority = false,
 }: {
   item: ContinueWatchingItem;
+  /** The first cards in the row: fetched at once rather than when seen. */
+  priority?: boolean;
   wasDraggedRef: React.RefObject<boolean>;
   onRemove: (item: ContinueWatchingItem) => void;
   onOpenDetails: (item: ContinueWatchingItem) => void;
@@ -238,10 +242,13 @@ const ContinueWatchingCard = memo(function ContinueWatchingCard({
               in" hard crop. */}
           {(item.nextEpisode?.thumbnail || item.background || item.poster) ? (
             <img
-              src={item.nextEpisode?.thumbnail || item.background || item.poster || ''}
+              // Through the server's image cache at the card's size, like
+              // every poster grid - not the full-size original each launch.
+              src={cachedImageUrl(item.nextEpisode?.thumbnail || item.background || item.poster) || ''}
               alt={item.showName}
               draggable={false}
-              loading="lazy"
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : undefined}
               decoding="async"
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 pointer-events-none"
             />
@@ -387,6 +394,9 @@ export default function DashboardPage() {
   // Fetched independently of the main dashboard load - Cinemeta lookups
   // powering this are a nice-to-have, and shouldn't be able to fail the
   // whole dashboard if Cinemeta is briefly unreachable.
+  // Last time's row shows at once (see useLastKnown), so it doesn't pop in
+  // late and push the page down.
+  useLastKnown<ContinueWatchingItem[]>('/users/continue-watching', (cached) => setContinueWatching((now) => (now.length ? now : cached)));
   useEffect(() => {
     api.getContinueWatching().then(setContinueWatching).catch(() => setContinueWatching([]));
   }, []);
@@ -532,9 +542,14 @@ export default function DashboardPage() {
   // 30s auto-refresh below so Now Playing stays live without the whole
   // Dashboard flashing back to a loading state every cycle (same pattern
   // Activity's own 30s Now Playing refresh already uses).
+  // The live refresh only needs Now Playing and the metrics; the addon list
+  // and account counts barely move, so they're re-read every few minutes
+  // rather than on every 30s tick and every play/stop.
+  const sideDataAtRef = useRef(0);
   const refreshData = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     setError(null);
+    const withSideData = !silent || Date.now() - sideDataAtRef.current > 5 * 60 * 1000;
     try {
       const [stats, metrics, addons] = await Promise.all([
         // Separately caught - a fresh account has no API key configured
@@ -543,16 +558,17 @@ export default function DashboardPage() {
         // fall back gracefully to null), and shouldn't block metrics/addons
         // from loading or put a scary "Failed to load dashboard data" banner
         // in front of a brand new signup.
-        api.getAccountStats().catch(() => null),
+        withSideData ? api.getAccountStats().catch(() => null) : Promise.resolve(undefined),
         api.getMetrics('7d'),
-        api.getAddons(),
+        withSideData ? api.getAddons() : Promise.resolve(undefined),
       ]);
 
-      setAccountStats(stats);
+      if (withSideData) sideDataAtRef.current = Date.now();
+      if (stats !== undefined) setAccountStats(stats);
       setMetricsData(metrics);
       setMetricsAt(Date.now());
       setNowTick(Date.now());
-      setRecentAddons(addons.slice(0, 3));
+      if (addons) setRecentAddons(addons.slice(0, 3));
     } catch (err) {
       console.error('Dashboard data fetch failed:', err);
       if (!silent) setError(err as Error);
@@ -570,9 +586,14 @@ export default function DashboardPage() {
     const stopPoll = startAdaptivePoll(() => refreshData(true), 30000, 180000);
     // SSE accelerant: a stream starting or stopping refetches immediately
     // instead of waiting out the interval above (which stays as fallback).
-    const onLive = () => refreshData(true);
+    // Several devices starting at once send a burst: one refresh for it.
+    let liveTimer: ReturnType<typeof setTimeout> | null = null;
+    const onLive = () => {
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(() => { liveTimer = null; refreshData(true); }, 1500);
+    };
     window.addEventListener('slicksync:live-nowplaying', onLive);
-    return () => { stopPoll(); window.removeEventListener('slicksync:live-nowplaying', onLive); };
+    return () => { stopPoll(); if (liveTimer) clearTimeout(liveTimer); window.removeEventListener('slicksync:live-nowplaying', onLive); };
   }, [refreshData]);
 
   // Derived stats with fallbacks
@@ -878,10 +899,11 @@ export default function DashboardPage() {
                   onPointerLeave={handleRowPointerUp}
                   className="flex gap-3 overflow-x-auto pb-1 cursor-grab active:cursor-grabbing no-scrollbar paint-isolated"
                 >
-                  {continueWatching.map((item) => {
+                  {continueWatching.map((item, index) => {
                     const card = (
                       <ContinueWatchingCard
                         item={item}
+                        priority={index < 6}
                         wasDraggedRef={wasDraggedRef}
                         onRemove={handleDismissContinueWatching}
                         onOpenDetails={setDetailModalItem}
@@ -998,11 +1020,7 @@ export default function DashboardPage() {
                         <div className="relative shrink-0">
                           <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="sm" />
                           <div
-                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold"
-                            style={{
-                              background: index === 0 ? 'var(--color-warning)' : index === 1 ? 'var(--color-text-muted)' : 'var(--color-text-subtle)',
-                              color: 'var(--color-bg)',
-                            }}
+                            className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold ${index === 0 ? 'rank-1' : index === 1 ? 'rank-2' : 'rank-3'}`}
                           >
                             {index + 1}
                           </div>
@@ -1205,10 +1223,11 @@ export default function DashboardPage() {
                 onPointerLeave={handleRowPointerUp}
                 className="flex gap-3 overflow-x-auto pb-1 cursor-grab active:cursor-grabbing no-scrollbar paint-isolated"
               >
-                {continueWatching.map((item) => (
+                {continueWatching.map((item, index) => (
                   <ContinueWatchingCard
                     key={`${item.userId}-${item.showId}`}
                     item={item}
+                    priority={index < 6}
                     wasDraggedRef={wasDraggedRef}
                     onRemove={handleDismissContinueWatching}
                     onOpenDetails={setDetailModalItem}
@@ -1268,7 +1287,7 @@ export default function DashboardPage() {
                   recentActivityItems.map((np, index) => (
                     <motion.div
                       key={`${np.user.id}-${np.item.id}-${np.timestamp}-${index}`}
-                      initial={{ opacity: 0, x: -10 }}
+                      initial={false}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.3 + index * 0.05 }}
                       whileHover={{ x: 4 }}
@@ -1337,7 +1356,7 @@ export default function DashboardPage() {
                   topUsers.map((user, index) => (
                     <Link key={user.id || user.name} href={`/users/${user.id}`} className="block">
                       <motion.div
-                        initial={{ opacity: 0, y: 10 }}
+                        initial={false}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.35 + index * 0.05 }}
                         whileHover={{ scale: 1.01 }}
@@ -1346,11 +1365,7 @@ export default function DashboardPage() {
                         <div className="relative">
                           <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="md" />
                           <div 
-                            className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
-                            style={{ 
-                              background: index === 0 ? 'var(--color-warning)' : index === 1 ? 'var(--color-text-muted)' : 'var(--color-text-subtle)',
-                              color: 'var(--color-bg)'
-                            }}
+                            className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${index === 0 ? 'rank-1' : index === 1 ? 'rank-2' : 'rank-3'}`}
                           >
                             {index + 1}
                           </div>

@@ -727,14 +727,9 @@ function LoginContent() {
     >
       {/* Background gradient */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div
-          className="absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full blur-[120px] opacity-30"
-          style={{ background: 'var(--color-primaryMuted)' }}
-        />
-        <div
-          className="absolute -bottom-40 -left-40 w-[400px] h-[400px] rounded-full blur-[100px] opacity-20"
-          style={{ background: 'var(--color-secondaryMuted)' }}
-        />
+        {/* Drawn without a blur filter - see .glow in globals.css. */}
+        <div className="glow glow-corner-a" />
+        <div className="glow glow-corner-b" />
       </div>
 
       <motion.div
@@ -772,22 +767,14 @@ function LoginContent() {
         >
           <button
             onClick={() => switchMode('user')}
-            className="flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2"
-            style={{
-              background: mode === 'user' ? 'var(--color-primary)' : 'transparent',
-              color: mode === 'user' ? 'white' : 'var(--color-text-muted)',
-            }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${mode === 'user' ? 'seg-on' : 'seg-off'}`}
           >
             <UserIcon className="w-4 h-4" />
             User
           </button>
           <button
             onClick={() => switchMode('admin')}
-            className="flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2"
-            style={{
-              background: mode === 'admin' ? 'var(--color-primary)' : 'transparent',
-              color: mode === 'admin' ? 'white' : 'var(--color-text-muted)',
-            }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${mode === 'admin' ? 'seg-on' : 'seg-off'}`}
           >
             <ShieldCheckIcon className="w-4 h-4" />
             Admin
@@ -804,10 +791,7 @@ function LoginContent() {
         >
           {/* Top accent */}
           <div
-            className="h-1"
-            style={{
-              background: mode === 'user' ? 'var(--color-success)' : 'var(--color-primary)',
-            }}
+            className={`h-1 ${mode === 'user' ? 'bg-success' : 'bg-primary'}`}
           />
 
           <div className="p-6">

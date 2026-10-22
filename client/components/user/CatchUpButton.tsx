@@ -291,7 +291,7 @@ export function CatchUpButton({ userId, name, hasServer, size = 'md' }: {
                 </div>
                 {job.state !== 'undone' && (
                   <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-bg-subtle)' }}>
-                    <div className="h-full rounded-full transition-all" style={{ width: `${job.total ? Math.max((jobDone / job.total) * 100, 2) : 100}%`, background: job.state === 'failed' ? 'var(--color-error)' : 'var(--color-primary)' }} />
+                    <div className={`h-full rounded-full transition-all ${job.state === 'failed' ? 'bg-error' : 'bg-primary'}`} style={{ width: `${job.total ? Math.max((jobDone / job.total) * 100, 2) : 100}%` }} />
                   </div>
                 )}
                 <div className="flex items-end justify-between gap-2">

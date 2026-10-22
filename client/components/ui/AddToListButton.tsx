@@ -144,7 +144,7 @@ export function CatalogPickerMenu({
 // trigger + popover wrapper around CatalogPickerMenu above.
 /** `compact` renders an icon-only trigger, for action rows where a labelled
  *  button would be the sixth in a line and push the row onto two. */
-export function AddToListButton({ item, compact = false }: { item: CatalogItem; compact?: boolean }) {
+export function AddToListButton({ item, compact = false, pill = false }: { item: CatalogItem; compact?: boolean; pill?: boolean }) {
   const [open, setOpen] = useState(false);
   const toggleOpen = useCallback(() => setOpen((v) => !v), []);
 
@@ -155,12 +155,14 @@ export function AddToListButton({ item, compact = false }: { item: CatalogItem; 
         onClick={toggleOpen}
         title={compact ? 'Add to a catalog' : undefined}
         aria-label={compact ? 'Add to a catalog' : undefined}
-        className={compact
+        className={pill
+          ? 'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap border border-default text-muted hover:text-primary transition-colors'
+          : compact
           ? 'flex items-center justify-center w-10 h-10 rounded-lg bg-surface-hover text-muted hover:bg-primary/20 hover:text-primary transition-colors shrink-0'
           : 'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-surface-hover text-default hover:bg-primary/20 hover:text-primary transition-colors'}
       >
-        <RectangleStackIcon className={compact ? 'w-5 h-5' : 'w-4 h-4'} />
-        {!compact && 'Add to catalog'}
+        {pill ? <PlusIcon className="w-3.5 h-3.5" /> : <RectangleStackIcon className={compact ? 'w-5 h-5' : 'w-4 h-4'} />}
+        {pill ? 'Catalog' : !compact && 'Add to catalog'}
       </button>
 
       {open && (

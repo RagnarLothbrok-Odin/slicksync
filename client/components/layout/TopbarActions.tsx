@@ -247,10 +247,8 @@ export function TopbarActions({
         onClick={openCommandPalette}
         title="Search, jump to a page, or ask how to do something (Ctrl+K)"
         aria-label="Open the command palette"
-        className={`p-2 transition-colors ${floating ? 'rounded-full' : 'rounded-lg'}`}
+        className={`p-2 transition-colors ${floating ? 'rounded-full' : 'rounded-lg hov-surface'}`}
         style={{ color: 'var(--color-text-muted)', ...(floating ? FLOATING_ICON_STYLE : {}) }}
-        onMouseEnter={(e) => { if (!floating) e.currentTarget.style.background = 'var(--color-surface-hover)'; }}
-        onMouseLeave={(e) => { if (!floating) e.currentTarget.style.background = 'transparent'; }}
       >
         <WizardBooksIcon className="w-5 h-5" />
       </button>

@@ -157,22 +157,11 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => setIsOpen(!isOpen)}
-        className={isCompact
+        className={`${isCompact
           ? 'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200'
-          : 'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200'}
+          : 'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200'} ${isOpen ? 'panel-btn-open' : 'panel-btn'}`}
         style={{
-          background: isOpen ? 'var(--color-surface-elevated)' : 'transparent',
           color: 'var(--color-text)',
-        }}
-        onMouseEnter={(e) => {
-          if (!isOpen) {
-            e.currentTarget.style.background = 'var(--color-surface-hover)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isOpen) {
-            e.currentTarget.style.background = 'transparent';
-          }
         }}
       >
         {/* Current Mode Icon */}
@@ -260,14 +249,8 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
             {/* Switch Panel Button */}
             <button
               onClick={handleSwitchPanel}
-              className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200"
+              className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 hover:bg-surface-hover"
               style={{ color: 'var(--color-text)' }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--color-surface-hover)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-              }}
             >
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -370,14 +353,8 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
                 <div className="h-px" style={{ background: 'var(--color-surface-border)' }} />
                 <button
                   onClick={() => { setIsOpen(false); setAccountModalOpen(true); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200"
+                  className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 hov-surface"
                   style={{ color: 'var(--color-text)' }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'var(--color-surface-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent';
-                  }}
                 >
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -399,14 +376,8 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
             {/* Logout Button */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200"
+              className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 hov-error"
               style={{ color: 'var(--color-error)' }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--color-error-muted)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-              }}
             >
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center"

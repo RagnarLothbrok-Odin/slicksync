@@ -6,7 +6,6 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
-import { toast } from '@/components/ui/Toast';
 import { useTheme } from '@/lib/theme';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVPageProvider } from '@/components/tv/TVPageProvider';
@@ -14,6 +13,9 @@ import { TVFocusable } from '@/components/tv/TVFocusable';
 import { TVLink } from '@/components/tv/TVLink';
 import { Button, Card, Badge, Avatar, UserAvatar, StatCard, SearchInput, PageToolbar, MediaDetailModal } from '@/components/ui';
 import { DroppedShowsPanel } from '@/components/activity/DroppedShowsPanel';
+import { ActivityCardMenu, useCardMenuPress, type MenuTarget, type MenuWatcher } from '@/components/activity/ActivityCardMenu';
+import { showDeletedWithUndo } from '@/components/ui/undoToast';
+import { toast } from '@/components/ui/Toast';
 import { ActivityFilterBar, EMPTY_FILTERS, SOURCE_LABELS, SOURCE_ORDER, sourceOf, filtersFromParams, filtersToParams, type ActivityFilters } from '@/components/activity/ActivityFilterBar';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { NebulaPageHeading, NebulaStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
@@ -73,6 +75,7 @@ interface ActivityItem {
   contentType: ContentType;
   contentId: string;
   contentName: string;
+  videoId?: string; // the episode, for a show (Remove from Activity takes just that one)
   season?: number;
   episode?: number;
   episodeName?: string;
@@ -157,6 +160,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         contentType: (session.item.type === 'movie' ? 'movie' : 'series') as ContentType,
         contentId: session.item.id,
         contentName: session.item.name,
+        videoId: session.videoId || undefined,
         season: session.item.season ?? undefined,
         episode: session.item.episode ?? undefined,
         durationSeconds: session.durationSeconds,
@@ -214,6 +218,7 @@ function transformMetricsToActivity(metrics: MetricsData | null): ActivityItem[]
         contentType: (entry.item.type === 'movie' ? 'movie' : 'series') as ContentType,
         contentId: entry.item.id,
         contentName: entry.item.name,
+        videoId: entry.videoId || undefined,
         season: entry.item.season ?? undefined,
         episode: entry.item.episode ?? undefined,
         episodeName: entry.episodeName ?? undefined,
@@ -496,12 +501,14 @@ const ActivityCard = memo(function ActivityCard({
   onFilterByContent,
   onFilterByEpisode,
   onOpenDetails,
+  onMenu,
   focusable = false,
 }: {
   activity: ActivityItem;
   onFilterByContent?: (name: string) => void;
   onFilterByEpisode?: (activity: ActivityItem) => void;
   onOpenDetails?: (activity: ActivityItem) => void;
+  onMenu?: (activity: ActivityItem, x: number, y: number) => void;
   /** TV mode: wraps the row in a D-pad-focusable container, Enter/OK opens
    *  the detail modal. */
   focusable?: boolean;
@@ -509,9 +516,11 @@ const ActivityCard = memo(function ActivityCard({
   const showProgress = activity.type === 'watch' || activity.type === 'pause';
   const [imageError, setImageError] = useState(false);
   const { rpdbEnabled } = usePersonalFeatures();
+  const press = useCardMenuPress((x, y) => onMenu?.(activity, x, y));
 
   const rowElement = (
     <motion.div
+      {...(onMenu ? press.handlers : {})}
       whileHover={{ x: 4 }}
       className="flex items-start gap-4 p-4 rounded-xl bg-surface border border-default hover:border-primary/50 transition-colors cv-row"
     >
@@ -520,7 +529,7 @@ const ActivityCard = memo(function ActivityCard({
         <button
           type="button"
           className="w-12 h-16 rounded-lg overflow-hidden shrink-0 bg-surface border border-default tap-card"
-          onClick={() => onOpenDetails?.(activity)}
+          onClick={() => { if (press.suppressClick()) return; onOpenDetails?.(activity); }}
         >
           <img
             src={posterUrl({ id: activity.contentId, poster: activity.poster }, rpdbEnabled)}
@@ -646,17 +655,20 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
   activity,
   onFilterByContent,
   onOpenDetails,
+  onMenu,
   focusable = false,
 }: {
   activity: ActivityItem;
   onFilterByContent?: (name: string) => void;
   onOpenDetails?: (activity: ActivityItem) => void;
+  onMenu?: (activity: ActivityItem, x: number, y: number) => void;
   /** TV mode: wraps the card in a D-pad-focusable container, Enter/OK opens
    *  the detail modal. */
   focusable?: boolean;
 }) {
   const [imageError, setImageError] = useState(false);
   const { rpdbEnabled } = usePersonalFeatures();
+  const press = useCardMenuPress((x, y) => onMenu?.(activity, x, y));
   // Multi-watcher popover (who else watched this same title today) - kept off
   // the poster art itself (just a count badge there); tapping reveals the
   // full list, so it's discoverable on mobile too, not a desktop-only tooltip.
@@ -684,8 +696,7 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
 
   const cardElement = (
     <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
+      initial={false}
       whileHover={{ y: -4 }}
       className="group relative cursor-pointer"
     >
@@ -706,7 +717,8 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
       {/* Poster Card */}
       <div
         className="relative aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 shadow-xl tap-card cv-poster"
-        onClick={() => onOpenDetails?.(activity)}
+        {...(onMenu ? press.handlers : {})}
+        onClick={() => { if (press.suppressClick()) return; onOpenDetails?.(activity); }}
       >
         {activity.poster && !imageError ? (
           <>
@@ -1209,12 +1221,7 @@ function ProxyHistoryView() {
           {proxyLogs.map((log, index) => (
             <div
               key={index}
-              className="flex items-center gap-4 p-3 rounded-lg transition-colors"
-              style={
-                layoutMode === 'nebula'
-                  ? { background: 'color-mix(in srgb, var(--color-surface) 50%, transparent)', border: '1px solid var(--color-surface-border)' }
-                  : { background: 'var(--color-surface-hover)', border: '1px solid var(--color-surface-border)' }
-              }
+              className={`flex items-center gap-4 p-3 rounded-lg transition-colors ${layoutMode === 'nebula' ? 'lm-row-nebula' : 'lm-row-hover'}`}
             >
                 <div className="flex-shrink-0">
                   {log.cacheHit ? (
@@ -1589,12 +1596,7 @@ function InviteHistoryRow({ invite }: { invite: InviteHistoryItem }) {
   return (
     <motion.div
       whileHover={{ x: 4 }}
-      className="flex items-start gap-4 p-4 rounded-xl transition-colors"
-      style={
-        layoutMode === 'nebula'
-          ? { background: 'color-mix(in srgb, var(--color-surface) 50%, transparent)', border: '1px solid var(--color-surface-border)' }
-          : { background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }
-      }
+      className={`flex items-start gap-4 p-4 rounded-xl transition-colors ${layoutMode === 'nebula' ? 'lm-row-nebula' : 'lm-row-surface'}`}
     >
       {/* Invite action icon */}
       <div className={`p-2 rounded-lg ${invite.action === 'created'
@@ -1694,6 +1696,10 @@ function ActivityPageContent() {
   const [visibleCount, setVisibleCount] = useState(50); // lazy-load activity in chunks
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [detailModalItem, setDetailModalItem] = useState<ActivityItem | null>(null);
+  // The poster menu (right-click / press and hold): which card, and where.
+  const [menuFor, setMenuFor] = useState<{ activity: ActivityItem; x: number; y: number } | null>(null);
+  const handleMenu = useCallback((activity: ActivityItem, x: number, y: number) => setMenuFor({ activity, x, y }), []);
+  const closeMenu = useCallback(() => setMenuFor(null), []);
 
   // Fetch real data
   const [metricsData, setMetricsData] = useState<MetricsData | null>(null);
@@ -2349,6 +2355,7 @@ function ActivityPageContent() {
                           activity={activity}
                           onFilterByContent={handleFilterByContent}
                           onOpenDetails={setDetailModalItem}
+                          onMenu={isTV ? undefined : handleMenu}
                           focusable={isTV}
                         />
                       ))}
@@ -2363,6 +2370,7 @@ function ActivityPageContent() {
                             onFilterByContent={handleFilterByContent}
                             onFilterByEpisode={handleFilterByEpisode}
                             onOpenDetails={setDetailModalItem}
+                            onMenu={isTV ? undefined : handleMenu}
                             focusable={isTV}
                           />
                         </StaggerItem>
@@ -2600,6 +2608,52 @@ function ActivityPageContent() {
         )}
       </div>
       </div>
+
+      {menuFor && (() => {
+        const a = menuFor.activity;
+        const watchers: MenuWatcher[] = [
+          { userId: a.userId, userName: a.userName, userEmail: a.userEmail, userAvatarUrl: a.userAvatarUrl, userUseGravatar: a.userUseGravatar, userColorIndex: a.userColorIndex },
+          ...(a.additionalWatchers || []).map((w) => ({ userId: w.userId, userName: w.userName, userEmail: w.userEmail, userAvatarUrl: w.userAvatarUrl, userUseGravatar: w.userUseGravatar, userColorIndex: w.userColorIndex })),
+        ];
+        const ep = a.season != null && a.episode != null ? ` · S${a.season} E${a.episode}` : '';
+        const when = a.dateOnly ? a.timestamp.toLocaleDateString() : a.timestamp.toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+        const target: MenuTarget = {
+          x: menuFor.x, y: menuFor.y, title: `${a.contentName}${ep}`,
+          detail: [a.durationSeconds ? formatDuration(a.durationSeconds) : '', when].filter(Boolean).join(' · '),
+          isShow: a.contentType === 'series', watchers,
+        };
+        return (
+          <ActivityCardMenu
+            target={target}
+            onClose={closeMenu}
+            actions={{
+              openDetails: () => setDetailModalItem(a),
+              onlyTitle: () => handleFilterByContent(a.contentName),
+              onlyPerson: (userId) => setFilters((f) => ({ ...f, person: userId })),
+              addToWatchlist: () => api.addToWatchlist({ itemId: a.contentId, itemType: a.contentType === 'movie' ? 'movie' : 'series', name: a.contentName, poster: a.poster || null })
+                .then(() => toast.success(`${a.contentName} is on the Watchlist`), () => toast.error('Could not add it to the Watchlist')),
+              markNotWatched: () => api.markWatched(a.contentId, false)
+                .then(() => toast.success(`${a.contentName} marked as not watched`), () => toast.error('Could not change that')),
+              buryShow: () => api.dismissContinueWatching(a.userId, a.contentId)
+                .then(() => toast.success(`${a.contentName} rests in the Graveyard now`), () => toast.error('Could not bury it')),
+              remove: async (w) => {
+                // That day on this screen's clock - the day the card is filed under.
+                const d = a.timestamp;
+                const from = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+                const to = new Date(from.getTime() + 86400000);
+                const day = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
+                try {
+                  const r = await api.removeActivityViewing(w.userId, { itemId: a.contentId, videoId: a.videoId || null, day, from: from.toISOString(), to: to.toISOString() });
+                  showDeletedWithUndo(`${r.label} from ${w.userName}’s Activity`, r.trashId, () => fetchData(false));
+                  await fetchData(false);
+                } catch (e) {
+                  toast.error((e as Error)?.message || 'Could not remove that viewing');
+                }
+              },
+            }}
+          />
+        );
+      })()}
 
       {detailModalItem && (
         <MediaDetailModal

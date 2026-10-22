@@ -1,5 +1,32 @@
 [
   {
+    "version": "1.101.0",
+    "date": "2026-10-22",
+    "title": "1.101.0 - A new Discover with a page for every actor, AIOSync between any app, person and profile, and a faster app",
+    "features": [
+      "A new Discover: search across the top with Movies, Shows or Both, then Titles, People, For you, Nobody's seen it and Watchlist as tabs. Sort by Most popular, Trending, Newest, Highest rated or A to Z, and filter by genre, decade, rating, length and what you've watched - each filter shows as a chip you can tap away, and a line above the posters says what you're looking at. Surprise me opens something nobody here has seen. Describe it still finds a title from a half-remembered plot, and For you now holds Airing this season, Trending on SIMKL and Finish the saga.",
+      "Every actor, actress and director gets a page in Discover: their photo, what they do, when and where they were born, a short biography, and every title they've been in - sorted by most popular, newest or oldest, with Only what I haven't seen and Follow right there. In a title's cast, tap someone to see their titles underneath, or hold them (right-click on a computer) for a menu: see everything they've been in, show or hide their titles, or follow them.",
+      "AIOSync: copy watched titles and resume points from one sign-in or profile to another - Stremio, Nuvio, Jellyfin, AIOStreams and AIOMetadata, in every direction, for the same person or between two people. Each title lands as far along as the source has it and never moves backwards; a title already further along stays as it is. Before copying, the titles are grouped by what will happen, and each one shows both profiles' pictures: a tick for watched, a ring filled to the resume point, faded for not yet. Any of them can be left out. Every copy can be undone for 7 days, and undoing leaves alone anything watched since. On Stremio and Nuvio the watchlist (Library) can come along too.",
+      "AIOSync on each provider: Stremio keeps one resume point and one date per show, so the newest episode's carries over. Nuvio keeps every profile apart. Jellyfin marks what its library has, on the real watch date. AIOStreams keeps the watch date; AIOMetadata shows today's. Titles a Jellyfin library names without an id can be matched by hand.",
+      "Keep in step: a person's own sign-ins and profiles kept matching from now on - finish or stop part-way on one, and it shows up on the others within a few minutes. Each sign-in or profile sends and receives, only receives (a Kids profile that shouldn't push into a parent's history), or stays out. Nothing is lost while a sign-in can't be reached; it catches up afterwards. Recently moved lists what went where.",
+      "AIOSync has its own place on Tasks, saying who is synced with whom, and a tile on every person's page. Someone who just added a second sign-in is offered their history on it.",
+      "Activity: right-click a poster (press and hold on a phone) to open its details, show only that title or that person, add it to the Watchlist, mark it not watched, bury a show in the Graveyard, or remove that viewing. Removing takes it out of that person's watch time and history too, says so first, and the Trash keeps it for 30 days with an Undo. Every right-click and press-and-hold menu has larger, easier-to-read text.",
+      "Title popup: Bookmark and Watched sit right under the title as small pills on a computer, and on a phone they share one row with + Catalog after the ratings; the app buttons line up on a phone.",
+      "Open in your own app: anyone here on Jellyfin, AIOStreams or AIOMetadata gets an Open in … button on a title, next to Stremio and Nuvio. Its arrow picks the app - AIOStreams, Swiftfin, Streamyfin, Infuse, or the server's own page in a browser - and each device remembers its own pick. Any other app (Odin, for example) works through an iPhone Shortcut you name once, which opens the app itself. On a real Jellyfin, Play on a device starts the title on a screen that has a Jellyfin app open, including the official apps.",
+      "Faster to open and use, especially on a phone: the app opens without waiting on a session check, the home page loads far less code, pages and cards appear at once instead of fading in, and Continue Watching pictures come through the image cache at the card's size and show straight away. The saved theme is applied before anything is drawn, so a light theme no longer flashes dark.",
+      "Posters load faster on Discover and the home page: a poster nobody has opened before shows straight away instead of waiting its turn, every Discover list, page, filter and search gets its posters ready while the page is still arriving, and the first rows load ahead of the rest.",
+      "Lighter on the server: the Users page, the addons list, the home page's live refresh and the notification bell each do a fraction of the work they did, and the database gets the indexes and statistics its busiest pages need."
+    ],
+    "bugFixes": [
+      "A Monthly sync schedule ran every half a minute instead of once a month. On a public instance, saving sync settings also left only that account's schedule running; every account's schedule now keeps running, and one slow account no longer holds up the rest.",
+      "Restoring a backup from Settings failed whenever a login was set.",
+      "Changing page could land partway down the new page instead of at the top.",
+      "Right-click menus could open past the edge of the screen and get cut off.",
+      "Deleting a person or an account now clears everything recorded for them, and a person's history goes once their Trash entry expires (unless they were restored).",
+      "Tabs, pills, toggles and buttons could stay highlighted after picking another one when a browser extension recolours the page."
+    ]
+  },
+  {
     "version": "1.100.0",
     "date": "2026-10-19",
     "title": "1.100.0 - Sign in a Nuvio TV, their servers in Nuvio, and tidier cards everywhere",

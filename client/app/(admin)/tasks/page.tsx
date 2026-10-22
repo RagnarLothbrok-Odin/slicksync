@@ -1,5 +1,6 @@
 'use client';
 
+import { WatchSyncCard } from '@/components/user/WatchSyncCard';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -1235,6 +1236,12 @@ export default function TasksPage() {
               label="Manage Rules"
             />
           </TaskCard>
+        </PageSection>
+
+        {/* AIOSync - copy watch history between sign-ins and profiles, or
+            keep them in step (components/user/WatchSyncCard.tsx). */}
+        <PageSection>
+          <WatchSyncCard />
         </PageSection>
 
         {/* Maintenance - off-site backup targets, database upkeep, and

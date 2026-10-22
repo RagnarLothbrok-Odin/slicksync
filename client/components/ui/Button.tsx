@@ -25,47 +25,14 @@ const sizes: Record<ButtonSize, string> = {
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = 'primary', size = 'md', isLoading, leftIcon, rightIcon, children, className, disabled, style, ...props }, ref) => {
     
-    // Get variant styles using CSS variables
-    const getVariantStyles = () => {
-      switch (variant) {
-        case 'primary':
-        case 'aurora': // Legacy support
-          return {
-            background: 'var(--color-primary)',
-            color: 'var(--color-bg)',
-            border: 'none',
-          };
-        case 'secondary':
-        case 'glass': // Legacy support
-          return {
-            background: 'transparent',
-            color: 'var(--color-text)',
-            border: '1px solid var(--color-surface-border)',
-          };
-        case 'ghost':
-          return {
-            background: 'transparent',
-            color: 'var(--color-text-muted)',
-            border: 'none',
-          };
-        case 'danger':
-          return {
-            background: 'var(--color-error)',
-            color: 'white',
-            border: 'none',
-          };
-        case 'cyan': // Legacy support
-          return {
-            background: 'var(--color-secondary)',
-            color: 'var(--color-bg)',
-            border: 'none',
-          };
-        default:
-          return {};
-      }
-    };
-
-    const variantStyles = getVariantStyles();
+    // Colours and hover live in globals.css (.btn-v-*): classes rather than
+    // inline styles repainted on hover, which a colour-freezing extension
+    // could leave stuck.
+    const variantClass = {
+      primary: 'btn-v-primary', aurora: 'btn-v-primary',
+      secondary: 'btn-v-secondary', glass: 'btn-v-secondary',
+      ghost: 'btn-v-ghost', danger: 'btn-v-danger', cyan: 'btn-v-cyan',
+    }[variant];
 
     return (
       <motion.button
@@ -77,41 +44,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           'relative inline-flex items-center justify-center font-medium transition-all duration-200',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
           'disabled:opacity-50 disabled:cursor-not-allowed',
+          variantClass,
           sizes[size],
           className
         )}
-        style={{
-          ...variantStyles,
-          ...style,
-        }}
+        style={style}
         disabled={disabled || isLoading}
-        onMouseEnter={(e) => {
-          if (disabled || isLoading) return;
-          const target = e.currentTarget;
-          if (variant === 'ghost') {
-            target.style.background = 'var(--color-surface-hover)';
-            target.style.color = 'var(--color-text)';
-          } else if (variant === 'secondary' || variant === 'glass') {
-            target.style.background = 'var(--color-surface-hover)';
-            target.style.borderColor = 'var(--color-text-subtle)';
-          } else if (variant === 'primary' || variant === 'aurora') {
-            target.style.background = 'var(--color-primary-hover)';
-          } else if (variant === 'cyan') {
-            target.style.background = 'var(--color-secondary-muted)';
-          } else if (variant === 'danger') {
-            target.style.opacity = '0.9';
-          }
-        }}
-        onMouseLeave={(e) => {
-          const target = e.currentTarget;
-          const styles = getVariantStyles();
-          // Reset each property explicitly to avoid issues with Object.assign
-          target.style.background = styles.background || '';
-          target.style.color = styles.color || '';
-          target.style.border = styles.border || '';
-          target.style.borderColor = '';
-          target.style.opacity = '';
-        }}
         {...props}
       >
         {/* Content */}

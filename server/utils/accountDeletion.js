@@ -8,6 +8,40 @@
 // irreversible operation either way, just a different caller/audit trail.
 // Throws (with .notFound = true) if the account doesn't exist; callers
 // decide how to report that.
+// Every table holding rows for one person (a userId column), in both
+// schemas. A table added later belongs here too - test/accountDeletion.test.js
+// reads the schemas and fails when one is missing.
+const PERSON_TABLES = [
+  'aioConfigSnapshot', 'dismissedContinueWatching', 'episodeWatchHistory', 'movieWatchHistory',
+  'nuvioCollectionsSnapshot', 'nuvioHomeLayoutSnapshot', 'personPushSubscription', 'proxyDeviceClaim',
+  'proxyUserIpAffinity', 'streamGateWrap', 'userSyncGuardState', 'watchActivity', 'watchCopyRun',
+  'watchSession', 'watchSnapshot', 'watchStateCursor', 'watchStateEvent', 'watchSyncMove', 'watchSyncSetting',
+  'userProviderCredential',
+]
+
+// Every table scoped to an account (an accountId column), children first;
+// User and AppAccount go last. Checked against the schemas the same way.
+const ACCOUNT_TABLES = [
+  'addonHealthAlert', 'addonSnapshot', 'aioConfigSnapshot', 'automationRun', 'automationRule', 'customList',
+  'dbSizeSample', 'dismissedContinueWatching', 'dismissedThemedCatalog', 'dismissedUpcomingEpisode', 'episodeAlert',
+  'episodeWatchHistory', 'followedSubject', 'inviteRequest', 'jellyfinProfile', 'manualWatchOverride',
+  'movieWatchHistory', 'mutedShow', 'notInterestedItem', 'notification', 'notificationDigestEntry',
+  'nuvioCollectionsSnapshot', 'nuvioHomeLayoutSnapshot', 'nuvioProfileRoute', 'passkey', 'personPushSubscription',
+  'profileMerge', 'proxyDeviceClaim', 'proxyStreamSession', 'proxyUserIpAffinity', 'pushSubscription',
+  'showEpisodeAlertState', 'streamGateWrap', 'titleRating', 'titleReaction', 'trashItem', 'userSyncGuardState',
+  'vaultEntry', 'watchActivity', 'watchCopyRun', 'watchSession', 'watchSnapshot', 'watchStateCursor',
+  'watchStateEvent', 'watchSyncMove', 'watchSyncSetting', 'watchTogetherShow', 'watchlistItem',
+  // Invitation already cascades from AppAccount, but clearing it explicitly
+  // keeps this list self-contained/order-independent.
+  'invitation',
+  // Group/Addon last among the "structural" tables - GroupAddon has no
+  // accountId of its own, it cascades automatically off these two.
+  'group', 'addon',
+]
+
+// A table only one schema has (dbSizeSample is SQLite-only) is skipped.
+const deletes = (prisma, tables, where) => tables.filter((t) => prisma[t]?.deleteMany).map((t) => prisma[t].deleteMany({ where }))
+
 async function deleteAccountCascade(prisma, accountId) {
   const existing = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { id: true, uuid: true } });
   if (!existing) {
@@ -16,38 +50,11 @@ async function deleteAccountCascade(prisma, accountId) {
     throw err;
   }
   const where = { accountId };
+  // Merged-in sign-ins carry only the person's id.
+  const people = (await prisma.user.findMany({ where, select: { id: true } })).map((u) => u.id);
   await prisma.$transaction([
-    prisma.addonHealthAlert.deleteMany({ where }),
-    prisma.addonSnapshot.deleteMany({ where }),
-    prisma.customList.deleteMany({ where }),
-    prisma.dismissedContinueWatching.deleteMany({ where }),
-    prisma.dismissedUpcomingEpisode.deleteMany({ where }),
-    prisma.episodeAlert.deleteMany({ where }),
-    prisma.episodeWatchHistory.deleteMany({ where }),
-    prisma.inviteRequest.deleteMany({ where }),
-    prisma.manualWatchOverride.deleteMany({ where }),
-    prisma.movieWatchHistory.deleteMany({ where }),
-    prisma.notInterestedItem.deleteMany({ where }),
-    prisma.nuvioProfileRoute.deleteMany({ where }),
-    prisma.profileMerge.deleteMany({ where }),
-    prisma.proxyStreamSession.deleteMany({ where }),
-    prisma.pushSubscription.deleteMany({ where }),
-    prisma.showEpisodeAlertState.deleteMany({ where }),
-    prisma.userSyncGuardState.deleteMany({ where }),
-    prisma.vaultEntry.deleteMany({ where }),
-    prisma.watchActivity.deleteMany({ where }),
-    prisma.watchSession.deleteMany({ where }),
-    prisma.watchSnapshot.deleteMany({ where }),
-    prisma.watchStateCursor.deleteMany({ where }),
-    prisma.watchStateEvent.deleteMany({ where }),
-    prisma.watchlistItem.deleteMany({ where }),
-    // Invitation already cascades from AppAccount, but clearing it
-    // explicitly here too keeps this list self-contained/order-independent.
-    prisma.invitation.deleteMany({ where }),
-    // Group/Addon last among the "structural" tables - GroupAddon has no
-    // accountId of its own, it cascades automatically off these two.
-    prisma.group.deleteMany({ where }),
-    prisma.addon.deleteMany({ where }),
+    ...deletes(prisma, ['userProviderCredential'], { userId: { in: people } }),
+    ...deletes(prisma, ACCOUNT_TABLES, where),
     prisma.user.deleteMany({ where }),
     prisma.appAccount.delete({ where: { id: accountId } }),
   ]);
@@ -95,20 +102,9 @@ async function deleteUserCascade(prisma, userId) {
     }
   }
 
-  const where = { userId }
   await prisma.$transaction([
     ...groupUpdates,
-    prisma.watchSnapshot.deleteMany({ where }),
-    prisma.watchActivity.deleteMany({ where }),
-    prisma.episodeWatchHistory.deleteMany({ where }),
-    prisma.movieWatchHistory.deleteMany({ where }),
-    prisma.userSyncGuardState.deleteMany({ where }),
-    prisma.watchSession.deleteMany({ where }),
-    prisma.dismissedContinueWatching.deleteMany({ where }),
-    prisma.watchStateCursor.deleteMany({ where }),
-    prisma.watchStateEvent.deleteMany({ where }),
-    prisma.proxyUserIpAffinity.deleteMany({ where }),
-    prisma.userProviderCredential.deleteMany({ where }),
+    ...deletes(prisma, PERSON_TABLES, { userId }),
     prisma.user.delete({ where: { id: userId } }),
   ])
   })
@@ -116,4 +112,17 @@ async function deleteUserCascade(prisma, userId) {
   return existing
 }
 
-module.exports = { deleteAccountCascade, deleteUserCascade };
+/**
+ * A person deleted from the Users page waits 30 days in the Trash with their
+ * history kept (it reattaches when they're restored). Once that entry is
+ * gone for good, so is what they left: called for each person whose Trash
+ * entry expired or was emptied - and only if they weren't restored.
+ */
+async function purgePersonLeftovers(prisma, userId) {
+  if (!userId) return
+  const back = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => null)
+  if (back) return
+  await prisma.$transaction(deletes(prisma, PERSON_TABLES, { userId }))
+}
+
+module.exports = { deleteAccountCascade, deleteUserCascade, purgePersonLeftovers, PERSON_TABLES, ACCOUNT_TABLES };

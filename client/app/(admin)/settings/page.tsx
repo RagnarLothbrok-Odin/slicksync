@@ -297,12 +297,7 @@ function PoolKeysField({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors ml-2"
-        style={{
-          background: keys.length > 0 ? 'var(--color-primary-muted)' : 'transparent',
-          color: keys.length > 0 ? 'var(--color-primary)' : 'var(--color-text-muted)',
-          border: `1px solid ${keys.length > 0 ? 'transparent' : 'var(--color-surface-border)'}`,
-        }}
+        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors ml-2 ${keys.length > 0 ? 'keyset-on' : 'keyset-off'}`}
       >
         <Squares2X2Icon className="w-3.5 h-3.5" />
         {keys.length > 0 ? `Key pool (${keys.length})` : 'Add key pool'}
@@ -395,12 +390,7 @@ function BackupKeyField({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors"
-          style={{
-            background: hasValue ? 'var(--color-successMuted)' : 'transparent',
-            color: hasValue ? 'var(--color-success)' : 'var(--color-text-muted)',
-            border: `1px solid ${hasValue ? 'transparent' : 'var(--color-surface-border)'}`,
-          }}
+          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors ${hasValue ? 'keyset-ok' : 'keyset-off'}`}
         >
           <ShieldCheckIcon className="w-3.5 h-3.5" />
           {hasValue ? 'Backup key set' : 'Add backup key'}
@@ -1331,10 +1321,10 @@ export default function SettingsPage() {
                     // behind it to read as "this one and none of the others".
                     className={`relative w-full flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl text-left mb-0.5 focus:outline-none rail-item ${active ? 'rail-item-on' : hovered ? 'rail-item-warm' : 'rail-item-off'}`}
                   >
-                    <Icon className="w-4 h-4 shrink-0" style={{ color: active ? '#fff' : 'var(--color-text-muted)' }} />
+                    <Icon className={`w-4 h-4 shrink-0 ${active ? 'rail-ico-on' : 'text-muted'}`} />
                     <span className="min-w-0">
                       <span className={`block text-sm ${active ? 'font-semibold' : 'font-medium'}`}>{t.label}</span>
-                      <span className="block text-[11px] leading-tight" style={{ color: active ? 'rgba(255,255,255,0.78)' : 'var(--color-text-muted)' }}>{t.blurb}</span>
+                      <span className={`block text-[11px] leading-tight ${active ? 'rail-blurb-on' : 'text-muted'}`}>{t.blurb}</span>
                     </span>
                   </button>
                 );

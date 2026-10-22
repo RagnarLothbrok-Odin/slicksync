@@ -71,7 +71,6 @@ function MoreMenuItem({
   active?: boolean;
   title?: string;
 }) {
-  const [hovered, setHovered] = useState(false);
   const tintVar = `var(--color-${tint})`;
   return (
     <button
@@ -79,21 +78,15 @@ function MoreMenuItem({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-sm text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      style={{ background: hovered && !disabled ? 'var(--color-surface-hover)' : 'transparent' }}
+      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-sm text-left transition-colors enabled:hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+      style={{ '--tint': tintVar } as React.CSSProperties}
     >
       <span
-        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-        style={{
-          background: active ? tintVar : `color-mix(in srgb, ${tintVar} 16%, transparent)`,
-          color: active ? 'var(--color-bg)' : tintVar,
-        }}
+        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${active ? 'tint-ico-on' : 'tint-ico-off'}`}
       >
         {icon}
       </span>
-      <span style={{ color: active ? tintVar : 'var(--color-text)' }} className="truncate">
+      <span className={`truncate ${active ? 'tint-lbl-on' : 'text-default'}`}>
         {children}
       </span>
     </button>
@@ -1523,11 +1516,7 @@ export default function ListDetailPage() {
                           type="button"
                           onClick={() => handleChangeAutoRefreshFrequency(freq)}
                           disabled={savingAutoRefresh}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium capitalize transition-colors disabled:opacity-50"
-                          style={{
-                            background: active ? 'var(--color-primary)' : 'var(--color-subtle)',
-                            color: active ? 'white' : 'var(--color-text-muted)',
-                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium capitalize transition-colors disabled:opacity-50 ${active ? 'seg-on' : 'seg-off-subtle'}`}
                         >
                           {freq}
                         </button>
