@@ -1813,9 +1813,13 @@ export function MediaDetailModal({
                       target={castMenu}
                       title={details?.title || effectiveFallbackTitle || null}
                       follow={personFollows[castMenu.tmdbId] || null}
+                      titlesOpen={!!personView && String(personView.id) === castMenu.tmdbId}
                       onClose={closeCastMenu}
                       onSeeEverything={() => seeEverything(castMenu.tmdbId, castMenu.name)}
-                      onShowHere={() => openPerson({ name: castMenu.name, tmdbId: castMenu.tmdbId }, true)}
+                      onShowHere={() => {
+                        if (personView && String(personView.id) === castMenu.tmdbId) setPersonView(null);
+                        else openPerson({ name: castMenu.name, tmdbId: castMenu.tmdbId }, true);
+                      }}
                       onFollow={() => togglePersonFollow(castMenu.tmdbId, castMenu.name)}
                     />
                   )}

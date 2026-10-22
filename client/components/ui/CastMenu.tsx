@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BellIcon, BellSlashIcon, RectangleStackIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { BellIcon, BellSlashIcon, RectangleStackIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 export interface CastMenuTarget {
   id: string;
@@ -19,9 +19,11 @@ export interface CastMenuTarget {
   anchor: DOMRect;
 }
 
-export function CastMenu({ target, title, follow, onClose, onSeeEverything, onShowHere, onFollow }: {
+export function CastMenu({ target, title, follow, titlesOpen, onClose, onSeeEverything, onShowHere, onFollow }: {
   target: CastMenuTarget;
   title: string | null;
+  /** Their titles are already showing under the cast: the option hides them. */
+  titlesOpen: boolean;
   follow: { muted: boolean } | null;
   onClose: () => void;
   onSeeEverything: () => void;
@@ -104,7 +106,8 @@ export function CastMenu({ target, title, follow, onClose, onSeeEverything, onSh
         <RectangleStackIcon className={icon} />See everything they&apos;ve been in
       </button>
       <button type="button" role="menuitem" className={item} onClick={() => { onClose(); onShowHere(); }}>
-        <ChevronDownIcon className={icon} />Show their titles here
+        {titlesOpen ? <ChevronUpIcon className={icon} /> : <ChevronDownIcon className={icon} />}
+        {titlesOpen ? 'Hide their titles' : 'Show their titles here'}
       </button>
       <div className="h-px bg-[var(--color-surface-border)] my-1" />
       <button type="button" role="menuitem" className={item} onClick={() => { onClose(); onFollow(); }}>
