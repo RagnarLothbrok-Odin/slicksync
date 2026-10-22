@@ -159,6 +159,8 @@ export default function DiscoverPage() {
       setSearchQuery(detail.name);
       setDebouncedQuery(detail.name);
       setLens('people');
+      // So a reload, or the link copied, is this person too.
+      window.history.replaceState(null, '', `/discover?${detail.id ? `person=${detail.id}&` : ''}name=${encodeURIComponent(detail.name)}`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     window.addEventListener('slicksync:discover-person', onPerson);
@@ -602,7 +604,9 @@ export default function DiscoverPage() {
   const credits = useMemo(() => {
     const list = (person?.results ?? []).filter((r) => { const id = creditImdb(r); return !unseenOnly || !(id && watchedStatus[id]); });
     if (personSort === 'popular') return [...list].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
-    return [...list].sort((a, b) => (personSort === 'newest' ? yearOf(b.year) - yearOf(a.year) : yearOf(a.year) - yearOf(b.year)));
+    // A title with no year yet (announced, not out) goes last either way.
+    const y = (r: PersonSearchResult) => yearOf(r.year) || (personSort === 'newest' ? -1 : 9999);
+    return [...list].sort((a, b) => (personSort === 'newest' ? y(b) - y(a) : y(a) - y(b)));
   }, [person, unseenOnly, watchedStatus, personSort, creditImdb]);
 
   const handleMarkNotInterested = useCallback(async (item: PosterCardItem) => {

@@ -20,14 +20,18 @@ const BIO_ASIDE = /\/[^/]+\/|\bborn\b|\bn[ée]e\b|;|[^\u0000-ɏḀ-ỿ‐-‟]/i
 
 /**
  * The first sentences of a biography, up to about three hundred letters.
- * The first paragraph only - TMDb's later ones are career detail, and some
- * end in a "From Wikipedia" credit. Wikipedia's opening aside ("(/ˈmeɪ̯pɒθər/;
- * born July 3, 1962)") goes, since the facts beside it already say that.
- * A sentence ends at a stop followed by a space and a capital, so "$15.4
- * billion" stays one sentence.
+ * The first paragraph, carried into the next when it is one short line
+ * ("X is an American actress.") - TMDb's later ones are career detail, and a
+ * "From Wikipedia" credit is dropped. Wikipedia's opening aside
+ * ("(/ˈmeɪ̯pɒθər/; born July 3, 1962)") goes, since the facts beside it
+ * already say that. A sentence ends at a stop followed by a space and a
+ * capital, so "$15.4 billion" stays one sentence.
  */
 function shortBiography(text) {
-  const first = String(text || '').split(/\n\s*\n/)[0]
+  const paragraphs = String(text || '').split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p && !/wikipedia/i.test(p))
+  let lead = paragraphs[0] || ''
+  for (let i = 1; lead.length < 160 && i < paragraphs.length; i++) lead += ' ' + paragraphs[i]
+  const first = lead
     .replace(/\s*\(([^()]*)\)/g, (bracket, inner) => (BIO_ASIDE.test(inner) ? '' : bracket))
     .replace(/\[\d+\]/g, '')
     .replace(/\s+/g, ' ')

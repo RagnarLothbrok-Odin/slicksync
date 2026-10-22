@@ -73,4 +73,8 @@ test('person card: what they do, born, and a short bio without Wikipedia asides'
   assert.equal(facts.bio, 'Linda Edna Cardellini is an American actress. She is known for Freaks and Geeks (1999). She played Velma.')
   assert.equal(shortBiography('It made $15.4 billion worldwide. Then more.'), 'It made $15.4 billion worldwide. Then more.')
   assert.equal(shortBiography(''), null)
+  assert.equal(
+    shortBiography('Linda Edna Cardellini is an American actress.\n\nShe played Velma in Scooby-Doo. She was in Mad Men.\n\nFrom Wikipedia, the free encyclopedia'),
+    'Linda Edna Cardellini is an American actress. She played Velma in Scooby-Doo. She was in Mad Men.',
+  )
 })
