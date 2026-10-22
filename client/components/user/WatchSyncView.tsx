@@ -23,17 +23,28 @@ import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { KeepInStepCard } from '@/components/user/KeepInStepCard';
 import { toast } from '@/components/ui/Toast';
-import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
-import { posterUrl } from '@/lib/posterUrl';
+import { cachedImageUrl } from '@/lib/posterUrl';
 import { useCoarsePointer } from '@/lib/hooks/useCoarsePointer';
 import {
-  api, type WatchCopySide, type WatchCopyPerson, type WatchCopyPreview, type WatchCopyItem, type WatchCopyOutcome, type WatchCopyRun,
+  api, type WatchCopySide, type WatchCopyPerson, type WatchCopyPreview, type WatchCopyItem, type WatchCopyOutcome, type WatchCopyRun, type WatchCopyHas,
 } from '@/lib/api';
 
 const FROM_C = '#2dd4bf';
 const TO_C = 'var(--color-primary)';
 const AMBER = '#f5a524';
 const PAGE = 120;
+// The Will copy group opens on a peek of its first titles; the rest are one tap away.
+const COPY_PEEK = 18;
+
+// The poster grid, grouped by what will happen, in this order. The two that
+// need nothing from you start folded.
+const GROUPS: { key: WatchCopyOutcome; title: string; color: string; sub: string; folded?: boolean }[] = [
+  { key: 'copy', title: 'Will copy', color: 'var(--color-success)', sub: '' },
+  { key: 'match', title: 'Pick the match', color: 'var(--color-primary)', sub: 'We couldn’t tell which title these are. Pick one to include it.' },
+  { key: 'further', title: 'Kept as it is', color: AMBER, sub: 'Further along there already, so these are left alone' },
+  { key: 'there', title: 'Already there', color: 'var(--color-text-muted)', sub: 'Nothing to do for these', folded: true },
+  { key: 'missing', title: 'Not on that server', color: 'var(--color-text-muted)', sub: '', folded: true },
+];
 
 const PROVIDER_LOOK: Record<string, { letter: string; bg: string }> = {
   stremio: { letter: 'S', bg: 'linear-gradient(135deg,#8a5cf6,#5b3fd6)' },
@@ -49,14 +60,6 @@ const PROVIDER_PILL: Record<string, { bg: string; fg: string }> = {
   jellyfin: { bg: 'rgba(0,164,220,.18)', fg: 'rgb(160,215,240)' },
   aiostreams: { bg: 'rgba(159,146,255,0.16)', fg: 'rgb(212,208,255)' },
   aiometadata: { bg: 'rgba(45,212,191,0.14)', fg: 'rgb(153,246,228)' },
-};
-
-const OUTCOME: Record<WatchCopyOutcome, { label: string; color: string }> = {
-  copy: { label: 'Copies', color: 'var(--color-success)' },
-  there: { label: 'Already there', color: 'var(--color-text-muted)' },
-  further: { label: 'Kept', color: AMBER },
-  match: { label: 'Pick the match', color: 'var(--color-primary)' },
-  missing: { label: 'Not on that server', color: 'var(--color-text-muted)' },
 };
 
 const SINCE = [
@@ -224,10 +227,13 @@ function Slot({ role, choice, count, sides, others, person, other, onPick, compa
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className="w-full text-left flex items-center gap-3 rounded-[18px]"
-        style={{ padding: compact ? 12 : 16, border: `2px solid ${color}`, background: `color-mix(in srgb, ${color} 9%, var(--color-surface))`, boxShadow: `0 10px 30px -18px ${color}` }}
+        style={choice
+          ? { padding: compact ? 12 : 16, border: `2px solid ${color}`, background: `color-mix(in srgb, ${color} 9%, var(--color-surface))`, boxShadow: `0 10px 30px -18px ${color}` }
+          : { padding: compact ? 12 : 16, minHeight: compact ? 72 : 88, border: `2px dashed ${color}`, background: 'transparent', justifyContent: 'center' }}
       >
-        {choice ? <Logo kind={choice.sideInfo.kind} size={compact ? 40 : 48} /> : <span className="rounded-xl bg-surface-hover" style={{ width: 48, height: 48 }} />}
-        <span className="flex-1 min-w-0">
+        {choice ? <Logo kind={choice.sideInfo.kind} size={compact ? 40 : 48} /> : null}
+        {!choice && <span className="font-semibold text-default flex items-center gap-1.5" style={{ fontSize: compact ? 15 : 16 }}>Pick a sign-in<ChevronDownIcon className="w-4 h-4 opacity-70" /></span>}
+        {choice && <span className="flex-1 min-w-0">
           <span className="block font-semibold text-default" style={{ fontSize: compact ? 15 : 16 }}>{choice?.sideInfo.name || 'Pick a sign-in'}</span>
           <span className="block text-xs text-muted truncate">
             {[choice?.sideInfo.detail, count != null ? `${count.toLocaleString()} titles` : null].filter(Boolean).join(' · ')}
@@ -239,8 +245,8 @@ function Slot({ role, choice, count, sides, others, person, other, onPick, compa
               {choice.profileName && <ChevronDownIcon className="w-3 h-3 opacity-60" />}
             </span>
           )}
-        </span>
-        <span className="text-xs text-muted shrink-0 flex items-center gap-1">Change<ChevronDownIcon className="w-3 h-3" /></span>
+        </span>}
+        {choice && <span className="text-xs text-muted shrink-0 flex items-center gap-1">Change<ChevronDownIcon className="w-3 h-3" /></span>}
       </button>
       {open && <SidePicker sides={sides} others={others} person={person} current={choice?.side || ''} other={other} title={role === 'from' ? 'Copy from…' : 'Copy to…'} onPick={(s) => { onPick(s); setOpen(false); }} />}
     </div>
@@ -307,35 +313,105 @@ function MatchPicker({ userId, item, onPick, onClose }: { userId: string; item: 
   );
 }
 
-function Poster({ item, selected, matched, onToggle, onMatch, rpdb }: {
-  item: WatchCopyItem; selected: boolean; matched: boolean; onToggle: () => void; onMatch: () => void; rpdb: boolean;
+// A side's picture showing what it has of one title: a tick when watched, a
+// ring filled to the resume point when part-way, faded when not yet, dashed
+// when there's no match to tell.
+function StateAvatar({ has, pic, size, unknown }: { has: WatchCopyHas; pic: (size: number) => React.ReactNode; size: number; unknown?: boolean }) {
+  const state = unknown ? 'unknown' : has.state || (has.none ? 'none' : 'watched');
+  const badge = Math.max(12, Math.round(size * 0.55));
+  if (state === 'partial') {
+    return (
+      <span title={has.text} className="shrink-0 rounded-full inline-flex items-center justify-center" style={{ width: size + 6, height: size + 6, background: `conic-gradient(${FROM_C} ${has.pct ?? 50}%, rgba(255,255,255,.18) 0)` }}>
+        <span className="rounded-full inline-flex" style={{ boxShadow: '0 0 0 2px var(--color-background, #0b0d14)' }}>{pic(size)}</span>
+      </span>
+    );
+  }
+  return (
+    <span
+      title={unknown ? 'No match yet' : has.text}
+      className="relative shrink-0 inline-flex rounded-full"
+      style={state === 'none' ? { opacity: 0.38, filter: 'grayscale(1)' } : state === 'unknown' ? { opacity: 0.5, outline: '1.5px dashed var(--color-primary)', outlineOffset: 1 } : undefined}
+    >
+      {pic(size)}
+      {state === 'watched' && (
+        <span className="absolute -right-1 -bottom-1 rounded-full flex items-center justify-center" style={{ width: badge, height: badge, background: '#22c55e', color: '#04140a', boxShadow: '0 0 0 2px var(--color-background, #0b0d14)' }}>
+          <CheckIcon style={{ width: badge * 0.65, height: badge * 0.65, strokeWidth: 3.5 }} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Plain poster art, as on Discover - never the rating-printed RPDB kind.
+function plainPoster(item: WatchCopyItem): string | undefined {
+  if (item.poster) return cachedImageUrl(item.poster, 342);
+  if (item.id && /^tt\d+$/.test(item.id)) return cachedImageUrl(`https://images.metahub.space/poster/medium/${item.id}/img`, 342);
+  return undefined;
+}
+
+function Poster({ item, selected, matched, onToggle, onMatch, fromPic, toPic }: {
+  item: WatchCopyItem; selected: boolean; matched: boolean; onToggle: () => void; onMatch: () => void;
+  fromPic: (size: number) => React.ReactNode; toPic: (size: number) => React.ReactNode;
 }) {
-  const look = OUTCOME[item.outcome];
   const [broken, setBroken] = useState(false);
-  const src = item.id && !broken ? posterUrl({ id: item.id, poster: item.poster }, rpdb) : undefined;
-  const label = matched ? 'Matched' : look.label;
+  const src = !broken ? plainPoster(item) : undefined;
+  const pickable = item.outcome === 'copy' || matched;
+  const faded = pickable ? !selected : true;
+  const size = 20;
+  const detail = matched ? 'Matched' : item.outcome === 'copy' ? item.detail : item.outcome === 'further' ? `They’re at: ${item.to.text}` : null;
   return (
     <div className="min-w-0">
-      <div className={`relative aspect-[2/3] rounded-xl overflow-hidden bg-surface-hover ${item.outcome === 'there' || item.outcome === 'missing' ? 'opacity-55' : ''}`}>
+      <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-surface-hover transition-opacity" style={{ opacity: faded ? 0.6 : 1 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {src ? <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className="absolute inset-0 w-full h-full object-cover" /> : <span className="absolute inset-0 flex items-end p-2 text-white font-extrabold uppercase text-sm leading-tight" style={{ background: 'linear-gradient(160deg,#2b2b2b,#555)' }}>{item.name}</span>}
-        <button
-          type="button"
-          onClick={item.outcome === 'match' && !matched ? onMatch : undefined}
-          className="absolute left-1.5 bottom-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full text-white backdrop-blur"
-          style={{ background: `color-mix(in srgb, ${matched ? 'var(--color-success)' : look.color} 30%, rgba(0,0,0,.7))`, cursor: item.outcome === 'match' ? 'pointer' : 'default' }}
-        >
-          {label}
-        </button>
-        {(item.outcome === 'copy' || matched) && (
+        {pickable && (
           <div className="absolute top-1.5 right-1.5"><SelectionCheckbox checked={selected} onChange={onToggle} /></div>
         )}
       </div>
       <div className="font-semibold text-default text-[13px] mt-1.5 truncate">{item.name || item.id}</div>
-      <div className="mt-1 text-[11px] leading-snug">
-        <div className="flex items-start gap-1.5 text-muted" title={`From: ${item.from.text}`}><span className="w-[7px] h-[7px] rounded-full shrink-0 mt-[5px]" style={{ background: FROM_C }} /><span className="line-clamp-2">{item.from.text}</span></div>
-        <div className="flex items-start gap-1.5 text-subtle mt-0.5" title={`To: ${item.to.text}`}><span className="w-[7px] h-[7px] rounded-full shrink-0 mt-[5px]" style={{ background: TO_C }} /><span className="line-clamp-2">{item.to.text}</span></div>
-      </div>
+      {item.outcome === 'match' && !matched ? (
+        <button type="button" onClick={onMatch} className="mt-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)' }}>
+          Pick the match
+        </button>
+      ) : (
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <StateAvatar has={item.from} pic={fromPic} size={size} />
+          <span className="text-xs text-subtle">→</span>
+          <StateAvatar has={matched ? { text: 'Not watched', none: true, state: 'none' } : item.to} pic={toPic} size={size} unknown={item.outcome === 'missing'} />
+        </div>
+      )}
+      {detail && <div className="mt-1 text-[11px] text-muted truncate" title={detail}>{detail}</div>}
+    </div>
+  );
+}
+
+// One group of titles that share an outcome; the heading says it once.
+function Group({ color, title, count, sub, action, folded, onUnfold, children }: {
+  color: string; title: string; count: number; sub: React.ReactNode; action?: React.ReactNode; folded?: boolean; onUnfold?: () => void; children?: React.ReactNode;
+}) {
+  const head = (
+    <>
+      <span className="w-1 self-stretch rounded shrink-0" style={{ background: color }} />
+      <span className="flex-1 min-w-0 text-left">
+        <span className="block font-bold text-default text-[17px]">
+          {title}<span className="ml-2 align-[2px] text-[13px] font-semibold text-muted px-2 py-px rounded-full bg-surface-hover">{count.toLocaleString()}</span>
+        </span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs sm:text-[13px] text-muted">{sub}</span>
+      </span>
+    </>
+  );
+  if (folded) {
+    return (
+      <button type="button" onClick={onUnfold} className="mt-6 w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-surface hover:bg-surface-hover">
+        {head}
+        <span className="text-[13px] font-semibold px-3 py-1.5 rounded-[10px] shrink-0" style={{ color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)', background: 'color-mix(in srgb, var(--color-primary) 14%, transparent)' }}>Show ›</span>
+      </button>
+    );
+  }
+  return (
+    <div className="mt-6 first:mt-1">
+      <div className="flex items-center gap-3">{head}{action}</div>
+      {children}
     </div>
   );
 }
@@ -353,7 +429,6 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [userId]);
   const { layoutMode } = useLayoutMode();
   const compact = useCoarsePointer();
-  const { rpdbEnabled } = usePersonalFeatures();
 
   const [person, setPerson] = useState<string>('');
   const [sides, setSides] = useState<WatchCopySide[] | null>(null);
@@ -376,6 +451,8 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
   const [typeFilter, setTypeFilter] = useState<'all' | 'movie' | 'series'>('all');
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [matches, setMatches] = useState<Record<string, string>>({});
   const [matching, setMatching] = useState<string | null>(null);
@@ -388,6 +465,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
   useDismiss(confirmUndo, undoRef, closeUndo);
 
   useEffect(() => {
+    if (!userId) return;
     api.getUser(userId).then((u: { username?: string }) => setPerson(u?.username || '')).catch(() => {});
     api.getWatchCopySides(userId, true).then((r) => {
       setSides(r.sides);
@@ -398,14 +476,12 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
       const wantFrom = search.get('from');
       const wantTo = search.get('to');
       const known = new Set([...all, ...(r.others || []).map((o) => o.side)]);
+      // Nothing is picked for you: From and To start empty unless the
+      // address names them (a link from Keep in step or a person's page).
       if (wantFrom && wantTo && wantFrom !== wantTo && known.has(wantFrom) && known.has(wantTo)) {
         setFrom(wantFrom);
         setTo(wantTo);
-        return;
       }
-      setFrom(all[0] || '');
-      // Someone with a single sign-in copies to (or from) another person's.
-      setTo(all.find((x) => x !== all[0] && !x.startsWith(all[0].split(':')[0])) || all[1] || r.others?.[0]?.side || '');
     }).catch((e) => setError(e?.message || 'Could not read their sign-ins'));
   }, [userId, search]);
 
@@ -414,7 +490,7 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
   const libraryAvailable = !!fromChoice && !!toChoice && fromChoice.sideInfo.provider !== 'jellyfin' && toChoice.sideInfo.provider !== 'jellyfin';
 
   const load = useCallback(async () => {
-    if (!from || !to || from === to) return;
+    if (!userId || !from || !to || from === to) return;
     setLoading(true);
     setError(null);
     try {
@@ -423,6 +499,8 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
       setSelected(new Set(r.items.filter((i) => i.outcome === 'copy').map((i) => i.key)));
       setMatches({});
       setShown(PAGE);
+      setCopyOpen(false);
+      setUnfolded(new Set());
     } catch (e) {
       setPreview(null);
       setError((e as Error)?.message || 'Could not read their watch history');
@@ -487,6 +565,8 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
     }
   };
 
+  const fromPic = (size: number) => fromChoice ? <ProfilePic profile={fromChoice.profile} person={fromChoice.sideInfo.person || personInfo} kind={fromChoice.sideInfo.kind} size={size} /> : null;
+  const toPic = (size: number) => toChoice ? <ProfilePic profile={toChoice.profile} person={toChoice.sideInfo.person || personInfo} kind={toChoice.sideInfo.kind} size={size} /> : null;
   const otherSignIns = (sides || []).filter((s) => s.provider !== fromChoice?.sideInfo.provider && s.provider !== toChoice?.sideInfo.provider);
   const backButton = (
     <Button variant="ghost" size="sm" leftIcon={<ArrowLeftIcon className="w-4 h-4" />} onClick={() => router.push(home === 'tasks' ? '/tasks' : `/users/${encodeURIComponent(userId)}`)}>
@@ -546,12 +626,33 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
               </div>
             )}
 
-            {sides === null && !error && <div className="text-sm text-muted">Reading their sign-ins…</div>}
+            {!userId && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 md:gap-4 items-start max-w-[70rem]">
+                  {(['from', 'to'] as const).map((role) => (
+                    <div key={role} className={`min-w-0 ${role === 'to' ? 'md:order-3' : ''}`}>
+                      <div className="mb-1.5 text-[11px] font-bold tracking-[0.08em]" style={{ color: role === 'from' ? FROM_C : TO_C }}>{role === 'from' ? 'COPY FROM' : 'COPY TO'}</div>
+                      <div className="flex items-center justify-center rounded-[18px] text-sm text-muted opacity-60" style={{ minHeight: compact ? 72 : 88, border: `2px dashed ${role === 'from' ? FROM_C : TO_C}` }}>Choose a person first</div>
+                    </div>
+                  ))}
+                  <div className="flex md:flex-col items-center justify-center md:pt-6 md:order-2">
+                    <span className="w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center text-subtle bg-surface-hover">
+                      <ArrowRightIcon className="hidden md:block w-5 h-5" /><ArrowDownIcon className="md:hidden w-5 h-5" />
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-6 rounded-2xl border border-dashed border-default px-5 py-9 text-center">
+                  <div className="font-semibold text-default text-[17px]">Choose who to sync</div>
+                  <div className="mt-1.5 text-sm text-muted">Pick a person above, then where to copy from and to. The titles that would copy show up here.</div>
+                </div>
+              </>
+            )}
+            {userId && sides === null && !error && <div className="text-sm text-muted">Reading their sign-ins…</div>}
             {sides && sides.reduce((n, s) => n + Math.max(1, s.profiles.length), 0) + others.length < 2 && (
-              <div className="text-sm text-muted">There's nothing to copy between yet - add a second sign-in or profile, or another person.</div>
+              <div className="text-sm text-muted">There’s nothing to copy between yet - add a second sign-in or profile, or another person.</div>
             )}
 
-            {sides && fromChoice && toChoice && (
+            {sides && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 md:gap-4 items-start max-w-[70rem]">
                   <Slot role="from" choice={fromChoice} count={preview?.counts.from ?? null} sides={sides} others={others} person={personInfo} other={to} onPick={pickFrom} compact={compact} />
@@ -574,6 +675,13 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                   </div>
                 )}
 
+                {(!fromChoice || !toChoice) && (
+                  <div className="mt-6 rounded-2xl border border-dashed border-default px-5 py-9 text-center">
+                    <div className="font-semibold text-default text-[17px]">Pick where to copy from and to</div>
+                    <div className="mt-1.5 text-sm text-muted">Choose two of their sign-ins or profiles, or someone else’s, and the titles that would copy show up here.</div>
+                  </div>
+                )}
+                {fromChoice && toChoice && (<>
                 <div className="mt-4 flex flex-wrap items-center gap-1.5">
                   <span className="text-xs text-subtle mr-0.5">What to copy</span>
                   <OptionChip on={watched} onClick={() => setWatched((v) => !v)}>Watched</OptionChip>
@@ -605,10 +713,9 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                         );
                       })}
                     </div>
-                    {(preview.limits.length > 0 || totals!.missing > 0) && (
+                    {preview.limits.length > 0 && (
                       <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                         {preview.limits.map((l) => <span key={l}>{l}</span>)}
-                        {totals!.missing > 0 && <span>{totals!.missing.toLocaleString()} aren’t on that server, so they’re left out</span>}
                       </div>
                     )}
 
@@ -626,31 +733,61 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                       </div>
                     </div>
 
-                    <div className="mt-3.5 grid gap-x-3.5 gap-y-[18px] grid-cols-3 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
-                      {visible.slice(0, shown).map((item) => (
-                        <div key={item.key} className="relative">
-                          <Poster
-                            item={item}
-                            selected={selected.has(item.key)}
-                            matched={!!matches[item.key]}
-                            rpdb={rpdbEnabled}
-                            onToggle={() => setSelected((s) => { const n = new Set(s); if (n.has(item.key)) n.delete(item.key); else n.add(item.key); return n; })}
-                            onMatch={() => setMatching(item.key)}
-                          />
-                          {matching === item.key && (
-                            <MatchPicker userId={userId} item={item} onClose={() => setMatching(null)} onPick={(id) => {
-                              setMatches((m) => ({ ...m, [item.key]: id }));
-                              setSelected((s) => new Set(s).add(item.key));
-                              setMatching(null);
-                            }} />
+                    {GROUPS.map((g) => {
+                      const list = visible.filter((v) => v.outcome === g.key);
+                      if (!list.length) return null;
+                      const folded = g.folded && !unfolded.has(g.key);
+                      const limit = g.key === 'copy' && !copyOpen ? COPY_PEEK : shown;
+                      const keys = list.map((v) => v.key);
+                      const allOn = keys.every((k) => selected.has(k));
+                      return (
+                        <Group
+                          key={g.key}
+                          color={g.color}
+                          title={g.title}
+                          count={list.length}
+                          sub={g.key === 'copy'
+                            ? <>Marked watched, or picked up where they left off, on {toPic(16)} {choiceLabel(toChoice)}</>
+                            : g.key === 'missing' ? `${choiceLabel(toChoice)} doesn’t have these, so they’re left out` : g.sub}
+                          action={g.key === 'copy' ? (
+                            <button type="button" onClick={() => setSelected((sel) => { const n = new Set(sel); keys.forEach((k) => (allOn ? n.delete(k) : n.add(k))); return n; })} className="text-[13px] font-semibold px-3 py-1.5 rounded-[10px] shrink-0 whitespace-nowrap" style={{ color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)', background: 'color-mix(in srgb, var(--color-primary) 14%, transparent)' }}>
+                              {allOn ? 'Untick all' : 'Tick all'}
+                            </button>
+                          ) : undefined}
+                          folded={folded}
+                          onUnfold={() => setUnfolded((u) => new Set(u).add(g.key))}
+                        >
+                          <div className="mt-3 grid gap-x-3.5 gap-y-[18px] grid-cols-3 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
+                            {list.slice(0, limit).map((item) => (
+                              <div key={item.key} className="relative">
+                                <Poster
+                                  item={item}
+                                  selected={selected.has(item.key)}
+                                  matched={!!matches[item.key]}
+                                  fromPic={fromPic}
+                                  toPic={toPic}
+                                  onToggle={() => setSelected((sel) => { const n = new Set(sel); if (n.has(item.key)) n.delete(item.key); else n.add(item.key); return n; })}
+                                  onMatch={() => setMatching(item.key)}
+                                />
+                                {matching === item.key && (
+                                  <MatchPicker userId={userId} item={item} onClose={() => setMatching(null)} onPick={(id) => {
+                                    setMatches((m) => ({ ...m, [item.key]: id }));
+                                    setSelected((sel) => new Set(sel).add(item.key));
+                                    setMatching(null);
+                                  }} />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          {list.length > limit && (
+                            <button type="button" onClick={() => (g.key === 'copy' && !copyOpen ? setCopyOpen(true) : setShown((n) => n + PAGE))} className="mt-3.5 w-full py-2.5 rounded-[10px] bg-surface hover:bg-surface-hover text-[13px] font-semibold text-muted">
+                              {g.key === 'copy' && !copyOpen ? `Show all ${list.length.toLocaleString()}` : `Show more (${(list.length - limit).toLocaleString()} left)`}
+                            </button>
                           )}
-                        </div>
-                      ))}
-                    </div>
+                        </Group>
+                      );
+                    })}
                     {visible.length === 0 && <div className="mt-4 text-sm text-muted">Nothing here.</div>}
-                    {visible.length > shown && (
-                      <div className="mt-4 flex justify-center"><Button variant="secondary" size="sm" onClick={() => setShown((n) => n + PAGE)}>Show more ({(visible.length - shown).toLocaleString()} left)</Button></div>
-                    )}
 
                     {/* In the top-bar layout the account button floats in the bottom-left corner; the bar starts after it. */}
                     <div className={`sticky bottom-3 z-20 mt-4 flex items-center justify-between gap-3 pr-3.5 py-3 rounded-2xl border border-default backdrop-blur-xl ${layoutMode === 'nebula' ? 'pl-[4.25rem] md:pl-20' : 'pl-3.5'}`} style={{ background: 'color-mix(in srgb, var(--color-surface) 88%, transparent)', boxShadow: '0 -8px 30px -16px rgba(0,0,0,.7)' }}>
@@ -684,9 +821,10 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                     </div>
                   </>
                 )}
+                </>)}
               </>
             )}
-            {sides && <div className="mt-6"><KeepInStepCard userId={userId} /></div>}
+            {userId && sides && <div className="mt-6"><KeepInStepCard userId={userId} /></div>}
           </PageSection>
         </div>
       </div>

@@ -42,27 +42,48 @@ function furthest(title) {
   return last ? { key: last, resume: false } : null
 }
 
+// text: what that side has, in words. state + pct drive the avatar on the
+// page's poster cards: a tick for watched, a ring filled to the resume point.
 function describe(title) {
-  if (!title) return { text: 'Not watched', none: true }
+  if (!title) return { text: 'Not watched', none: true, state: 'none' }
   const r = title.resume
   const left = r && r.duration > 0 ? Math.max(0, Math.round((r.duration - r.position) / 60000)) : null
+  const pct = r && r.duration > 0 ? Math.min(99, Math.max(1, Math.round((r.position / r.duration) * 100))) : null
+  const partial = (text) => ({ text, state: 'partial', ...(pct != null ? { pct } : {}) })
   if (title.type === 'movie') {
-    if (title.watchedAt != null) return { text: 'Watched' }
-    if (r) return { text: left != null ? `Stopped · ${left} min left` : 'Started' }
-    return { text: 'Not watched', none: true }
+    if (title.watchedAt != null) return { text: 'Watched', state: 'watched' }
+    if (r) return partial(left != null ? `Stopped · ${left} min left` : 'Started')
+    return { text: 'Not watched', none: true, state: 'none' }
   }
   const n = title.episodes?.size || 0
   const f = furthest(title)
   if (f?.resume) {
     const [s, e] = epOrder(f.key)
-    return { text: left != null ? `S${s} E${e} · ${left} min left` : `S${s} E${e} started` }
+    return partial(left != null ? `S${s} E${e} · ${left} min left` : `S${s} E${e} started`)
   }
   if (f) {
     const [s, e] = epOrder(f.key)
-    return { text: n > 1 ? `${n} episodes · up to S${s} E${e}` : `S${s} E${e} finished` }
+    return { text: n > 1 ? `${n} episodes · up to S${s} E${e}` : `S${s} E${e} finished`, state: 'watched' }
   }
-  if (title.watchedAt != null) return { text: 'Marked watched' }
-  return { text: 'Not watched', none: true }
+  if (title.watchedAt != null) return { text: 'Marked watched', state: 'watched' }
+  return { text: 'Not watched', none: true, state: 'none' }
+}
+
+const clock = (ms) => {
+  const m = Math.max(1, Math.round((ms || 0) / 60000))
+  return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} m` : `${m} m`
+}
+
+// The one thing worth saying about a title on its card, beyond its group:
+// how many episodes are added, or where it picks up. Plain marks say nothing.
+function detailOf(changes) {
+  if (!changes) return null
+  const parts = []
+  const eps = changes.addEpisodes?.length || 0
+  if (eps) parts.push(`${eps} episode${eps === 1 ? '' : 's'}`)
+  const r = changes.resume
+  if (r) parts.push(r.season != null && r.episode != null ? `S${r.season} E${r.episode} from ${clock(r.position)}` : `from ${clock(r.position)}`)
+  return parts.join(' · ') || null
 }
 
 /**
@@ -147,7 +168,7 @@ function plan(source, dest, opts = {}, { isPresent = null } = {}) {
     if (isPresent && !isPresent(src)) { items.push({ ...base, outcome: 'missing', to: { text: 'Not on that server', none: true }, changes: null }); continue }
     const dst = dest.get(key) || null
     const p = planTitle(src, dst, opts)
-    items.push({ ...base, outcome: p.outcome, to: describe(dst), changes: p.changes })
+    items.push({ ...base, outcome: p.outcome, to: describe(dst), changes: p.changes, detail: detailOf(p.changes) })
   }
   items.sort((a, b) => (source.get(b.key)?.lastActivity || 0) - (source.get(a.key)?.lastActivity || 0))
   const count = (o) => items.filter((i) => i.outcome === o).length
@@ -157,4 +178,4 @@ function plan(source, dest, opts = {}, { isPresent = null } = {}) {
   }
 }
 
-module.exports = { plan, planTitle, describe, furthest, epKey, FINISHED }
+module.exports = { plan, planTitle, describe, detailOf, furthest, epKey, FINISHED }

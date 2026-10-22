@@ -1161,10 +1161,10 @@ export const HELP_ENTRIES: HelpEntry[] = [
     answer: 'AIOSync copies watched titles and resume points from one sign-in or profile to another - Stremio, Nuvio, Jellyfin, AIOStreams and AIOMetadata, in any direction, for the same person or between two people. Nothing is ever removed, nothing goes backwards, and every copy can be undone for 7 days.',
     steps: [
       'Open it from Tasks -> AIOSync, or from the AIOSync tile on a person\'s page.',
-      'Pick who it\'s for with the For pill at the top (from Tasks).',
+      'Pick who it\'s for with the For pill at the top (from Tasks). Nothing is picked for you - the page waits until you choose.',
       'Choose COPY FROM and COPY TO - any of their sign-ins or profiles, or Other people for someone else\'s.',
       'Choose what to copy: Watched, Resume points, and Library (the watchlist, between Stremio and Nuvio only), and how far back.',
-      'Check the titles - each card says what it has and what the other side already has - untick any you want left out, then press Copy and confirm.',
+      'Check the titles. They\'re grouped by what will happen: Will copy, Pick the match, Kept as it is, and Already there (folded away). On each card, the two pictures are where it comes from and where it goes: a green tick means watched there, a ring around the picture fills up to the resume point, and a faded picture means not watched there yet. Untick any you want left out, then press Copy and confirm.',
       'Changed your mind? The banner at the top undoes that copy for 7 days.',
     ],
     details: [

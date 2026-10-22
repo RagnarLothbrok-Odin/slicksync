@@ -3782,9 +3782,14 @@ export interface WatchCopyItem {
   name: string | null;
   poster: string | null;
   outcome: WatchCopyOutcome;
-  from: { text: string; none?: boolean };
-  to: { text: string; none?: boolean };
+  from: WatchCopyHas;
+  to: WatchCopyHas;
+  // What's specific to this title on its card: "62 episodes", "from 1 h 13 m".
+  detail?: string | null;
 }
+
+// What one side has of a title. state + pct drive the avatar on the card.
+export interface WatchCopyHas { text: string; none?: boolean; state?: 'watched' | 'partial' | 'none'; pct?: number }
 
 export interface WatchCopyPreview {
   items: WatchCopyItem[];

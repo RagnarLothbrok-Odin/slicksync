@@ -441,3 +441,25 @@ test('a double-tap starts one copy, not two', async () => {
   assert.equal(job.state, 'done')
   assert.equal(require('../server/utils/watchCopy/locks').holder('acc|u1|nuvio'), null, 'the sign-in is free again')
 })
+
+test('cards: each side says watched, part-way (with how far) or not yet', () => {
+  const { describe } = require('../server/utils/watchCopy/plan')
+  assert.equal(describe(null).state, 'none')
+  assert.equal(describe(title('tt1', 'movie', { watchedAt: 5 })).state, 'watched')
+  const part = describe(title('tt1', 'movie', { resume: { position: 30 * 60000, duration: 120 * 60000 } }))
+  assert.deepEqual([part.state, part.pct], ['partial', 25])
+  const show = title('tt2', 'series', { episodes: new Map([['1:1', 1], ['1:2', 2]]) })
+  assert.equal(describe(show).state, 'watched')
+  assert.equal(describe({ ...show, resume: { season: 1, episode: 3, position: 60000, duration: 0 } }).pct, undefined, 'no length, no ring amount')
+})
+
+test('cards: a copy names what is specific to it, a plain mark says nothing', () => {
+  const src = title('tt3', 'series', { episodes: new Map([['1:1', 1], ['1:2', 2]]), resume: { season: 1, episode: 3, position: 73 * 60000, duration: 90 * 60000 } })
+  const movie = title('tt4', 'movie', { resume: { position: 12 * 60000, duration: 100 * 60000 } })
+  const watched = title('tt5', 'movie', { watchedAt: 9 })
+  const r = plan(new Map([['a', src], ['b', movie], ['c', watched]]), new Map(), {})
+  const by = Object.fromEntries(r.items.map((i) => [i.key, i.detail]))
+  assert.equal(by.a, '2 episodes · S1 E3 from 1 h 13 m')
+  assert.equal(by.b, 'from 12 m')
+  assert.equal(by.c, null)
+})

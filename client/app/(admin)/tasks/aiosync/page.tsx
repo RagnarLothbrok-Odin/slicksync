@@ -23,7 +23,6 @@ function ForSwitcher({ people, current, onPick }: { people: User[]; current: Use
     document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('touchstart', close); document.removeEventListener('keydown', esc); };
   }, [open]);
-  if (!current) return null;
   return (
     <div className="flex items-center justify-center gap-2.5 mb-5">
       <span className="text-sm text-muted">For</span>
@@ -34,8 +33,12 @@ function ForSwitcher({ people, current, onPick }: { people: User[]; current: Use
           aria-expanded={open}
           className="inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border border-default bg-surface-hover text-sm font-semibold text-default"
         >
-          <UserAvatar userId={current.id} name={current.username} email={current.email} src={current.avatarUrl || undefined} useGravatar={current.useGravatar} colorIndex={current.colorIndex} size="xs" />
-          {current.username}
+          {current ? (
+            <>
+              <UserAvatar userId={current.id} name={current.username} email={current.email} src={current.avatarUrl || undefined} useGravatar={current.useGravatar} colorIndex={current.colorIndex} size="xs" />
+              {current.username}
+            </>
+          ) : <span className="pl-2">Choose a person</span>}
           <ChevronDownIcon className="w-4 h-4 text-muted" />
         </button>
         {open && (
@@ -52,7 +55,7 @@ function ForSwitcher({ people, current, onPick }: { people: User[]; current: Use
                   <span className="block text-sm text-default truncate">{p.username}</span>
                   <span className="block text-xs text-muted truncate">{providerTypeLabel(p.providerType)}</span>
                 </span>
-                {p.id === current.id && <CheckIcon className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />}
+                {p.id === current?.id && <CheckIcon className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />}
               </button>
             ))}
           </div>
@@ -69,13 +72,14 @@ function WatchSyncFromTasks() {
   useEffect(() => { api.getUsers().then(setPeople).catch(() => setPeople([])); }, []);
 
   const wanted = search.get('person');
-  const current = people?.find((p) => p.id === wanted) || people?.[0] || null;
+  // Nobody is picked for you - the page waits until you choose who.
+  const current = people?.find((p) => p.id === wanted) || null;
   if (!people) return null;
-  if (!current) return <p className="text-center text-muted p-10">Add people first - AIOSync works between their sign-ins.</p>;
+  if (!people.length) return <p className="text-center text-muted p-10">Add people first - AIOSync works between their sign-ins.</p>;
   return (
     <WatchSyncView
-      key={current.id}
-      userId={current.id}
+      key={current?.id || 'nobody'}
+      userId={current?.id || ''}
       home="tasks"
       forSlot={<ForSwitcher people={people} current={current} onPick={(id) => router.replace(`/tasks/aiosync?person=${encodeURIComponent(id)}`)} />}
     />
