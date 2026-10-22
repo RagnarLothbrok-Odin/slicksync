@@ -743,6 +743,8 @@ async function bootstrap() {
     }
     try {
       require('./utils/discover').scheduleDiscoverWarm()
+      // Saved titles that are only an id get their real name (utils/titleNames).
+      try { require('./utils/titleNames').scheduleNameRepair(prisma) } catch (e) { console.warn('[titleNames] not scheduled:', e?.message) }
     } catch (err) {
       console.error('⚠️ Failed to initialize Discover pre-warm:', err)
     }

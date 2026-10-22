@@ -19,6 +19,7 @@
       "Lighter on the server: the Users page, the addons list, the home page's live refresh and the notification bell each do a fraction of the work they did, and the database gets the indexes and statistics its busiest pages need."
     ],
     "bugFixes": [
+      "Titles watched through AIOStreams could show as an IMDb id (\"tt4468740\") instead of their name on Activity, in notifications and in history. They show their real title now, and titles already saved that way were renamed.",
       "A Monthly sync schedule ran every half a minute instead of once a month. On a public instance, saving sync settings also left only that account's schedule running; every account's schedule now keeps running, and one slow account no longer holds up the rest.",
       "Restoring a backup from Settings failed whenever a login was set.",
       "Changing page could land partway down the new page instead of at the top.",
