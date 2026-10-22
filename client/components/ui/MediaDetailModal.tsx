@@ -1908,7 +1908,7 @@ export function MediaDetailModal({
                           className="mt-2.5 text-sm font-semibold transition-opacity hover:opacity-80"
                           style={{ color: 'color-mix(in srgb, var(--color-primary) 45%, #ffffff)' }}
                         >
-                          See everything they&apos;ve been in →
+                          See more about {personView.name} →
                         </button>
                       )}
                     </div>

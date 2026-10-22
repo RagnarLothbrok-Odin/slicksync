@@ -12,7 +12,7 @@
  * The filters a catalog can't apply itself (decade, rating, length) and
  * Movies + Shows together are the server's (utils/discoverFacets.js), so
  * paging works the same with any of them on. A person - from People, or
- * from "See everything they've been in" on a title's cast - gets a page of
+ * from "See more about" on a title's cast - gets a page of
  * their own at the top: who they are, and everything they've been in.
  */
 
@@ -146,7 +146,7 @@ export default function DiscoverPage() {
     return () => clearTimeout(id);
   }, [searchQuery]);
 
-  // "See everything they've been in" from a title's cast, while already here.
+  // "See more about" someone in a title's cast, while already here.
   useEffect(() => {
     const onPerson = (e: Event) => {
       const detail = (e as CustomEvent<{ id: number | null; name: string }>).detail;

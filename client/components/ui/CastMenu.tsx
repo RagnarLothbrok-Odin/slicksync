@@ -103,7 +103,7 @@ export function CastMenu({ target, title, follow, titlesOpen, onClose, onSeeEver
         </span>
       </div>
       <button type="button" role="menuitem" className={item} onClick={() => { onClose(); onSeeEverything(); }}>
-        <RectangleStackIcon className={icon} />See everything they&apos;ve been in
+        <RectangleStackIcon className={icon} /><span className="min-w-0 truncate">See more about {target.name}</span>
       </button>
       <button type="button" role="menuitem" className={item} onClick={() => { onClose(); onShowHere(); }}>
         {titlesOpen ? <ChevronUpIcon className={icon} /> : <ChevronDownIcon className={icon} />}
@@ -112,7 +112,11 @@ export function CastMenu({ target, title, follow, titlesOpen, onClose, onSeeEver
       <div className="h-px bg-[var(--color-surface-border)] my-1" />
       <button type="button" role="menuitem" className={item} onClick={() => { onClose(); onFollow(); }}>
         {follow && !follow.muted ? <BellSlashIcon className={icon} /> : <BellIcon className={icon} />}
-        {!follow ? `Follow ${target.name}` : follow.muted ? `Turn alerts for ${target.name} back on` : `Mute alerts for ${target.name}`}
+        {/* The name is at the top already, so the options don't repeat it. */}
+        <span className="min-w-0">
+          {!follow ? 'Follow' : follow.muted ? 'Turn alerts back on' : 'Mute alerts'}
+          {!follow && <span className="block text-[12.5px] text-muted leading-snug">Hear when they have something new out</span>}
+        </span>
       </button>
     </div>,
     document.body,

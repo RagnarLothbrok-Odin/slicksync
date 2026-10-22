@@ -1,6 +1,7 @@
 'use client';
 
 import clsx from 'clsx';
+import { JellyfinLogo } from '@/components/jellyfin/JellyfinLogo';
 
 export type BadgeVariant = 'default' | 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'aurora' | 'cyan' | 'neutral' | 'outline' | 'muted' | 'stremio' | 'nuvio' | 'jellyfin' | 'aiostreams' | 'aiometadata';
 type BadgeSize = 'sm' | 'md';
@@ -98,14 +99,12 @@ function getBadgeStyles(variant: BadgeVariant) {
         borderColor: 'rgba(45, 212, 191, 0.28)',
       };
     case 'aiostreams':
-      // AIOStreams' media server: half black, half white, split by the same
-      // diagonal as Nuvio's two tones. The text takes a dark outline so it
-      // reads on both halves.
+      // AIOStreams' media server, in the Catalogs tile's look: dark navy with
+      // the Jellyfin purple-to-blue edge (the text is drawn two-tone below).
       return {
-        background: 'linear-gradient(115deg, rgb(12, 12, 14) 0%, rgb(12, 12, 14) 50%, rgb(244, 244, 245) 50%, rgb(244, 244, 245) 100%)',
-        color: 'rgb(255, 255, 255)',
-        borderColor: 'rgba(255, 255, 255, 0.35)',
-        textShadow: '0 0 2px rgb(0, 0, 0), 0 0 2px rgb(0, 0, 0), 0 0 1px rgb(0, 0, 0)',
+        background: 'linear-gradient(rgba(0, 11, 37, 0.94), rgba(6, 16, 46, 0.94)) padding-box, linear-gradient(115deg, rgba(170, 92, 195, 0.75), rgba(0, 164, 220, 0.75)) border-box',
+        color: 'rgb(212, 208, 255)',
+        borderColor: 'transparent',
       };
     case 'aiometadata':
       // AIOMetadata's media server: rose.
@@ -188,7 +187,13 @@ export function Badge({ children, variant = 'default', size = 'sm', pulse = fals
         </span>
       )}
       {icon}
-      {children}
+      {variant === 'aiostreams' && children === 'AIOStreams' ? (
+        // The Jellyfin mark, then "AIO" light and "Streams" indigo, as on Catalogs.
+        <>
+          <JellyfinLogo size={size === 'sm' ? 10 : 12} />
+          <span><span style={{ color: 'rgb(212, 208, 255)' }}>AIO</span><span style={{ color: 'rgb(159, 146, 255)' }}>Streams</span></span>
+        </>
+      ) : children}
     </span>
   );
 }
