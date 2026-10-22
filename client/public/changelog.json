@@ -1,5 +1,27 @@
 [
   {
+    "version": "1.101.0",
+    "date": "2026-10-21",
+    "title": "1.101.0 - AIOSync: watch history between any app, person and profile, plus a faster app",
+    "features": [
+      "AIOSync: copy watched titles and resume points from one sign-in or profile to another - Stremio, Nuvio, Jellyfin, AIOStreams and AIOMetadata, in every direction, for the same person or between two people. Each title lands as far along as the source has it and never moves backwards; a title already further along stays as it is. Before copying, every title shows what each side has, and any of them can be left out. Every copy can be undone for 7 days, and undoing leaves alone anything watched since. On Stremio and Nuvio the watchlist (Library) can come along too.",
+      "AIOSync on each provider: Stremio keeps one resume point and one date per show, so the newest episode's carries over. Nuvio keeps every profile apart. Jellyfin marks what its library has, on the real watch date. AIOStreams keeps the watch date; AIOMetadata shows today's. Titles a Jellyfin library names without an id can be matched by hand.",
+      "Keep in step: a person's own sign-ins and profiles kept matching from now on - finish or stop part-way on one, and it shows up on the others within a few minutes. Each sign-in or profile sends and receives, only receives (a Kids profile that shouldn't push into a parent's history), or stays out. Nothing is lost while a sign-in can't be reached; it catches up afterwards. Recently moved lists what went where.",
+      "AIOSync has its own place on Tasks, saying who is synced with whom, and a tile on every person's page. Someone who just added a second sign-in is offered their history on it.",
+      "Activity: right-click a poster (press and hold on a phone) to open its details, show only that title or that person, add it to the Watchlist, mark it not watched, bury a show in the Graveyard, or remove that viewing. Removing takes it out of that person's watch time and history too, says so first, and the Trash keeps it for 30 days with an Undo.",
+      "Title popup: Bookmark and Watched sit right under the title as small pills on a computer, and on a phone they share one row with + Catalog after the ratings. Open in AIOStreams appears for anyone here on AIOStreams and opens the title in the AIOStreams app, asking which server when there's more than one.",
+      "Faster to open and use, especially on a phone: the app opens without waiting on a session check, the home page loads well under two thirds of the code it did, pages and cards appear at once instead of fading in, and Continue Watching pictures come through the image cache at the card's size and show straight away. The saved theme is applied before anything is drawn, so a light theme no longer flashes dark.",
+      "Lighter on the server: the Users page, the addons list, the home page's live refresh and the notification bell each do a fraction of the work they did, and the database gets the indexes and statistics its busiest pages need."
+    ],
+    "bugFixes": [
+      "A Monthly sync schedule ran every half a minute instead of once a month. On a public instance, saving sync settings also left only that account's schedule running; every account's schedule now keeps running, and one slow account no longer holds up the rest.",
+      "Restoring a backup from Settings failed whenever a login was set.",
+      "Changing page could land partway down the new page instead of at the top.",
+      "Right-click menus could open past the edge of the screen and get cut off.",
+      "Deleting a person or an account now clears everything recorded for them, and a person's history goes once their Trash entry expires (unless they were restored)."
+    ]
+  },
+  {
     "version": "1.100.0",
     "date": "2026-10-19",
     "title": "1.100.0 - Sign in a Nuvio TV, their servers in Nuvio, and tidier cards everywhere",
