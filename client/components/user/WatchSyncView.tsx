@@ -280,8 +280,8 @@ function OptionChip({ on, onClick, children, disabled }: { on: boolean; onClick:
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs whitespace-nowrap border text-default disabled:opacity-40"
-      style={{ borderColor: on ? 'var(--color-primary)' : 'var(--color-surface-border)', background: on ? 'color-mix(in srgb, var(--color-primary) 14%, transparent)' : 'transparent' }}
+      // The chosen look is a class, never inline - see .sync-chip-on in globals.css.
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs whitespace-nowrap border text-default disabled:opacity-40 ${on ? 'sync-chip-on' : 'sync-chip-off'}`}
     >
       {on && <CheckIcon className="w-3.5 h-3.5" />}
       {children}
@@ -706,8 +706,8 @@ export function WatchSyncView({ userId, home = 'person', forSlot }: { userId: st
                       {tiles.map((t) => {
                         const on = filter === t.key;
                         return (
-                          <button key={t.key} type="button" onClick={() => setFilter(on ? 'all' : t.key)} className="text-left px-3.5 py-3 rounded-[14px] border"
-                            style={{ borderColor: on ? `color-mix(in srgb, ${t.color} 60%, transparent)` : 'var(--color-surface-border)', background: on ? `color-mix(in srgb, ${t.color} 10%, var(--color-surface))` : 'color-mix(in srgb, var(--color-surface) 70%, transparent)' }}>
+                          <button key={t.key} type="button" onClick={() => setFilter(on ? 'all' : t.key)} className={`text-left px-3.5 py-3 rounded-[14px] border sync-tile ${on ? 'is-on' : ''}`}
+                            style={{ '--tile': t.color } as React.CSSProperties}>
                             <div className="text-[22px] font-bold" style={{ color: t.color }}>{t.n.toLocaleString()}</div>
                             <div className="text-xs text-muted">{t.label}</div>
                           </button>

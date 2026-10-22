@@ -84,10 +84,7 @@ function Pill({ on, onClick, children, tv = false }: { on: boolean; onClick: () 
         type="button"
         onClick={onClick}
         aria-pressed={on}
-        className={`h-8 px-3 rounded-full text-[13px] font-medium transition-colors ${on ? 'text-default' : 'text-muted hover:text-default'}`}
-        style={on
-          ? { background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', boxShadow: 'inset 0 0 0 1px var(--color-primary)' }
-          : { background: 'var(--color-surface-hover)' }}
+        className={`h-8 px-3 rounded-full text-[13px] font-medium transition-colors ${on ? 'text-default disc-pill-on' : 'text-muted hover:text-default disc-pill-off'}`}
       >
         {children}
       </button>
@@ -825,8 +822,7 @@ export default function DiscoverPage() {
                     type="button"
                     onClick={() => setKind(k.key)}
                     aria-pressed={kind === k.key}
-                    className={`h-10 px-4 flex-1 sm:flex-none rounded-[10px] text-sm font-medium transition-colors ${kind === k.key ? 'text-default' : 'text-muted hover:text-default'}`}
-                    style={kind === k.key ? { background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 60%, transparent)' } : undefined}
+                    className={`h-10 px-4 flex-1 sm:flex-none rounded-[10px] text-sm font-medium transition-colors ${kind === k.key ? 'text-default disc-choice-on' : 'text-muted hover:text-default'}`}
                   >
                     {k.label}
                   </button>
@@ -850,11 +846,8 @@ export default function DiscoverPage() {
                     type="button"
                     onClick={() => setLens(l.key)}
                     aria-pressed={lens === l.key}
-                    className={`px-1.5 sm:px-4 py-2 sm:py-1.5 rounded-full text-[14px] sm:text-[15px] font-medium text-center whitespace-nowrap transition-colors ${lens === l.key ? 'text-default' : 'text-muted hover:text-default'}`}
-                    style={{
-                      gridColumn: `span ${lensSpan(i)}`,
-                      ...(lens === l.key ? { background: 'color-mix(in srgb, var(--color-primary) 22%, transparent)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 60%, transparent)' } : {}),
-                    }}
+                    className={`px-1.5 sm:px-4 py-2 sm:py-1.5 rounded-full text-[14px] sm:text-[15px] font-medium text-center whitespace-nowrap transition-colors ${lens === l.key ? 'text-default disc-choice-on' : 'text-muted hover:text-default'}`}
+                    style={{ gridColumn: `span ${lensSpan(i)}` }}
                   >
                     {l.label}
                     {l.count ? <span className="ml-1.5 text-[11px] px-1.5 py-px rounded-full" style={{ background: 'rgba(255,255,255,.08)' }}>{l.count}</span> : null}
@@ -901,8 +894,8 @@ export default function DiscoverPage() {
                       onClick={() => filtersPop.setOpen(!filtersPop.open)}
                       aria-expanded={filtersPop.open}
                       aria-label={filterCount > 0 ? `Filters, ${filterCount} on` : 'Filters'}
-                      className={`relative h-10 sm:h-9 ${sortOptions ? 'w-10 sm:w-auto justify-center' : 'w-full sm:w-auto justify-between sm:justify-start'} sm:pl-3 sm:pr-2 px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center gap-2`}
-                      style={{ background: 'color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-hover))', boxShadow: filtersPop.open ? 'inset 0 0 0 1px var(--color-primary)' : undefined }}
+                      className={`relative h-10 sm:h-9 ${sortOptions ? 'w-10 sm:w-auto justify-center' : 'w-full sm:w-auto justify-between sm:justify-start'} sm:pl-3 sm:pr-2 px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center gap-2 disc-filters-btn ${filtersPop.open ? 'is-open' : ''}`}
+                      data-open={filtersPop.open || undefined}
                     >
                       <AdjustmentsHorizontalIcon className="w-5 h-5 sm:w-4 sm:h-4" />
                       <span className={sortOptions ? 'hidden sm:inline' : ''}>Filters</span>
@@ -1051,10 +1044,7 @@ export default function DiscoverPage() {
                                   onClick={() => { void toggleFollow(); }}
                                   disabled={followBusy}
                                   title={!personFollow ? `Follow ${person.person.name} - hear when they have something new out` : personFollow.muted ? 'Alerts muted - tap to turn them back on' : 'Following - tap to mute'}
-                                  className="h-8 px-3 rounded-full text-[13px] font-semibold inline-flex items-center gap-1.5"
-                                  style={personFollow && !personFollow.muted
-                                    ? { color: 'var(--color-primary)', background: 'color-mix(in srgb, var(--color-primary) 16%, transparent)' }
-                                    : { color: 'color-mix(in srgb, var(--color-primary) 40%, #ffffff)', boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 55%, transparent)' }}
+                                  className={`h-8 px-3 rounded-full text-[13px] font-semibold inline-flex items-center gap-1.5 ${personFollow && !personFollow.muted ? 'disc-follow-on' : 'disc-follow-off'}`}
                                 >
                                   <BellIcon className="w-4 h-4" />
                                   {!personFollow ? 'Follow' : personFollow.muted ? 'Muted' : 'Following'}

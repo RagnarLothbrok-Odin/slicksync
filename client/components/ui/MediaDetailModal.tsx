@@ -634,6 +634,39 @@ export function MediaDetailModal({
   // native scroll already handles those, and capturing every pointer type
   // fights the page's own vertical touch scroll.
   const castRowRef = useRef<HTMLDivElement>(null);
+
+  // A cast member opens on a tap OR a finger held on them. On an iPhone a
+  // held finger is not a tap - no click ever comes - so holding on someone
+  // did nothing. The hold opens them itself, and the click that some
+  // browsers still send afterwards is ignored rather than closing it again.
+  const castHold = useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({ timer: null, x: 0, y: 0, fired: false });
+  const castHoldStart = useCallback((e: React.PointerEvent, open: () => void) => {
+    if (e.pointerType === 'mouse') return;
+    const h = castHold.current;
+    if (h.timer) clearTimeout(h.timer);
+    h.fired = false;
+    h.x = e.clientX;
+    h.y = e.clientY;
+    h.timer = setTimeout(() => { h.timer = null; h.fired = true; open(); }, 450);
+  }, []);
+  const castHoldMove = useCallback((e: React.PointerEvent) => {
+    const h = castHold.current;
+    if (h.timer && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 10) { clearTimeout(h.timer); h.timer = null; }
+  }, []);
+  const castHoldEnd = useCallback(() => {
+    const h = castHold.current;
+    if (h.timer) { clearTimeout(h.timer); h.timer = null; }
+  }, []);
+
+  // The filmography opens under the cast row, which on a phone can be below
+  // the screen - bring it into view so a tap visibly does something.
+  const personPanelRef = useRef<HTMLDivElement>(null);
+  const personViewId = personView?.id;
+  useEffect(() => {
+    if (personViewId == null) return;
+    const t = setTimeout(() => personPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
+    return () => clearTimeout(t);
+  }, [personViewId]);
   const isCastPointerDownRef = useRef(false);
   const castDragStartXRef = useRef(0);
   const castDragStartScrollLeftRef = useRef(0);
@@ -1711,10 +1744,19 @@ export function MediaDetailModal({
                         // Only a real click (not a drag) fires - the cast row's
                         // drag-scroll only captures the pointer after 5px of
                         // movement, so a stationary click still reaches here.
-                        onClick={() => { if (clickable) openPerson(member); }}
+                        onClick={() => {
+                          if (castHold.current.fired) { castHold.current.fired = false; return; }
+                          if (clickable) openPerson(member);
+                        }}
+                        onPointerDown={(e) => { if (clickable) castHoldStart(e, () => openPerson(member)); }}
+                        onPointerMove={castHoldMove}
+                        onPointerUp={castHoldEnd}
+                        onPointerCancel={castHoldEnd}
+                        onContextMenu={(e) => { if (clickable && castHold.current.fired) e.preventDefault(); }}
                         disabled={!clickable}
                         title={clickable ? `See ${member.name}'s other titles` : member.name}
                         className={`shrink-0 w-24 text-center ${clickable ? 'cursor-pointer group/cast' : 'cursor-default'}`}
+                        style={{ WebkitTouchCallout: 'none' }}
                       >
                         {member.photo ? (
                           <img
@@ -1758,7 +1800,7 @@ export function MediaDetailModal({
                       and re-drives the whole modal to that title (setOverrideItem),
                       same navigation "More Like This" uses. */}
                   {personView && (
-                    <div className="mt-4 rounded-xl border border-default bg-surface-hover/40 p-3">
+                    <div ref={personPanelRef} className="mt-4 rounded-xl border border-default bg-surface-hover/40 p-3 scroll-mt-4">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-sm font-semibold text-default">
                           {personView.name}

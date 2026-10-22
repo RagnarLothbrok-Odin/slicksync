@@ -1296,3 +1296,24 @@ body {
   .addon-card-tags { display: flex; margin-top: 12px; }
   .has-drag .addon-card-tags { padding-left: 38px; }
 }
+
+/* Discover's chosen tab, kind, filter pill and Follow. The chosen look is a
+   class, never an inline style: a browser extension that freezes inline
+   colours (seen on a Firefox setup) left every tab once picked still lit. */
+.disc-choice-on {
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 60%, transparent);
+}
+.disc-pill-off { background: var(--color-surface-hover); }
+.disc-pill-on {
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+.disc-filters-btn { background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-hover)); }
+.disc-filters-btn.is-open { box-shadow: inset 0 0 0 1px var(--color-primary); }
+.disc-follow-on { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 16%, transparent); }
+.disc-follow-off { color: color-mix(in srgb, var(--color-primary) 40%, #ffffff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 55%, transparent); }
+.sync-chip-off { border-color: var(--color-surface-border); background: transparent; }
+.sync-chip-on { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 14%, transparent); }
+.sync-tile { border-color: var(--color-surface-border); background: color-mix(in srgb, var(--color-surface) 70%, transparent); }
+.sync-tile.is-on { border-color: color-mix(in srgb, var(--tile) 60%, transparent); background: color-mix(in srgb, var(--tile) 10%, var(--color-surface)); }
