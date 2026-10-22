@@ -42,7 +42,9 @@ function shortBiography(text) {
   let out = ''
   for (const sentence of sentences) {
     const next = (out ? out + ' ' : '') + sentence.trim()
-    if (out && (next.length > 300 || out.split(/[.!?]\s/).length >= 3)) break
+    // A short opening ("X is an American actress.") always takes the next
+    // sentence, however long - it is cut at a word below if it runs on.
+    if (out && ((out.length >= 120 && next.length > 300) || out.split(/[.!?]\s/).length >= 3)) break
     out = next
   }
   if (out.length > 340) out = out.slice(0, 330).replace(/\s+\S*$/, '') + '…'

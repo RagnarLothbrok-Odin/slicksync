@@ -44,13 +44,23 @@ function detectTV(): boolean {
   return TV_UA_PATTERNS.some((p) => p.test(navigator.userAgent));
 }
 
+// The answer once any component has worked it out - it can't change while
+// the app is open.
+let known: boolean | null = null;
+
 // Starts false until the effect resolves post-mount - same reasoning as
 // useIsMobile, avoids a hydration mismatch since detection depends on
-// window/navigator that don't exist during SSR.
+// window/navigator that don't exist during SSR. Only for what renders with
+// the first page, though: anything mounted later (the title popup) starts
+// with the known answer. Starting it false too flipped the popup's isTV on
+// its second render, and its TV-only focus hook with it - a hook appearing
+// between renders, which crashed every title opened in TV mode.
 export function useIsTV(): boolean {
-  const [isTV, setIsTV] = useState(false);
+  const [isTV, setIsTV] = useState(() => known ?? false);
   useEffect(() => {
-    setIsTV(detectTV());
+    known = detectTV();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading the browser once hydrated is the point
+    setIsTV(known);
   }, []);
   return isTV;
 }
