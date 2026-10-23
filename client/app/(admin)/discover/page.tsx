@@ -44,7 +44,7 @@ import { ScrollRow } from '@/components/ui/ScrollRow';
 type Lens = 'titles' | 'people' | 'foryou' | 'nobody' | 'watchlist';
 type PersonResult = { person: DiscoverPerson; results: PersonSearchResult[]; source?: 'lumiere' };
 
-const GRID = 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3';
+const GRID = 'discovery-poster-grid';
 const SORT_STORE = 'slicksync-discover-sort';
 
 /**
@@ -784,10 +784,18 @@ export default function DiscoverPage() {
       {layoutMode !== 'nebula' && (
         <Header title="Discover" subtitle="Browse or search for something to watch, then open it straight in Stremio or Nuvio" />
       )}
-      <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-4 md:p-8'}>
+      <div data-discovery-tv={isTV} className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-4 md:p-8'}>
         <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
-          {layoutMode === 'nebula' && <h1 className="sr-only">Discover</h1>}
+          {layoutMode === 'nebula' && isTV && <h1 className="sr-only">Discover</h1>}
+          {layoutMode === 'nebula' && !isTV && (
+            <div className="discovery-heading mb-7">
+              <p className="text-xs font-semibold text-primary mb-3 tracking-wide">A little inspiration</p>
+              <h1 className="font-display font-bold text-default">Find your next favorite.</h1>
+              <p className="text-sm text-muted mt-3">Explore a title, follow a familiar face, or find something unexpected.</p>
+            </div>
+          )}
 
+          <div className="discovery-controls interface-panel rounded-2xl p-4 md:p-5 mb-7">
           {/* The search, what kind, and Surprise me. TV has no search - typing on a remote isn't worth it. */}
           <div className="flex flex-wrap items-center gap-3">
             {!isTV && (
@@ -938,6 +946,8 @@ export default function DiscoverPage() {
               ))}
             </div>
           )}
+
+          </div>
 
           {/* ---------- Titles ---------- */}
           {lens === 'titles' && (
