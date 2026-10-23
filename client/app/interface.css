@@ -263,8 +263,11 @@ html.daylight .btn-v-primary { color: #fff; }
 .profile-hero { padding: clamp(1.25rem, 3vw, 2rem); }
 .profile-name { font-size: clamp(1.75rem, 3vw, 2.5rem); letter-spacing: -0.035em; line-height: 1.15; }
 @media (max-width: 767px) {
-  .detail-toolbar-controls { width: 100%; }
-  .detail-actions { flex: 1; }
+  .detail-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .detail-toolbar-controls { display: contents; }
+  .detail-toolbar-utilities { grid-column: 2; grid-row: 1; }
+  .detail-actions { grid-column: 1 / -1; grid-row: 2; }
+  .detail-actions > div { justify-content: flex-start; }
 }
 
 .profile-management > summary { background: var(--color-surface); border: 1px solid var(--color-surface-border); list-style: none; }

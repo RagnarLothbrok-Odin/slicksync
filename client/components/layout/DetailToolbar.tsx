@@ -22,7 +22,7 @@ export function DetailToolbar({ title, backHref, backLabel, actions }: DetailToo
       </Link>
       <div className="detail-toolbar-controls flex items-center justify-end gap-3 flex-wrap min-w-0 ml-auto">
         <div className="detail-actions min-w-0">{actions}</div>
-        <TopbarActions />
+        <div className="detail-toolbar-utilities"><TopbarActions /></div>
       </div>
     </div>
   );
