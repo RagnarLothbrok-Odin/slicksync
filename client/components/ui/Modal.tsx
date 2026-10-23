@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import clsx from 'clsx';
 import { useCoarsePointer } from '@/lib/hooks/useCoarsePointer';
@@ -66,6 +66,7 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
   // every frame of the exit; a fade alone composites for free. The open
   // keeps its motion - the content has to be painted then regardless.
   const coarse = useCoarsePointer();
+  const reduceMotion = useReducedMotion();
   // The library's own title element inside its shell; a plain heading in
   // the lightweight one, wired to the dialog by id for screen readers.
   const TitleTag: React.ElementType = lightweight ? 'h2' : DialogTitle;
@@ -119,7 +120,7 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
       {!hideCloseButton && (
       <button
         onClick={onClose}
-        className="absolute top-3 right-3 z-20 p-2 rounded-lg backdrop-blur-sm transition-colors"
+        className="absolute top-3 right-3 z-20 p-2.5 rounded-full backdrop-blur-sm transition-colors"
         style={{ color: 'var(--color-text-muted)', background: 'color-mix(in srgb, var(--color-surface) 70%, transparent)' }}
         aria-label="Close"
       >
@@ -185,14 +186,10 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
           leaveTo="opacity-0"
         >
           <div
-            // backdrop-filter blur across the full viewport is GPU-heavy and,
-            // recomputed every frame of the panel's enter/exit transition, is
-            // a common cause of visibly janky modal opens on phones - the
-            // rgba dimming alone is enough to read as an overlay, so the
-            // blur itself only kicks in at sm: and up, where the extra
-            // compositing budget is less likely to be felt.
-            className="fixed inset-0 sm:backdrop-blur-sm"
-            style={{ background: 'rgba(0, 0, 0, 0.7)' }}
+            // A dimming scrim separates the task without re-blurring the
+            // entire page during every frame of the dialog transition.
+            className="fixed inset-0"
+            style={{ background: 'rgba(0, 0, 0, 0.55)' }}
           />
         </TransitionChild>
 
@@ -201,15 +198,15 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
           <TransitionChild
             as={Fragment}
             enter="ease-out duration-200"
-            enterFrom="opacity-0 scale-95 translate-y-4"
+            enterFrom={reduceMotion ? 'opacity-0' : 'opacity-0 scale-[0.98] translate-y-2'}
             enterTo="opacity-100 scale-100 translate-y-0"
             leave="ease-in duration-150"
-            leaveFrom={coarse ? 'opacity-100' : 'opacity-100 scale-100 translate-y-0'}
-            leaveTo={coarse ? 'opacity-0' : 'opacity-0 scale-95 translate-y-4'}
+            leaveFrom={coarse || reduceMotion ? 'opacity-100' : 'opacity-100 scale-100 translate-y-0'}
+            leaveTo={coarse || reduceMotion ? 'opacity-0' : 'opacity-0 scale-[0.98] translate-y-2'}
           >
             <DialogPanel
               className={clsx(
-                'relative w-full flex flex-col max-h-[85vh]',
+                'interface-modal relative w-full flex flex-col max-h-[85dvh]',
                 sizeStyles[size],
                 'rounded-2xl p-0 overflow-hidden'
               )}
@@ -273,7 +270,7 @@ function LightShell({ isOpen, onClose, size, titleId, children }: {
           underneath never scrolls - without ever changing the page. */}
       <div
         className="fixed inset-0"
-        style={{ background: 'rgba(0, 0, 0, 0.7)', touchAction: 'none' }}
+        style={{ background: 'rgba(0, 0, 0, 0.55)', touchAction: 'none' }}
         onClick={onClose}
         onWheel={(e) => e.preventDefault()}
         aria-hidden="true"

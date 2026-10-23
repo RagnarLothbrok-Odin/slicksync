@@ -712,7 +712,7 @@ function LoginContent() {
   if (checkingAuth) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center p-6"
+        className="interface-login min-h-screen flex items-center justify-center p-6"
         style={{ background: 'var(--color-bg)' }}
       >
         <div className="w-8 h-8 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ color: 'var(--color-primary)' }} />
@@ -722,16 +722,9 @@ function LoginContent() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-6"
+      className="interface-login min-h-screen flex items-center justify-center p-6"
       style={{ background: 'var(--color-bg)' }}
     >
-      {/* Background gradient */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        {/* Drawn without a blur filter - see .glow in globals.css. */}
-        <div className="glow glow-corner-a" />
-        <div className="glow glow-corner-b" />
-      </div>
-
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -739,24 +732,24 @@ function LoginContent() {
         style={{ maxWidth: '448px' }}
       >
         {/* Logo */}
-        <div className="text-center mb-8">
+        <div className="mb-8">
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.1 }}
-            className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
+            className="w-12 h-12 mb-5 rounded-2xl flex items-center justify-center"
             style={{ background: 'var(--color-primary)' }}
           >
-            <SlickSyncLogo className="w-10 h-10" />
+            <SlickSyncLogo className="w-7 h-7" />
           </motion.div>
           <h1
             className="text-3xl font-bold font-display mb-2"
             style={{ color: 'var(--color-text)' }}
           >
-            SlickSync
+            Welcome to SlickSync
           </h1>
           <p style={{ color: 'var(--color-text-muted)' }}>
-            Sign in to continue
+            Your library. Your people. All in sync.
           </p>
         </div>
 
@@ -783,26 +776,21 @@ function LoginContent() {
 
         {/* Login Card */}
         <motion.div
-          className="rounded-2xl overflow-hidden"
+          className="interface-login-panel rounded-2xl overflow-hidden"
           style={{
             background: 'var(--color-surface)',
             border: '1px solid var(--color-surface-border)',
           }}
         >
-          {/* Top accent */}
-          <div
-            className={`h-1 ${mode === 'user' ? 'bg-success' : 'bg-primary'}`}
-          />
-
           <div className="p-6">
-            <AnimatePresence mode="wait">
+            <AnimatePresence initial={false}>
               {mode === 'admin' ? (
                 /* Admin Login Form */
                 <motion.div
                   key="admin"
-                  initial={{ opacity: 0, x: -20 }}
+                  initial={{ opacity: 0 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
+                  exit={{ opacity: 0 }}
                   className="space-y-4"
                 >
                   {/* Admin Login Type Selector (Public Mode only) */}
@@ -1311,9 +1299,9 @@ function LoginContent() {
                 /* User OAuth */
                 <motion.div
                   key="user"
-                  initial={{ opacity: 0, x: 20 }}
+                  initial={{ opacity: 0 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
+                  exit={{ opacity: 0 }}
                   className="space-y-4"
                 >
                   {/* Provider switcher */}

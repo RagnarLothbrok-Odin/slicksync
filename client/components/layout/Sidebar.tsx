@@ -214,12 +214,12 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         animate={{ x: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         className={`
-          fixed left-0 top-0 bottom-0 w-60 flex flex-col z-50
+          interface-sidebar fixed left-0 top-0 bottom-0 w-60 flex flex-col z-50
           md:z-40 md:translate-x-0 md:flex
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
         style={{
-          background: 'linear-gradient(180deg, var(--color-surface) 0%, var(--color-bg) 100%)',
+          background: 'var(--interface-material)',
           borderRight: '1px solid var(--color-surface-border)',
           boxShadow: '4px 0 24px -12px rgba(0,0,0,0.5)',
         }}
@@ -229,6 +229,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           <span className="text-sm font-medium text-muted">Menu</span>
           <button
             onClick={onClose}
+            aria-label="Close navigation"
             className="p-2 rounded-lg hover:bg-surface-hover transition-colors"
           >
             <XMarkIcon className="w-5 h-5 text-muted" />
@@ -246,7 +247,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               transition={{ duration: 0.2 }}
               className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden"
               style={{
-                background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                background: 'var(--color-primary)',
                 boxShadow: '0 8px 24px -6px var(--color-primary)',
               }}
             >

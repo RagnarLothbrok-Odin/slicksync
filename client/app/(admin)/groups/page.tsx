@@ -368,7 +368,7 @@ export default function GroupsPage() {
           <NebulaCompactStatCard label="Addons Assigned" value={isLoading ? '...' : totalGroupAddons} icon={<PuzzlePieceIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={0} />
         </div>
       )}
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+      <div className="interface-management-content">
       {layoutMode === 'nebula' && <NebulaGlassStripe />}
         {/* Filters */}
         <PageToolbar

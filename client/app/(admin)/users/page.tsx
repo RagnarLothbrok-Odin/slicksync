@@ -598,7 +598,7 @@ export default function UsersPage() {
           </div>
         );
       })}
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+      <div className="interface-management-content">
       {layoutMode === 'nebula' && <NebulaGlassStripe />}
         {/* Filters and controls */}
         <PageToolbar

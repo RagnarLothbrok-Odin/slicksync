@@ -123,3 +123,23 @@ html.daylight .btn-v-primary { color: #fff; }
   .interface-heading { margin-bottom: 1.5rem; }
   .interface-heading h1 { font-size: 2rem; }
 }
+
+.interface-page-header { background: var(--interface-material); backdrop-filter: blur(20px); }
+.interface-sidebar { backdrop-filter: blur(20px); }
+.interface-login-panel { box-shadow: var(--interface-shadow); }
+.interface-login input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.interface-login button { min-height: 2.75rem; }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .interface-page-header, .interface-sidebar { backdrop-filter: none; }
+}
+
+.interface-dashboard-stats > * { min-height: 7rem; }
+.interface-empty-icon { width: 3rem; height: 3rem; background: var(--color-bg-muted); color: var(--color-text-subtle); }
+.interface-activity-row + .interface-activity-row { border-top: 1px solid var(--color-surface-border); border-radius: 0; }
+.interface-management-content { padding-top: 0.5rem; }
+@media (hover: hover) {
+  .interface-activity-row:hover { background: var(--color-bg-subtle); }
+}
+@media (max-width: 767px) {
+  .interface-dashboard-stats > * { padding: 1rem; min-height: 6.5rem; }
+}

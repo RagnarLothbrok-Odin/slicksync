@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ComponentType, Fragment, ReactNode, useEffect, useId, useState } from 'react';
+import { ComponentType, Fragment, ReactNode, useEffect, useId, useState, useSyncExternalStore } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useIsTV } from '@/lib/hooks/useIsTV';
@@ -20,6 +20,14 @@ export type NebulaNavSection = {
   items: { href: string; label: string; icon: ComponentType<{ className?: string }> }[];
 };
 
+function subscribeToViewport(onChange: () => void) {
+  const query = window.matchMedia('(max-width: 767px)');
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+const compactViewport = () => window.matchMedia('(max-width: 767px)').matches;
+const serverViewport = () => false;
+
 /** Shared admin and personal navigation. TV keeps every destination visible;
  * touch screens open an explicit menu, while desktop collapses on scroll. */
 export function NebulaBar({ sections, homeHref, menu, account }: {
@@ -34,23 +42,15 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
   const reduceMotion = useReducedMotion();
   const navId = useId();
   const [isScrolled, setIsScrolled] = useState(false);
-  const [isCompact, setIsCompact] = useState(false);
-
-  useEffect(() => {
-    const query = window.matchMedia('(max-width: 767px)');
-    const update = () => setIsCompact(query.matches);
-    update();
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  }, []);
+  const isCompact = useSyncExternalStore(subscribeToViewport, compactViewport, serverViewport);
+  const { isOpen, onOpen, onClose } = menu;
 
   useEffect(() => {
     if (isTV) return;
     // Hysteresis exceeds the space released by the nav. A collapse cannot
     // clamp the scroll position past the expand threshold and oscillate.
     let collapsed = window.scrollY > 160;
-    let frame = 0;
-    setIsScrolled(collapsed);
+    let frame = requestAnimationFrame(() => setIsScrolled(collapsed));
     const onScroll = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -66,15 +66,15 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
   }, [isTV]);
 
   useEffect(() => {
-    if (!menu.isOpen) return;
+    if (!isOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') menu.onClose();
+      if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [menu.isOpen, menu.onClose]);
+  }, [isOpen, onClose]);
 
-  const navVisible = isTV || menu.isOpen || (!isCompact && !isScrolled);
+  const navVisible = isTV || isOpen || (!isCompact && !isScrolled);
   const showMenu = !isTV && (isCompact || isScrolled);
 
   return (
@@ -90,13 +90,13 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
             {showMenu && (
               <button
                 type="button"
-                onClick={menu.isOpen ? menu.onClose : menu.onOpen}
+                onClick={isOpen ? onClose : onOpen}
                 className="interface-menu-button flex items-center justify-center shrink-0 rounded-xl"
-                aria-label={menu.isOpen ? 'Close navigation' : 'Open navigation'}
-                aria-expanded={menu.isOpen}
+                aria-label={isOpen ? 'Close navigation' : 'Open navigation'}
+                aria-expanded={isOpen}
                 aria-controls={navId}
               >
-                {menu.isOpen ? <XMarkIcon className="w-5 h-5" /> : <Bars3Icon className="w-5 h-5" />}
+                {isOpen ? <XMarkIcon className="w-5 h-5" /> : <Bars3Icon className="w-5 h-5" />}
               </button>
             )}
             <Link href={homeHref} aria-label="SlickSync home" className="interface-brand inline-flex items-center gap-2.5 min-w-0">
@@ -128,7 +128,7 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
                           <Link
                             href={link.href}
                             tabIndex={isTV ? -1 : undefined}
-                            onClick={menu.onClose}
+                            onClick={onClose}
                             aria-current={active ? 'page' : undefined}
                             className={`interface-nav-link nav-item-hover-pill flex items-center gap-2 rounded-xl whitespace-nowrap ${active ? 'nebula-link-on' : 'text-muted'}`}
                           >

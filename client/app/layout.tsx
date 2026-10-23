@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/lib/theme";
 import { LayoutModeProvider } from "@/lib/layout-mode";
 import { UserCacheProvider } from "@/components/providers/UserCacheProvider";
 import { ServiceWorkerRegistrar } from "@/components/pwa/ServiceWorkerRegistrar";
+import { MotionProvider } from "@/components/providers/MotionProvider";
 import { BuildWatcher } from "@/components/pwa/BuildWatcher";
 
 export const metadata: Metadata = {
@@ -147,6 +148,7 @@ export default function RootLayout({
         }}
       >
         <div className="relative z-10">
+        <MotionProvider>
         <ThemeProvider>
           <LayoutModeProvider>
             <UserCacheProvider>
@@ -158,6 +160,7 @@ export default function RootLayout({
             </UserCacheProvider>
           </LayoutModeProvider>
         </ThemeProvider>
+        </MotionProvider>
         </div>
       </body>
     </html>

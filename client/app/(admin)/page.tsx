@@ -1,5 +1,7 @@
 'use client';
 
+import { EmptyState } from '@/components/ui/EmptyState';
+
 import { memo, useEffect, useState, useMemo, useCallback, useRef, Fragment } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
@@ -775,7 +777,7 @@ export default function DashboardPage() {
           <div className="mx-auto" style={{ maxWidth: 'min(120rem, 92vw)' }}>
             <NebulaPageHeading
               title="Dashboard"
-              subtitle="Welcome back! Here's what's happening with SlickSync."
+              subtitle="Your household, connected. Here’s what’s playing."
               actions={(() => {
                 const syncBtn = (
                   <Button
@@ -817,10 +819,10 @@ export default function DashboardPage() {
             {!isTV && <SetupChecklist />}
 
             {/* Ring stat + mini stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-              <div className={`${NEBULA_GLASS_CLASS} p-5 flex items-center gap-5`} style={nebulaGlassStyle}>
+            <div className="interface-dashboard-stats grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4 mb-6">
+              <div className={`${NEBULA_GLASS_CLASS} col-span-2 sm:col-span-1 p-5 flex items-center gap-5`} style={nebulaGlassStyle}>
                 <NebulaGlassStripe />
-                <svg width="72" height="72" viewBox="0 0 64 64" className="shrink-0 -rotate-90">
+                <svg width="56" height="56" viewBox="0 0 64 64" className="shrink-0 -rotate-90">
                   <circle cx="32" cy="32" r="28" fill="none" stroke="var(--color-surface-border)" strokeWidth="6" />
                   <circle
                     cx="32" cy="32" r="28" fill="none"
@@ -837,7 +839,7 @@ export default function DashboardPage() {
                 </svg>
                 <div>
                   <p className="text-sm text-muted mb-1">Active Now</p>
-                  <p className="text-3xl font-bold text-default">
+                  <p className="interface-stat-value text-3xl font-semibold text-default">
                     {isLoading ? '...' : activeUsers}
                     <span className="text-base text-muted font-normal"> / {isLoading ? '...' : stats.totalUsers} users</span>
                   </p>
@@ -847,7 +849,7 @@ export default function DashboardPage() {
                 <NebulaGlassStripe />
                 <div>
                   <p className="text-sm text-muted mb-1">Groups</p>
-                  <p className="text-3xl font-bold text-default">{isLoading ? '...' : stats.totalGroups}</p>
+                  <p className="interface-stat-value text-3xl font-semibold text-default">{isLoading ? '...' : stats.totalGroups}</p>
                 </div>
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
@@ -860,7 +862,7 @@ export default function DashboardPage() {
                 <NebulaGlassStripe />
                 <div>
                   <p className="text-sm text-muted mb-1">Addons</p>
-                  <p className="text-3xl font-bold text-default">{isLoading ? '...' : stats.totalAddons}</p>
+                  <p className="interface-stat-value text-3xl font-semibold text-default">{isLoading ? '...' : stats.totalAddons}</p>
                 </div>
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
@@ -888,9 +890,8 @@ export default function DashboardPage() {
 
             {/* Continue Watching - identical cards/drag logic to Current mode */}
             {continueWatching.length > 0 && (
-              <div className={`${NEBULA_GLASS_CLASS} p-5 mb-5`} style={nebulaGlassStyle}>
-                <NebulaGlassStripe />
-                <h3 className="text-base font-semibold font-display text-default mb-4">Continue Watching</h3>
+              <section className="interface-media-section my-7" aria-label="Continue watching">
+                <h2 className="text-xl font-semibold font-display text-default mb-4">Continue Watching</h2>
                 <div
                   ref={scrollRowRef}
                   onPointerDown={handleRowPointerDown}
@@ -920,7 +921,7 @@ export default function DashboardPage() {
                     );
                   })}
                 </div>
-              </div>
+              </section>
             )}
 
             {/* Coming up - upcoming episodes for shows being watched */}
@@ -936,7 +937,7 @@ export default function DashboardPage() {
                 grid-cols-1 and the row-span both collapse to a normal
                 single-column stack - unchanged from before, since that
                 was already fine on mobile. */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-5 mb-4 items-start">
               <div className={`${NEBULA_GLASS_CLASS} p-5 lg:row-span-2`} style={nebulaGlassStyle}>
                 <NebulaGlassStripe />
                 <div className="flex items-center justify-between mb-4">
@@ -952,12 +953,9 @@ export default function DashboardPage() {
                     recentActivityItems.map((np, index) => (
                       <div
                         key={`${np.user.id}-${np.item.id}-${np.timestamp}-${index}`}
-                        className="flex items-center gap-3 p-2.5 rounded-xl relative pl-4"
+                        className="interface-activity-row flex items-center gap-3 p-3 rounded-xl relative"
                       >
-                        <span
-                          className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full opacity-70"
-                          style={{ background: 'linear-gradient(180deg, var(--color-primary), var(--color-secondary))' }}
-                        />
+
                         <TVLink
                         href={`/users/${np.user.id}`}
                         onClick={(e) => e.stopPropagation()}
@@ -992,7 +990,7 @@ export default function DashboardPage() {
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-8 text-sm text-muted">No recent activity</div>
+                    <EmptyState icon={<ClockIcon className="w-6 h-6" />} title="A little quiet right now" description="Movies and episodes watched by your household will appear here." />
                   )}
                 </div>
               </div>
@@ -1012,11 +1010,8 @@ export default function DashboardPage() {
                     <div className="text-center py-8 text-sm text-muted">Loading...</div>
                   ) : topUsers.length > 0 ? (
                     topUsers.map((user, index) => (
-                      <TVLink key={user.id || user.name} href={`/users/${user.id}`} className="flex items-center gap-3 p-2.5 rounded-xl relative pl-4" focusWrapperClassName="block">
-                        <span
-                          className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full opacity-70"
-                          style={{ background: 'linear-gradient(180deg, var(--color-primary), var(--color-secondary))' }}
-                        />
+                      <TVLink key={user.id || user.name} href={`/users/${user.id}`} className="interface-activity-row flex items-center gap-3 p-3 rounded-xl relative" focusWrapperClassName="block">
+
                         <div className="relative shrink-0">
                           <UserAvatar userId={user.id} name={user.name} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="sm" />
                           <div
@@ -1043,7 +1038,7 @@ export default function DashboardPage() {
                       </TVLink>
                     ))
                   ) : (
-                    <div className="text-center py-8 text-sm text-muted">No user data</div>
+                    <EmptyState icon={<UsersIcon className="w-6 h-6" />} title="Everyone starts somewhere" description="Watch time and streaks will appear once your household starts watching." />
                   )}
                 </div>
               </div>
@@ -1094,7 +1089,7 @@ export default function DashboardPage() {
                       />
                     ))
                   ) : (
-                    <div className="text-center py-8 text-sm text-muted">No recent addons</div>
+                    <EmptyState icon={<PuzzlePieceIcon className="w-6 h-6" />} title="Make room for more" description="Addons you connect will appear here, ready to share with your household." />
                   )}
                 </div>
               </div>
@@ -1121,7 +1116,7 @@ export default function DashboardPage() {
     <>
       <Header
         title="Dashboard"
-        subtitle="Welcome back! Here's what's happening with SlickSync."
+        subtitle="Your household, connected. Here’s what’s playing."
         actions={
           <Button
             variant="primary"
@@ -1328,7 +1323,7 @@ export default function DashboardPage() {
                     </motion.div>
                   ))
                 ) : (
-                  <div className="text-center py-8 text-sm text-muted">No recent activity</div>
+                  <EmptyState icon={<ClockIcon className="w-6 h-6" />} title="A little quiet right now" description="Movies and episodes watched by your household will appear here." />
                 )}
               </div>
             </Card>
@@ -1391,7 +1386,7 @@ export default function DashboardPage() {
                     </Link>
                   ))
                 ) : (
-                  <div className="text-center py-8 text-sm text-muted">No user data</div>
+                  <EmptyState icon={<UsersIcon className="w-6 h-6" />} title="Everyone starts somewhere" description="Watch time and streaks will appear once your household starts watching." />
                 )}
               </div>
             </Card>
@@ -1440,7 +1435,7 @@ export default function DashboardPage() {
                     />
                   ))
                 ) : (
-                  <div className="text-center py-8 text-sm text-muted">No recent addons</div>
+                  <EmptyState icon={<PuzzlePieceIcon className="w-6 h-6" />} title="Make room for more" description="Addons you connect will appear here, ready to share with your household." />
                 )}
               </div>
             </Card>

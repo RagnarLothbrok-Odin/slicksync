@@ -1,8 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { BellIcon, MagnifyingGlassIcon, Bars3Icon } from '@heroicons/react/24/outline';
-import { Avatar } from '../ui/Avatar';
+import { Bars3Icon } from '@heroicons/react/24/outline';
 import { TopbarActions } from './TopbarActions';
 import { useMobileMenu } from '@/app/(admin)/AdminClientLayout';
 
@@ -10,12 +9,8 @@ interface HeaderProps {
   title: React.ReactNode;
   subtitle?: string;
   actions?: React.ReactNode;
-  // Rendered in the left grid column, opposite `actions` - the title stays
-  // centered either way (see the 3-column grid comment below). Mirrors
-  // NebulaPageHeading's own `leading` prop for the same reason: a control
-  // that reads as "go somewhere else" (a back button, or an unrelated
-  // entry point like Nuvio Collections on the Catalogs page) belongs on
-  // the opposite side from page-specific actions like Rename/Delete/Save.
+  // Navigation controls precede the title; page actions stay at the end
+  // of the row, matching NebulaPageHeading.
   leading?: React.ReactNode;
   activities?: any[];
   inviteHistory?: any[];
@@ -41,111 +36,28 @@ export function Header({
   const onMenuClick = onMenuClickProp || onMenuClickContext;
   const isMobileMenuOpen = isMobileMenuOpenProp !== undefined ? isMobileMenuOpenProp : isMobileMenuOpenContext;
 
-  const INSTANCE_TYPE = (process.env.NEXT_PUBLIC_INSTANCE_TYPE || 'private') as 'public' | 'private';
 
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="sticky top-0 z-30"
-      style={{
-        background: 'color-mix(in srgb, var(--color-bg) 80%, transparent)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid transparent',
-        borderImage: 'linear-gradient(90deg, var(--color-primary-muted), transparent 60%) 1',
-      }}
-    >
-      {/* Desktop uses a 3-column grid so the page title sits centered in the
-          middle column while the right section (notifications + actions) stays
-          right-aligned in the last column. Mobile keeps the flex layout so the
-          hamburger and title flow tight on the left - flex-wrap (harmless at
-          md+ since display switches to grid there) lets the right section
-          drop to its own row below the title instead of squeezing or
-          overflowing when a page passes several action buttons. Safe to grow
-          taller here since this header is position:sticky, not fixed - it
-          stays in normal document flow, so page content below it reflows
-          around whatever height it ends up at instead of getting covered. */}
-      <div className="px-4 md:px-6 lg:px-8 py-3 md:py-4 flex items-center justify-between gap-x-4 gap-y-2 flex-wrap md:grid md:grid-cols-[1fr_auto_1fr]">
-        {/* Leading - left column, opposite `actions`. Empty when not passed,
-            so every existing page (no leading) renders exactly as before. */}
-        {leading ? (
-          <div className="flex items-center md:col-start-1 md:justify-self-start order-first md:order-none">
-            {leading}
-          </div>
-        ) : null}
-
-        {/* Mobile Menu Button & Title section */}
-        <div className="flex items-center gap-3 md:col-start-2 md:justify-self-center md:text-center">
-          {/* Hamburger - only show on mobile */}
-          <button
-            onClick={onMenuClick}
-            className="md:hidden p-2 -ml-2 rounded-lg hover:bg-surface-hover transition-colors"
-            aria-label="Open menu"
-          >
-            <Bars3Icon className="w-6 h-6 text-default" />
+    <header className="interface-page-header sticky top-0 z-30">
+      <div className="px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <button type="button" onClick={onMenuClick}
+            className="md:hidden p-2 rounded-xl hover:bg-surface-hover text-default"
+            aria-label="Open navigation" aria-expanded={isMobileMenuOpen}>
+            <Bars3Icon className="w-5 h-5" />
           </button>
-
           <div>
-            <motion.h1
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.1 }}
-              className="text-xl md:text-2xl font-bold font-display tracking-tight"
-              style={{
-                background: 'linear-gradient(135deg, var(--color-text) 0%, var(--color-primary) 120%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              {title}
-            </motion.h1>
-            {subtitle ? (
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="text-sm mt-0.5 hidden sm:block"
-                style={{ color: 'var(--color-text-muted)' }}
-              >
-                {subtitle}
-              </motion.p>
-            ) : null}
+            {leading && <div className="mb-3">{leading}</div>}
+            <h1 className="text-2xl md:text-3xl font-bold font-display text-default">{title}</h1>
+            {subtitle && <p className="text-sm text-muted mt-2">{subtitle}</p>}
           </div>
         </div>
-
-        {/* Right section. Actions render BEFORE the bell so on mobile the
-            bell sits flush to the screen's right edge — its dropdown anchors
-            `right-0` off the bell, and if the bell isn't at the true right
-            edge the dropdown extends left off-screen (dropdown is ~320px wide,
-            so even a small offset shoves its left edge past 0). */}
-        <div className="flex items-center gap-2 md:gap-3 flex-wrap justify-end w-full md:w-auto md:col-start-3 md:justify-self-end">
-          {/* Actions - w-full on mobile is load-bearing: flex-wrap only
-              engages once this div's own width is bounded, same reasoning
-              as NebulaPageHeading's actions container (see that file for
-              the fuller writeup of why an unbounded flex child won't wrap
-              on its own). */}
-          {actions ? (
-            <div
-              className="flex items-center gap-2 pr-3 flex-wrap"
-              style={{ borderRight: '1px solid var(--color-surface-border)' }}
-            >
-              {actions}
-            </div>
-          ) : null}
-
-          {/* Command palette + notifications — always last so the bell's
-              dropdown fits within the screen. The resume-tour prompt renders
-              on top of both from inside TopbarActions. */}
-          <TopbarActions
-            activities={activities}
-            inviteHistory={inviteHistory}
-            taskHistory={taskHistory}
-          />
+        <div className="flex items-center justify-end gap-3 flex-wrap ml-auto">
+          {actions}
+          <TopbarActions activities={activities} inviteHistory={inviteHistory} taskHistory={taskHistory} />
         </div>
       </div>
-    </motion.header>
+    </header>
   );
 }
 
