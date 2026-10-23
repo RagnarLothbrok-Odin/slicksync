@@ -201,67 +201,20 @@ export function NebulaStatCard({
   );
 }
 
-// Smaller variant of NebulaStatCard - same glass card + icon-badge
-// language, scaled down on mobile so 3-4 of them fit comfortably in one row
-// instead of stacking full-width/full-height one per row (the full-size
-// NebulaStatCard's p-5 padding and 44px icon badge only really work at 1-2
-// per row on a phone; forcing that into 3 columns crammed the icon and
-// padding into most of a card's width, leaving barely anything for the
-// number). From md up, scales to match Dashboard's own Groups/Addons stat
-// cards exactly (p-5, 44px icon, text-3xl value) per explicit request -
-// "smaller" was specifically about mobile and the previous full-width-per-
-// card layout, not about reading small on desktop too. Built for
-// Groups/Users/Metrics.
-export function NebulaCompactStatCard({
-  label,
-  value,
-  icon,
-  colorIndex = 0,
-}: {
+/** Quiet summaries leave the management list as the main content. */
+export function NebulaCompactStatCard({ label, value, icon }: {
   label: string;
   value: string | number;
   icon?: ReactNode;
   colorIndex?: number;
 }) {
-  const isPrimary = colorIndex % 2 === 0;
   return (
-    // Phone: the number sits beside the icon and the label gets the tile's
-    // whole width underneath (three tiles in a row left it ~45px, so labels
-    // were cut). From md up: icon on the left, number over label.
-    <div className={`${NEBULA_GLASS_CLASS} p-2.5 sm:p-3 md:p-5 flex flex-col md:flex-row md:items-center gap-1.5 md:gap-4 min-w-0`} style={nebulaGlassStyle}>
-      <NebulaGlassStripe />
-      <div className="contents md:hidden">
-        <div className="flex items-center gap-2 min-w-0">
-          {icon && (
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-              style={{
-                background: isPrimary ? 'var(--color-primary-muted)' : 'var(--color-secondary-muted)',
-                color: isPrimary ? 'var(--color-primary)' : 'var(--color-secondary)',
-              }}
-            >
-              {icon}
-            </div>
-          )}
-          <p className="text-lg font-bold font-display text-default leading-none truncate">{value}</p>
-        </div>
-        <p className="text-[11px] leading-tight text-muted">{label}</p>
+    <dl className="interface-compact-stat">
+      {icon && <span aria-hidden="true" className="interface-compact-stat-icon">{icon}</span>}
+      <div className="min-w-0">
+        <dt className="text-xs text-muted">{label}</dt>
+        <dd className="interface-stat-value text-2xl font-semibold text-default mt-1">{value}</dd>
       </div>
-      {icon && (
-        <div
-          className="hidden md:flex w-11 h-11 rounded-xl items-center justify-center shrink-0"
-          style={{
-            background: isPrimary ? 'var(--color-primary-muted)' : 'var(--color-secondary-muted)',
-            color: isPrimary ? 'var(--color-primary)' : 'var(--color-secondary)',
-          }}
-        >
-          {icon}
-        </div>
-      )}
-      <div className="hidden md:block min-w-0">
-        <p className="interface-stat-value text-3xl font-semibold font-display text-default leading-none truncate">{value}</p>
-        <p className="text-sm text-muted mt-1 truncate">{label}</p>
-      </div>
-    </div>
+    </dl>
   );
 }

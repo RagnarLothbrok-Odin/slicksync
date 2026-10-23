@@ -1352,7 +1352,7 @@ export default function AddonDetailPage() {
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
         <DetailToolbar title={addon.name} backHref="/addons" backLabel="Addons" actions={detailActions} />
       )}
@@ -1360,15 +1360,17 @@ export default function AddonDetailPage() {
         <PageSection className="mb-8">
           <Card padding="lg" className="profile-hero">
             <div className="relative">
-              <div className="flex items-start gap-6">
+              <div className="profile-hero-layout flex flex-col sm:flex-row items-start gap-4 sm:gap-6">
                 {/* Addon Logo - Large and clickable */}
                 <motion.div
-                  initial={{ scale: 0.8, opacity: 0 }}
+                  initial={false}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 200 }}
-                  className="relative shrink-0"
+                  className="profile-hero-avatar relative shrink-0"
                 >
-                  <div
+                  <button
+                    type="button"
+                    aria-label="Edit addon appearance"
                     onClick={() => {
                       setEditForm({
                         name: addon.name,
@@ -1391,7 +1393,7 @@ export default function AddonDetailPage() {
                         <PuzzlePieceIcon className="w-12 h-12 text-primary" />
                       )}
                     </div>
-                  </div>
+                  </button>
                 </motion.div>
 
                 {/* Info */}
@@ -1435,7 +1437,7 @@ export default function AddonDetailPage() {
                       onSave={handleDescriptionUpdate}
                       placeholder="Enter description..."
                       maxLength={200}
-                      className="text-muted"
+                      className="profile-description text-muted"
                     />
                   </div>
 
@@ -1656,7 +1658,7 @@ export default function AddonDetailPage() {
         {/* Resources Section */}
         <PageSection delay={0.2} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-purple-500/20">
                   <CubeIcon className="w-5 h-5 text-purple-400" />
@@ -1748,7 +1750,7 @@ export default function AddonDetailPage() {
         {/* Catalogs Section */}
         <PageSection delay={0.3} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-green-500/20">
                   <BookOpenIcon className="w-5 h-5 text-green-400" />
@@ -1896,7 +1898,7 @@ export default function AddonDetailPage() {
         {/* Groups Section */}
         <PageSection delay={0.4} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/20">
                   <UsersIcon className="w-5 h-5 text-blue-400" />
@@ -2483,7 +2485,7 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
     <PageSection delay={0.5} className="mb-8">
       <Card padding="lg">
         {/* Section Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="detail-section-header flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -2774,7 +2776,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
   if (loading) {
     return (
       <Card padding="lg">
-        <div className="flex items-center justify-between mb-6">
+        <div className="detail-section-header flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-500/20">
               <HeartIcon className="w-5 h-5 text-rose-400" />
@@ -2832,7 +2834,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
 
   return (
     <Card padding="lg">
-      <div className="flex items-center justify-between mb-6">
+      <div className="detail-section-header flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-500/20">
             <HeartIcon className="w-5 h-5 text-rose-400" />

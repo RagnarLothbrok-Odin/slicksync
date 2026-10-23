@@ -158,7 +158,7 @@ export default function AiostreamsCollectionsPage() {
         />
       )}
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-        <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+        <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
           {layoutMode === 'nebula' && (
             <NebulaPageHeading title="Jellyfin | AIOStreams Collections" subtitle={subtitle} leading={backButton} />
           )}

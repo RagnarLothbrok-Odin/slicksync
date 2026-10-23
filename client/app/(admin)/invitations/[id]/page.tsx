@@ -248,7 +248,7 @@ export default function InvitationDetailPage() {
       )}
 
       <div className={isNebula ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={isNebula ? 'mx-auto' : ''} style={isNebula ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={isNebula ? 'mx-auto' : ''} style={isNebula ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
         {isNebula && (
           <NebulaPageHeading
             title={invitation.name || code}

@@ -33,17 +33,17 @@ export function Card({
   ...props
 }: CardProps) {
   const { layoutMode } = useLayoutMode();
-  const reduceMotion = useReducedMotion();
   const isInteractive = variant === 'interactive';
   const isAurora = variant === 'aurora';
   const isNebula = layoutMode === 'nebula' && !isAurora;
 
   return (
     <motion.div
-      whileHover={isInteractive && !reduceMotion ? { y: -2 } : undefined}
+      whileHover={undefined}
       transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
       className={clsx(
         'interface-card rounded-2xl relative overflow-hidden',
+        isInteractive && 'interface-card-interactive',
         paddingStyles[padding],
         variant === 'bordered' && 'accent-border',
         !isAurora && (isNebula ? 'card-bg-nebula' : 'card-bg-plain'),
@@ -58,7 +58,7 @@ export function Card({
         border: isAurora ? 'none' : '1px solid var(--color-surface-border)',
         boxShadow: isAurora
           ? '0 12px 32px -12px var(--color-primary)'
-          : '0 1px 0 0 rgba(255,255,255,0.02) inset, 0 8px 24px -16px rgba(0,0,0,0.4)',
+          : '0 1px 2px rgb(0 0 0 / 0.04)',
         ...style,
       }}
       {...props}

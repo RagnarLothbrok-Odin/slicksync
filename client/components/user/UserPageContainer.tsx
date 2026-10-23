@@ -17,7 +17,7 @@ interface UserPageContainerProps {
 export function UserPageContainer({ children, className }: UserPageContainerProps) {
   return (
     <PageContainer noSidebarOffset className={className}>
-      <div className="mx-auto" style={{ maxWidth: 'min(120rem, 92vw)' }}>
+      <div className="mx-auto" style={{ maxWidth: 'var(--interface-content-width)' }}>
         {children}
       </div>
     </PageContainer>

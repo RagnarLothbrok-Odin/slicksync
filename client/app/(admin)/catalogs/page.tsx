@@ -319,7 +319,7 @@ export default function ListsPage() {
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
         {layoutMode === 'nebula' && <NebulaPageHeading title={heading.title} subtitle={heading.subtitle} leading={collectionsButtons} />}
 
         <BeginnerHint guideId="catalog-create">Catalogs are your own named lists of titles - separate from the Watchlist - that you can share with a code or push to a user's app.</BeginnerHint>

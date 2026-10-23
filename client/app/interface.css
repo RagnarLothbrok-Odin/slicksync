@@ -1,6 +1,7 @@
 /* Shared visual language. Content surfaces stay solid; only floating chrome
    uses a translucent material so text never competes with another layer. */
 :root {
+  --interface-content-width: min(90rem, 92vw);
   --interface-shadow: 0 2px 8px rgb(0 0 0 / 0.08), 0 16px 48px rgb(0 0 0 / 0.08);
   --interface-material: color-mix(in srgb, var(--color-surface) 94%, transparent);
 }
@@ -88,7 +89,7 @@ html.daylight .btn-v-primary { color: #fff; }
 /* Compact, persistent chrome leaves the page itself as the main event. */
 .interface-topbar { padding: 1rem clamp(1rem, 3vw, 2.5rem) 0.5rem; }
 .interface-nav-material {
-  max-width: min(120rem, 92vw);
+  max-width: var(--interface-content-width);
   margin-inline: auto;
   background: var(--interface-material);
   backdrop-filter: blur(20px) saturate(140%);
@@ -324,3 +325,35 @@ html.daylight .btn-v-primary { color: #fff; }
 .interface-segments [role='tab'], .interface-segment-indicator { border-radius: 0.625rem; }
 .interface-segments [role='tab'] { font-size: 0.8125rem; }
 .interface-heading h1 { font-size: clamp(1.85rem, 3vw, 2.25rem); }
+
+/* Summary figures stay quieter than the records and actions beneath them. */
+.interface-compact-stat { display: flex; align-items: center; gap: 0.875rem; min-width: 0; padding: 0.875rem 0.25rem; border-bottom: 1px solid var(--color-surface-border); }
+.interface-compact-stat-icon { color: var(--color-text-muted); display: flex; flex-shrink: 0; }
+.interface-compact-stat-icon svg { width: 1.25rem; height: 1.25rem; }
+.interface-compact-stat dd { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.interface-card-interactive { transition: border-color 150ms ease, background-color 150ms ease; }
+@media (hover: hover) {
+  .interface-card-interactive:hover { border-color: var(--color-text-subtle) !important; }
+}
+.interface-card-interactive:focus-within { border-color: var(--color-primary) !important; }
+@media (max-width: 767px) {
+  .interface-compact-stat { align-items: flex-start; padding: 0.75rem 0; gap: 0.5rem; }
+  .interface-compact-stat-icon { display: none; }
+  .interface-compact-stat dt { line-height: 1.4; min-height: 2.8em; }
+  .interface-compact-stat dd { margin-top: 0; font-size: 1.5rem; }
+  .interface-heading { margin-bottom: 1.5rem; gap: 1rem; }
+}
+
+.profile-description { width: 100%; }
+.profile-description > span { white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
+.detail-section-header { gap: 1rem; flex-wrap: wrap; }
+.detail-section-header > :first-child { min-width: 0; flex: 1 1 12rem; }
+.detail-section-header > :last-child { flex-shrink: 0; flex-wrap: wrap; }
+@media (max-width: 639px) {
+  .profile-hero-layout > .flex-1 { width: 100%; }
+  .profile-hero-avatar > button > div { width: 4rem; height: 4rem; }
+  .profile-hero-avatar > button > div svg { width: 2rem; height: 2rem; }
+  .profile-hero-layout .gap-6 { gap: 0.75rem 1.25rem; font-size: 0.875rem; }
+  .detail-member-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; }
+  .detail-member-row > :last-child { grid-column: 1 / -1; justify-content: flex-end; }
+}

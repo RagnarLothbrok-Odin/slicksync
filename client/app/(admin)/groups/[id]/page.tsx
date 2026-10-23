@@ -130,7 +130,7 @@ const GroupWatchTimeChart = memo(function GroupWatchTimeChart({
   if (activeUsers.length === 0 || data.length === 0) {
     return (
       <Card padding="lg">
-        <div className="flex items-center justify-between mb-6">
+        <div className="detail-section-header flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-default font-display">Watch Time</h3>
         </div>
         <div className="h-40 md:h-64 flex items-center justify-center text-muted">
@@ -142,7 +142,7 @@ const GroupWatchTimeChart = memo(function GroupWatchTimeChart({
 
   return (
     <Card padding="lg" className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-6">
+      <div className="detail-section-header flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold text-default font-display">Watch Time by User</h3>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted">Per-user activity</span>
@@ -270,7 +270,7 @@ const GroupContentBreakdownChart = memo(function GroupContentBreakdownChart({
   if (activeUsers.length === 0 || groupedData.length === 0) {
     return (
       <Card padding="lg">
-        <div className="flex items-center justify-between mb-6">
+        <div className="detail-section-header flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-default font-display">Content Breakdown</h3>
         </div>
         <div className="h-40 md:h-64 flex items-center justify-center text-muted">
@@ -282,7 +282,7 @@ const GroupContentBreakdownChart = memo(function GroupContentBreakdownChart({
 
   return (
     <Card padding="lg" className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-6">
+      <div className="detail-section-header flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold text-default font-display">Content Breakdown by User</h3>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted">Movies vs Series per user</span>
@@ -941,7 +941,7 @@ export default function GroupDetailPage() {
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
         <DetailToolbar title={isLoading ? 'Loading group' : (group?.name || 'Group')} backHref="/groups" backLabel="Groups" actions={detailActions} />
       )}
@@ -949,14 +949,14 @@ export default function GroupDetailPage() {
         <PageSection className="mb-8">
           <Card padding="lg" className="profile-hero">
             <div className="relative">
-              <div className="flex items-start gap-4">
+              <div className="profile-hero-layout flex flex-col sm:flex-row items-start gap-4">
                 {/* Group Icon with Color Picker */}
                 <motion.div
                   ref={colorPickerRef}
-                  initial={{ scale: 0.8, opacity: 0 }}
+                  initial={false}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 200 }}
-                  className="relative shrink-0"
+                  className="profile-hero-avatar relative shrink-0"
                 >
                   <button type="button" aria-label="Change profile picture"
                     onClick={() => setShowAvatarPicker(true)}
@@ -1018,7 +1018,7 @@ export default function GroupDetailPage() {
                       onSave={handleDescriptionUpdate}
                       placeholder="Enter description..."
                       maxLength={200}
-                      className="text-muted"
+                      className="profile-description text-muted"
                     />
                   </div>
 
@@ -1052,7 +1052,7 @@ export default function GroupDetailPage() {
                 </div>
 
                 {/* Avatar stack - show on mobile too */}
-                <div className="flex items-start shrink-0 mt-4 md:mt-0">
+                <div className="hidden sm:flex items-start shrink-0 mt-4 md:mt-0">
                   <AvatarGroup
                     users={groupUsers.map(u => ({ name: u.name || u.username || 'Unknown', email: u.email, id: u.id, src: u.avatarUrl ?? undefined, useGravatar: u.useGravatar }))}
                     max={5}
@@ -1067,7 +1067,7 @@ export default function GroupDetailPage() {
         {/* Members Section */}
         <PageSection delay={0.1} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/20">
                   <UsersIcon className="w-5 h-5 text-blue-400" />
@@ -1111,7 +1111,7 @@ export default function GroupDetailPage() {
                     <StaggerItem key={user.id}>
                       <motion.div
                         whileHover={{ x: 4 }}
-                        className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface transition-colors group overflow-hidden"
+                        className="detail-member-row flex items-center gap-4 p-4 rounded-xl bg-surface-hover hover:bg-surface transition-colors group overflow-hidden"
                       >
                         <UserAvatar userId={user.id} name={displayName} email={user.email} src={user.avatarUrl ?? undefined} useGravatar={user.useGravatar} colorIndex={user.colorIndex} size="md" />
 
@@ -1168,7 +1168,7 @@ export default function GroupDetailPage() {
         {/* Addons Section */}
         <PageSection delay={0.2}>
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-purple-500/20">
                   <PuzzlePieceIcon className="w-5 h-5 text-purple-400" />
