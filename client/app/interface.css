@@ -278,3 +278,18 @@ html.daylight .btn-v-primary { color: #fff; }
 .guide-category[aria-pressed='true'] { color: var(--color-primary); background: var(--color-primary-muted); border-color: var(--color-primary); }
 .theme-choice { background: var(--color-bg-subtle); }
 .theme-choice[aria-pressed='true'] { background: var(--color-primary-muted); }
+
+/* Keep desktop destinations alongside the brand; smaller screens use the
+   explicit menu rather than squeezing two rows into a large header. */
+@media (min-width: 1280px) {
+  .interface-nav-material { display: flex; align-items: center; gap: 1rem; }
+  .interface-brand-row { flex: 0 0 auto; padding-right: 0; }
+  .interface-brand-caption { display: none; }
+  .interface-nav-material > nav { flex: 1; min-width: 0; }
+  .interface-nav-sections { justify-content: flex-end; gap: 0.5rem; padding: 0; }
+  .interface-nav-sections > * { width: auto; }
+  .interface-nav-link { padding-inline: 0.6rem; }
+}
+@media (min-width: 768px) and (max-width: 1279px) {
+  .interface-topbar:not(.interface-topbar-tv):not([data-menu-open='true']) nav { display: none; }
+}

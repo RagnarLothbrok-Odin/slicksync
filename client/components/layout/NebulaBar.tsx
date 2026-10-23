@@ -21,11 +21,11 @@ export type NebulaNavSection = {
 };
 
 function subscribeToViewport(onChange: () => void) {
-  const query = window.matchMedia('(max-width: 767px)');
+  const query = window.matchMedia('(max-width: 1279px)');
   query.addEventListener('change', onChange);
   return () => query.removeEventListener('change', onChange);
 }
-const compactViewport = () => window.matchMedia('(max-width: 767px)').matches;
+const compactViewport = () => window.matchMedia('(max-width: 1279px)').matches;
 const serverViewport = () => false;
 
 /** Shared admin and personal navigation. TV keeps every destination visible;
