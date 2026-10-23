@@ -156,6 +156,10 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
       <motion.button
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
+        type="button"
+        aria-label="Account and settings"
+        aria-expanded={isOpen}
+        title="Account and settings"
         onClick={() => setIsOpen(!isOpen)}
         className={`${isCompact
           ? 'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200'

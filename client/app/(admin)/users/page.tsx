@@ -12,7 +12,7 @@ import { ProfilesCard } from '@/components/user/ProfilesCard';
 import { LimitsButton } from '@/components/user/LimitsButton';
 import { CatchUpButton } from '@/components/user/CatchUpButton';
 import { HouseholdsCard } from '@/components/jellyfin/HouseholdCard';
-import { NebulaPageHeading, NebulaCompactStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
+import { NebulaPageHeading, NebulaCompactStatCard, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { toast } from '@/components/ui/Toast';
 import { api, User, Group, MetricsData, type LimitsSummary } from '@/lib/api';

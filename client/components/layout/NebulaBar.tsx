@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ComponentType, Fragment, ReactNode, useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { ComponentType, Fragment, ReactNode, useEffect, useId, useState, useSyncExternalStore, useRef } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useIsTV } from '@/lib/hooks/useIsTV';
@@ -41,6 +41,7 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
   const isTV = useIsTV();
   const reduceMotion = useReducedMotion();
   const navId = useId();
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [isScrolled, setIsScrolled] = useState(false);
   const isCompact = useSyncExternalStore(subscribeToViewport, compactViewport, serverViewport);
   const { isOpen, onOpen, onClose } = menu;
@@ -68,7 +69,7 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') { onClose(); menuButtonRef.current?.focus(); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -84,11 +85,12 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
       </div>
       {/* The action cluster measures these two anchors when the page title
           scrolls out of view. Keep the logo row clear at the right edge. */}
-      <header data-nebula-topbar className={`interface-topbar sticky top-0 z-30 ${isTV ? 'interface-topbar-tv' : ''}`}>
+      <header data-nebula-topbar data-menu-open={isOpen} className={`interface-topbar sticky top-0 z-30 ${isTV ? 'interface-topbar-tv' : ''}`}>
         <div className="nebula-bar-panel interface-nav-material">
           <div data-nebula-logo-row className="interface-brand-row relative flex items-center">
             {showMenu && (
               <button
+                ref={menuButtonRef}
                 type="button"
                 onClick={isOpen ? onClose : onOpen}
                 className="interface-menu-button flex items-center justify-center shrink-0 rounded-xl"

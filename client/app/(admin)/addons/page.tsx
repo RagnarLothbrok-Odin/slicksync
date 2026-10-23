@@ -18,7 +18,7 @@ import { BeginnerHint } from '@/components/ui/BeginnerHint';
 import { AddonDirectoryModal } from '@/components/addons/AddonDirectoryModal';
 import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
-import { NebulaPageHeading, NebulaHeaderStats, NebulaCompactStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
+import { NebulaPageHeading, NebulaHeaderStats, NebulaCompactStatCard, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { toast } from '@/components/ui/Toast';

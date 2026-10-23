@@ -164,8 +164,7 @@ export function FilterTabs({
           className="interface-segment-indicator absolute top-1 bottom-1 rounded-lg"
           initial={false}
           animate={{
-            left: indicatorStyle.left,
-            width: indicatorStyle.width,
+            x: indicatorStyle.left,
           }}
           transition={{
             duration: reduceMotion ? 0 : 0.3,
@@ -175,6 +174,7 @@ export function FilterTabs({
             mass: 1,
           }}
           style={{
+            width: indicatorStyle.width,
             zIndex: 0,
           }}
         />

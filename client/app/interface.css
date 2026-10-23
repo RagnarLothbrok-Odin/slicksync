@@ -73,7 +73,7 @@ html.daylight .btn-v-primary { color: #fff; }
   .nebula-bar-panel, .interface-modal { backdrop-filter: none !important; }
 }
 @media (prefers-contrast: more) {
-  :root { --color-surface-border: var(--color-text-muted); --color-text-subtle: var(--color-text-muted); }
+  html:root { --color-surface-border: var(--color-text-muted); --color-text-subtle: var(--color-text-muted); }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -142,4 +142,25 @@ html.daylight .btn-v-primary { color: #fff; }
 }
 @media (max-width: 767px) {
   .interface-dashboard-stats > * { padding: 1rem; min-height: 6.5rem; }
+}
+
+.interface-checkbox { border-radius: 0.45rem; border: 1.5px solid var(--color-text-subtle); background: transparent; color: var(--color-bg); transition: background-color 120ms ease, border-color 120ms ease; }
+.interface-checkbox::before { content: ''; position: absolute; inset: -0.625rem; }
+.interface-checkbox-checked { background: var(--color-primary); border-color: var(--color-primary); }
+.interface-checkbox:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (hover: hover) {
+  .interface-checkbox:hover:not(:disabled) { border-color: var(--color-primary); }
+}
+
+.interface-connect .auth-opt-on { background: var(--color-primary-muted); border-color: var(--color-primary); }
+.interface-connect .auth-opt-on .ao-title { color: var(--color-text); }
+.interface-connect .auth-opt-on .ao-sub { color: var(--color-text-muted); }
+.interface-connect .auth-opt-on .ao-glyph { color: var(--color-primary); }
+.interface-connect .auth-opt-on .ao-badge { background: var(--color-primary-muted); color: var(--color-primary); }
+
+.interface-connect button[aria-pressed='true'] { background: var(--color-primary-muted); color: var(--color-primary); }
+.interface-login .seg-on { background: var(--color-primary-muted); color: var(--color-text); }
+@media (max-width: 767px) {
+  /* Hide the desktop server snapshot until the viewport store hydrates. */
+  .interface-topbar:not(.interface-topbar-tv)[data-menu-open='false'] nav { display: none; }
 }
