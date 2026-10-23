@@ -161,7 +161,7 @@ export function FilterTabs({
       {indicatorStyle && (
         <motion.div
           layoutId={uniqueLayoutId}
-          className="interface-segment-indicator absolute top-1 bottom-1 rounded-lg"
+          className="interface-segment-indicator absolute left-0 top-0 bottom-0 rounded-lg"
           initial={false}
           animate={{
             x: indicatorStyle.left,
