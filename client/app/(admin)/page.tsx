@@ -116,7 +116,8 @@ const RecentAddonItem = memo(function RecentAddonItem({
         <Button
           variant="ghost"
           size="sm"
-          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2"
+          className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-2"
+          aria-label={`Reload ${addon.name}`}
           onClick={onReload}
         >
           <ArrowPathIcon className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`} />

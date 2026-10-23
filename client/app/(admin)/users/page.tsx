@@ -971,6 +971,7 @@ export default function UsersPage() {
       {/* Floating Add Button - Mobile Only */}
       <button
         onClick={() => setIsCreateModalOpen(true)}
+        aria-label="Add user"
         className="lg:hidden fixed bottom-4 right-4 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface border border-default nav-item-hover-pill"
         style={{ boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
       >
@@ -1261,6 +1262,7 @@ function UserCard({
           <div className="user-card-toggle">
             <ToggleSwitch
               checked={user.status === 'active'}
+              title={`Activate ${user.name}`}
               onChange={async () => {
                 try {
                   const newStatus = user.status === 'active' ? false : true;
