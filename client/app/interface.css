@@ -164,3 +164,68 @@ html.daylight .btn-v-primary { color: #fff; }
   /* Hide the desktop server snapshot until the viewport store hydrates. */
   .interface-topbar:not(.interface-topbar-tv)[data-menu-open='false'] nav { display: none; }
 }
+
+/* Settings has its own navigation hierarchy and an inset list rhythm. */
+.settings-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2.5rem; align-items: start; }
+.settings-with-rail { grid-template-columns: 15.5rem minmax(0, 1fr); }
+.settings-navigation { min-width: 0; position: sticky; top: 9rem; }
+.settings-content { max-width: 58rem; }
+.settings-search { background: var(--color-surface); border: 1px solid var(--color-surface-border); }
+.settings-search:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.settings-nav-label { color: var(--color-text-subtle); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.5rem 0.875rem; }
+.settings-section-button { min-height: 2.75rem; color: var(--color-text-muted); transition: background-color 120ms ease, color 120ms ease; }
+.settings-section-button[aria-pressed='true'] { background: var(--color-primary-muted); color: var(--color-primary); }
+.settings-mobile-picker { display: none; }
+.settings-content .interface-card { padding: 1.5rem; box-shadow: none !important; border-radius: 1.25rem; }
+.settings-content .settings-row { background: transparent; border-radius: 0; padding: 1rem 0; }
+.settings-row + .settings-row { border-top: 1px solid var(--color-surface-border); }
+.settings-row > :first-child { min-width: 0; }
+.settings-row > :last-child { flex-shrink: 0; }
+.settings-row p + p { margin-top: 0.3rem; line-height: 1.6; max-width: 38rem; }
+.settings-result + .settings-result { border-top: 1px solid var(--color-surface-border); }
+.settings-workspace:not(.settings-with-rail) .settings-section-list { display: none; }
+.settings-workspace:not(.settings-with-rail) .settings-mobile-picker { display: block; }
+.settings-workspace:not(.settings-with-rail) .settings-navigation { position: static; max-width: 58rem; }
+@media (hover: hover) {
+  .settings-section-button:hover:not([aria-pressed='true']), .settings-result:hover { background: var(--color-surface-hover); }
+}
+@media (max-width: 767px) {
+  .settings-workspace, .settings-with-rail { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .settings-navigation { position: static; }
+  .settings-section-list { display: none; }
+  .settings-mobile-picker { display: block; }
+  .settings-content .interface-card { padding: 1.125rem; }
+  .settings-row { gap: 1rem; }
+}
+
+.task-category-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+.task-category-button { color: var(--color-text-muted); border: 1px solid var(--color-surface-border); background: var(--color-surface); min-width: 0; transition: border-color 150ms ease, background-color 150ms ease; }
+.task-category-button[aria-pressed='true'] { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-muted); }
+.task-category-description { color: var(--color-text-muted); }
+.tasks-catalog-grid:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: stretch; }
+.tasks-catalog-grid > section:last-child { grid-column: 1 / -1; }
+.tasks-catalog-grid .task-action-card { height: 100%; margin-bottom: 0; }
+.tasks-data-group, .tasks-backup-group, .tasks-schedule-group { max-width: 72rem; }
+.task-action-card > :first-child { align-items: flex-start; margin-bottom: 1.5rem; }
+.task-action-card p { line-height: 1.6; margin-top: 0.25rem; }
+@media (hover: hover) {
+  .task-category-button:hover:not([aria-pressed='true']) { border-color: var(--color-text-subtle); }
+}
+@media (max-width: 1000px) {
+  .task-category-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .tasks-catalog-grid:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
+  .task-category-button { padding: 0.875rem; gap: 0.625rem; }
+  .task-category-description { display: none; }
+}
+
+.settings-with-rail .settings-navigation { max-height: calc(100dvh - 10rem); overflow-y: auto; }
+@media (min-width: 1100px) {
+  .settings-profile-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 1.25rem; }
+  .settings-profile-grid > section { margin-bottom: 1.5rem; }
+  .settings-profile-grid .interface-card { height: 100%; }
+}
+@media (max-width: 767px) {
+  .settings-with-rail .settings-navigation { max-height: none; overflow: visible; }
+}

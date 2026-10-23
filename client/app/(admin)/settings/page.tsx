@@ -1,6 +1,6 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, isValidElement, cloneElement } from 'react';
 import { motion } from 'framer-motion';
 import { Header } from '@/components/layout/Header';
 import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
@@ -46,8 +46,9 @@ import {
   Squares2X2Icon,
   ArrowTopRightOnSquareIcon,
   InformationCircleIcon,
+  MagnifyingGlassIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline';
-import { ScrollRow } from '@/components/ui/ScrollRow';
 import { LumiereDbField } from '@/components/settings/LumiereDbField';
 import { AboutPanel } from '@/components/settings/AboutPanel';
 
@@ -167,12 +168,13 @@ function SettingRow({
     // data-setting carries the visible label verbatim so the command
     // palette's settings deep-search (lib/settingsIndex.ts) can scroll to
     // and flash this exact row via /settings?highlight=<label>.
-    <div data-setting={label} className={`flex items-center justify-between p-4 rounded-lg bg-subtle ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+    <div data-setting={label} className={`settings-row flex items-center justify-between gap-6 p-4 rounded-lg bg-subtle ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       <div>
         <p className="font-medium text-sm text-default">{label}</p>
         <p className="text-xs text-muted">{description}</p>
       </div>
-      {children}
+      {isValidElement<{ label?: string }>(children) && children.type === ToggleSwitch
+        ? cloneElement(children, { label }) : children}
     </div>
   );
 }
@@ -185,7 +187,7 @@ function findSettingElement(target: string): HTMLElement | null {
   const exact = document.querySelector(`[data-setting="${CSS.escape(target)}"]`);
   if (exact) return exact as HTMLElement;
   const t = target.trim().toLowerCase();
-  for (const el of Array.from(document.querySelectorAll('label, h3'))) {
+  for (const el of Array.from(document.querySelectorAll('label, h3, p'))) {
     const txt = (el.textContent || '').trim().toLowerCase();
     if (txt === t || txt.startsWith(t)) return (el.closest('div') || el) as HTMLElement;
   }
@@ -474,15 +476,11 @@ export default function SettingsPage() {
   // Mirrors the localStorage flag so the switch reflects reality after mount
   // (reading it during render would disagree with the server render).
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  // The rail's hover is tracked here instead of in CSS, for two reasons that
-  // both bit this rail. The rows carry inline styles, and an inline
-  // background silently beats any :hover rule that isn't !important - so the
-  // CSS hover never actually painted anything. And a CSS :hover STICKS after
-  // a tap on a touch screen (there is no hover-out event to end it), which is
-  // exactly the "the last one I clicked stays lit" symptom. State can only
-  // hold one key, and only a real mouse can set it, so at most one row is
-  // ever lit and a tap can never leave one behind.
-  const [hoveredTab, setHoveredTab] = useState<SettingsTab | null>(null);
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const currentSection = SETTINGS_TABS.find((tab) => tab.key === activeTab)!;
+  const settingsMatches = settingsQuery.trim() ? SETTINGS_INDEX.filter((entry) =>
+    `${entry.label} ${entry.section} ${entry.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase())
+  ).slice(0, 12) : [];
   // Nebula puts the app's own nav across the top, so settings can own the
   // left rail. Original already has a sidebar - a second one beside it is
   // the clutter this avoids.
@@ -1267,96 +1265,83 @@ export default function SettingsPage() {
       {layoutMode !== 'nebula' && (
         <Header
           title="Settings"
-          subtitle="Customize your SlickSync experience"
+          subtitle="Make yourself at home. Your preferences, connections, and account."
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-6 lg:p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={{ maxWidth: layoutMode === 'nebula' ? 'min(120rem, 92vw)' : '896px' }}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={{ maxWidth: layoutMode === 'nebula' ? 'min(92rem, 92vw)' : '70rem' }}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading title="Settings" subtitle="Customize your SlickSync experience" />
+        <NebulaPageHeading title="Settings" subtitle="Make yourself at home. Your preferences, connections, and account." />
       )}
-        {/* Settings navigation takes the axis the APP's own layout is not
-            using. In Nebula (top nav) that is a left rail; in Original (which
-            already has a sidebar) a second vertical nav beside the first just
-            reads as clutter, so the groups run along the top instead. Narrow
-            screens always get the horizontal row - a rail there would eat the
-            width the settings themselves need. */}
-        {/* Row only where the rail actually exists. The rail is hidden below
-            md, but this container stayed a flex row there - so the phone laid
-            the tab strip and the settings out SIDE BY SIDE, the strip took
-            the width, and every setting ended up off-screen to the right of
-            it. Below md this has to be plain block flow: strip on top,
-            settings under it. */}
-        <div className={useSettingsRail ? 'md:flex md:gap-6 md:items-start' : ''}>
-          {useSettingsRail && (
-          <nav
-            className="hidden md:block w-56 shrink-0 sticky top-4"
-            // Safety net for the pointer that leaves the rail fast enough to
-            // skip a row's own leave event (or leaves the window entirely).
-            onPointerLeave={() => setHoveredTab(null)}
-          >
-            <div className="rounded-2xl p-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }}>
-              {SETTINGS_TABS.map((t) => {
-                const active = activeTab === t.key;
-                const hovered = !active && hoveredTab === t.key;
-                const Icon = t.icon;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    // Clearing the hover on click matters as much as setting
-                    // it: after a tap the finger is gone but the pointer
-                    // never "leaves", so without this the row you just
-                    // chose would keep its hover tint on top of everything.
-                    onClick={(e) => { setActiveTab(t.key); setHoveredTab(null); e.currentTarget.blur(); }}
-                    onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHoveredTab(t.key); }}
-                    onPointerLeave={() => setHoveredTab((k) => (k === t.key ? null : k))}
-                    // One of three mutually exclusive classes, never a mix,
-                    // and each is !important (see globals.css) - so a row
-                    // that is not the selected one cannot be painted by a
-                    // leftover :hover, a theme rule, or anything else. The
-                    // selected row is a solid fill rather than the 20% tint
-                    // it used to be: the tint sat too close to the card
-                    // behind it to read as "this one and none of the others".
-                    className={`relative w-full flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl text-left mb-0.5 focus:outline-none rail-item ${active ? 'rail-item-on' : hovered ? 'rail-item-warm' : 'rail-item-off'}`}
-                  >
-                    <Icon className={`w-4 h-4 shrink-0 ${active ? 'rail-ico-on' : 'text-muted'}`} />
-                    <span className="min-w-0">
-                      <span className={`block text-sm ${active ? 'font-semibold' : 'font-medium'}`}>{t.label}</span>
-                      <span className={`block text-[11px] leading-tight ${active ? 'rail-blurb-on' : 'text-muted'}`}>{t.blurb}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </nav>
-          )}
-
-          <div className={`${useSettingsRail ? 'md:hidden' : ''} -mx-1 px-1 pb-3 sticky top-0 z-20`} style={{ background: 'linear-gradient(180deg, var(--color-bg) 70%, transparent)' }}>
-            <ScrollRow className="flex gap-1.5">
-              {SETTINGS_TABS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setActiveTab(t.key)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap focus:outline-none ${
-                    activeTab === t.key ? 'bg-primary text-white' : 'bg-surface-hover text-muted nav-item-hover-pill'
-                  }`}
-                >
-                  {t.label}
-                </button>
+        <div className={`settings-workspace ${useSettingsRail ? 'settings-with-rail' : ''}`}>
+          <aside className="settings-navigation">
+            <label className="settings-search flex items-center gap-2.5 rounded-xl px-3.5 py-3">
+              <MagnifyingGlassIcon className="w-4 h-4 text-muted shrink-0" />
+              <input type="search" aria-label="Find a setting" placeholder="Find a setting"
+                value={settingsQuery} onChange={(event) => setSettingsQuery(event.target.value)}
+                className="bg-transparent text-sm text-default min-w-0 w-full outline-none" />
+            </label>
+            <nav aria-label="Settings sections" className="settings-section-list mt-5">
+              {['Your experience', 'Your setup'].map((group, groupIndex) => (
+                <div key={group} className="mb-5">
+                  <p className="settings-nav-label">{group}</p>
+                  {SETTINGS_TABS.filter((tab) => groupIndex === 0
+                    ? ['general', 'themes', 'notifications'].includes(tab.key)
+                    : !['general', 'themes', 'notifications'].includes(tab.key)).map((tab) => {
+                    const Icon = tab.icon;
+                    return (
+                      <button key={tab.key} type="button" aria-pressed={activeTab === tab.key}
+                        onClick={() => { setActiveTab(tab.key); setSettingsQuery(''); }}
+                        className="settings-section-button flex items-center gap-3 w-full text-left rounded-xl px-3.5 py-3">
+                        <Icon className="w-[18px] h-[18px] shrink-0" />
+                        <span className="text-sm font-medium flex-1">{tab.label}</span>
+                        {activeTab === tab.key && <ChevronRightIcon className="w-3.5 h-3.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
               ))}
-            </ScrollRow>
-          </div>
+            </nav>
+            <label className="settings-mobile-picker mt-3">
+              <span className="sr-only">Settings section</span>
+              <select aria-label="Settings section" value={activeTab}
+                onChange={(event) => { setActiveTab(event.target.value as SettingsTab); setSettingsQuery(''); }}
+                className="interface-field w-full rounded-xl px-4 py-3 text-sm text-default bg-surface border border-default">
+                {SETTINGS_TABS.map((tab) => <option key={tab.key} value={tab.key}>{tab.label}</option>)}
+              </select>
+            </label>
+          </aside>
 
-          <div className={useSettingsRail ? 'flex-1 min-w-0' : ''}>
-
+          <div className="settings-content min-w-0">
+            {settingsQuery.trim() ? (
+              <section className="settings-search-results mb-7" aria-label="Settings search results">
+                <h2 className="text-xl font-semibold text-default mb-2">Find your setting</h2>
+                <p className="text-sm text-muted mb-5">{settingsMatches.length ? 'Choose a result to jump straight to its control.' : 'No matching settings. Try a different name, like notifications or timezone.'}</p>
+                <div className="interface-panel rounded-2xl overflow-hidden">
+                  {settingsMatches.map((entry) => (
+                    <button key={`${entry.section}-${entry.label}`} type="button"
+                      onClick={() => { setSettingsQuery(''); window.dispatchEvent(new CustomEvent('slicksync:settings-highlight', { detail: entry.label })); }}
+                      className="settings-result flex items-center justify-between gap-4 w-full text-left px-5 py-4">
+                      <span><span className="block text-sm font-medium text-default">{entry.label}</span><span className="block text-xs text-muted mt-1">{entry.section}</span></span>
+                      <ChevronRightIcon className="w-4 h-4 text-muted shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            <div hidden={!!settingsQuery.trim()}>
+            <div className="settings-section-heading mb-6">
+              <p className="text-xs font-medium text-primary mb-2">Settings</p>
+              <h2 className="text-2xl font-semibold text-default">{currentSection.label}</h2>
+              <p className="text-sm text-muted mt-2">{currentSection.blurb}</p>
+            </div>
 
         {activeTab === 'themes' && <ThemesPanel embedded />}
 
         {activeTab === 'about' && <AboutPanel lumiere={!isPublicInstance && !!syncSettings.lumiereDbUrl} shared={isPublicInstance} />}
 
+        <div className="settings-profile-grid">
         {/* Profile Picture - shown on the account button (bottom-left in
             Nebula, bottom of sidebar in Original) and its dropdown menu. */}
         {activeTab === 'general' && (
@@ -1442,6 +1427,8 @@ export default function SettingsPage() {
           </Card>
         </PageSection>
         )}
+
+        </div>
 
         {/* Privacy & Display */}
         {activeTab === 'general' && (
@@ -2941,6 +2928,7 @@ export default function SettingsPage() {
           </Card>
         </PageSection>
         )}
+            </div>
           </div>
         </div>
       </div>
