@@ -314,6 +314,7 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
     >
       <LinkIcon className="w-5 h-5 text-muted shrink-0" />
       <input
+        aria-label="Manifest URL"
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onFocus={() => setIsFocused(true)}
@@ -1288,6 +1289,7 @@ export default function AddonDetailPage() {
         <span className="text-sm text-muted">Active</span>
         <ToggleSwitch
           checked={addon.isActive !== false}
+              title="Activate addon"
           onChange={handleToggleStatus}
           size="sm"
           disabled={isTogglingStatus}
@@ -1516,6 +1518,7 @@ export default function AddonDetailPage() {
               <Button
                 variant="ghost"
                 size="sm"
+                aria-label="Copy manifest URL"
                 onClick={async () => {
                   const url = (addon as any).url || (addon as any).manifestUrl;
                   if (url) {
@@ -1582,6 +1585,7 @@ export default function AddonDetailPage() {
               <button
                 type="button"
                 onClick={() => setIsManifestExpanded((prev: boolean) => !prev)}
+                aria-expanded={isManifestExpanded}
                 className="w-full flex items-center justify-between gap-3"
               >
                 <div className="flex items-center gap-3">
@@ -1945,10 +1949,11 @@ export default function AddonDetailPage() {
                          {/* Sync Status Badge */}
                          <SyncBadge groupId={group.id} size="sm" />
 
-                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
+                         <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
                            <Button
                              variant="ghost"
                              size="sm"
+                             aria-label={`Sync ${group.name}`}
                              onClick={async (e) => {
                                e.preventDefault();
                                try {
@@ -1964,6 +1969,7 @@ export default function AddonDetailPage() {
                            <Button
                              variant="ghost"
                              size="sm"
+                             aria-label={`Remove addon from ${group.name}`}
                              onClick={(e) => {
                                e.preventDefault();
                                handleRemoveFromGroup(group.id, group.name);
@@ -2024,6 +2030,7 @@ export default function AddonDetailPage() {
                 </span>
                 <ToggleSwitch
                   checked={anyAddon?.proxyEnabled || false}
+                  title="Proxy streams"
                   onChange={handleToggleProxy}
                   disabled={isTogglingProxy}
                 />
@@ -2587,7 +2594,7 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setIsRemoveModalOpen(true)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-lg"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity p-1 rounded-lg"
                   style={{ color: 'var(--color-error)' }}
                   title="Remove backup chain"
                 >

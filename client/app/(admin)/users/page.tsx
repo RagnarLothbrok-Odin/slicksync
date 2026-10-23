@@ -564,7 +564,7 @@ export default function UsersPage() {
       {layoutMode === 'nebula' && (
         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-5">
           <NebulaCompactStatCard label="Total Users" value={isLoading ? '...' : users.length} icon={<UsersIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={0} />
-          <NebulaCompactStatCard label="Active" value={isLoading ? '...' : activeCount} icon={<CheckIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={1} />
+          <NebulaCompactStatCard label="Watching now" value={isLoading ? '...' : activeCount} icon={<CheckIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={1} />
           <NebulaCompactStatCard label="Expired" value={isLoading ? '...' : expiredCount} icon={<XMarkIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={0} />
         </div>
       )}

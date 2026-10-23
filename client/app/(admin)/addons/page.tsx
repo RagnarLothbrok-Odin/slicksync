@@ -1006,6 +1006,7 @@ export default function AddonsPage() {
       {/* Floating Add Button - Mobile Only */}
       <button
         onClick={() => setIsAddModalOpen(true)}
+        aria-label="Add addon"
         className="lg:hidden fixed bottom-4 right-4 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface border border-default nav-item-hover-pill"
         style={{ boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
       >
@@ -1469,6 +1470,7 @@ function AddonCard({
             <div className="shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
               <ToggleSwitch
                 checked={addon.isActive !== false}
+              title={`Activate ${addon.name}`}
                 onChange={async () => {
                   try {
                     const newStatus = !addon.isActive;
@@ -1618,6 +1620,7 @@ function AddonCard({
         <div className="hidden md:block shrink-0" onClick={(e) => e.stopPropagation()}>
           <ToggleSwitch
             checked={addon.isActive !== false}
+              title={`Activate ${addon.name}`}
             onChange={async () => {
               try {
                 const newStatus = !addon.isActive;

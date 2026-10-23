@@ -892,6 +892,7 @@ export default function GroupDetailPage() {
         <span className="text-sm text-muted">Active</span>
         <ToggleSwitch
           checked={(group as any)?.isActive !== false}
+              title="Activate group"
           onChange={handleToggleActive}
           size="sm"
         />
@@ -1133,7 +1134,7 @@ export default function GroupDetailPage() {
                           <p className="text-sm text-muted truncate">{displayEmail(user.email)}</p>
                         </div>
 
-                        <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1276,12 +1277,13 @@ export default function GroupDetailPage() {
                               )}
                             </div>
                           </Link>
-                          <div className="flex items-center gap-2 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-2 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
                             <Button
                               variant="ghost"
                               size="sm"
                               onMouseDown={(e) => e.stopPropagation()}
                               onTouchStart={(e) => e.stopPropagation()}
+                              aria-label={`Remove ${addon.name} from group`}
                               onClick={() => {
                                 if (addon.id) {
                                   handleRemoveAddon(addon.id);

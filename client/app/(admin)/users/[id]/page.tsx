@@ -1123,6 +1123,7 @@ export default function UserDetailPage() {
         <span className="text-sm text-muted">Active</span>
         <ToggleSwitch
           checked={user?.isActive !== false}
+              title="Activate user"
           onChange={handleToggleActive}
           size="sm"
         />
@@ -2489,6 +2490,7 @@ export default function UserDetailPage() {
               </div>
               <ToggleSwitch
                 checked={cinemetaDraft[row.key]}
+                title={row.label}
                 onChange={() => setCinemetaDraft((prev) => ({ ...prev, [row.key]: !prev[row.key] }))}
               />
             </div>

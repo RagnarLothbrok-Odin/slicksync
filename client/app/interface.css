@@ -12,7 +12,7 @@ h1 { letter-spacing: -0.035em; line-height: 1.12; }
 h2, h3 { letter-spacing: -0.02em; }
 button, a, input, select, textarea { touch-action: manipulation; }
 button:not(:disabled), a { -webkit-tap-highlight-color: transparent; }
-:where(button, a, [role='button'], input, textarea, select):focus-visible {
+:where(button, a, summary, [role='button'], input, textarea, select):focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 4px;
 }
@@ -316,3 +316,11 @@ html.daylight .btn-v-primary { color: #fff; }
   .interface-topbar[data-menu-open='true'] .interface-nav-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
   .interface-topbar[data-menu-open='true'] .interface-nav-system { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--color-surface-border); padding-top: 0.5rem; }
 }
+
+/* Consistent edges and feedback make controls recognizable across pages. */
+.interface-button:active:not(:disabled), .interface-menu-button:active,
+.interface-nav-link:active, .settings-section-button:active { filter: brightness(0.92); }
+.interface-segments { border-radius: 0.875rem; }
+.interface-segments [role='tab'], .interface-segment-indicator { border-radius: 0.625rem; }
+.interface-segments [role='tab'] { font-size: 0.8125rem; }
+.interface-heading h1 { font-size: clamp(1.85rem, 3vw, 2.25rem); }

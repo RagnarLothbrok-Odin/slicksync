@@ -24,6 +24,17 @@ export function InlineEdit({
   const [editValue, setEditValue] = useState(value);
   const [isSaving, setIsSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const cancelledRef = useRef(false);
+  const savingRef = useRef(false);
+  const restoreFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (!isEditing && restoreFocusRef.current) {
+      triggerRef.current?.focus();
+      restoreFocusRef.current = false;
+    }
+  }, [isEditing]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -39,16 +50,19 @@ export function InlineEdit({
 
   const handleStartEdit = () => {
     if (disabled) return;
+    cancelledRef.current = false;
     setIsEditing(true);
     setEditValue(value || '');
   };
 
   const handleCancel = () => {
+    cancelledRef.current = true;
     setIsEditing(false);
     setEditValue(value || '');
   };
 
   const handleSave = async () => {
+    if (cancelledRef.current || savingRef.current) return;
     const currentVal = editValue || '';
     const originalVal = value || '';
     
@@ -57,6 +71,7 @@ export function InlineEdit({
       return;
     }
 
+    savingRef.current = true;
     setIsSaving(true);
     try {
       await onSave(currentVal.trim());
@@ -64,15 +79,18 @@ export function InlineEdit({
     } catch (error) {
       console.error('Failed to save:', error);
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      restoreFocusRef.current = true;
       e.preventDefault();
       handleSave();
     } else if (e.key === 'Escape') {
+      restoreFocusRef.current = true;
       e.preventDefault();
       handleCancel();
     }
@@ -87,6 +105,7 @@ export function InlineEdit({
       <input
         ref={inputRef}
         type="text"
+        aria-label={placeholder}
         value={editValue}
         onChange={(e) => setEditValue(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -100,17 +119,21 @@ export function InlineEdit({
   }
 
   return (
-    <div 
+    <button
+      ref={triggerRef}
+      type="button"
+      disabled={disabled}
+      aria-label={`Edit ${value || placeholder}`}
       onClick={handleStartEdit}
-      className={`flex items-center gap-2 cursor-pointer group rounded px-1 -ml-1 hover:bg-surface-hover transition-colors ${disabled ? 'cursor-default' : ''} ${className}`}
+      className={`text-left flex items-center gap-2 cursor-pointer group rounded px-1 -ml-1 hover:bg-surface-hover transition-colors ${disabled ? 'cursor-default' : ''} ${className}`}
       title={disabled ? '' : 'Click to edit'}
     >
       <span className="text-inherit font-inherit truncate max-w-full">
         {value || placeholder || 'Click to edit'}
       </span>
       {!disabled && (
-        <PencilIcon className="w-4 h-4 text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+        <PencilIcon className="w-4 h-4 text-muted opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity shrink-0" />
       )}
-    </div>
+    </button>
   );
 }
