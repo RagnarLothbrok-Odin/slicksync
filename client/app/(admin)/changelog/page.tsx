@@ -308,14 +308,14 @@ export default function ChangelogPage() {
       {layoutMode !== 'nebula' && (
         <Header
           title={<Breadcrumbs items={[{ label: "What's New" }]} className="text-xl font-semibold" />}
-          subtitle="All notable changes to this project will be documented here."
+          subtitle="The latest improvements, in one place."
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(72rem, 92vw)' } : undefined}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading title="What's New" subtitle="All notable changes to this project will be documented here." />
+        <NebulaPageHeading title="What's New" subtitle="The latest improvements, in one place." />
       )}
         {/* Loading State */}
         {isInitialLoading && (

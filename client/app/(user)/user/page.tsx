@@ -66,7 +66,7 @@ function StatCard({ label, value, icon, color = 'var(--color-primary)', delay = 
       <div className="flex items-center gap-3">
         <div 
           className="w-10 h-10 rounded-lg flex items-center justify-center"
-          style={{ background: `${color}20`, color }}
+          style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}
         >
           {icon}
         </div>
@@ -207,8 +207,8 @@ export default function UserHomePage() {
   return (
     <div className="p-4 sm:p-8">
       <UserPageHeader 
-        title={`Welcome back, ${userInfo?.username || 'User'}!`}
-        subtitle="Here's your activity overview"
+        title={`Hello, ${userInfo?.username || 'User'}.`}
+        subtitle="Your library, your activity, and what’s next."
       />
 
       {/* Profile Card with Sync Button and Risk Badge */}

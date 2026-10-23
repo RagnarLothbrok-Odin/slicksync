@@ -475,6 +475,7 @@ export default function UserLibraryPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search your library"
             placeholder="Search by title..."
             className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm"
             style={{
@@ -590,7 +591,7 @@ export default function UserLibraryPage() {
       {/* Library - flat list, no date grouping */}
       {!loading && !error && filteredLibrary.length > 0 && (
         viewMode === 'grid' ? (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
+          <div className="discovery-poster-grid">
             <AnimatePresence mode="popLayout">
               {filteredLibrary.map((item) => (
                 <LibraryCardItem

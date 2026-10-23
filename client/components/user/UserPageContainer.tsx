@@ -35,14 +35,14 @@ export function UserPageHeader({ title, subtitle, actions }: UserPageHeaderProps
   // No menu button here any more - the top bar above carries the navigation.
   return (
     <motion.div
-      initial={{ opacity: 0, y: -10 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
-      className="flex items-center justify-between mb-6 gap-4"
+      className="interface-heading flex items-end justify-between mb-7 gap-4 flex-wrap"
     >
       <div className="flex items-center gap-3 min-w-0">
         <div className="min-w-0">
           <h1
-            className="text-2xl font-bold font-display truncate"
+            className="font-bold font-display break-words"
             style={{ color: 'var(--color-text)' }}
           >
             {title}
@@ -57,7 +57,7 @@ export function UserPageHeader({ title, subtitle, actions }: UserPageHeaderProps
           )}
         </div>
       </div>
-      {actions && <div className="flex items-center gap-3 shrink-0">{actions}</div>}
+      {actions && <div className="flex items-center justify-end gap-3 flex-wrap ml-auto max-w-full">{actions}</div>}
     </motion.div>
   );
 }

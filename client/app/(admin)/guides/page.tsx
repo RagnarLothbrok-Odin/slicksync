@@ -13,7 +13,7 @@ import {
   SparklesIcon,
   LifebuoyIcon,
 } from '@heroicons/react/24/outline';
-import { HELP_ENTRIES, searchHelp, helpEntriesByCategory, HelpEntry } from '@/lib/helpContent';
+import { searchHelp, helpEntriesByCategory, HelpEntry } from '@/lib/helpContent';
 
 // The Guides index - the "browse everything" counterpart to the command
 // palette's search-as-you-type. The palette answers a question you already
@@ -23,6 +23,7 @@ import { HELP_ENTRIES, searchHelp, helpEntriesByCategory, HelpEntry } from '@/li
 export default function GuidesPage() {
   const { layoutMode } = useLayoutMode();
   const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<string | null>(null);
 
   // With a query we show a flat ranked list (relevance beats category
   // grouping when you've actually asked for something specific); without
@@ -47,7 +48,7 @@ export default function GuidesPage() {
           {layoutMode === 'nebula' && (
             <NebulaPageHeading
               title="Guides"
-              subtitle={`${HELP_ENTRIES.length} guides covering every page, setting, and the things that most often go wrong.`}
+              subtitle="A little guidance, whenever you need it."
             />
           )}
 
@@ -57,7 +58,8 @@ export default function GuidesPage() {
               <div className="flex items-center gap-3">
                 <MagnifyingGlassIcon className="w-5 h-5 shrink-0" style={{ color: 'var(--color-text-muted)' }} />
                 <input
-                  type="text"
+                  type="search"
+                  aria-label="Search guides"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search help - try &quot;history missing&quot;, &quot;2fa&quot;, or &quot;auto remove&quot;"
@@ -107,6 +109,14 @@ export default function GuidesPage() {
             </PageSection>
           )}
 
+          {results === null && (
+            <nav aria-label="Guide categories" className="guide-categories flex flex-wrap gap-2 mb-6">
+              <button type="button" aria-pressed={category === null} onClick={() => setCategory(null)} className="guide-category rounded-full px-4 py-2.5 text-sm">All guides</button>
+              {grouped.map((group) => <button key={group.category} type="button" aria-pressed={category === group.category}
+                onClick={() => setCategory(group.category)} className="guide-category rounded-full px-4 py-2.5 text-sm">{group.category}</button>)}
+            </nav>
+          )}
+
           {/* Categorised browse.
               CSS multi-column rather than a grid: category cards have wildly
               different heights (10 guides vs. 2), and in a 2-col grid every
@@ -115,8 +125,8 @@ export default function GuidesPage() {
               tightly instead. break-inside-avoid keeps a card from being
               split across the column boundary. */}
           {results === null && (
-            <div className="columns-1 lg:columns-2 gap-4">
-              {grouped.map((group) => (
+            <div className={category ? '' : 'columns-1 lg:columns-2 gap-4'} style={category ? { maxWidth: '52rem' } : undefined}>
+              {grouped.filter((group) => !category || group.category === category).map((group) => (
                 <div key={group.category} className="break-inside-avoid mb-4">
                   <Card padding="lg">
                     <div className="flex items-center gap-3 mb-4">
