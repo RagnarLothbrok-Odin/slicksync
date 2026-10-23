@@ -44,7 +44,7 @@ export function PersonTopbar() {
       sections={sections}
       homeHref="/user"
       menu={menu}
-      account={<PanelSwitcher mode="user" userInfo={userInfo} onLogout={handleLogout} variant="compact" align="left" />}
+      account={<PanelSwitcher mode="user" userInfo={userInfo} onLogout={handleLogout} variant="compact" dropdownPosition="down" align="right" />}
     />
   );
 }

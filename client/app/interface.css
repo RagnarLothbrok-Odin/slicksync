@@ -293,3 +293,26 @@ html.daylight .btn-v-primary { color: #fff; }
 @media (min-width: 768px) and (max-width: 1279px) {
   .interface-topbar:not(.interface-topbar-tv):not([data-menu-open='true']) nav { display: none; }
 }
+
+/* Account controls belong to the navigation, with their menu anchored below. */
+.interface-nav-material { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 0.75rem; }
+.interface-brand-row { grid-column: 1; grid-row: 1; padding-right: 6rem; }
+.interface-account { grid-column: 2; grid-row: 1; position: relative; z-index: 40; border: 0; box-shadow: none; padding: 0; background: transparent; }
+.interface-account > div > button { min-width: 2.75rem; min-height: 2.75rem; }
+.interface-main-nav { grid-column: 1 / -1; grid-row: 2; }
+.interface-nav-system { display: none; }
+@media (min-width: 1280px) {
+  .interface-nav-material { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .interface-brand-row { padding-right: 0; }
+  .interface-main-nav { grid-column: 2; grid-row: 1; }
+  .interface-account { grid-column: 3; }
+  .interface-nav-link { padding-inline: 0.5rem; }
+  .interface-topbar[data-menu-open='true'] .interface-main-nav { grid-column: 1 / -1; grid-row: 2; }
+}
+.interface-topbar[data-menu-open='true'] .interface-nav-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0.75rem 0; gap: 1rem; max-height: calc(100dvh - 7rem); overflow-y: auto; }
+.interface-topbar[data-menu-open='true'] .interface-nav-row { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; overflow: visible; mask-image: none; }
+.interface-topbar[data-menu-open='true'] .interface-nav-link { min-height: 2.75rem; font-size: 0.875rem; padding-inline: 0.875rem; }
+@media (max-width: 767px) {
+  .interface-topbar[data-menu-open='true'] .interface-nav-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  .interface-topbar[data-menu-open='true'] .interface-nav-system { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--color-surface-border); padding-top: 0.5rem; }
+}

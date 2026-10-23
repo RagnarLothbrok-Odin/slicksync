@@ -12,6 +12,9 @@ import {
   ShieldCheckIcon,
   EnvelopeIcon,
   RectangleStackIcon,
+  Cog6ToothIcon,
+  QueueListIcon,
+  BookOpenIcon,
 } from '@heroicons/react/24/outline';
 import { TopbarActions } from '@/components/layout/TopbarActions';
 import { PanelSwitcher } from './PanelSwitcher';
@@ -28,18 +31,26 @@ const NEBULA_NAV_SECTIONS: NebulaNavSection[] = [
       { href: '/', label: 'Dashboard', icon: HomeIcon },
       { href: '/activity', label: 'Activity', icon: ClockIcon },
       { href: '/metrics', label: 'Metrics', icon: ChartBarIcon },
-      { href: '/users', label: 'Users', icon: UsersIcon },
-      { href: '/groups', label: 'Groups', icon: UserGroupIcon },
+      { href: '/discover', label: 'Discover', icon: MagnifyingGlassIcon },
+      { href: '/catalogs', label: 'Catalogs', icon: RectangleStackIcon },
     ],
   },
   {
     id: 'management',
     items: [
-      { href: '/discover', label: 'Discover', icon: MagnifyingGlassIcon },
-      { href: '/catalogs', label: 'Catalogs', icon: RectangleStackIcon },
+      { href: '/users', label: 'Users', icon: UsersIcon },
+      { href: '/groups', label: 'Groups', icon: UserGroupIcon },
       { href: '/addons', label: 'Addons', icon: PuzzlePieceIcon },
       { href: '/vault', label: 'Vault', icon: ShieldCheckIcon },
       { href: '/invitations', label: 'Invitations', icon: EnvelopeIcon },
+    ],
+  },
+  {
+    id: 'system',
+    items: [
+      { href: '/tasks', label: 'Tasks', icon: QueueListIcon },
+      { href: '/settings', label: 'Settings', icon: Cog6ToothIcon },
+      { href: '/guides', label: 'Guides', icon: BookOpenIcon },
     ],
   },
 ];
@@ -84,7 +95,7 @@ export function NebulaTopbar() {
       sections={NEBULA_NAV_SECTIONS}
       homeHref="/"
       menu={menu}
-      account={<PanelSwitcher mode="admin" userInfo={accountInfo} onLogout={handleLogout} variant="compact" align="left" />}
+      account={<PanelSwitcher mode="admin" userInfo={accountInfo} onLogout={handleLogout} variant="compact" dropdownPosition="down" align="right" />}
     />
   );
 }

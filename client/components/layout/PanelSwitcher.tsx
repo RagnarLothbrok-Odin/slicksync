@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   UserIcon,
   ShieldCheckIcon,
@@ -64,6 +64,9 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
   const [isOpen, setIsOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownId = useId();
+  const reduceMotion = useReducedMotion();
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -80,12 +83,15 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
   // Close on escape
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsOpen(false);
+      if (event.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
     };
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, []);
+  }, [isOpen]);
 
   const handleSwitchPanel = async () => {
     if (mode === 'admin') {
@@ -154,11 +160,12 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
     <div className="relative" ref={menuRef}>
       {/* Trigger Button */}
       <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+        ref={triggerRef}
+        whileTap={reduceMotion ? undefined : { scale: 0.97 }}
         type="button"
         aria-label="Account and settings"
         aria-expanded={isOpen}
+        aria-controls={isOpen ? dropdownId : undefined}
         title="Account and settings"
         onClick={() => setIsOpen(!isOpen)}
         className={`${isCompact
@@ -236,18 +243,22 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: dropdownPosition === 'down' ? 10 : -10, scale: 0.95 }}
+            id={dropdownId}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: dropdownPosition === 'down' ? -4 : 4, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: dropdownPosition === 'down' ? 10 : -10, scale: 0.95 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: dropdownPosition === 'down' ? -4 : 4, scale: 0.98 }}
             transition={{ duration: 0.15 }}
             className={
-              `absolute rounded-xl overflow-hidden shadow-xl z-50 ${dropdownPosition === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'} ${
+              `absolute rounded-xl overflow-y-auto shadow-xl z-50 ${dropdownPosition === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'} ${
                 isCompact ? `${align === 'left' ? 'left-0' : 'right-0'} w-72` : 'left-0 right-0'
               }`
             }
             style={{
               background: 'var(--color-surface)',
               border: '1px solid var(--color-surface-border)',
+              maxHeight: 'calc(100dvh - 7rem)',
+              maxWidth: 'calc(100vw - 2rem)',
+              transformOrigin: `${dropdownPosition === 'down' ? 'top' : 'bottom'} ${align}`,
             }}
           >
             {/* Switch Panel Button */}

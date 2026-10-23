@@ -80,9 +80,6 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
 
   return (
     <>
-      <div className="interface-account fixed bottom-4 left-4 md:bottom-6 md:left-6 z-40">
-        {account}
-      </div>
       {/* The action cluster measures these two anchors when the page title
           scrolls out of view. Keep the logo row clear at the right edge. */}
       <header data-nebula-topbar data-menu-open={isOpen} className={`interface-topbar sticky top-0 z-30 ${isTV ? 'interface-topbar-tv' : ''}`}>
@@ -107,7 +104,7 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
               </span>
               <span className="text-base font-semibold tracking-tight text-default">SlickSync</span>
             </Link>
-            <span className="interface-brand-caption text-xs text-muted">Your media, together.</span>
+
           </div>
           <AnimatePresence initial={false}>
             {navVisible && (
@@ -118,11 +115,11 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={reduceMotion ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.3 }}
-                className="overflow-hidden"
+                className="interface-main-nav overflow-hidden"
               >
                 <div className="interface-nav-sections">
                   {sections.map((section) => (
-                    <ScrollRow key={section.id} className="interface-nav-row flex flex-nowrap items-center gap-1 w-full">
+                    <ScrollRow key={section.id} className={`interface-nav-row interface-nav-${section.id} flex flex-nowrap items-center gap-1 w-full`}>
                       {section.items.map((link) => {
                         const active = isNavItemActive(pathname, link.href, homeHref);
                         const Icon = link.icon;
@@ -150,6 +147,7 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
               </motion.nav>
             )}
           </AnimatePresence>
+          <div className="interface-account">{account}</div>
         </div>
       </header>
     </>

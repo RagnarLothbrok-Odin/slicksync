@@ -134,7 +134,7 @@ export function TopbarActions({
       const row = document.querySelector('[data-nebula-logo-row]');
       const rr = row?.getBoundingClientRect();
       const card = row?.parentElement?.getBoundingClientRect();
-      const edge = card ? card.right - DOCK_EDGE_INSET : rr?.right ?? 0;
+      const edge = card ? card.right - DOCK_EDGE_INSET - 52 : rr?.right ?? 0;
       // A fixed element's `right` counts from the page's visible width, which
       // excludes a desktop-style scrollbar; innerWidth would include it and
       // shift the buttons left by the scrollbar's width.
