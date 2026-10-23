@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
 import { Card, Button, Modal, PosterThumb, Badge, MediaDetailModal, ContextMenu, useContextMenu } from '@/components/ui';
 import { showDeletedWithUndo } from '@/components/ui/undoToast';
@@ -224,7 +225,7 @@ export default function ListsPage() {
     setLists((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
   };
 
-  const heading = { title: 'Catalogs', subtitle: 'Your custom collections of movies and shows.' };
+  const heading = { title: 'Catalogs', subtitle: 'Your taste, collected. Movies and shows worth keeping together.' };
 
   // Nuvio Collections entry point - deliberately not a card in the page
   // body (was too easy to miss as a full-width button there, then too
@@ -345,11 +346,18 @@ export default function ListsPage() {
           </div>
 
           {loaded && lists.length === 0 && (
-            <Card padding="lg" className="text-center">
-              <RectangleStackIcon className="w-10 h-10 mx-auto text-subtle mb-3" />
-              <p className="text-sm text-muted">No catalogs yet.</p>
-              <p className="text-xs text-subtle mt-1">Create one, then add titles from any movie or show&apos;s details.</p>
-            </Card>
+            <div className="catalog-starter interface-panel rounded-2xl">
+              <EmptyState icon={<RectangleStackIcon className="w-6 h-6" />} title="A collection with your name on it"
+                description="Gather movies and shows for a mood, a movie night, or someone you love sharing with."
+                action={<Button variant="primary" size="md" leftIcon={<PlusIcon className="w-4 h-4" />} onClick={() => setShowCreate(true)}>Create a catalog</Button>} />
+              <div className="catalog-starter-ideas flex items-center justify-center gap-2 flex-wrap px-5 pb-7">
+                <span className="text-xs text-muted mr-1">Start with an idea</span>
+                {['Movie night', 'Worth a rewatch', 'Next up'].map((name) => (
+                  <button key={name} type="button" onClick={() => { setNewName(name); setShowCreate(true); }}
+                    className="rounded-full px-3 py-2 text-xs font-medium text-muted bg-surface-hover">{name}</button>
+                ))}
+              </div>
+            </div>
           )}
 
           {lists.length > 0 && (() => {

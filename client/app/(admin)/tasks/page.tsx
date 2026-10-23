@@ -1,7 +1,7 @@
 'use client';
 
 import { WatchSyncCard } from '@/components/user/WatchSyncCard';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Children, isValidElement } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Header } from '@/components/layout/Header';
@@ -64,6 +64,11 @@ function TaskCard({
   description: string;
   children: React.ReactNode;
 }) {
+  const actions = Children.toArray(children);
+  const isRemoval = (child: React.ReactNode) => isValidElement<{ variant?: string }>(child)
+    && child.type === ActionButton && child.props.variant === 'danger';
+  const removalActions = actions.filter(isRemoval);
+  const primaryActions = actions.filter((child) => !isRemoval(child));
   return (
     <Card padding="lg" className="task-action-card mb-6">
       <div className="flex items-center gap-3 mb-4">
@@ -75,9 +80,13 @@ function TaskCard({
           <p className="text-xs text-muted">{description}</p>
         </div>
       </div>
-      <div className="flex flex-wrap gap-3">
-        {children}
-      </div>
+      <div className="flex flex-wrap gap-3">{primaryActions}</div>
+      {removalActions.length > 0 && (
+        <details className="task-removal-actions mt-5">
+          <summary className="text-xs text-muted cursor-pointer py-1">Reset &amp; removal</summary>
+          <div className="flex flex-wrap gap-2 pt-3">{removalActions}</div>
+        </details>
+      )}
     </Card>
   );
 }

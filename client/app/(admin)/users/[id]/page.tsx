@@ -9,7 +9,7 @@ import { copyToClipboard } from '@/lib/clipboard';
 import { useTheme } from '@/lib/theme';
 import Link from 'next/link';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
+import { DetailToolbar } from '@/components/layout/DetailToolbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button, Card, StatCard, Avatar, Badge, StatusBadge, Modal, ConfirmModal, ColorPicker, DateTimePicker, InlineEdit, ToggleSwitch, Select, SyncBadge, Input, VersionBadge, ResourceBadge, UserAvatar } from '@/components/ui';
 import { SyncPreviewDialog } from '@/components/ui/SyncPreviewDialog';
@@ -1176,11 +1176,7 @@ export default function UserDetailPage() {
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
       <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading
-          title={isLoading ? 'Loading...' : (user?.username || user?.name || 'User')}
-          subtitle="Users"
-          actions={detailActions}
-        />
+        <DetailToolbar title={isLoading ? 'Loading user' : (user?.username || user?.name || 'User')} backHref="/users" backLabel="Users" actions={detailActions} />
       )}
         {/* Loading state */}
         {isLoading ? (
@@ -1209,7 +1205,7 @@ export default function UserDetailPage() {
           <>
             {/* User Hero Section */}
             <PageSection className="mb-6 md:mb-8">
-              <Card padding="md" className="md:lg:p-6">
+              <Card padding="md" className="profile-hero md:lg:p-6">
                 <div className="relative">
                   <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
                     {/* Avatar with Color Picker */}
@@ -1220,7 +1216,7 @@ export default function UserDetailPage() {
                       transition={{ type: 'spring', stiffness: 200 }}
                       className="relative shrink-0"
                     >
-                      <div
+                      <button type="button" aria-label="Change profile picture"
                         onClick={() => setShowAvatarPicker(true)}
                         className="relative transition-transform cursor-pointer hover:scale-105 group"
                       >
@@ -1240,7 +1236,7 @@ export default function UserDetailPage() {
                         <div className="absolute inset-0 rounded-xl md:rounded-2xl bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                           <PencilIcon className="w-4 h-4 md:w-6 md:h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
-                      </div>
+                      </button>
                       <AvatarPickerModal
                         isOpen={showAvatarPicker}
                         onClose={() => setShowAvatarPicker(false)}
@@ -1262,7 +1258,7 @@ export default function UserDetailPage() {
                           onSave={handleUsernameUpdate}
                           placeholder="Enter username..."
                           maxLength={50}
-                          className="text-xl md:text-2xl font-bold font-display"
+                          className="profile-name font-semibold font-display"
                         />
                         <span className="inline-flex items-center gap-1.5 flex-wrap">
                           <Badge
@@ -1484,6 +1480,13 @@ export default function UserDetailPage() {
               </PageSection>
             )}
 
+            <details className="profile-management mb-7">
+              <summary className="flex items-center justify-between gap-4 rounded-2xl px-5 py-4 cursor-pointer">
+                <span><span className="block text-sm font-semibold text-default">Connections &amp; history</span>
+                <span className="block text-xs text-muted mt-1">Linked apps, history imports, and household preferences</span></span>
+                <span aria-hidden className="profile-management-indicator text-xl text-muted">+</span>
+              </summary>
+              <div className="pt-5">
             {/* Manual merge - shown when this account hasn't already
                 absorbed a second provider's account. */}
             {!mergeInfo && (
@@ -1833,6 +1836,9 @@ export default function UserDetailPage() {
               </Card>
             </PageSection>
 
+              </div>
+            </details>
+
             {/* Tab Navigation */}
             <PageSection className="mb-6 md:mb-8">
               <ScrollRow className="flex items-center gap-2 p-1 rounded-xl bg-surface w-fit max-w-full">
@@ -1871,7 +1877,7 @@ export default function UserDetailPage() {
               <>
                 {/* Stats Cards */}
                 <PageSection delay={0.1} className="mb-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="profile-summary-grid grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                     <Link href={`/activity?user=${encodeURIComponent(user?.username || '')}&period=today`}>
                       <StatCard
                         label="Watch Time Today"

@@ -8,7 +8,7 @@ import { api, User, Group, Addon } from '@/lib/api';
 import { useLastKnown } from '@/lib/hooks/useLastKnown';
 import { formatLastSync } from '@/lib/relativeTime';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
+import { DetailToolbar } from '@/components/layout/DetailToolbar';
 import { displayEmail } from '@/lib/providers';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button, Card, Avatar, AvatarColorSwatches, AvatarGroup, Badge, Modal, ConfirmModal, Input, ColorPicker, InlineEdit, ToggleSwitch, SyncBadge, VersionBadge, ResourceBadge, UserAvatar, SelectionCheckbox } from '@/components/ui';
@@ -942,15 +942,11 @@ export default function GroupDetailPage() {
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
       <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading
-          title={isLoading ? 'Loading...' : (group?.name || 'Group')}
-          subtitle={isLoading ? 'Groups' : (group?.description || 'Groups')}
-          actions={detailActions}
-        />
+        <DetailToolbar title={isLoading ? 'Loading group' : (group?.name || 'Group')} backHref="/groups" backLabel="Groups" actions={detailActions} />
       )}
         {/* Group Hero Section */}
         <PageSection className="mb-8">
-          <Card padding="lg">
+          <Card padding="lg" className="profile-hero">
             <div className="relative">
               <div className="flex items-start gap-4">
                 {/* Group Icon with Color Picker */}
@@ -961,7 +957,7 @@ export default function GroupDetailPage() {
                   transition={{ type: 'spring', stiffness: 200 }}
                   className="relative shrink-0"
                 >
-                  <div
+                  <button type="button" aria-label="Change profile picture"
                     onClick={() => setShowAvatarPicker(true)}
                     className="cursor-pointer hover:scale-105 transition-transform"
                   >
@@ -972,7 +968,7 @@ export default function GroupDetailPage() {
                       colorIndex={group?.colorIndex ?? 0}
                       className="shadow-lg ring-4 ring-[var(--color-bg)]"
                     />
-                  </div>
+                  </button>
                   <AvatarPickerModal
                     isOpen={showAvatarPicker}
                     onClose={() => setShowAvatarPicker(false)}

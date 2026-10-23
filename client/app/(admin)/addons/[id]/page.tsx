@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { api, Addon, Group } from '@/lib/api';
 import { copyToClipboard } from '@/lib/clipboard';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
+import { DetailToolbar } from '@/components/layout/DetailToolbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button, Card, Badge, ResourceBadge, Modal, ConfirmModal, Input, ToggleSwitch, VersionBadge, InlineEdit, SyncBadge } from '@/components/ui';
 import { AddonConfigModal } from '@/components/addons/AddonConfigModal';
@@ -1352,11 +1352,11 @@ export default function AddonDetailPage() {
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
       <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading title={addon.name} subtitle="Addons" actions={detailActions} />
+        <DetailToolbar title={addon.name} backHref="/addons" backLabel="Addons" actions={detailActions} />
       )}
         {/* Hero Section */}
         <PageSection className="mb-8">
-          <Card padding="lg">
+          <Card padding="lg" className="profile-hero">
             <div className="relative">
               <div className="flex items-start gap-6">
                 {/* Addon Logo - Large and clickable */}

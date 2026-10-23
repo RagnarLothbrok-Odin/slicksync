@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react';
-import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { motion, AnimatePresence, LayoutGroup, useReducedMotion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Header } from '@/components/layout/Header';
-import { NebulaPageHeading, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
+import { NebulaPageHeading, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { copyToClipboard } from '@/lib/clipboard';
 import { useIsTV } from '@/lib/hooks/useIsTV';
@@ -13,7 +14,7 @@ import { TVPageProvider } from '@/components/tv/TVPageProvider';
 import { TVFocusable } from '@/components/tv/TVFocusable';
 import { TVLink } from '@/components/tv/TVLink';
 import { Button, Card, Badge, Avatar, Modal, Input, Select, ConfirmModal, ToggleSwitch, DateTimePicker, UserAvatar, ContextMenu, useContextMenu, SelectAllCheckbox, SelectionCheckbox, PageToolbar } from '@/components/ui';
-import { Dialog, DialogPanel } from '@headlessui/react';
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { toast } from '@/components/ui/Toast';
 import { api, Invitation, Group } from '@/lib/api';
@@ -338,7 +339,7 @@ export default function InvitationsPage() {
           subtitle={isLoading ? 'Loading...' : `${invitations.length} active invite${invitations.length !== 1 ? 's' : ''} • ${pendingRequests.length} pending request${pendingRequests.length !== 1 ? 's' : ''}`}
         />
       )}
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+      <div className="interface-management-content">
       {layoutMode === 'nebula' && <NebulaGlassStripe />}
         {/* Filters */}
         <PageToolbar
@@ -521,18 +522,9 @@ export default function InvitationsPage() {
               )}
 
               {!isLoading && !error && invitationsDisplay.length === 0 && (
-                <div className="text-center py-16">
-                  <div className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 bg-surface-hover">
-                    <EnvelopeIcon className="w-8 h-8 text-subtle" />
-                  </div>
-                  <h3 className="text-lg font-medium mb-2 text-default">No invitations</h3>
-                  <p className="mb-6 text-muted">
-                    Create an invitation to start inviting users
-                  </p>
-                  <Button variant="primary" onClick={() => setIsCreateModalOpen(true)}>
-                    Create Invite
-                  </Button>
-                </div>
+                <EmptyState icon={<EnvelopeIcon className="w-6 h-6" />} title="A place for your people"
+                  description="Create an invitation so someone can join your household with their own sign-in."
+                  action={<Button variant="primary" onClick={() => setIsCreateModalOpen(true)}>Create invitation</Button>} />
               )}
             </motion.div>
           ) : (
@@ -1378,6 +1370,7 @@ function CreateInvitationModal({
   onClose: () => void;
   groups: Group[];
 }) {
+  const reduceMotion = useReducedMotion();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -1461,20 +1454,20 @@ function CreateInvitationModal({
             exit={{ opacity: 0 }}
             className="fixed inset-0"
             style={{
-              background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.85) 100%)',
-              backdropFilter: 'blur(8px)'
+              background: 'rgba(0,0,0,0.55)'
             }}
           />
 
           <div className="fixed inset-0 flex items-center justify-center p-4 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
+              transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
+              className="w-full" style={{ maxWidth: '512px' }}
             >
               <DialogPanel
-                className="w-full overflow-hidden my-8"
+                className="interface-modal relative w-full overflow-hidden my-8 max-h-[85dvh] overflow-y-auto"
                 style={{
                   background: 'var(--color-surface)',
                   borderRadius: '24px',
@@ -1483,14 +1476,13 @@ function CreateInvitationModal({
                   boxShadow: '0 0 0 1px rgba(255,255,255,0.05), 0 40px 80px -20px rgba(0,0,0,0.5)'
                 }}
               >
-                <div
-                  className="h-1.5 w-full"
-                  style={{
-                    background: 'linear-gradient(90deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 60%, var(--color-secondary)) 50%, var(--color-secondary) 100%)'
-                  }}
-                />
+                <DialogTitle className="sr-only">Create invitation</DialogTitle>
+                <button type="button" onClick={onClose} aria-label="Close invitation"
+                  className="absolute right-3 top-3 z-20 w-11 h-11 rounded-full flex items-center justify-center text-muted hover:bg-surface-hover">
+                  <XMarkIcon className="w-5 h-5" />
+                </button>
 
-                <div className="p-8">
+                <div className="p-6 md:p-8">
                   <AnimatePresence mode="wait">
                     {!showSuccess ? (
                       <motion.div
@@ -1500,18 +1492,17 @@ function CreateInvitationModal({
                         exit={{ opacity: 0, x: 20 }}
                       >
                         {/* Header */}
-                        <div className="text-center mb-8">
+                        <div className="mb-7 pr-6">
                           <motion.div
-                            initial={{ scale: 0 }}
+                            initial={false}
                             animate={{ scale: 1 }}
                             transition={{ type: 'spring', delay: 0.1 }}
-                            className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
+                            className="w-11 h-11 mb-4 rounded-xl flex items-center justify-center"
                             style={{
-                              background: 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 70%, var(--color-secondary)) 100%)',
-                              boxShadow: '0 8px 32px -8px var(--color-primary)'
+                              background: 'var(--color-primary-muted)'
                             }}
                           >
-                            <EnvelopeIcon className="w-8 h-8 text-white" />
+                            <EnvelopeIcon className="w-5 h-5 text-primary" />
                           </motion.div>
                           <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                             Create Invitation

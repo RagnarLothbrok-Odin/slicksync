@@ -3,6 +3,7 @@
 import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, Suspense, Fragment } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Header } from '@/components/layout/Header';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { copyToClipboard } from '@/lib/clipboard';
@@ -1156,7 +1157,7 @@ function VaultPageContent() {
         </>
       )}
 
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+      <div className="interface-management-content">
       {layoutMode === 'nebula' && <NebulaGlassStripe />}
         <div className="mb-5">
           <FilterTabsResponsive fill options={filterOptions} activeKey={activeCategory} onChange={setActiveCategory} layoutId="vault-filter" enableDropTargets />
@@ -1165,20 +1166,9 @@ function VaultPageContent() {
         {isLoading ? (
           <div className="text-center py-16" style={{ color: 'var(--color-text-muted)' }}>Loading vault...</div>
         ) : entries.length === 0 ? (
-          // Straight on the panel, like the empty states on Invitations,
-          // Addons and Groups - not a second bordered box inside it.
-          <div className="text-center py-16">
-            <div className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 bg-surface-hover">
-              <ShieldCheckIcon className="w-8 h-8 text-subtle" />
-            </div>
-            <h3 className="text-lg font-medium mb-2 text-default">No entries yet</h3>
-            <p className="mb-6 text-muted">
-              Track API keys, accounts, and credentials with expiry alerts and active-checks.
-            </p>
-            <Button variant="primary" onClick={openAddModal}>
-              Add your first entry
-            </Button>
-          </div>
+          <EmptyState icon={<ShieldCheckIcon className="w-6 h-6" />} title="Everything important, in one place"
+            description="Keep track of accounts, renewal dates, and credentials, with a reminder before anything expires."
+            action={<Button variant="primary" onClick={openAddModal}>Add your first entry</Button>} />
         ) : (
           <>
             <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>
