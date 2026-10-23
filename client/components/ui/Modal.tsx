@@ -1,18 +1,20 @@
 'use client';
 
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { useReducedMotion } from 'framer-motion';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import clsx from 'clsx';
 import { useCoarsePointer } from '@/lib/hooks/useCoarsePointer';
 import { cachedImageUrl } from '@/lib/posterUrl';
+import { Button } from './Button';
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  ariaLabel?: string;
   description?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   children: React.ReactNode;
@@ -59,7 +61,7 @@ const sizeMaxWidthPx = {
   full: '896px',
 };
 
-export function Modal({ isOpen, onClose, title, description, size = 'md', children, hideCloseButton = false, backdropImage, lightweight = false }: ModalProps) {
+export function Modal({ isOpen, onClose, title, ariaLabel, description, size = 'md', children, hideCloseButton = false, backdropImage, lightweight = false }: ModalProps) {
   // On a phone or tablet the close is a plain fade. The default close also
   // shrinks and slides the panel, and a transform on a panel whose backdrop
   // art is a large blurred image makes WebKit re-rasterize that image on
@@ -70,9 +72,11 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
   // The library's own title element inside its shell; a plain heading in
   // the lightweight one, wired to the dialog by id for screen readers.
   const TitleTag: React.ElementType = lightweight ? 'h2' : DialogTitle;
-  const titleId = lightweight ? 'slicksync-light-modal-title' : undefined;
+  const generatedTitleId = useId();
+  const titleId = lightweight ? generatedTitleId : undefined;
   const panelBody = (
     <>
+      {!title && !lightweight && <DialogTitle className="sr-only">{ariaLabel || 'Details'}</DialogTitle>}
       {/* Ambient backdrop art - z-0, sits behind the header/content
           below (both explicitly z-10) rather than relying on default
           paint order, which would otherwise put this absolutely-
@@ -152,7 +156,7 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
       )}
 
       {/* Content */}
-      <div className="relative z-10 p-6 overflow-y-auto">
+      <div className="relative z-10 p-6 overflow-y-auto overscroll-contain">
         {children}
       </div>
     </>
@@ -160,7 +164,7 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
 
   if (lightweight) {
     return (
-      <LightShell isOpen={isOpen} onClose={onClose} size={size} titleId={title ? titleId : undefined}>
+      <LightShell isOpen={isOpen} onClose={onClose} size={size} titleId={title ? titleId : undefined} ariaLabel={ariaLabel}>
         {panelBody}
       </LightShell>
     );
@@ -227,15 +231,18 @@ export function Modal({ isOpen, onClose, title, description, size = 'md', childr
 }
 
 // The shell behind `lightweight` - see that prop's comment on Modal.
-function LightShell({ isOpen, onClose, size, titleId, children }: {
+function LightShell({ isOpen, onClose, size, titleId, ariaLabel, children }: {
   isOpen: boolean;
   onClose: () => void;
   size: NonNullable<ModalProps['size']>;
   titleId?: string;
+  ariaLabel?: string;
   children: React.ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusTo = useRef<Element | null>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -244,12 +251,12 @@ function LightShell({ isOpen, onClose, size, titleId, children }: {
     // Focus the panel itself so Escape and Tab land inside it.
     panel?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); return; }
       if (e.key !== 'Tab' || !panel) return;
       // Keep Tab inside the panel.
-      const focusable = panel.querySelectorAll<HTMLElement>(
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      );
+      )).filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
       if (focusable.length === 0) { e.preventDefault(); return; }
       const first = focusable[0], last = focusable[focusable.length - 1];
       if (e.shiftKey && (document.activeElement === first || document.activeElement === panel)) { e.preventDefault(); last.focus(); }
@@ -261,7 +268,7 @@ function LightShell({ isOpen, onClose, size, titleId, children }: {
       const el = restoreFocusTo.current as HTMLElement | null;
       if (el && typeof el.focus === 'function' && el.isConnected) el.focus({ preventScroll: true });
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen || typeof document === 'undefined') return null;
   return createPortal(
@@ -281,9 +288,10 @@ function LightShell({ isOpen, onClose, size, titleId, children }: {
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
+          aria-label={titleId ? undefined : (ariaLabel || 'Media details')}
           tabIndex={-1}
           className={clsx(
-            'relative w-full flex flex-col max-h-[85vh] pointer-events-auto outline-none',
+            'relative w-full flex flex-col max-h-[85dvh] pointer-events-auto outline-none',
             sizeStyles[size],
             'rounded-2xl p-0 overflow-hidden overscroll-contain'
           )}
@@ -330,44 +338,16 @@ export function ConfirmModal({
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm">
       <p className="mb-6" style={{ color: 'var(--color-text-muted)' }}>{description}</p>
       <div className="flex gap-3 justify-end">
-        <button
-          onClick={onClose}
-          disabled={isLoading}
-          className="px-6 py-3 rounded-xl font-medium transition-all duration-300"
-          style={{
-            background: 'var(--color-surface-hover)',
-            color: 'var(--color-text)',
-            border: '1px solid var(--color-surface-border)'
-          }}
-        >
+        <Button variant="secondary" onClick={onClose} disabled={isLoading}>
           {cancelText}
-        </button>
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+        </Button>
+        <Button
+          variant={variant === 'danger' ? 'danger' : 'primary'}
           onClick={onConfirm}
-          disabled={isLoading}
-          className="px-6 py-3 rounded-xl font-medium transition-all duration-300"
-          style={{
-            background: variant === 'danger' 
-              ? 'var(--color-error)'
-              : variant === 'warning'
-              ? 'var(--color-warning)'
-              : 'var(--color-primary)',
-            color: 'white'
-          }}
+          isLoading={isLoading}
         >
-          {isLoading ? (
-            <span className="flex items-center gap-2">
-              <motion.span
-                className="w-4 h-4 border-2 border-current border-t-transparent rounded-full"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-              />
-              Processing...
-            </span>
-          ) : confirmText}
-        </motion.button>
+          {isLoading ? 'Processing...' : confirmText}
+        </Button>
       </div>
     </Modal>
   );
