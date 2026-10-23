@@ -149,25 +149,25 @@ html.velvet {
   --radius-xl: 20px;
 }
 
-/* Nebula Theme (default) - Deep blue-black (Midnight structure) with violet-to-cyan accents */
+/* Nebula Theme (default) - Graphite surfaces with periwinkle accents */
 :root,
 html.nebula {
   /* Background spectrum */
-  --color-bg: #0d1117;
-  --color-bg-subtle: #161b22;
-  --color-bg-muted: #21262d;
+  --color-bg: #101114;
+  --color-bg-subtle: #18191e;
+  --color-bg-muted: #22242a;
   /* Surface colors */
-  --color-surface: #1c2128;
-  --color-surface-hover: #262c36;
+  --color-surface: #1b1d23;
+  --color-surface-hover: #262930;
   --color-surface-border: rgba(240, 246, 252, 0.1);
   /* Text */
-  --color-text: #f0f6fc;
-  --color-text-muted: #8b949e;
-  --color-text-subtle: #6e7681;
-  /* Primary accent - soft periwinkle-violet (same as Slick) */
-  --color-primary: #8b7ec8;
-  --color-primary-hover: #a394d8;
-  --color-primary-muted: rgba(139, 126, 200, 0.15);
+  --color-text: #f5f5f7;
+  --color-text-muted: #a3a5af;
+  --color-text-subtle: #838692;
+  /* Primary accent - periwinkle */
+  --color-primary: #9bafff;
+  --color-primary-hover: #b8c6ff;
+  --color-primary-muted: rgba(155, 175, 255, 0.13);
   --color-primaryMuted: var(--color-primary-muted);
   /* Secondary accent - muted teal (same as Slick) */
   --color-secondary: #5fd4c4;
@@ -184,7 +184,7 @@ html.nebula {
   --color-warning-muted: rgba(210, 153, 34, 0.15);
   --color-warningMuted: var(--color-warning-muted);
   /* Chart colors */
-  --color-chart-1: #8b7ec8;
+  --color-chart-1: #9bafff;
   --color-chart-2: #5fd4c4;
   --color-chart-3: #58a6ff;
   --color-chart-4: #3fb950;
@@ -449,8 +449,8 @@ html.daylight {
 
 html {
   scroll-behavior: smooth;
-  --font-space-grotesk: 'Space Grotesk', system-ui, sans-serif;
-  --font-outfit: 'Outfit', system-ui, sans-serif;
+  --font-space-grotesk: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-outfit: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-jetbrains-mono: 'JetBrains Mono', monospace;
 }
 

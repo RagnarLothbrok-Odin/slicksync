@@ -29,9 +29,9 @@ export const themeMeta: Record<ThemeId, {
   },
   nebula: {
     name: 'Nebula',
-    description: 'Deep blue-black with violet-to-cyan accents',
-    preview: '#8b7ec8',
-    colors: { bg: '#0d1117', surface: '#1c2128', primary: '#8b7ec8', secondary: '#5fd4c4' },
+    description: 'Graphite surfaces with periwinkle accents',
+    preview: '#9bafff',
+    colors: { bg: '#101114', surface: '#1b1d23', primary: '#9bafff', secondary: '#5fd4c4' },
   },
   midnight: {
     name: 'Midnight',

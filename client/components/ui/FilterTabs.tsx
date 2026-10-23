@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useLayoutEffect, useEffect, useId } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { useDroppable } from '@dnd-kit/core';
 import {
   ChevronDownIcon,
@@ -76,6 +76,7 @@ export function FilterTabs({
   enableDropTargets = false,
   dropTargetPrefix = 'vault-category-',
 }: FilterTabsProps) {
+  const reduceMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement>(null);
   const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number } | null>(null);
   const generatedId = useId();
@@ -150,7 +151,7 @@ export function FilterTabs({
     // scrolls sideways (drag, swipe, wheel, or the small edge arrows).
     <ScrollRow
       arrows
-      wrapperClassName={`rounded-xl bg-surface border border-default ${fill ? 'w-full' : 'w-auto max-w-full'} ${className}`}
+      wrapperClassName={`interface-segments rounded-xl bg-surface border border-default ${fill ? 'w-full' : 'w-auto max-w-full'} ${className}`}
       className={styles.pad}
       role="tablist"
       aria-label="Filter options"
@@ -160,14 +161,15 @@ export function FilterTabs({
       {indicatorStyle && (
         <motion.div
           layoutId={uniqueLayoutId}
-          className="absolute top-1 bottom-1 rounded-lg bg-primary-muted"
+          className="interface-segment-indicator absolute top-1 bottom-1 rounded-lg"
           initial={false}
           animate={{
             left: indicatorStyle.left,
             width: indicatorStyle.width,
           }}
           transition={{
-            type: 'spring',
+            duration: reduceMotion ? 0 : 0.3,
+            type: reduceMotion ? 'tween' : 'spring',
             stiffness: 500,
             damping: 35,
             mass: 1,
