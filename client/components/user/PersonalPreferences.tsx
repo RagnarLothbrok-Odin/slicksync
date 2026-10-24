@@ -14,6 +14,7 @@ export function PersonalPreferencesProvider({ children }: { children: ReactNode 
   identity.current = { userId, authKey };
   const [preferences, setPreferences] = useState(defaults);
   const [ready, setReady] = useState(false);
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -21,7 +22,7 @@ export function PersonalPreferencesProvider({ children }: { children: ReactNode 
     let active = true;
     setReady(false); setSaving(false); setPreferences(defaults); setError(null);
     if (isReady && userId && authKey) personalRequest<PersonalPreferences>(userId, authKey, '/preferences')
-      .then(value => { if (active) { setPreferences(value); setReady(true); } })
+      .then(value => { if (active) { setPreferences(value); setLoadedUserId(userId); setReady(true); } })
       .catch(() => { if (active) setError('Could not load your display preferences.'); });
     return () => { active = false; };
   }, [userId, authKey, isReady, revision]);
@@ -34,6 +35,10 @@ export function PersonalPreferencesProvider({ children }: { children: ReactNode 
     } catch { if (identity.current.userId === userId && identity.current.authKey === authKey) toast.error('Could not save your display preferences'); }
     finally { if (identity.current.userId === userId && identity.current.authKey === authKey) setSaving(false); }
   }, [ready, saving, userId, authKey, preferences]);
-  return <Context.Provider value={{ preferences, ready, saving, error, reload: () => setRevision(value => value + 1), save }}>{children}</Context.Provider>;
+  // Keep sensitive fields covered until this person's preferences arrive,
+  // including the first render after a reload or an identity switch.
+  const resolved = ready && loadedUserId === userId;
+  const visiblePreferences = resolved ? preferences : { ...defaults, hideSensitive: true };
+  return <Context.Provider value={{ preferences: visiblePreferences, ready: resolved, saving, error, reload: () => setRevision(value => value + 1), save }}>{children}</Context.Provider>;
 }
 export const usePersonalPreferences = () => useContext(Context);
