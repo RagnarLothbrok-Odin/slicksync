@@ -245,14 +245,20 @@ export default function ListsPage() {
         <Header
           title={<Breadcrumbs items={[{ label: 'Catalogs' }]} className="text-xl font-semibold" />}
           subtitle={heading.subtitle}
-          leading={collectionsButtons}
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
       <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
-        {layoutMode === 'nebula' && <NebulaPageHeading title={heading.title} subtitle={heading.subtitle} leading={collectionsButtons} />}
+        {layoutMode === 'nebula' && <NebulaPageHeading title={heading.title} subtitle={heading.subtitle} />}
 
+        <section aria-label="Connected collections" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-default bg-surface px-4 py-3 mb-6">
+          <div>
+            <h2 className="text-sm font-semibold text-default">Connected collections</h2>
+            <p className="text-xs text-muted mt-0.5">Organize the collections shown in your apps.</p>
+          </div>
+          {collectionsButtons}
+        </section>
         <BeginnerHint guideId="catalog-create">Catalogs are your own named lists of titles - separate from the Watchlist - that you can share with a code or push to a user's app.</BeginnerHint>
         <PageSection>
           {/* Wraps on a phone: the three buttons are wider than one line there. */}
