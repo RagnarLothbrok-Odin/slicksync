@@ -16,7 +16,7 @@ export function DiceBearPicker({ name, initialUrl, onChange }: {
 }) {
   const saved = diceBearSelection(initialUrl);
   const [styles, setStyles] = useState<string[]>([...DICEBEAR_STYLES]);
-  const [style, setStyle] = useState(saved?.style || 'notionists');
+  const [style, setStyle] = useState(saved?.style || 'voxel-bot');
   const [seed, setSeed] = useState(saved?.seed || md5(`slicksync-picker:${name}`).toString());
   const [anchorSeed, setAnchorSeed] = useState(seed);
   const [background, setBackground] = useState(saved?.background || '');

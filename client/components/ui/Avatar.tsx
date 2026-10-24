@@ -8,6 +8,7 @@ import clsx from 'clsx';
 import md5 from 'crypto-js/md5';
 import { UserAvatar } from './UserAvatar';
 import { avatarThumbUrl } from '@/lib/posterUrl';
+import { diceBearUrl } from '@/lib/dicebear';
 
 interface AvatarProps {
   name: string;
@@ -226,7 +227,9 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
   // Hash the identity locally so the public avatar service never receives
   // names or email addresses. A fixed style version keeps defaults stable.
   const seed = md5(`slicksync-avatar:${email?.trim().toLowerCase() || ''}:${name.trim().toLowerCase()}`).toString();
-  const generatedSrc = fallbackIcon ? undefined : `https://api.dicebear.com/10.x/notionists/svg?seed=${seed}`;
+  const backgrounds = ['e8ecff', 'd5f2e8', 'fce7d5', 'f6dfe9', 'dceafa', 'fff0ba', 'c7c9d1', 'bde7f0'];
+  const background = backgrounds[parseInt(seed.slice(0, 2), 16) % backgrounds.length];
+  const generatedSrc = fallbackIcon ? undefined : diceBearUrl('voxel-bot', seed, background);
   const finalSrc = imageError ? generatedSrc : (primarySrc || generatedSrc);
   const showImage = !!finalSrc && !(finalSrc === generatedSrc && generatedError);
   const isGenerated = finalSrc === generatedSrc;
