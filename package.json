@@ -47,20 +47,20 @@
   "dependencies": {
     "@jimp/core": "^1.6.1",
     "@jimp/wasm-webp": "^1.6.1",
-    "@prisma/client": "^7.10.1",
+    "@prisma/client": "6.19.3",
     "@simplewebauthn/server": "^14.0.3",
     "bcryptjs": "^3.0.3",
     "compression": "^1.8.2",
     "cors": "^2.8.6",
     "dotenv": "^18.0.9",
-    "express": "^5.3.0",
+    "express": "4.22.3",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
     "jimp": "^1.6.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.5.0",
-    "otplib": "^13.5.0",
-    "prisma": "^8.0.0-rc.27",
+    "otplib": "12.0.1",
+    "prisma": "6.19.3",
     "qrcode": "^1.5.4",
     "stremio-api-client": "^1.6.0",
     "swagger-jsdoc": "^6.3.0",
@@ -68,9 +68,12 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.3",
+    "@biomejs/biome": "2.5.15",
     "@types/node": "^26.6.5",
     "concurrently": "^10.0.6",
-    "ultracite": "8.0.2"
+    "ultracite": "7.12.4"
+  },
+  "overrides": {
+    "node-fetch": "2.7.0"
   }
 }
