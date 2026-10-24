@@ -8,6 +8,7 @@ import { Button, Card, Badge, Modal, ConfirmModal, Avatar, ComboBox, ProviderKey
 import { PageSection } from '@/components/layout/PageContainer';
 import { useTheme } from '@/lib/theme';
 import { copyToClipboard } from '@/lib/clipboard';
+import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { api, SyncSettings, AccountStats, PushDevice, PasskeyRow } from '@/lib/api';
 import { toast, showToast } from '@/components/ui/Toast';
@@ -46,7 +47,6 @@ import {
   Squares2X2Icon,
   ArrowTopRightOnSquareIcon,
   InformationCircleIcon,
-  MagnifyingGlassIcon,
   ChevronRightIcon,
 } from '@heroicons/react/24/outline';
 import { LumiereDbField } from '@/components/settings/LumiereDbField';
@@ -1275,43 +1275,8 @@ export default function SettingsPage() {
         <NebulaPageHeading title="Settings" subtitle="Make yourself at home. Your preferences, connections, and account." />
       )}
         <div className={`settings-workspace ${useSettingsRail ? 'settings-with-rail' : ''}`}>
-          <aside className="settings-navigation">
-            <label className="settings-search flex items-center gap-2.5 rounded-xl px-3.5 py-3">
-              <MagnifyingGlassIcon className="w-4 h-4 text-muted shrink-0" />
-              <input type="search" aria-label="Find a setting" placeholder="Find a setting"
-                value={settingsQuery} onChange={(event) => setSettingsQuery(event.target.value)}
-                className="bg-transparent text-sm text-default min-w-0 w-full outline-none" />
-            </label>
-            <nav aria-label="Settings sections" className="settings-section-list mt-5">
-              {['Your experience', 'Your setup'].map((group, groupIndex) => (
-                <div key={group} className="mb-5">
-                  <p className="settings-nav-label">{group}</p>
-                  {SETTINGS_TABS.filter((tab) => groupIndex === 0
-                    ? ['general', 'themes', 'notifications'].includes(tab.key)
-                    : !['general', 'themes', 'notifications'].includes(tab.key)).map((tab) => {
-                    const Icon = tab.icon;
-                    return (
-                      <button key={tab.key} type="button" aria-pressed={activeTab === tab.key}
-                        onClick={() => { setActiveTab(tab.key); setSettingsQuery(''); }}
-                        className="settings-section-button flex items-center gap-3 w-full text-left rounded-xl px-3.5 py-3">
-                        <Icon className="w-[18px] h-[18px] shrink-0" />
-                        <span className="text-sm font-medium flex-1">{tab.label}</span>
-                        {activeTab === tab.key && <ChevronRightIcon className="w-3.5 h-3.5" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </nav>
-            <label className="settings-mobile-picker mt-3">
-              <span className="sr-only">Settings section</span>
-              <select aria-label="Settings section" value={activeTab}
-                onChange={(event) => { setActiveTab(event.target.value as SettingsTab); setSettingsQuery(''); }}
-                className="interface-field w-full rounded-xl px-4 py-3 text-sm text-default bg-surface border border-default">
-                {SETTINGS_TABS.map((tab) => <option key={tab.key} value={tab.key}>{tab.label}</option>)}
-              </select>
-            </label>
-          </aside>
+          <SettingsNavigation sections={SETTINGS_TABS.map(tab => ({ ...tab, group: ['general', 'themes', 'notifications'].includes(tab.key) ? 'Your experience' : 'Your setup' }))}
+            activeKey={activeTab} onChange={key => { setActiveTab(key as SettingsTab); setSettingsQuery(''); }} query={settingsQuery} onQueryChange={setSettingsQuery} />
 
           <div className="settings-content min-w-0">
             {settingsQuery.trim() ? (
