@@ -1,14 +1,14 @@
 {
   "name": "@slicksync/client",
   "version": "0.1.0",
+  "private": true,
   "sideEffects": [
     "*.css"
   ],
-  "private": true,
   "scripts": {
     "build": "next build",
     "dev": "next dev -p 3000",
-    "lint": "eslint",
+    "lint": "bun run type-check && biome check --files-ignore-unknown=true --diagnostic-level=error --no-errors-on-unmatched .",
     "start": "next start -p 3000",
     "type-check": "tsc --noEmit"
   },
@@ -38,8 +38,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.8",
     "playwright": "^1.58.0",
     "tailwindcss": "^4",
     "typescript": "^5"

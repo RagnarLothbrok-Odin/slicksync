@@ -1,8 +1,21 @@
 {
   "name": "slicksync",
   "version": "1.101.0",
+  "private": true,
   "description": "SlickSync - Nuvio and Stremio addon, user and credential management",
+  "keywords": [
+    "nuvio",
+    "stremio",
+    "addons",
+    "management",
+    "encryption"
+  ],
+  "license": "MIT",
+  "author": "SlickSync Team",
   "main": "server/index.js",
+  "workspaces": [
+    "client"
+  ],
   "scripts": {
     "build": "bun run --cwd client build",
     "client:dev": "bun run --cwd client dev",
@@ -11,8 +24,10 @@
     "dev": "concurrently \"bun run server:watch\" \"bun run client:dev\"",
     "dev:private": "concurrently \"bun run server:private:watch\" \"bun run client:dev:private\"",
     "dev:public": "concurrently \"bun run server:public:watch\" \"bun run client:dev:public\"",
-    "lint": "eslint server/ scripts/ test/",
-    "lint:fix": "eslint server/ --fix",
+    "format": "biome format --write --files-ignore-unknown=true .",
+    "format:check": "biome format --files-ignore-unknown=true .",
+    "lint": "bun run type-check && biome check --files-ignore-unknown=true --diagnostic-level=error --no-errors-on-unmatched .",
+    "lint:fix": "biome check --write --files-ignore-unknown=true --no-errors-on-unmatched .",
     "server:private:watch": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && bunx prisma generate && QUIET=true NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=false REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" SLICKSYNC_PRIVATE_USERNAME=\"${SLICKSYNC_PRIVATE_USERNAME}\" SLICKSYNC_PRIVATE_PASSWORD=\"${SLICKSYNC_PRIVATE_PASSWORD}\" nodemon --config nodemon.json server/index.js",
     "server:public:watch": "cp prisma/schema.postgres.prisma prisma/schema.prisma && bunx prisma generate && QUIET=false NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=true DATABASE_URL=\"postgresql://slicksync:slicksync@localhost:5432/slicksync\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/index.js",
     "server:watch": "nodemon server/index.js",
@@ -23,21 +38,11 @@
     "test:bun": "bun test --isolate --timeout 30000 test/",
     "type-check": "bun run --cwd client type-check"
   },
-  "keywords": [
-    "nuvio",
-    "stremio",
-    "addons",
-    "management",
-    "encryption"
-  ],
-  "author": "SlickSync Team",
-  "license": "MIT",
   "dependencies": {
-    "@prisma/client": "^6.19.1",
-    "prisma": "^6.19.1",
-    "@simplewebauthn/server": "^14.0.1",
     "@jimp/core": "^1.6.0",
     "@jimp/wasm-webp": "^1.6.0",
+    "@prisma/client": "^6.19.1",
+    "@simplewebauthn/server": "^14.0.1",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.2",
     "cors": "^2.8.5",
@@ -49,6 +54,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.4.0",
     "otplib": "^12.0.1",
+    "prisma": "^6.19.1",
     "qrcode": "^1.5.4",
     "redis": "^4.6.0",
     "stremio-api-client": "^1.6.0",
@@ -60,13 +66,8 @@
     "@biomejs/biome": "2.5.11",
     "@types/node": "^20.0.0",
     "concurrently": "^8.2.0",
-    "eslint": "^8.57.0",
     "nodemon": "^3.1.10",
     "ultracite": "7.10.7"
   },
-  "private": true,
-  "packageManager": "bun@1.4.4",
-  "workspaces": [
-    "client"
-  ]
+  "packageManager": "bun@1.4.4"
 }
