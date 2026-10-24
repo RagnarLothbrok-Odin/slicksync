@@ -33,14 +33,14 @@ inherit the build's dependency tree.
 | `builder` | Generates the Prisma client and builds the frontend |
 | `production` | Copies the runtime tree from `prod-deps`, the built app and the generated Prisma client from `builder` |
 
-That split is why the published image does not carry ESLint, nodemon or the
+That split is why the published image does not carry Biome, nodemon or the
 rest of the build tooling. Note that `prisma` itself is a runtime dependency,
 not a build one: the start script applies the schema on every boot, so an
 image without it would reach for the network at startup.
 
 ## Instance types
 
-`INSTANCE` is a build argument, and the two published images differ by it.
+`INSTANCE` remains a build argument. This fork publishes the private image; the public build path remains in the application for development.
 
 | | `:private` | `:public` |
 |---|---|---|
@@ -48,23 +48,24 @@ image without it would reach for the network at startup.
 | Accounts | one instance, no signup | self-registered, isolated per account |
 | Schema applied by | `prisma db push` on boot | `migrate deploy`, then a guarded push |
 
-`:beta` is the private image built from the beta branch. Use it only to test
-something that has not shipped.
+## Compose file
 
-## Compose files
+`docker-compose.private.yml` runs the single-household SQLite deployment and uses `ghcr.io/ragnarlothbrok-odin/slicksync:private` from this fork.
 
+It reads `.env` (copy `env.example`) and requires a real `JWT_SECRET`.
+
+Build locally before starting if the fork image has not been published:
+
+```sh
+docker build --build-arg INSTANCE=private -t ghcr.io/ragnarlothbrok-odin/slicksync:private .
+docker compose -f docker-compose.private.yml up -d --pull never
 ```
-docker-compose.private.yml   # SQLite, single household
-docker-compose.public.yml    # PostgreSQL, multi-tenant
-docker-compose.beta.yml      # private, beta channel
-```
 
-Each reads `.env` (copy `env.example`) and refuses to start if a required
-secret is missing, rather than falling back to a value everyone else also has.
+The private release workflow publishes to GHCR and needs no Docker Hub credentials. Public and beta deployment bundles are not included. Their underlying application code and database schemas have not been removed.
 
 ## The data volume
 
-Every one of those files mounts a volume at `/app/data`. That directory holds
+The compose file mounts a volume at `/app/data`. That directory holds
 the SQLite database on private instances, and on every instance it holds the
 generated encryption key, Vault backups, avatars and the poster cache.
 

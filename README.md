@@ -32,7 +32,7 @@ Nuvio gives you the apps. SlickSync gives you the control panel behind them: wha
 Docker and Docker Compose, plus a reverse proxy in front for HTTPS — SlickSync doesn't terminate TLS itself.
 
 ```bash
-git clone https://github.com/slicknsliding/slicksync.git
+git clone https://github.com/RagnarLothbrok-Odin/slicksync.git
 cd slicksync
 cp env.example .env
 echo "JWT_SECRET=$(openssl rand -base64 32)" >> .env
@@ -330,7 +330,7 @@ Every type works with zero Discord setup; a webhook only adds Discord delivery o
 **Prerequisites**: Docker + Docker Compose, and a reverse proxy in front for HTTPS (Traefik/Caddy/nginx — SlickSync doesn't terminate TLS itself).
 
 ```bash
-git clone https://github.com/slicknsliding/slicksync.git
+git clone https://github.com/RagnarLothbrok-Odin/slicksync.git
 cd slicksync
 cp env.example .env
 ```
@@ -352,11 +352,16 @@ docker compose -f docker-compose.private.yml up -d
 docker compose -f docker-compose.private.yml logs -f   # watch it come up
 ```
 
-This pulls the pre-built `ghcr.io/slicknsliding/slicksync:private` image — the stable release built from `main`. (A `:beta` image exists for testing upcoming changes; don't use it unless you specifically want something not yet released.) The same image is published to Docker Hub as `slicknsliding/slicksync:private`.
+This pulls `ghcr.io/ragnarlothbrok-odin/slicksync:private`, published by this fork's private release workflow. The image must be published before it can be pulled. To build the checked-out source locally instead:
+
+```bash
+docker build --build-arg INSTANCE=private -t ghcr.io/ragnarlothbrok-odin/slicksync:private .
+docker compose -f docker-compose.private.yml up -d --pull never
+```
 
 Frontend and API are both served through `:3000` — only that port needs a mapping or a reverse proxy pointed at it.
 
-**Verify it's up**: `docker exec slicksync sh -c 'echo APP_VERSION=$APP_VERSION'` should print the current release tag (matching the latest on the [Releases page](https://github.com/slicknsliding/slicksync/releases)), and `https://your-domain/` should load the login page.
+**Verify it's up**: `docker exec slicksync sh -c 'echo APP_VERSION=$APP_VERSION'` should print the current release tag (matching the latest on the [Releases page](https://github.com/RagnarLothbrok-Odin/slicksync/releases)), and `https://your-domain/` should load the login page.
 
 **Open it from the address your devices use**: SlickSync learns the address phones and TVs reach it at when you open it from there — SlickTrax, pictures on a server and instant pauses use it — and follows you to a new domain the first time you open it there. Nothing to type in. For a setup only ever opened through some other address (a tunnel, say), set `PUBLIC_APP_URL`.
 
@@ -379,41 +384,7 @@ Frontend and API are both served through `:3000` — only that port needs a mapp
 >
 > Keep `./slicksync-data` until you've checked everything is there. If your compose file already mounts a volume at `/app/data`, none of this applies. Full details in the [1.88.0 release notes](https://github.com/slicknsliding/slicksync/releases/tag/v1.88.0).
 
-<details>
-<summary><strong>Public / multi-tenant mode</strong> — hosting for more than one separate group</summary>
-
-Private and public are genuinely different modes:
-
-| | Private (default) | Public |
-|---|---|---|
-| Who it's for | One household running their own copy | Hosting for multiple separate groups |
-| Database | SQLite, embedded | PostgreSQL (required) |
-| Accounts | One shared instance, no signup | Self-registered, isolated per account |
-| Image | `ghcr.io/slicknsliding/slicksync:private` | `ghcr.io/slicknsliding/slicksync:public` |
-
-```bash
-cp env.example .env
-openssl rand -base64 32   # run twice - once for JWT_SECRET, once for ENCRYPTION_KEY
-```
-
-```
-JWT_SECRET=<first generated value>
-ENCRYPTION_KEY=<second generated value>
-POSTGRES_PASSWORD=<any password you choose>
-```
-
-The app and the bundled Postgres container both read `POSTGRES_PASSWORD`, so the connection string builds itself — there's no `DATABASE_URL` to assemble by hand.
-
-```bash
-docker compose -f docker-compose.public.yml up -d
-```
-
-First visit shows a "Create one" registration link. `/register` generates a random account UUID once — that UUID *is* the login ID, so save it; there's no recovery if it's lost.
-
-A **Superadmin** panel (`/superadmin`) lets the operator search tenant accounts, bulk enable/disable/delete them, see a health summary with an abandoned-account flag, and review an **audit log** of every action taken — without ever exposing a tenant's own credentials or private data.
-
-**Updating**: `docker compose -f docker-compose.public.yml pull && docker compose -f docker-compose.public.yml up -d`.
-</details>
+This fork ships a private, single-household deployment. The PostgreSQL schema and multi-tenant application code remain available for development, but public and beta deployment bundles are not maintained here.
 
 <details>
 <summary><strong>Environment variables</strong></summary>

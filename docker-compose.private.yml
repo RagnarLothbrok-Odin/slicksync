@@ -1,6 +1,6 @@
 services:
   slicksync:
-    image: ghcr.io/slicknsliding/slicksync:private
+    image: ghcr.io/ragnarlothbrok-odin/slicksync:private
     # Reads the .env you copied from env.example. Without this, nothing you
     # put in that file reaches the container.
     env_file:

@@ -230,7 +230,6 @@ const fetchChangelog = async (): Promise<Release[]> => {
 export default function ChangelogPage() {
   const { layoutMode } = useLayoutMode();
   const appVersion = (process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev';
-  const INSTANCE_TYPE = (process.env.NEXT_PUBLIC_INSTANCE_TYPE || 'private') as 'public' | 'private';
   const [releases, setReleases] = useState<Release[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
@@ -267,17 +266,10 @@ export default function ChangelogPage() {
     return text.charAt(0).toUpperCase() + text.slice(1);
   };
 
-  // Matches the repo's own documented standalone flow (README.md) - both
-  // docker-compose.private.yml and docker-compose.public.yml pull a
-  // published GHCR image with no local build: context, so a real deploy is
-  // just a pull + recreate, run from wherever that compose file lives (repo
-  // root, if cloned as directed). No git pull, no --build - those were only
-  // ever needed for building from local source, not for picking up a
-  // published release. A self-hoster running a materially different setup
-  // (e.g. a host-level compose file gating multiple apps behind a profile)
-  // already knows their own deploy flow doesn't match this generic one.
+  // The maintained deployment bundle uses the fork's private GHCR image.
+  // Pulling and recreating preserves the named data volume.
   const copyUpdateCommand = () => {
-    const composeFile = INSTANCE_TYPE === 'public' ? 'docker-compose.public.yml' : 'docker-compose.private.yml';
+    const composeFile = 'docker-compose.private.yml';
     const command = `docker compose -f ${composeFile} pull && docker compose -f ${composeFile} up -d --force-recreate`;
     copyToClipboard(command).then(() => {
       setCopied(true);

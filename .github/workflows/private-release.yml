@@ -8,8 +8,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/slicksync
+  IMAGE_NAME: ragnarlothbrok-odin/slicksync
 
 # Each architecture is built on a runner of that architecture, then the two
 # results are stitched into one multi-arch tag.
@@ -83,7 +82,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Built and pushed by digest to GHCR only; the merge job below applies
-      # the human-readable tags to BOTH registries from these same digests,
+      # the human-readable tags to GHCR from these same digests,
       # so a tag never points at a half-built manifest.
       - name: Build and push by digest (private)
         id: build
@@ -96,9 +95,7 @@ jobs:
             INSTANCE=private
             APP_VERSION=${{ github.ref_name }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          # Scoped per workflow AND per architecture. All three release
-          # workflows fire on the same push and previously shared one default
-          # cache scope, so they overwrote each other's entries.
+          # Keep each architecture's build cache independent.
           cache-from: type=gha,scope=private-${{ env.PLATFORM_PAIR }}
           cache-to: type=gha,mode=max,scope=private-${{ env.PLATFORM_PAIR }}
 
@@ -140,19 +137,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Extract metadata (private)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ${{ env.DOCKERHUB_IMAGE_NAME }}
           # Floating tag only - no per-version tag. The instances track
           # this moving tag, and a release is identified by its git tag and
           # GitHub Release rather than by a second copy of the same image
@@ -162,8 +152,8 @@ jobs:
           labels: |
             org.opencontainers.image.title=slicksync-private
 
-      # One imagetools call carries every tag on both registries, all built
-      # from the same two digests - so GHCR and Docker Hub cannot drift apart.
+      # One imagetools call carries every tag, all built
+      # from the same two digests in the fork's GHCR repository.
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
