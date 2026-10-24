@@ -7,6 +7,7 @@
 
 import {
   HomeIcon,
+  MagnifyingGlassIcon,
   FilmIcon,
   ClockIcon,
   ShareIcon,
@@ -14,12 +15,14 @@ import {
   Cog6ToothIcon,
 } from '@heroicons/react/24/outline';
 import { NebulaBar, type NebulaNavSection } from '@/components/layout/NebulaBar';
+import { usePersonalPreferences } from './PersonalPreferences';
 import { PanelSwitcher } from '@/components/layout/PanelSwitcher';
 import { useUserAuth } from '@/lib/hooks/useUserAuth';
 import { useUserMobileMenu } from '@/lib/hooks/useUserMobileMenu';
 
 const ITEMS: NebulaNavSection['items'] = [
   { href: '/user', label: 'Home', icon: HomeIcon },
+  { href: '/user/discover', label: 'Discover', icon: MagnifyingGlassIcon },
   { href: '/user/library', label: 'Library', icon: FilmIcon },
   { href: '/user/activity', label: 'Activity', icon: ClockIcon },
   { href: '/user/addons', label: 'Addons', icon: PuzzlePieceIcon },
@@ -29,6 +32,7 @@ const ITEMS: NebulaNavSection['items'] = [
 
 export function PersonTopbar() {
   const { userInfo, logout, provider } = useUserAuth();
+  const { preferences } = usePersonalPreferences();
   const menu = useUserMobileMenu();
   const sections: NebulaNavSection[] = [
     { id: 'person', items: ITEMS.filter((item) => provider !== 'jellyfin' || item.href !== '/user/addons') },
@@ -44,7 +48,7 @@ export function PersonTopbar() {
       sections={sections}
       homeHref="/user"
       menu={menu}
-      account={<PanelSwitcher mode="user" userInfo={userInfo} onLogout={handleLogout} variant="compact" dropdownPosition="down" align="right" />}
+      account={<PanelSwitcher mode="user" userInfo={preferences.hideSensitive && userInfo ? { ...userInfo, email: '', groupName: null } : userInfo} onLogout={handleLogout} variant="compact" dropdownPosition="down" align="right" />}
     />
   );
 }

@@ -17,6 +17,7 @@ import {
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
 import { Avatar } from '@/components/ui';
+import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
 import { userActivity, userSync, UserActivityData, AtRiskStatus, getOwnScreenTime } from '@/lib/user-api';
 import { MoonIcon as PausedMoonIcon, PauseCircleIcon as PausedIcon } from '@heroicons/react/24/outline';
 import { providerTypeLabel } from '@/lib/providers';
@@ -90,6 +91,7 @@ function StatCard({ label, value, icon, color = 'var(--color-primary)', delay = 
 }
 
 export default function UserHomePage() {
+  const { preferences } = usePersonalPreferences();
   const { userId, userInfo, provider } = useUserAuth();
   const providerLabel = providerTypeLabel(provider);
   const { authKey, isReady } = useUserAuthHeaders();
@@ -227,7 +229,7 @@ export default function UserHomePage() {
           <div className="flex items-center gap-4 sm:gap-6 flex-1 min-w-0">
           <Avatar
             name={userInfo?.username || 'User'}
-            email={userInfo?.email}
+            email={preferences.hideSensitive ? 'Hidden' : userInfo?.email}
             src={userInfo?.avatarUrl || undefined}
             useGravatar={userInfo?.useGravatar}
             colorIndex={userInfo?.colorIndex || 0}
@@ -260,9 +262,9 @@ export default function UserHomePage() {
               className="text-sm truncate"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {userInfo?.email}
+              {preferences.hideSensitive ? 'Hidden' : userInfo?.email}
             </p>
-            {userInfo?.groupName && (
+            {!preferences.hideSensitive && userInfo?.groupName && (
               <p 
                 className="text-sm mt-1"
                 style={{ color: 'var(--color-text-subtle)' }}

@@ -3,7 +3,7 @@ const { publicMessage } = require('../utils/publicError')
 const { previewHistory } = require('../utils/portalHistory')
 const PREFERENCES = { beginnerMode: false, hideSensitive: false, posterRatings: false, autoplayTrailer: false, trailerSound: false }
 
-module.exports = ({ prisma, personAsking, decrypt, createProvider }) => {
+module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET }) => {
   const router = express.Router()
   // Resolve the credential before every operation, including uploaded files.
   router.use(async (req, res, next) => {
@@ -19,6 +19,9 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider }) => {
     }
   }
   const scope = req => ({ accountId: req.person.accountId, userId: req.person.id })
+  router.get('/about', handle(async (req, res) => {
+    res.json({ version: require('../../package.json').version });
+  }))
   router.get('/preferences', handle(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.person.id }, select: { portalPreferences: true } })
     let stored = {}
@@ -27,7 +30,7 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider }) => {
   }))
   router.patch('/preferences', handle(async (req, res) => {
     const patch = req.body.preferences
-    if (!patch || Object.keys(patch).some(key => !(key in PREFERENCES) || typeof patch[key] !== 'boolean')) return res.status(400).json({ error: 'Invalid display preferences' })
+    if (!patch || Object.keys(patch).some(key => !Object.hasOwn(PREFERENCES, key) || typeof patch[key] !== 'boolean')) return res.status(400).json({ error: 'Invalid display preferences' })
     // The client sends the full preference object so unrelated partial saves
     // cannot overwrite one another after a delayed response.
     if (Object.keys(patch).length !== Object.keys(PREFERENCES).length) return res.status(400).json({ error: 'Send all display preferences' })
@@ -77,12 +80,12 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider }) => {
     let preview
     try { preview = previewHistory(req.body.text, existing.map(row => row.itemId)) } catch (error) { return res.status(400).json({ error: error.message }) }
     // The signed preview pins the exact rows and owner that were reviewed.
-    const token = require('jsonwebtoken').sign({ userId: req.person.id, accountId: req.person.accountId, rows: preview.rows }, require('../utils/config').JWT_SECRET, { expiresIn: '15m', audience: 'personal-history-import' })
+    const token = require('jsonwebtoken').sign({ userId: req.person.id, accountId: req.person.accountId, rows: preview.rows }, JWT_SECRET, { expiresIn: '15m', audience: 'personal-history-import' })
     res.json({ ...preview, token })
   }))
   router.post('/history/import', handle(async (req, res) => {
     let preview
-    try { preview = require('jsonwebtoken').verify(req.body.token, require('../utils/config').JWT_SECRET, { audience: 'personal-history-import' }) } catch { return res.status(400).json({ error: 'Preview expired. Choose your file again.' }) }
+    try { preview = require('jsonwebtoken').verify(req.body.token, JWT_SECRET, { audience: 'personal-history-import' }) } catch { return res.status(400).json({ error: 'Preview expired. Choose your file again.' }) }
     if (preview.userId !== req.person.id || preview.accountId !== req.person.accountId) return res.status(403).json({ error: 'This preview belongs to another account' })
     const imported = await prisma.$transaction(async tx => {
       let added = 0

@@ -27,6 +27,8 @@ import { ProfilePictureSettings } from '@/components/settings/ProfilePictureSett
 import { toast } from '@/components/ui/Toast';
 import { providerTypeLabel } from '@/lib/providers';
 import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
+import { PersonalDisplayPanel, PersonalSyncPanel, PersonalDevicesPanel, PersonalHistoryPanel, PersonalHelpPanel } from '@/components/user/PersonalSettingsPanels';
+import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
 import { PersonPushRow } from '@/components/user/PersonPushRow';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
@@ -37,6 +39,9 @@ import { AvatarPickerModal } from '@/components/modals/AvatarPickerModal';
 
 const PERSONAL_SECTIONS = [
   { key: 'general', label: 'General', icon: UserCircleIcon, group: 'Your experience', blurb: 'Profile, privacy, and sharing', keywords: 'avatar picture profile visibility public stats export' },
+  { key: 'sync', label: 'Sync', icon: ArrowPathIcon, group: 'Your setup', blurb: 'Your connection and next sync', keywords: 'sync status preview addons connection' },
+  { key: 'history', label: 'History', icon: ClipboardDocumentIcon, group: 'Your setup', blurb: 'Bring your watch history with you', keywords: 'import history csv trakt json' },
+  { key: 'about', label: 'Help & About', icon: GlobeAltIcon, group: 'Your experience', blurb: 'Guides, privacy, and credits', keywords: 'help about guides credits data privacy' },
   { key: 'themes', label: 'Themes', icon: PaintBrushIcon, group: 'Your experience', blurb: 'Make SlickSync feel like home', keywords: 'appearance colours color dark light theme' },
   { key: 'notifications', label: 'Notifications', icon: BellIcon, group: 'Your experience', blurb: 'Push, watch alerts, and Discord', keywords: 'webhook alerts watch notifications push discord' },
   { key: 'integrations', label: 'Integrations', icon: KeyIcon, group: 'Your setup', blurb: 'Connect your apps', keywords: 'api key rotate integrations' },
@@ -48,6 +53,7 @@ export default function UserSettingsPage() {
   const [settingsQuery, setSettingsQuery] = useState('');
   const currentSection = PERSONAL_SECTIONS.find(section => section.key === activeSection)!;
   const matches = PERSONAL_SECTIONS.filter(section => `${section.label} ${section.blurb} ${section.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()));
+  const { preferences } = usePersonalPreferences();
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const { userInfo, refreshUserInfo, provider, deleteAccount } = useUserAuth();
   const { userId, authKey, isReady } = useUserAuthHeaders();
@@ -385,13 +391,13 @@ export default function UserSettingsPage() {
             {/* Provider details are read-only; picture changes belong to this account. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-default">
               <div><p className="text-xs text-muted mb-1">Name</p><p className="text-sm font-medium text-default">{userInfo?.username}</p></div>
-              <div className="min-w-0"><p className="text-xs text-muted mb-1">Email</p><p className="text-sm font-medium text-default break-all">{userInfo?.email}</p></div>
+              <div className="min-w-0"><p className="text-xs text-muted mb-1">Email</p><p className="text-sm font-medium text-default break-all">{preferences.hideSensitive ? 'Hidden' : userInfo?.email}</p></div>
               <div>
                 <p className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-subtle)' }}>
                   Groups
                 </p>
                 <p className="font-medium" style={{ color: 'var(--color-text)' }}>
-                  {userInfo?.groups ? (userInfo.groups.map(group => group.name).join(', ') || 'No groups') : (userInfo?.groupName || 'Loading groups...')}
+                  {preferences.hideSensitive ? 'Hidden' : userInfo?.groups ? (userInfo.groups.map(group => group.name).join(', ') || 'No groups') : (userInfo?.groupName || 'Loading groups...')}
                 </p>
               </div>
               <div>
@@ -414,11 +420,15 @@ export default function UserSettingsPage() {
               )}
             </div>
         </ProfilePictureSettings>
+        <PersonalDisplayPanel />
             <AvatarPickerModal isOpen={avatarPickerOpen} onClose={() => setAvatarPickerOpen(false)} name={userInfo?.username || 'User'} currentAvatarUrl={userInfo?.avatarUrl} currentColorIndex={userInfo?.colorIndex}
               onUpload={file => userAuth.uploadAvatar(userId!, authKey!, file)}
               onSave={async data => { await userAuth.updateProfile(userId!, authKey!, data); await refreshUserInfo(); }} />
 
         </div>
+        <div hidden={activeSection !== 'sync'}><PersonalSyncPanel /></div>
+        <div hidden={activeSection !== 'history'}><PersonalHistoryPanel onExport={handleExportMyData} exporting={isExportingMyData} /></div>
+        <div hidden={activeSection !== 'about'}><PersonalHelpPanel /></div>
         <div hidden={activeSection !== 'themes'} className="space-y-6">
         <ThemesPanel embedded showLayout={false} />
 
@@ -592,6 +602,7 @@ export default function UserSettingsPage() {
           </div>
         </Card>
 
+        <PersonalDevicesPanel />
         </div>
         <div hidden={activeSection !== 'integrations'} className="space-y-6">
         {/* API Key */}
@@ -631,7 +642,7 @@ export default function UserSettingsPage() {
                   className="flex-1 text-sm font-mono truncate"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {maskedApiKey}
+                  {preferences.hideSensitive ? '••••••••••••••••' : maskedApiKey}
                 </code>
                 <button
                   onClick={() => setApiKeyVisible(!apiKeyVisible)}

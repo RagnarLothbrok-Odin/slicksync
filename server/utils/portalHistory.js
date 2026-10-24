@@ -6,7 +6,11 @@ const { parseTraktExport, looksLikeJson } = require('./traktExportImport')
 function previewHistory(text, existingIds = []) {
   let parsed
   if (looksLikeJson(text)) {
-    parsed = parseTraktExport(text)
+    let backup
+    try { backup = JSON.parse(text) } catch { throw new Error('That file is not valid JSON') }
+    if (Array.isArray(backup?.movieHistory)) {
+      parsed = { headers: ['imdbID', 'Title', 'Watched Date'], records: backup.movieHistory.map(row => ({ imdbID: row.itemId, Title: row.itemName, 'Watched Date': row.watchedAt })), skippedNonMovie: Array.isArray(backup.episodeHistory) ? backup.episodeHistory.length : 0 }
+    } else parsed = parseTraktExport(text)
     if (!parsed) throw new Error('That file is not valid JSON')
   } else parsed = parseCsv(text)
   const { headers, records } = parsed

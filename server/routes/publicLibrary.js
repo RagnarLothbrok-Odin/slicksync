@@ -3039,7 +3039,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       const accountId = user.accountId || DEFAULT_ACCOUNT_ID;
 
-      const [movieHistory, episodeHistory, watchlist] = await Promise.all([
+      const [movieHistory, episodeHistory, watchlist, personalWatchlist] = await Promise.all([
         prisma.movieWatchHistory.findMany({
           where: { userId, accountId },
           orderBy: { watchedAt: 'desc' },
@@ -3058,7 +3058,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           where: { accountId },
           orderBy: { addedAt: 'desc' },
           select: { itemId: true, itemType: true, name: true, poster: true, addedAt: true }
-        })
+        }),
+        prisma.personalTitleState.findMany({ where: { accountId, userId }, select: { itemId: true, itemType: true, name: true, poster: true, saved: true, reaction: true, createdAt: true } })
       ]);
 
       res.json({
@@ -3066,7 +3067,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         user: { username: user.username, email: user.email },
         movieHistory,
         episodeHistory,
-        watchlist
+        watchlist,
+        personalWatchlist
       });
     } catch (error) {
       console.error('Error exporting user data:', error);
@@ -3449,7 +3451,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       await prisma.personPushSubscription.upsert({
         where: { userId_endpoint: { userId: user.id, endpoint } },
         create: { accountId: user.accountId || DEFAULT_ACCOUNT_ID, userId: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, userAgent },
-        update: { p256dh: keys.p256dh, auth: keys.auth, userAgent },
+        update: { p256dh: keys.p256dh, auth: keys.auth, userAgent, lastSeenAt: new Date() },
       });
       res.json({ success: true });
     } catch (error) {
@@ -3469,7 +3471,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
-  router.use('/personal', require('./portalFeatures')({ prisma, personAsking, decrypt, createProvider }));
+  router.use('/personal', require('./portalFeatures')({ prisma, personAsking, decrypt, createProvider, JWT_SECRET }));
 
   return router;
 };

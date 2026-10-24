@@ -898,3 +898,48 @@ export const userApi = {
   sync: userSync,
   export: userExport,
 };
+
+export interface PersonalPreferences {
+  beginnerMode: boolean;
+  hideSensitive: boolean;
+  posterRatings: boolean;
+  autoplayTrailer: boolean;
+  trailerSound: boolean;
+}
+export interface PersonalDevice {
+  id: string;
+  label: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string | null;
+}
+export interface PersonalSyncStatus {
+  lastSyncedAt: string | null;
+  status: string;
+  error: string | null;
+  connectionProblem: boolean;
+  supported: boolean;
+}
+export interface PersonalSyncPlan {
+  supported: boolean;
+  noGroup: boolean;
+  alreadySynced: boolean;
+  current: string[];
+  desired: string[];
+  additions: string[];
+  removals: string[];
+  updates: number;
+}
+export interface HistoryPreview {
+  rows: Array<{ itemId: string; itemName: string; watchedAt: string }>;
+  duplicates: number;
+  skipped: number;
+  total: number;
+  token: string;
+}
+
+/** Every personal request carries both the selected identity and its proof. */
+export function personalRequest<T>(userId: string, authKey: string, path: string, options: RequestInit = {}): Promise<T> {
+  const separator = path.includes('?') ? '&' : '?';
+  return request<T>(`/public-library/personal${path}${separator}userId=${encodeURIComponent(userId)}`, { ...options, authKey });
+}
