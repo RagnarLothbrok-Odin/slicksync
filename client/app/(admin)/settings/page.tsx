@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, isValidElement, cloneElement } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Header } from '@/components/layout/Header';
 import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
@@ -8,6 +8,8 @@ import { Button, Card, Badge, Modal, ConfirmModal, Avatar, ComboBox, ProviderKey
 import { PageSection } from '@/components/layout/PageContainer';
 import { useTheme } from '@/lib/theme';
 import { copyToClipboard } from '@/lib/clipboard';
+import { ToggleSwitch, SettingRow } from '@/components/settings/SettingRow';
+import { ProfilePictureSettings } from '@/components/settings/ProfilePictureSettings';
 import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { api, SyncSettings, AccountStats, PushDevice, PasskeyRow } from '@/lib/api';
@@ -115,70 +117,6 @@ function formatLastSeen(dateStr: string | null): string {
 }
 
 // Toggle switch component
-function ToggleSwitch({
-  enabled,
-  onChange,
-  label,
-  disabled,
-}: {
-  enabled: boolean;
-  onChange: (value: boolean) => void;
-  label?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      onClick={() => !disabled && onChange(!enabled)}
-      className={`flex items-center gap-3 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      disabled={disabled}
-    >
-      <div
-        className={`relative w-10 h-5 rounded-full transition-colors ${
-          enabled ? 'bg-primary' : 'bg-muted'
-        }`}
-      >
-        <motion.div
-          initial={false}
-          animate={{ x: enabled ? 20 : 2 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-          className="absolute top-0.5 w-4 h-4 rounded-full shadow-md bg-surface"
-          style={{ backgroundColor: 'var(--color-text)' }}
-        />
-      </div>
-    </button>
-  );
-}
-
-// Setting row component
-function SettingRow({
-  label,
-  description,
-  children,
-  disabled,
-}: {
-  label: string;
-  description: string;
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    // data-setting carries the visible label verbatim so the command
-    // palette's settings deep-search (lib/settingsIndex.ts) can scroll to
-    // and flash this exact row via /settings?highlight=<label>.
-    <div data-setting={label} className={`settings-row flex items-center justify-between gap-6 p-4 rounded-lg bg-subtle ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      <div>
-        <p className="font-medium text-sm text-default">{label}</p>
-        <p className="text-xs text-muted">{description}</p>
-      </div>
-      {isValidElement<{ label?: string }>(children) && children.type === ToggleSwitch
-        ? cloneElement(children, { label }) : children}
-    </div>
-  );
-}
-
 // Locates the on-page element for a settings deep-link target: exact
 // data-setting match first (every SettingRow), then a text scan over the
 // labelled blocks and section headers that aren't SettingRows. Returns the
@@ -1311,35 +1249,13 @@ export default function SettingsPage() {
             Nebula, bottom of sidebar in Original) and its dropdown menu. */}
         {activeTab === 'general' && (
         <PageSection className="mb-6">
-          <Card padding="lg">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-primary-muted">
-                <UserCircleIcon className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="text-base font-semibold font-display text-default">Profile Picture</h3>
-                <p className="text-xs text-muted">Shown on your account button and its menu</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <Avatar
-                name={isPublicInstance ? (accountInfo?.uuid || accountInfo?.email || 'Admin') : 'Administrator'}
-                src={accountInfo?.avatarUrl || undefined}
-                email={accountInfo?.email || undefined}
-                size="xl"
-                fallbackIcon={<ShieldCheckIcon className="w-7 h-7" style={{ color: 'white' }} />}
-              />
-              <div className="flex-1">
-                <Button variant="secondary" size="sm" onClick={() => setAvatarModalOpen(true)}>
-                  Change Picture
-                </Button>
-                <p className="text-xs text-muted mt-2">
-                  Choose an avatar, upload an image, or paste a link.
-                </p>
-              </div>
-            </div>
-
+          <ProfilePictureSettings
+            name={isPublicInstance ? (accountInfo?.uuid || accountInfo?.email || 'Admin') : 'Administrator'}
+            src={accountInfo?.avatarUrl || undefined}
+            email={accountInfo?.email || undefined}
+            fallbackIcon={<ShieldCheckIcon className="w-7 h-7" style={{ color: 'white' }} />}
+            onChange={() => setAvatarModalOpen(true)}
+          >
             {isPublicInstance && (
               <div className="mt-5 pt-5 border-t border-default">
                 <label className="text-sm font-medium text-default mb-1.5 block">Nickname</label>
@@ -1363,7 +1279,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-          </Card>
+          </ProfilePictureSettings>
         </PageSection>
         )}
 
