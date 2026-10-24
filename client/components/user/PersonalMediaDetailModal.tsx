@@ -45,5 +45,5 @@ export function PersonalMediaDetailModal({ item, userId, authKey, onClose, onCha
       saveWatchTogether: unavailable, deleteWatchTogether: unavailable,
     };
   }, [userId, authKey, item, onChange]);
-  return <MediaDetailModal isOpen onClose={onClose} itemId={item.id} itemType={item.type} fallbackTitle={item.name} fallbackPoster={item.poster} fallbackRating={item.imdbRating} fallbackReleaseInfo={item.releaseInfo} client={client} householdActions={false} />;
+  return <MediaDetailModal isOpen onClose={onClose} itemId={item.id} itemType={item.type} fallbackTitle={item.name} fallbackPoster={item.poster} fallbackRating={item.imdbRating} fallbackReleaseInfo={item.releaseInfo} client={client} householdActions={false} cacheImages={false} />;
 }

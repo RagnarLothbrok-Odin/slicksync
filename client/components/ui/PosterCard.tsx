@@ -85,6 +85,8 @@ export interface PosterCardProps {
   /** Personal panels supply their own data loader and omit household catalog actions. */
   onPrefetchDetails?: (item: PosterCardItem) => void;
   showCatalogMenu?: boolean;
+  /** Personal sessions cannot use the admin-authenticated image cache. */
+  cacheImages?: boolean;
 }
 
 export const PosterCard = memo(function PosterCard({
@@ -110,6 +112,7 @@ export const PosterCard = memo(function PosterCard({
   priority = false,
   onPrefetchDetails,
   showCatalogMenu = true,
+  cacheImages = true,
 }: PosterCardProps) {
   const [imageError, setImageError] = useState(false);
   // Timer for the hover prefetch below; cleared on leave and on unmount so
@@ -182,13 +185,13 @@ export const PosterCard = memo(function PosterCard({
         {item.poster && !imageError ? (
           <>
             <img
-              src={posterUrl(item, rpdbEnabled)}
+              src={cacheImages ? posterUrl(item, rpdbEnabled) : item.poster || undefined}
               // Lets the browser take the 154px file where a card renders
               // small (most phone grids) instead of always the 342 - fewer
               // bytes and less decode work per scroll, which is a real part
               // of scroll cost on phones. `sizes` describes the card's own
               // rendered width at each breakpoint, matching the grid.
-              srcSet={posterSrcSet(item, rpdbEnabled)}
+              srcSet={cacheImages ? posterSrcSet(item, rpdbEnabled) : undefined}
               sizes="(max-width: 640px) 33vw, (max-width: 1024px) 22vw, 170px"
               alt={item.name}
               loading={priority ? 'eager' : 'lazy'}

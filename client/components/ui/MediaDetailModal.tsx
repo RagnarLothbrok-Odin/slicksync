@@ -15,7 +15,7 @@ import { api as defaultApi, MediaDetails, DiscoverItem, SeriesSeason } from '@/l
 import { toast } from './Toast';
 import { buildStremioAppUrl, buildNuvioAppUrl } from '@/lib/appLinks';
 import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
-import { posterUrl } from '@/lib/posterUrl';
+import { posterUrl as cachedPosterUrl } from '@/lib/posterUrl';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { useDragScroll } from '@/lib/hooks/useDragScroll';
 import { TVFocusable } from '@/components/tv/TVFocusable';
@@ -34,6 +34,7 @@ export type MediaDetailClient = Pick<typeof defaultApi,
 interface MediaDetailModalProps {
   client?: MediaDetailClient;
   householdActions?: boolean;
+  cacheImages?: boolean;
   isOpen: boolean;
   onClose: () => void;
   itemId: string;
@@ -104,6 +105,7 @@ function SmallPill({ on, tint, onClick, busy, icon, label, title }: {
 export function MediaDetailModal({
   client,
   householdActions = true,
+  cacheImages = true,
   isOpen,
   onClose,
   itemId,
@@ -118,6 +120,7 @@ export function MediaDetailModal({
   onWatchlistChange,
 }: MediaDetailModalProps) {
   const api = client || defaultApi;
+  const posterUrl = useCallback((...args: Parameters<typeof cachedPosterUrl>) => cacheImages ? cachedPosterUrl(...args) : args[0].poster || undefined, [cacheImages]);
   const [details, setDetails] = useState<MediaDetails | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
@@ -189,7 +192,7 @@ export function MediaDetailModal({
         setPersonFollows(map);
       })
       .catch(() => { /* following is additive - a failure just hides the state */ });
-  }, [isOpen]);
+  }, [api, isOpen]);
 
   const togglePersonFollow = useCallback(async (tmdbId: string, name: string) => {
     if (personFollowBusy) return;
@@ -216,7 +219,7 @@ export function MediaDetailModal({
     } finally {
       setPersonFollowBusy(null);
     }
-  }, [personFollows, personFollowBusy]);
+  }, [api, personFollows, personFollowBusy]);
 
   // Their page in Discover: who they are, and everything they've been in.
   // Already on Discover, the page is told who instead of reloading.
@@ -247,7 +250,7 @@ export function MediaDetailModal({
       return;
     }
     setPersonView({ id: member.tmdbId, name: res.person?.name || member.name, loading: false, credits: res.credits });
-  }, [personView]);
+  }, [api, personView]);
 
   // Mouse grab-drag for the person-filmography row (touch/trackpad scroll it
   // natively already; this adds the desktop drag affordance it was missing).
@@ -261,7 +264,7 @@ export function MediaDetailModal({
     if (res?.imdbId) {
       setOverrideItem({ id: res.imdbId, type: res.type, name: credit.title, poster: credit.poster });
     }
-  }, [creditsDrag]);
+  }, [api, creditsDrag]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -368,7 +371,7 @@ export function MediaDetailModal({
       })
       .catch(() => { /* following is additive - a failure just hides the state */ });
     return () => { cancelled = true; };
-  }, [isOpen, effectiveId, effectiveType]);
+  }, [api, isOpen, effectiveId, effectiveType]);
 
   const toggleFollow = async () => {
     if (!effectiveId || followBusy) return;
@@ -415,7 +418,7 @@ export function MediaDetailModal({
       })
       .catch(() => { /* additive only */ });
     return () => { cancelled = true; };
-  }, [isOpen, effectiveType, details?.title, details?.releaseInfo, details?.genres]);
+  }, [api, isOpen, effectiveType, details?.title, details?.releaseInfo, details?.genres]);
 
   // Seasons and episodes (series only). Lazy on purpose: a long-running show
   // has hundreds of episodes, and the detail popup is opened far more often
@@ -464,7 +467,7 @@ export function MediaDetailModal({
       setInWatchlist(list.some((i) => i.itemId === effectiveId));
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [isOpen, effectiveId, enableWatchlist]);
+  }, [api, isOpen, effectiveId, enableWatchlist]);
   const toggleWatchlist = async () => {
     if (watchlistBusy) return;
     setWatchlistBusy(true);
@@ -521,7 +524,7 @@ export function MediaDetailModal({
       .then((m) => { if (!cancelled) setSelfWatched(!!m[effectiveId]); })
       .catch(() => { if (!cancelled) setSelfWatched(null); });
     return () => { cancelled = true; };
-  }, [isOpen, effectiveId]);
+  }, [api, isOpen, effectiveId]);
 
   useEffect(() => {
     const parts = details?.collection?.parts;
@@ -531,7 +534,7 @@ export function MediaDetailModal({
       .then((m) => { if (!cancelled) setPartsWatched(m); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [isOpen, details?.collection]);
+  }, [api, isOpen, details?.collection]);
 
   const toggleSelfWatched = async () => {
     if (selfWatchedBusy || selfWatched === null) return;
@@ -616,7 +619,7 @@ export function MediaDetailModal({
     setReactionState(null);
     api.getReactions([effectiveId]).then((r) => { if (!cancelled) setReactionState(r.reactions[effectiveId] || null); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [isOpen, effectiveId, enableReactions]);
+  }, [api, isOpen, effectiveId, enableReactions]);
 
   const toggleReaction = async (next: 'happy' | 'sad') => {
     if (reactionBusy) return;
@@ -836,7 +839,7 @@ export function MediaDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, effectiveId, effectiveType, effectiveVideoId]);
+  }, [buildTrailerSrc, api, isOpen, effectiveId, effectiveType, effectiveVideoId]);
 
   // SlickTrax "More Like This" - always fresh, always unwatched by anyone
   // in the household (see the /similar route's own comment for why real
@@ -883,7 +886,7 @@ export function MediaDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, effectiveId, effectiveType]);
+  }, [api, isOpen, effectiveId, effectiveType]);
 
   const title = details?.episode?.title
     ? `${details?.title || effectiveFallbackTitle} — ${details.episode.title}`
@@ -972,7 +975,7 @@ export function MediaDetailModal({
     let cancelled = false;
     loadAioServers().then((list) => { if (!cancelled) setAioServers(list); });
     return () => { cancelled = true; };
-  }, [isOpen]);
+  }, [householdActions, isOpen]);
 
   // Bookmark and Watched as small pills (see SmallPill above).
   const personalPills = (

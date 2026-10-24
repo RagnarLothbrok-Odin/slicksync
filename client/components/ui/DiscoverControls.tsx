@@ -85,8 +85,8 @@ export function DiscoverControls<Lens extends string>({ isTV = false, searchRef,
     window.addEventListener('keydown', focus);
     return () => window.removeEventListener('keydown', focus);
   }, [searchRef, inputRef]);
-  const sortPop = usePopover();
-  const filtersPop = usePopover();
+  const { open: sortOpen, setOpen: setSortOpen, ref: sortRef, fit: sortPanelRef } = usePopover();
+  const { open: filtersOpen, setOpen: setFiltersOpen, ref: filtersRef, fit: filtersPanelRef } = usePopover();
   const sortLabel = sortOptions?.find(option => option.key === sortValue)?.label || '';
   const lensSpan = (index: number) => lenses.length === 5 ? (index < 3 ? 2 : 3) : lenses.length === 4 ? 3 : 6 / Math.max(1, lenses.length);
   return (
@@ -162,24 +162,24 @@ export function DiscoverControls<Lens extends string>({ isTV = false, searchRef,
             {!isTV && (sortOptions || hasFilters) && (
               <div className="relative flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
                 {sortOptions && (
-                  <div ref={sortPop.ref} className="flex-1 sm:flex-none sm:relative">
+                  <div ref={sortRef} className="flex-1 sm:flex-none sm:relative">
                     <button
                       type="button"
-                      onClick={() => sortPop.setOpen(!sortPop.open)}
-                      aria-expanded={sortPop.open}
+                      onClick={() => setSortOpen(!sortOpen)}
+                      aria-expanded={sortOpen}
                       className="w-full h-10 sm:h-9 px-3.5 sm:px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center justify-between sm:justify-start gap-1.5"
                       style={{ background: 'var(--color-surface-hover)' }}
                     >
                       <span><span className="text-muted">Sort</span> {sortLabel}</span>
                       <ChevronDownIcon className="w-3.5 h-3.5" />
                     </button>
-                    {sortPop.open && (
-                      <div ref={sortPop.fit} className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-52 p-1.5 rounded-2xl overflow-y-auto" style={panelStyle}>
+                    {sortOpen && (
+                      <div ref={sortPanelRef} className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-52 p-1.5 rounded-2xl overflow-y-auto" style={panelStyle}>
                         {sortOptions.map((o) => (
                           <button
                             key={o.key}
                             type="button"
-                            onClick={() => { pickSort(o.key); sortPop.setOpen(false); }}
+                            onClick={() => { pickSort(o.key); setSortOpen(false); }}
                             className={`w-full h-10 px-3 rounded-lg text-sm text-left flex items-center justify-between ${sortValue === o.key ? 'text-default' : 'text-muted hover:text-default hover:bg-surface-hover'}`}
                           >
                             {o.label}
@@ -191,14 +191,14 @@ export function DiscoverControls<Lens extends string>({ isTV = false, searchRef,
                   </div>
                 )}
                 {hasFilters && (
-                  <div ref={filtersPop.ref} className={sortOptions ? 'sm:relative' : 'flex-1 sm:flex-none sm:relative'}>
+                  <div ref={filtersRef} className={sortOptions ? 'sm:relative' : 'flex-1 sm:flex-none sm:relative'}>
                     <button
                       type="button"
-                      onClick={() => filtersPop.setOpen(!filtersPop.open)}
-                      aria-expanded={filtersPop.open}
+                      onClick={() => setFiltersOpen(!filtersOpen)}
+                      aria-expanded={filtersOpen}
                       aria-label={filterCount > 0 ? `Filters, ${filterCount} on` : 'Filters'}
-                      className={`relative h-10 sm:h-9 ${sortOptions ? 'w-10 sm:w-auto justify-center' : 'w-full sm:w-auto justify-between sm:justify-start'} sm:pl-3 sm:pr-2 px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center gap-2 disc-filters-btn ${filtersPop.open ? 'is-open' : ''}`}
-                      data-open={filtersPop.open || undefined}
+                      className={`relative h-10 sm:h-9 ${sortOptions ? 'w-10 sm:w-auto justify-center' : 'w-full sm:w-auto justify-between sm:justify-start'} sm:pl-3 sm:pr-2 px-3 rounded-xl sm:rounded-[10px] text-sm font-medium text-default inline-flex items-center gap-2 disc-filters-btn ${filtersOpen ? 'is-open' : ''}`}
+                      data-open={filtersOpen || undefined}
                     >
                       <AdjustmentsHorizontalIcon className="w-5 h-5 sm:w-4 sm:h-4" />
                       <span className={sortOptions ? 'hidden sm:inline' : ''}>Filters</span>
@@ -206,9 +206,9 @@ export function DiscoverControls<Lens extends string>({ isTV = false, searchRef,
                         <span className={`min-w-5 h-5 px-1.5 rounded-full text-[11px] font-bold inline-flex items-center justify-center text-white ${sortOptions ? 'absolute -top-1.5 -right-1.5 sm:static' : ''}`} style={{ background: 'var(--color-primary)' }}>{filterCount}</span>
                       )}
                     </button>
-                    {filtersPop.open && (
-                      <div ref={filtersPop.fit} data-filters-panel className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-[min(560px,92vw)] p-5 rounded-2xl flex flex-col gap-4 overflow-y-auto overscroll-contain" style={panelStyle}>
-                        {filtersBody(() => filtersPop.setOpen(false))}
+                    {filtersOpen && (
+                      <div ref={filtersPanelRef} data-filters-panel className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-2 z-30 sm:w-[min(560px,92vw)] p-5 rounded-2xl flex flex-col gap-4 overflow-y-auto overscroll-contain" style={panelStyle}>
+                        {filtersBody(() => setFiltersOpen(false))}
                       </div>
                     )}
                   </div>
