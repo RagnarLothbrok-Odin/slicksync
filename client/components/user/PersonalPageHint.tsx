@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Card } from '@/components/ui';
 import { usePersonalPreferences } from './PersonalPreferences';
@@ -19,5 +18,5 @@ export function PersonalPageHint() {
   const { preferences } = usePersonalPreferences();
   const hint = hints[path || ''];
   if (!preferences.beginnerMode || !hint) return null;
-  return <Card padding="md" className="mt-6"><p className="text-sm text-muted">{hint} <Link className="text-primary hover:underline" href="/user/settings?section=about">Help & About</Link></p></Card>;
+  return <Card padding="md" className="mt-6"><p className="text-sm text-muted">{hint} <a className="text-primary hover:underline" href="/user/settings?section=about">Help & About</a></p></Card>;
 }
