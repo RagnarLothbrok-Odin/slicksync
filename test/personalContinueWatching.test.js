@@ -36,3 +36,20 @@ test('continue watching scopes all history and dismissals before selection and s
     invalidateContinueWatching('scope-test')
   }
 })
+
+test('personal calendar scopes watched shows before the result limit', async () => {
+  const { getUpcomingEpisodes } = require('../server/utils/episodeAlerts')
+  const calls = []
+  const prisma = {
+    episodeWatchHistory: { findMany: async args => { calls.push(args); return [{ showId: 'tt-own' }] } },
+    showEpisodeAlertState: { findMany: async args => { calls.push(args); return [] } },
+    mutedShow: { findMany: async () => [] }, dismissedUpcomingEpisode: { findMany: async () => [] },
+  }
+  assert.deepEqual(await getUpcomingEpisodes(prisma, 'house', 24, 'viewer'), [])
+  assert.deepEqual(calls[0].where, { accountId: 'house', userId: 'viewer' })
+  assert.deepEqual(calls[1].where.showId, { in: ['tt-own'] })
+  assert.equal(calls[1].take, 24)
+  calls.length = 0
+  await getUpcomingEpisodes(prisma, 'house')
+  assert.equal(calls[0].where.showId, undefined)
+})

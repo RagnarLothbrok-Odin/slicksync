@@ -17,6 +17,7 @@ import {
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
 import { Avatar } from '@/components/ui';
+import { PersonalCalendar } from '@/components/user/PersonalCalendar';
 import { PersonalContinueWatching } from '@/components/user/PersonalContinueWatching';
 import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
 import { userActivity, userSync, UserActivityData, AtRiskStatus, getOwnScreenTime } from '@/lib/user-api';
@@ -379,6 +380,7 @@ export default function UserHomePage() {
       )}
 
       <PersonalContinueWatching />
+      <PersonalCalendar />
 
       {/* Stats Grid */}
       {!loading && !error && stats && (

@@ -56,6 +56,9 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     if (!result.count) return res.status(404).json({ error: 'Device not found' })
     res.json({ success: true })
   }))
+  router.get('/upcoming-episodes', handle(async (req, res) => {
+    res.json(await require('../utils/episodeAlerts').getUpcomingEpisodes(prisma, req.person.accountId, 24, req.person.id))
+  }))
   router.get('/continue-watching', handle(async (req, res) => {
     const items = await require('../utils/continueWatching').getContinueWatching(prisma, req.person.accountId, 12, req.person.id)
     res.json({ items })
