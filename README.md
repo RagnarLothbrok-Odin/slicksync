@@ -34,7 +34,7 @@ Docker and Docker Compose, plus a reverse proxy in front for HTTPS — SlickSync
 ```bash
 git clone https://github.com/RagnarLothbrok-Odin/slicksync.git
 cd slicksync
-cp env.example .env
+cp .env.example .env
 echo "JWT_SECRET=$(openssl rand -base64 32)" >> .env
 echo "SLICKSYNC_PRIVATE_USERNAME=admin" >> .env
 echo "SLICKSYNC_PRIVATE_PASSWORD=$(openssl rand -base64 18)" >> .env
@@ -332,7 +332,7 @@ Every type works with zero Discord setup; a webhook only adds Discord delivery o
 ```bash
 git clone https://github.com/RagnarLothbrok-Odin/slicksync.git
 cd slicksync
-cp env.example .env
+cp .env.example .env
 ```
 
 Generate a real secret and set it in `.env` — this signs your login sessions, so it needs actual randomness, not a made-up phrase:
@@ -389,7 +389,7 @@ This fork ships a private, single-household deployment. The PostgreSQL schema an
 <details>
 <summary><strong>Environment variables</strong></summary>
 
-Everything beyond `JWT_SECRET`/`ENCRYPTION_KEY` has a sensible default — see `env.example` for the full list. Most likely to actually change:
+Everything beyond `JWT_SECRET`/`ENCRYPTION_KEY` has a sensible default — see `.env.example` for the full list. Most likely to actually change:
 
 | Variable | Purpose | Default |
 |---|---|---|

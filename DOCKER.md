@@ -52,7 +52,7 @@ image without it would reach for the network at startup.
 
 `docker-compose.private.yml` runs the single-household SQLite deployment and uses `ghcr.io/ragnarlothbrok-odin/slicksync:private` from this fork.
 
-It reads `.env` (copy `env.example`) and requires a real `JWT_SECRET`.
+It reads `.env` (copy `.env.example`) and requires a real `JWT_SECRET`.
 
 Build locally before starting if the fork image has not been published:
 
@@ -86,7 +86,7 @@ health without you polling anything.
 
 ## Environment
 
-Everything configurable is documented in `env.example`, which is the
+Everything configurable is documented in `.env.example`, which is the
 authoritative list. Only `JWT_SECRET` is always required; in public mode
 `ENCRYPTION_KEY` and `POSTGRES_PASSWORD` are as well. On a private instance an
 encryption key generates itself on first boot and is kept in the data volume.
