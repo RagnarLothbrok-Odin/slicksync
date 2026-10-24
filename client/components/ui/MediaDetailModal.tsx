@@ -1555,7 +1555,7 @@ export function MediaDetailModal({
                     {/* Jellyfin, AIOStreams or AIOMetadata people here: open it
                         in the app this device picked (components/ui/OpenWithButton). */}
                     {householdActions && <OpenWithButton imdbId={details.imdb_id!} type={aioType} />}
-                    <span className="hidden sm:block w-px h-6 mx-0.5" style={{ background: 'var(--color-surface-border)' }} />
+                    {householdActions && <span className="hidden sm:block w-px h-6 mx-0.5" style={{ background: 'var(--color-surface-border)' }} />}
                     <div className="flex items-center gap-1.5">
                       {followBtn}
                       {/* On a phone + Catalog is a pill after the ratings instead. */}
