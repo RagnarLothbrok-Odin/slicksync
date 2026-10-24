@@ -1,6 +1,14 @@
 {
   "name": "@slicksync/client",
   "version": "0.1.0",
+  "description": "SlickSync web interface for household media, profiles, and settings.",
+  "homepage": "https://github.com/RagnarLothbrok-Odin/slicksync#readme",
+  "bugs": {
+    "url": "https://github.com/RagnarLothbrok-Odin/slicksync/issues"
+  },
+  "repository": "https://github.com/RagnarLothbrok-Odin/slicksync.git",
+  "license": "MIT",
+  "author": "SlickSync Team",
   "private": true,
   "sideEffects": [
     "*.css"

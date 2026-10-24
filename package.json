@@ -1,8 +1,15 @@
 {
   "name": "slicksync",
   "version": "1.101.0",
-  "private": true,
   "description": "SlickSync - Nuvio and Stremio addon, user and credential management",
+  "homepage": "https://github.com/RagnarLothbrok-Odin/slicksync#readme",
+  "bugs": {
+    "url": "https://github.com/RagnarLothbrok-Odin/slicksync/issues"
+  },
+  "repository": "https://github.com/RagnarLothbrok-Odin/slicksync.git",
+  "license": "MIT",
+  "author": "SlickSync Team",
+  "private": true,
   "keywords": [
     "nuvio",
     "stremio",
@@ -10,12 +17,11 @@
     "management",
     "encryption"
   ],
-  "license": "MIT",
-  "author": "SlickSync Team",
   "main": "server/index.js",
   "workspaces": [
     "client"
   ],
+  "packageManager": "bun@1.4.4",
   "scripts": {
     "build": "bun run --cwd client build",
     "client:dev": "bun run --cwd client dev",
@@ -68,6 +74,5 @@
     "concurrently": "^8.2.0",
     "nodemon": "^3.1.10",
     "ultracite": "7.10.7"
-  },
-  "packageManager": "bun@1.4.4"
+  }
 }

@@ -54,6 +54,16 @@
           "setImmediate"
         ]
       }
+    },
+    {
+      "includes": ["package.json", "client/package.json"],
+      "assist": {
+        "actions": {
+          "source": {
+            "useSortedPackageJson": "off"
+          }
+        }
+      }
     }
   ]
 }
