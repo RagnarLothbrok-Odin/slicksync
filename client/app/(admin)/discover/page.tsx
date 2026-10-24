@@ -16,7 +16,7 @@
  * their own at the top: who they are, and everything they've been in.
  */
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { DiscoverControls, DiscoverFilters, DiscoverHeading, Pill, Focus } from '@/components/ui/DiscoverControls';
 import { Header } from '@/components/layout/Header';
 import { useLayoutMode } from '@/lib/layout-mode';
@@ -28,18 +28,17 @@ import { useWatchlistState } from '@/lib/hooks/useWatchlistState';
 import { useWatchedStatusBatch } from '@/lib/hooks/useWatchedStatusBatch';
 import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
 import {
-  GENRES, SORTS, WATCHLIST_SORTS, DECADES, RATINGS, LENGTHS, KINDS, describeGrid, uniqueById, mergeNew, retryDelay, pickSurprise,
+  GENRES, SORTS, WATCHLIST_SORTS, DECADES, RATINGS, LENGTHS, describeGrid, uniqueById, mergeNew, retryDelay, pickSurprise,
   type Kind, type SortKey, type Decade, type Length, type WatchedFilter, type WatchlistSort,
 } from '@/lib/discoverWords';
 import { workAsPerson, bornLine } from '@/lib/personFacts';
 import {
-  MagnifyingGlassIcon, SparklesIcon, UserIcon, ChevronDownIcon, AdjustmentsHorizontalIcon, XMarkIcon,
-  ArrowsRightLeftIcon, CheckIcon, CalendarDaysIcon, MapPinIcon, BellIcon,
+  MagnifyingGlassIcon, SparklesIcon, UserIcon,
+  CheckIcon, CalendarDaysIcon, MapPinIcon, BellIcon,
 } from '@heroicons/react/24/outline';
 import { toast } from '@/components/ui/Toast';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVPageProvider } from '@/components/tv/TVPageProvider';
-import { TVFocusable } from '@/components/tv/TVFocusable';
 import { ScrollRow } from '@/components/ui/ScrollRow';
 
 type Lens = 'titles' | 'people' | 'foryou' | 'nobody' | 'watchlist';
@@ -53,7 +52,6 @@ const SORT_STORE = 'slicksync-discover-sort';
  * Escape. `fit` goes on the panel: it never runs past the bottom of the
  * window - it scrolls inside instead.
  */
-const panelStyle: React.CSSProperties = { background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' };
 
 /** A person asked for in the address: /discover?person=<TMDb id>&name=<name>. */
 function personFromAddress(): { id: number | null; name: string } | null {
@@ -625,7 +623,6 @@ export default function DiscoverPage() {
   ];
   const sortOptions: Array<{ key: string; label: string }> | null = lens === 'titles' && !debouncedQuery ? sorts : lens === 'watchlist' ? WATCHLIST_SORTS : null;
   const sortValue = lens === 'watchlist' ? watchlistSort : sort;
-  const sortLabel = sortOptions?.find((o) => o.key === sortValue)?.label ?? '';
   const pickSort = (key: string) => {
     if (lens === 'watchlist') setWatchlistSort(key as WatchlistSort);
     else setSort(key as SortKey);

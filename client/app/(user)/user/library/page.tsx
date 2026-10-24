@@ -16,7 +16,9 @@ import {
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { userLibrary, LibraryItem } from '@/lib/user-api';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
-import { ViewModeToggle } from '@/components/ui';
+import { PersonalMediaDetailModal } from '@/components/user/PersonalMediaDetailModal';
+import type { PosterCardItem } from '@/components/ui/PosterCard';
+import { ViewModeToggle, Button } from '@/components/ui';
 import { buildStremioAppUrl, buildNuvioAppUrl } from '@/lib/appLinks';
 
 type ViewMode = 'grid' | 'list';
@@ -61,6 +63,10 @@ function LibraryCardItem({ item, isSelected, isDeleting, onToggle, onDelete, can
       animate={{ opacity: 1, scale: 1 }}
       whileHover={{ y: -4 }}
       onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${item.name}`}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle(); } }}
       className="group relative cursor-pointer"
     >
       {/* Poster Card */}
@@ -184,6 +190,10 @@ function LibraryListItem({ item, isSelected, isDeleting, onToggle, onDelete, can
       animate={{ opacity: 1, x: 0 }}
       whileHover={{ x: 4 }}
       onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${item.name}`}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle(); } }}
       className={`flex items-start gap-4 p-4 rounded-xl cursor-pointer transition-colors ${isSelected ? 'bd2-sel' : 'bd-ok'}`}
       style={{
         background: 'var(--color-surface)',
@@ -302,6 +312,8 @@ export default function UserLibraryPage() {
   // fail (the server already guards this too, see publicLibrary.js's
   // DELETE /library/:itemId).
   const canDeleteLibraryItems = provider !== 'nuvio';
+  const [selecting, setSelecting] = useState(false);
+  const [detailItem, setDetailItem] = useState<PosterCardItem | null>(null);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -378,12 +390,13 @@ export default function UserLibraryPage() {
 
   // Handle item selection
   const handleItemToggle = useCallback((itemId: string) => {
+    if (!canDeleteLibraryItems || !selecting) return;
     setSelectedItems((prev) =>
       prev.includes(itemId)
         ? prev.filter((id) => id !== itemId)
         : [...prev, itemId]
     );
-  }, []);
+  }, [canDeleteLibraryItems, selecting]);
 
   // Select/Deselect all
   const handleSelectAll = useCallback(() => {
@@ -526,9 +539,12 @@ export default function UserLibraryPage() {
         />
       </motion.div>
 
+      {canDeleteLibraryItems && filteredLibrary.length > 0 && <div className="mb-4"><Button variant="secondary" size="sm" onClick={() => { setSelecting(value => !value); setSelectedItems([]); }}>{selecting ? 'Done selecting' : 'Select to remove'}</Button></div>}
+      {detailItem && userId && authKey && <PersonalMediaDetailModal key={detailItem.id} item={detailItem} userId={userId} authKey={authKey} onClose={() => setDetailItem(null)} onChange={() => {}} />}
+
       {/* Select all / Deselect all - selection only exists to enable bulk
           delete above, which isn't available for Nuvio users */}
-      {canDeleteLibraryItems && filteredLibrary.length > 0 && (
+      {canDeleteLibraryItems && selecting && filteredLibrary.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -600,7 +616,7 @@ export default function UserLibraryPage() {
                   item={item}
                   isSelected={selectedItems.includes(item._id)}
                   isDeleting={deletingIds.has(item._id)}
-                  onToggle={() => handleItemToggle(item._id)}
+                  onToggle={() => selecting && canDeleteLibraryItems ? handleItemToggle(item._id) : setDetailItem({ id: item._id.split(':')[0], type: item.type, name: item.name, poster: item.poster || null })}
                   onDelete={() => handleDeleteItem(item._id)}
                   canDelete={canDeleteLibraryItems}
                   stremioLink={getStremioLink(item)}
@@ -618,7 +634,7 @@ export default function UserLibraryPage() {
                   item={item}
                   isSelected={selectedItems.includes(item._id)}
                   isDeleting={deletingIds.has(item._id)}
-                  onToggle={() => handleItemToggle(item._id)}
+                  onToggle={() => selecting && canDeleteLibraryItems ? handleItemToggle(item._id) : setDetailItem({ id: item._id.split(':')[0], type: item.type, name: item.name, poster: item.poster || null })}
                   onDelete={() => handleDeleteItem(item._id)}
                   canDelete={canDeleteLibraryItems}
                   stremioLink={getStremioLink(item)}

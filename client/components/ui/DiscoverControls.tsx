@@ -77,6 +77,14 @@ export function DiscoverHeading() {
   return <div className="discovery-heading mb-7"><p className="text-xs font-semibold text-primary mb-3 tracking-wide">A little inspiration</p><h1 className="font-display font-bold text-default">Find your next favorite.</h1><p className="text-sm text-muted mt-3">Explore a title, follow a familiar face, or find something unexpected.</p></div>;
 }
 export function DiscoverControls<Lens extends string>({ isTV = false, searchRef, searchQuery, setSearchQuery, searchPlaceholder, onDescribe, kind, setKind, surprise, lens, setLens, lenses, sortOptions, sortValue, pickSort, hasFilters, filterCount, filtersBody, applied, sorts = [], sort, setSort, genre, setGenre }: DiscoverControlsProps<Lens>) {
+  const localSearchRef = useRef<HTMLInputElement>(null);
+  const inputRef = searchRef || localSearchRef;
+  useEffect(() => {
+    if (searchRef) return;
+    const focus = (event: KeyboardEvent) => { const target = event.target; if (event.key === '/' && !(target instanceof HTMLElement && (target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(target.tagName)))) { event.preventDefault(); inputRef.current?.focus(); } };
+    window.addEventListener('keydown', focus);
+    return () => window.removeEventListener('keydown', focus);
+  }, [searchRef, inputRef]);
   const sortPop = usePopover();
   const filtersPop = usePopover();
   const sortLabel = sortOptions?.find(option => option.key === sortValue)?.label || '';
@@ -89,7 +97,7 @@ export function DiscoverControls<Lens extends string>({ isTV = false, searchRef,
               <label className="flex-1 min-w-0 sm:min-w-[16rem] basis-full sm:basis-auto h-[52px] flex items-center gap-3 pl-4 pr-3 rounded-2xl" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }}>
                 <MagnifyingGlassIcon className="w-5 h-5 text-muted shrink-0" />
                 <input
-                  ref={searchRef}
+                  ref={inputRef}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {

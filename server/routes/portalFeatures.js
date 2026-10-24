@@ -108,11 +108,26 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     const data = { name, itemType, poster, saved, reaction }
     res.json(await prisma.personalTitleState.upsert({ where: { userId_itemId: { userId: req.person.id, itemId: req.params.id } }, create: { ...scope(req), itemId: req.params.id, ...data }, update: data }))
   }))
+  router.get('/discover/episodes/:id', handle(async (req, res) => {
+    if (!/^tt\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid title' })
+    const metadata = await require('../utils/notify').fetchMetadata(req.params.id, 'series', null)
+    const watched = await prisma.episodeWatchHistory.findMany({ where: { ...scope(req), showId: req.params.id }, select: { season: true, episode: true } })
+    const seen = new Set(watched.map(row => `${row.season}:${row.episode}`))
+    const seasons = new Map()
+    for (const episode of metadata?.allEpisodes || []) {
+      if (!seasons.has(episode.season)) seasons.set(episode.season, { season: episode.season, watchedCount: 0, episodes: [] })
+      const row = seasons.get(episode.season)
+      const complete = seen.has(`${episode.season}:${episode.episode}`)
+      row.episodes.push({ ...episode, watched: complete })
+      if (complete) row.watchedCount++
+    }
+    res.json({ seasons: [...seasons.values()].sort((a, b) => a.season - b.season) })
+  }))
   router.get('/discover/titles/:id', handle(async (req, res) => {
     if (!/^tt\d+$/.test(req.params.id) || !['movie', 'series'].includes(req.query.type)) return res.status(400).json({ error: 'Invalid title' })
     const metadata = await require('../utils/notify').fetchMetadata(req.params.id, req.query.type, null)
     const state = await prisma.personalTitleState.findUnique({ where: { userId_itemId: { userId: req.person.id, itemId: req.params.id } } })
-    res.json({ metadata, state })
+    res.json({ metadata: metadata ? { backdrop: null, rottenTomatoes: null, metacritic: null, rated: null, boxOffice: null, ...metadata, imdb_id: metadata.imdb_id || req.params.id } : null, state })
   }))
   // Reuse the admin's browse/filter implementation, but never expose its
   // household mutations or recommendations through this personal router.

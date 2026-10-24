@@ -11,7 +11,7 @@ import { buildAioStreamsAppUrl } from '@/lib/aiostreamsLink';
 import { OpenWithButton } from './OpenWithButton';
 import { CastMenu, type CastMenuTarget } from './CastMenu';
 import { metacriticColor as metacriticTextColor } from './RatingBadges';
-import { api, MediaDetails, DiscoverItem, SeriesSeason } from '@/lib/api';
+import { api as defaultApi, MediaDetails, DiscoverItem, SeriesSeason } from '@/lib/api';
 import { toast } from './Toast';
 import { buildStremioAppUrl, buildNuvioAppUrl } from '@/lib/appLinks';
 import { usePersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
@@ -22,7 +22,18 @@ import { TVFocusable } from '@/components/tv/TVFocusable';
 import { useFocusable, FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import { ScrollRow } from '@/components/ui/ScrollRow';
 
+// The same detail view can use a personal data source without gaining any
+// access to household operations. Callers must implement every operation.
+export type MediaDetailClient = Pick<typeof defaultApi,
+  'getFollows' | 'followSubject' | 'muteFollow' | 'getPersonCredits' | 'resolveImdbId' |
+  'lookupAnime' | 'getAnimeWatchOrder' | 'getMediaEpisodes' | 'getWatchlist' |
+  'addToWatchlist' | 'removeFromWatchlist' | 'getWatchedStatus' | 'markWatched' |
+  'getUsers' | 'getWatchTogether' | 'saveWatchTogether' | 'deleteWatchTogether' |
+  'getReactions' | 'clearReaction' | 'setReaction' | 'getMediaDetails' | 'getSimilarItems'>;
+
 interface MediaDetailModalProps {
+  client?: MediaDetailClient;
+  householdActions?: boolean;
   isOpen: boolean;
   onClose: () => void;
   itemId: string;
@@ -65,7 +76,7 @@ interface MediaDetailModalProps {
 // lib/aiostreamsLink.ts). An empty list hides Open in AIOStreams.
 let aioServersPromise: Promise<{ address: string; people: string[] }[]> | null = null;
 function loadAioServers() {
-  if (!aioServersPromise) aioServersPromise = api.getAioStreamsServers().then((r) => r.servers || []).catch(() => []);
+  if (!aioServersPromise) aioServersPromise = defaultApi.getAioStreamsServers().then((r) => r.servers || []).catch(() => []);
   return aioServersPromise;
 }
 
@@ -91,6 +102,8 @@ function SmallPill({ on, tint, onClick, busy, icon, label, title }: {
 }
 
 export function MediaDetailModal({
+  client,
+  householdActions = true,
   isOpen,
   onClose,
   itemId,
@@ -104,6 +117,7 @@ export function MediaDetailModal({
   fallbackMetacritic,
   onWatchlistChange,
 }: MediaDetailModalProps) {
+  const api = client || defaultApi;
   const [details, setDetails] = useState<MediaDetails | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
@@ -954,7 +968,7 @@ export function MediaDetailModal({
   const [aioServers, setAioServers] = useState<{ address: string; people: string[] }[]>([]);
   const [aioPickerOpen, setAioPickerOpen] = useState(false);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !householdActions) return;
     let cancelled = false;
     loadAioServers().then((list) => { if (!cancelled) setAioServers(list); });
     return () => { cancelled = true; };
@@ -1273,10 +1287,10 @@ export function MediaDetailModal({
               {!isTV && details.imdb_id && (
                 <div className="flex sm:hidden items-center gap-1 flex-nowrap">
                   {personalPills}
-                  <AddToListButton
+                  {householdActions && <AddToListButton
                     item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
                     pill
-                  />
+                  />}
                 </div>
               )}
 
@@ -1406,7 +1420,7 @@ export function MediaDetailModal({
                   icon: <CheckCircleIcon className="w-5 h-5" />,
                 });
 
-                const followBtn = effectiveType === 'series' && iconBtn({
+                const followBtn = householdActions && effectiveType === 'series' && iconBtn({
                   onClick: toggleFollow,
                   busy: followBusy,
                   on: !!followRow && !followRow.muted,
@@ -1537,16 +1551,16 @@ export function MediaDetailModal({
                     {nuvioBtn}
                     {/* Jellyfin, AIOStreams or AIOMetadata people here: open it
                         in the app this device picked (components/ui/OpenWithButton). */}
-                    <OpenWithButton imdbId={details.imdb_id!} type={aioType} />
+                    {householdActions && <OpenWithButton imdbId={details.imdb_id!} type={aioType} />}
                     <span className="hidden sm:block w-px h-6 mx-0.5" style={{ background: 'var(--color-surface-border)' }} />
                     <div className="flex items-center gap-1.5">
                       {followBtn}
                       {/* On a phone + Catalog is a pill after the ratings instead. */}
                       <div className="hidden sm:block">
-                        <AddToListButton
+                        {householdActions && <AddToListButton
                           item={{ id: effectiveId, type: effectiveType, name: effectiveFallbackTitle, poster: effectiveFallbackPoster || null }}
                           compact
-                        />
+                        />}
                       </div>
                     </div>
                   </div>
