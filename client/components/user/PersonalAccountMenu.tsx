@@ -35,7 +35,7 @@ export function PersonalAccountMenu({ onLogout }: { onLogout: () => void }) {
       // Reload every personal view after selecting an identity so no previous
       // profile's in-memory library, history or preferences can carry over.
       localStorage.setItem('slicksync-user-auth', JSON.stringify({ userId: session.userId, authKey: session.sessionToken, provider: 'nuvio', userInfo: info, profileSelected: true }));
-      window.location.assign('/user');
+      window.location.assign(new URL('/user', window.location.origin).href);
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not switch profiles'); setBusy(false); }
   };
   const close = () => {

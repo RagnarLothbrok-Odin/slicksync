@@ -19,11 +19,12 @@ export function useRatingsBatch(imdbIds: (string | null | undefined)[], fetchRat
   useEffect(() => { knownIdsRef.current.clear(); setRatings({}); }, [fetchRatings]);
 
   useEffect(() => {
+    const knownIds = knownIdsRef.current;
     const ids = dedupedKey ? dedupedKey.split(',') : [];
-    const unknownIds = ids.filter((id) => !knownIdsRef.current.has(id));
+    const unknownIds = ids.filter((id) => !knownIds.has(id));
     if (unknownIds.length === 0) return;
 
-    unknownIds.forEach((id) => knownIdsRef.current.add(id));
+    unknownIds.forEach((id) => knownIds.add(id));
 
     let cancelled = false;
     (fetchRatings ? fetchRatings(unknownIds) : api.getRatingsBatch(unknownIds)).then((result) => {
@@ -36,7 +37,7 @@ export function useRatingsBatch(imdbIds: (string | null | undefined)[], fetchRat
 
     return () => {
       cancelled = true;
-      unknownIds.forEach(id => knownIdsRef.current.delete(id));
+      unknownIds.forEach(id => knownIds.delete(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dedupedKey, fetchRatings]);

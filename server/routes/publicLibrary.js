@@ -3476,7 +3476,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
   const availableNuvioProfiles = async user => {
     const groups = await prisma.group.findMany({ where: { accountId: user.accountId, isActive: true }, select: { userIds: true } })
     const members = new Set()
-    for (const group of groups) { try { for (const id of JSON.parse(group.userIds || '[]')) members.add(id) } catch { /* Ignore invalid legacy memberships. */ } }
+    for (const group of groups) { try { const ids = JSON.parse(group.userIds || '[]'); if (Array.isArray(ids)) for (const id of ids) members.add(id) } catch { /* Ignore invalid legacy memberships. */ } }
     const profiles = await prisma.user.findMany({ where: { accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, username: true, nuvioProfileId: true, avatarUrl: true, colorIndex: true }, orderBy: { nuvioProfileId: 'asc' } })
     return profiles.filter(profile => members.has(profile.id))
   }
