@@ -1073,8 +1073,22 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         user = fullUser;
       }
 
+      // A solo member still belongs to their group. Read memberships
+      // directly rather than using the list of other household members.
+      const accountGroups = await prisma.group.findMany({
+        where: { accountId: user.accountId || DEFAULT_ACCOUNT_ID },
+        select: { id: true, name: true, userIds: true }
+      });
+      const groups = accountGroups.filter(group => {
+        try { const ids = JSON.parse(group.userIds || '[]'); return Array.isArray(ids) && ids.includes(user.id); }
+        catch { return false; }
+      }).map(group => ({ id: group.id, name: group.name }));
+
       res.json({
         id: user.id,
+        groups,
+        groupId: groups[0]?.id || null,
+        groupName: groups.map(group => group.name).join(', ') || null,
         username: user.username,
         email: user.email,
         activityVisibility: user.activityVisibility || 'private',

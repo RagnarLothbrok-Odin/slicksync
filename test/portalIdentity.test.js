@@ -349,3 +349,16 @@ test('an authenticated person can read their own profile before joining a group'
     assert.equal(response.status, 200)
   } finally { person.accountId = previous }
 })
+
+test('own profile reports exact group membership, including a solo member', async () => {
+  const group = data.group.rows[0]
+  const previous = group.userIds
+  group.name = 'Household'
+  group.userIds = JSON.stringify(['jA'])
+  try {
+    const response = await call('GET', '/user-info', { key: session('jA', 'jellyfin'), query: { userId: 'jA' } })
+    assert.equal(response.status, 200)
+    assert.deepEqual(response.body.groups, [{ id: group.id, name: 'Household' }])
+    assert.equal(response.body.groupName, 'Household')
+  } finally { group.userIds = previous }
+})
