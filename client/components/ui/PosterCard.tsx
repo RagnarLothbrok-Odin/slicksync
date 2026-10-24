@@ -236,6 +236,7 @@ export const PosterCard = memo(function PosterCardLocal({
                             className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
                             decoding="async"
                             fetchPriority={priority ? "high" : undefined}
+                            height={450}
                             loading={priority ? "eager" : "lazy"}
                             onError={() => setImageError(true)}
                             sizes="(max-width: 640px) 33vw, (max-width: 1024px) 22vw, 170px"
@@ -250,6 +251,7 @@ export const PosterCard = memo(function PosterCardLocal({
                             // of scroll cost on phones. `sizes` describes the card's own
                             // rendered width at each breakpoint, matching the grid.
                             srcSet={cacheImages ? posterSrcSet(item, rpdbEnabled) : undefined}
+                            width={300}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 to-transparent opacity-40 transition-opacity group-hover:opacity-60" />
                     </>

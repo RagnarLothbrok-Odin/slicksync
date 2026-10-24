@@ -195,6 +195,7 @@ const UpcomingRow = memo(function UpcomingRowLocal({
                         <img
                             alt=""
                             className="h-full w-full object-cover"
+                            height={56}
                             src={
                                 cacheImages
                                     ? posterUrl(
@@ -203,6 +204,7 @@ const UpcomingRow = memo(function UpcomingRowLocal({
                                       )
                                     : item.poster
                             }
+                            width={40}
                         />
                     ) : (
                         <TvIcon className="h-5 w-5 text-subtle" />
@@ -541,7 +543,9 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                         <img
                                             alt=""
                                             className="h-full w-full object-cover"
+                                            height={44}
                                             src={show.poster}
+                                            width={32}
                                         />
                                     ) : (
                                         <TvIcon className="h-4 w-4 text-subtle" />

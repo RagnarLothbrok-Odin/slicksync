@@ -143,7 +143,9 @@ export function CastMenu({
                     <img
                         alt=""
                         className="h-[30px] w-[30px] shrink-0 rounded-full object-cover"
+                        height={30}
                         src={target.photo}
+                        width={30}
                     />
                 ) : (
                     <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-surface-hover font-semibold text-muted text-sm">

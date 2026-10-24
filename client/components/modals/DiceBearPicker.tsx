@@ -143,9 +143,11 @@ export function DiceBearPicker({
                                         alt=""
                                         className="mx-auto h-14 w-14 rounded-xl bg-surface-hover"
                                         decoding="async"
+                                        height={56}
                                         loading="lazy"
                                         referrerPolicy="no-referrer"
                                         src={diceBearUrl(value, "style-preview")}
+                                        width={56}
                                     />
                                     <span className="mt-2 block font-medium text-default text-xs leading-snug">
                                         {styleName(value)}
@@ -208,6 +210,7 @@ export function DiceBearPicker({
                                     <img
                                         alt=""
                                         className="h-full w-full rounded-xl"
+                                        height={128}
                                         loading="lazy"
                                         referrerPolicy="no-referrer"
                                         src={diceBearUrl(style, value)}
@@ -216,6 +219,7 @@ export function DiceBearPicker({
                                                 ? { backgroundColor: `#${background}` }
                                                 : checker
                                         }
+                                        width={128}
                                     />
                                     {seed === value && (
                                         <span className="absolute right-0 bottom-0 rounded-full bg-primary p-0.5 text-on-primary">

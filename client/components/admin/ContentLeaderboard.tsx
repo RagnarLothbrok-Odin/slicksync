@@ -52,7 +52,9 @@ export function ContentLeaderboard({ movies, series, trending }: ContentLeaderbo
                                 <img
                                     alt={item.name}
                                     className="h-full w-full object-cover"
+                                    height={112}
                                     src={item.poster}
+                                    width={80}
                                 />
                             ) : (
                                 <div className="flex h-full w-full items-center justify-center text-muted">

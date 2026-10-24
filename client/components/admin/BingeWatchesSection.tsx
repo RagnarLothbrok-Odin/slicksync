@@ -40,7 +40,9 @@ export const BingeWatchesSection = memo(function BingeWatchesSectionLocal({
                             <img
                                 alt={item.name}
                                 className="h-full w-full object-cover"
+                                height={80}
                                 src={item.poster}
+                                width={56}
                             />
                         ) : (
                             <div className="flex h-full w-full items-center justify-center">

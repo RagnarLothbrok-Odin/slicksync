@@ -21,7 +21,13 @@ export function PosterThumb({
         >
             {src ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img alt="" className="h-full w-full object-cover" src={src} />
+                <img
+                    alt=""
+                    className="h-full w-full object-cover"
+                    height={450}
+                    src={src}
+                    width={300}
+                />
             ) : item.type === "series" ? (
                 <TvIcon className="h-5 w-5 text-subtle" />
             ) : (

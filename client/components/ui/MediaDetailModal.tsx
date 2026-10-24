@@ -1519,8 +1519,10 @@ export function MediaDetailModal({
                                     alt=""
                                     className="h-full w-full object-cover"
                                     decoding="async"
+                                    height={360}
                                     src={heroImage}
                                     style={{ objectPosition: "center 15%" }}
+                                    width={640}
                                 />
                                 <div
                                     className="absolute inset-0"
@@ -1882,7 +1884,9 @@ export function MediaDetailModal({
                                                         <img
                                                             alt=""
                                                             className="h-5 w-5 rounded-full"
+                                                            height={20}
                                                             src={p.logo}
+                                                            width={20}
                                                         />
                                                     ) : null}
                                                     <span className="font-medium text-default text-xs">
@@ -2654,11 +2658,13 @@ export function MediaDetailModal({
                                                                 className={`pointer-events-none mx-auto h-20 w-20 rounded-full bg-surface-hover object-cover transition-transform ${clickable ? "group-hover/cast:scale-105 group-hover/cast:ring-2 group-hover/cast:ring-primary" : ""}`}
                                                                 decoding="async"
                                                                 draggable={false}
+                                                                height={80}
                                                                 loading="lazy"
                                                                 onDragStart={(e) =>
                                                                     e.preventDefault()
                                                                 }
                                                                 src={member.photo}
+                                                                width={80}
                                                             />
                                                         ) : (
                                                             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-surface-hover font-medium text-muted text-xl">
@@ -2851,8 +2857,10 @@ export function MediaDetailModal({
                                                                             className="h-full w-full object-cover transition-transform group-hover/cred:scale-105"
                                                                             decoding="async"
                                                                             draggable={false}
+                                                                            height={450}
                                                                             loading="lazy"
                                                                             src={c.poster}
+                                                                            width={300}
                                                                         />
                                                                     ) : (
                                                                         <div className="flex h-full w-full items-center justify-center p-1 text-center text-muted text-xs">
@@ -3018,11 +3026,13 @@ export function MediaDetailModal({
                                                                         className="pointer-events-none h-full w-full object-cover transition-transform group-hover:scale-105"
                                                                         decoding="async"
                                                                         draggable={false}
+                                                                        height={160}
                                                                         loading="lazy"
                                                                         onDragStart={(e) =>
                                                                             e.preventDefault()
                                                                         }
                                                                         src={part.poster}
+                                                                        width={112}
                                                                     />
                                                                 ) : (
                                                                     <div className="flex h-full w-full items-center justify-center text-muted">
@@ -3135,6 +3145,7 @@ export function MediaDetailModal({
                                                                         className="pointer-events-none h-full w-full object-cover transition-transform group-hover:scale-105"
                                                                         decoding="async"
                                                                         draggable={false}
+                                                                        height={160}
                                                                         loading="lazy"
                                                                         onDragStart={(e) =>
                                                                             e.preventDefault()
@@ -3143,6 +3154,7 @@ export function MediaDetailModal({
                                                                             item,
                                                                             rpdbEnabled
                                                                         )}
+                                                                        width={112}
                                                                     />
                                                                 ) : (
                                                                     <div className="flex h-full w-full items-center justify-center text-muted">

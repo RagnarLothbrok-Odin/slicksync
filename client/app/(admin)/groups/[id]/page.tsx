@@ -1471,7 +1471,9 @@ export default function GroupDetailPage() {
                                                                     <img
                                                                         alt={addon.name}
                                                                         className="h-8 w-8 object-contain"
+                                                                        height={32}
                                                                         src={logo}
+                                                                        width={32}
                                                                     />
                                                                 ) : (
                                                                     <PuzzlePieceIcon className="h-6 w-6 text-primary" />
@@ -1974,7 +1976,9 @@ function AddAddonForm({ availableAddons, onAdd, onClose }: AddAddonFormProps) {
                                     <img
                                         alt={addon.name}
                                         className="h-8 w-8 rounded-md object-contain"
+                                        height={32}
                                         src={logo}
+                                        width={32}
                                     />
                                 ) : (
                                     <PuzzlePieceIcon className="h-6 w-6 text-primary" />

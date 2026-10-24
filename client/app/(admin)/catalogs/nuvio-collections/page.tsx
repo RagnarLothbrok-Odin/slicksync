@@ -318,7 +318,13 @@ function FolderTile({
                 <div className="relative aspect-[4/3] bg-surface-hover">
                     {heroPoster ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img alt="" className="h-full w-full object-cover" src={heroPoster} />
+                        <img
+                            alt=""
+                            className="h-full w-full object-cover"
+                            height={450}
+                            src={heroPoster}
+                            width={600}
+                        />
                     ) : sourceCount === 0 || items.length === 0 ? (
                         <div className="flex h-full w-full items-center justify-center">
                             {previewLoading ? (
@@ -3228,7 +3234,9 @@ export default function NuvioCollectionsPage() {
                                                         <img
                                                             alt=""
                                                             className="h-full w-full object-cover"
+                                                            height={450}
                                                             src={item.poster}
+                                                            width={64}
                                                         />
                                                     ) : (
                                                         <div className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-subtle">
@@ -3318,7 +3326,9 @@ export default function NuvioCollectionsPage() {
                                             <img
                                                 alt=""
                                                 className="h-full w-full object-cover"
+                                                height={80}
                                                 src={modalHeroPoster}
+                                                width={80}
                                             />
                                         ) : (
                                             <div className="flex h-full w-full items-center justify-center">
@@ -3545,7 +3555,9 @@ export default function NuvioCollectionsPage() {
                                                             <img
                                                                 alt=""
                                                                 className="h-full w-full object-cover"
+                                                                height={450}
                                                                 src={item.poster}
+                                                                width={80}
                                                             />
                                                         ) : (
                                                             <div className="flex h-full w-full items-center justify-center p-1.5 text-center text-[10px] text-subtle leading-tight">
@@ -3630,7 +3642,9 @@ export default function NuvioCollectionsPage() {
                                                         <img
                                                             alt=""
                                                             className="h-full w-full object-cover"
+                                                            height={450}
                                                             src={item.poster}
+                                                            width={64}
                                                         />
                                                     ) : (
                                                         <div className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-subtle">

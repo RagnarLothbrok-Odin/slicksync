@@ -369,8 +369,10 @@ const ActivityCard = memo(function ActivityCardLocal({
                     <img
                         alt={session.itemName}
                         className="h-full w-full object-cover"
+                        height={64}
                         onError={() => setImageError(true)}
                         src={session.poster}
+                        width={48}
                     />
                 </button>
             ) : (
@@ -501,8 +503,10 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
                         <img
                             alt={session.itemName}
                             className="h-full w-full object-cover transition-all duration-700 group-hover:scale-110"
+                            height={450}
                             onError={() => setImageError(true)}
                             src={session.poster}
+                            width={300}
                         />
                         {/* Gradient overlay */}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-40 transition-opacity group-hover:opacity-60" />
@@ -856,7 +860,9 @@ export default function UserActivityPage() {
                                                     <img
                                                         alt={np.item.name}
                                                         className="h-full w-full object-cover"
+                                                        height={56}
                                                         src={np.item.poster}
+                                                        width={40}
                                                     />
                                                 </div>
                                             ) : (

@@ -943,10 +943,11 @@ export default function UsersPage() {
                                                 <table className="w-full min-w-[600px]">
                                                     <thead>
                                                         <tr className="border-default border-b">
-                                                            <th
-                                                                aria-hidden="true"
-                                                                className="w-8"
-                                                            />
+                                                            <th className="w-8">
+                                                                <span className="sr-only">
+                                                                    Row actions
+                                                                </span>
+                                                            </th>
                                                             <th className="w-12 px-4 py-4 text-left">
                                                                 <div
                                                                     className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded border-2 transition-all ${

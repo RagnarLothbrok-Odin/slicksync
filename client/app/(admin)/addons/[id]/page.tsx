@@ -1592,8 +1592,10 @@ export default function AddonDetailPage() {
                                                     <img
                                                         alt={addon.name}
                                                         className="h-full w-full object-contain p-2"
+                                                        height={96}
                                                         onError={() => setLogoError(true)}
                                                         src={addon.logo}
+                                                        width={96}
                                                     />
                                                 ) : (
                                                     <PuzzlePieceIcon className="h-12 w-12 text-primary" />
@@ -2823,7 +2825,9 @@ function BackupAddonPickerModal({
                                         <img
                                             alt=""
                                             className="h-full w-full object-contain p-1.5"
+                                            height={44}
                                             src={logo}
+                                            width={44}
                                         />
                                     ) : (
                                         <PuzzlePieceIcon
@@ -3071,7 +3075,9 @@ function AddonBackupSection({
                                     <img
                                         alt=""
                                         className="h-full w-full object-contain p-1"
+                                        height={40}
                                         src={getLogo(addon)}
+                                        width={40}
                                     />
                                 ) : (
                                     <PuzzlePieceIcon
@@ -3201,7 +3207,9 @@ function AddonBackupSection({
                                         <img
                                             alt=""
                                             className="h-full w-full object-contain p-1"
+                                            height={40}
                                             src={getLogo(backup)}
+                                            width={40}
                                         />
                                     ) : (
                                         <PuzzlePieceIcon

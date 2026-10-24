@@ -238,7 +238,9 @@ export default function UserAddonsPage() {
                                             <img
                                                 alt={addon.name}
                                                 className="h-8 w-8 object-contain"
+                                                height={32}
                                                 src={addon.logo}
+                                                width={32}
                                             />
                                         ) : (
                                             <PuzzlePieceIcon
@@ -386,7 +388,9 @@ export default function UserAddonsPage() {
                                             <img
                                                 alt={addon.manifest.name}
                                                 className="h-8 w-8 object-contain"
+                                                height={32}
                                                 src={addon.manifest.logo}
+                                                width={32}
                                             />
                                         ) : (
                                             <GlobeAltIcon

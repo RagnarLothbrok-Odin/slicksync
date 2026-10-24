@@ -178,8 +178,10 @@ function ProfilePic({
             <img
                 alt=""
                 className="shrink-0 rounded-full object-cover"
+                height={size}
                 src={profile.avatar}
                 style={{ background: profile.color || undefined, height: size, width: size }}
+                width={size}
             />
         );
     }
@@ -391,7 +393,7 @@ function SidePicker({
 }
 
 function Slot({
-    role,
+    direction,
     choice,
     count,
     sides,
@@ -401,7 +403,7 @@ function Slot({
     onPick,
     compact,
 }: {
-    role: "from" | "to";
+    direction: "from" | "to";
     choice: Choice | null;
     count: number | null;
     sides: WatchCopySide[];
@@ -416,14 +418,14 @@ function Slot({
     const ref = useRef<HTMLDivElement>(null);
     const close = useCallback(() => setOpen(false), []);
     useDismiss(open, ref, close);
-    const color = role === "from" ? FROM_C : TO_C;
+    const color = direction === "from" ? FROM_C : TO_C;
     return (
         <div className="relative min-w-0" ref={ref}>
             <div
                 className="mb-1.5 flex items-center gap-1.5 font-bold text-[11px] tracking-[0.08em]"
                 style={{ color }}
             >
-                {role === "from" ? "COPY FROM" : "COPY TO"}
+                {direction === "from" ? "COPY FROM" : "COPY TO"}
             </div>
             <button
                 aria-expanded={open}
@@ -505,7 +507,7 @@ function Slot({
                     others={others}
                     person={person}
                     sides={sides}
-                    title={role === "from" ? "Copy from…" : "Copy to…"}
+                    title={direction === "from" ? "Copy from…" : "Copy to…"}
                 />
             )}
         </div>
@@ -630,7 +632,9 @@ function MatchPicker({
                         <img
                             alt=""
                             className="h-[45px] w-[30px] rounded-md object-cover"
+                            height={45}
                             src={c.poster}
+                            width={30}
                         />
                     ) : (
                         <span className="h-[45px] w-[30px] rounded-md bg-surface" />
@@ -769,9 +773,11 @@ function Poster({
                     <img
                         alt=""
                         className="absolute inset-0 h-full w-full object-cover"
+                        height={450}
                         loading="lazy"
                         onError={() => setBroken(true)}
                         src={src}
+                        width={300}
                     />
                 ) : (
                     <span
@@ -1367,11 +1373,11 @@ export function WatchSyncView({
                                         choice={fromChoice}
                                         compact={compact}
                                         count={preview?.counts.from ?? null}
+                                        direction="from"
                                         onPick={pickFrom}
                                         other={to}
                                         others={others}
                                         person={personInfo}
-                                        role="from"
                                         sides={sides}
                                     />
                                     <div className="flex items-center justify-center gap-3 md:flex-col md:gap-2 md:pt-6">
@@ -1399,11 +1405,11 @@ export function WatchSyncView({
                                         choice={toChoice}
                                         compact={compact}
                                         count={preview?.counts.to ?? null}
+                                        direction="to"
                                         onPick={pickTo}
                                         other={from}
                                         others={others}
                                         person={personInfo}
-                                        role="to"
                                         sides={sides}
                                     />
                                 </div>

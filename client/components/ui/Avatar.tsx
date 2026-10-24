@@ -345,6 +345,7 @@ export function Avatar({
                         alt={name}
                         className={clsx("h-full w-full object-cover", imgClassName)}
                         decoding="async"
+                        height={128}
                         loading="lazy"
                         onError={() => {
                             console.warn("[Avatar] Failed to load image, using the next fallback");
@@ -357,6 +358,7 @@ export function Avatar({
                         referrerPolicy="no-referrer"
                         role="img"
                         src={finalSrc}
+                        width={128}
                     />
                 ) : fallbackIcon ? (
                     <div className="flex h-full w-full items-center justify-center">

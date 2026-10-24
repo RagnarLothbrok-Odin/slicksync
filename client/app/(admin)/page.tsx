@@ -100,8 +100,10 @@ const RecentAddonItem = memo(function RecentAddonItemLocal({
                         <img
                             alt=""
                             className="h-full w-full object-contain p-1.5"
+                            height={48}
                             onError={() => setImageError(true)}
                             src={logo}
+                            width={48}
                         />
                     ) : (
                         <PuzzlePieceIcon className="h-6 w-6 text-primary" />

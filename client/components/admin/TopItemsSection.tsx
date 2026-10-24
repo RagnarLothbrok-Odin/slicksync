@@ -53,7 +53,13 @@ export const TopItemsSection = memo(function TopItemsSectionLocal({
         >
             <div className="relative h-24 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-surface">
                 {item.poster ? (
-                    <img alt={item.name} className="h-full w-full object-cover" src={item.poster} />
+                    <img
+                        alt={item.name}
+                        className="h-full w-full object-cover"
+                        height={96}
+                        src={item.poster}
+                        width={64}
+                    />
                 ) : (
                     <div className="flex h-full w-full items-center justify-center">
                         {item.type === "movie" ? (

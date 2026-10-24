@@ -1445,15 +1445,19 @@ export default function ListDetailPage() {
                                         alt=""
                                         aria-hidden="true"
                                         className="absolute inset-0 h-full w-full scale-110 object-cover"
+                                        height={360}
                                         src={list.coverImageUrl}
                                         style={{ filter: "blur(24px) brightness(0.55)" }}
+                                        width={640}
                                     />
                                     <div className="absolute inset-0 flex items-center justify-center">
                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                         <img
                                             alt=""
                                             className="relative max-h-full max-w-full object-contain"
+                                            height={360}
                                             src={list.coverImageUrl}
+                                            width={640}
                                         />
                                     </div>
                                 </>
@@ -2083,7 +2087,9 @@ export default function ListDetailPage() {
                                                     <img
                                                         alt=""
                                                         className="h-full w-full object-cover"
+                                                        height={450}
                                                         src={item.poster}
+                                                        width={300}
                                                     />
                                                 ) : (
                                                     <div className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-subtle">
@@ -2429,7 +2435,9 @@ export default function ListDetailPage() {
                                                     <img
                                                         alt=""
                                                         className="h-full w-full object-cover"
+                                                        height={450}
                                                         src={s.poster}
+                                                        width={300}
                                                     />
                                                 ) : (
                                                     <div className="flex h-full w-full items-center justify-center p-1 text-center text-subtle text-xs">

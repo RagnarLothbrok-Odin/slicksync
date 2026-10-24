@@ -1832,7 +1832,9 @@ function AddonCard({
                             <img
                                 alt={addon.name}
                                 className="h-full w-full object-contain p-1.5"
+                                height={44}
                                 src={addon.logo}
+                                width={44}
                             />
                         ) : (
                             <PuzzlePieceIcon className="h-1/2 w-1/2 text-primary" />
@@ -1943,7 +1945,9 @@ function AddonCard({
                         <img
                             alt={addon.name}
                             className="h-full w-full object-contain p-1.5"
+                            height={48}
                             src={addon.logo}
+                            width={48}
                         />
                     ) : (
                         <PuzzlePieceIcon className="h-6 w-6 text-primary" />
@@ -2597,7 +2601,9 @@ function AddAddonModal({
                                                             <img
                                                                 alt={manifestData.name}
                                                                 className="h-full w-full object-contain p-2"
+                                                                height={64}
                                                                 src={manifestData.logo}
+                                                                width={64}
                                                             />
                                                         ) : (
                                                             <PuzzlePieceIcon className="h-8 w-8 text-white" />

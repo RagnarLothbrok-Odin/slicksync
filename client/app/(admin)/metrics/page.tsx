@@ -1006,7 +1006,9 @@ export default function MetricsPage() {
                                                                                 <img
                                                                                     alt={t.name}
                                                                                     className="h-full w-full object-cover"
+                                                                                    height={80}
                                                                                     src={t.poster}
+                                                                                    width={56}
                                                                                 />
                                                                             )}
                                                                         </div>
@@ -1128,7 +1130,9 @@ export default function MetricsPage() {
                                                                         <img
                                                                             alt={item.name || ""}
                                                                             className="h-full w-full object-cover"
+                                                                            height={96}
                                                                             src={item.poster}
+                                                                            width={64}
                                                                         />
                                                                     )}
                                                                 </div>

@@ -92,11 +92,7 @@ export default function RootLayout({
                     rel="stylesheet"
                     suppressHydrationWarning
                 />
-                <script
-                    dangerouslySetInnerHTML={{
-                        __html: `try{var l=document.getElementById('optional-theme-fonts');l.onload=function(){this.media='all'};if(l.sheet)l.media='all'}catch(e){}`,
-                    }}
-                />
+                <script>{`try{var l=document.getElementById('optional-theme-fonts');l.onload=function(){this.media='all'};if(l.sheet)l.media='all'}catch(e){}`}</script>
                 <noscript>
                     <link
                         href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700;900&family=Playfair+Display:wght@400;500;600;700;800;900&family=Bungee&family=Bangers&family=Press+Start+2P&family=Permanent+Marker&family=Luckiest+Guy&family=Orbitron:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
@@ -125,22 +121,14 @@ export default function RootLayout({
             actual blur kill-switch this attribute gates. navigator.standalone
             is iOS Safari's own flag; matchMedia covers Android/desktop PWA
             installs the same way. */}
-                <script
-                    dangerouslySetInnerHTML={{
-                        __html: `try{if(window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches){document.documentElement.setAttribute('data-standalone','true')}}catch(e){}`,
-                    }}
-                />
+                <script>{`try{if(window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches){document.documentElement.setAttribute('data-standalone','true')}}catch(e){}`}</script>
                 {/* The saved theme, before first paint - the same blocking-script
             pattern as above. Without it every page opened in the default
             colours and switched once the app started (a light theme flashed
             dark first). A built-in theme is its class; a custom one starts
             from its base theme here, and its own colours follow at start-up
             (lib/theme.tsx). The id list mirrors themeIds there. */}
-                <script
-                    dangerouslySetInnerHTML={{
-                        __html: `try{var t=localStorage.getItem('slicksync-theme'),b=['nebula','slick','velvet','midnight','ember','nord','verdant','slate','rose','daylight'];if(t&&b.indexOf(t)<0){var c=JSON.parse(localStorage.getItem('slicksync-custom-themes')||'[]').filter(function(x){return x&&x.id===t})[0];t=c&&c.base}if(t&&b.indexOf(t)>=0)document.documentElement.className=t}catch(e){}`,
-                    }}
-                />
+                <script>{`try{var t=localStorage.getItem('slicksync-theme'),b=['nebula','slick','velvet','midnight','ember','nord','verdant','slate','rose','daylight'];if(t&&b.indexOf(t)<0){var c=JSON.parse(localStorage.getItem('slicksync-custom-themes')||'[]').filter(function(x){return x&&x.id===t})[0];t=c&&c.base}if(t&&b.indexOf(t)>=0)document.documentElement.className=t}catch(e){}`}</script>
             </head>
             <body
                 className="aurora-scrollbar overflow-x-hidden bg-page antialiased"

@@ -411,7 +411,9 @@ export default function UserSharesPage() {
                         <img
                             alt={share.itemName}
                             className="h-full w-full object-cover"
+                            height={450}
                             src={share.poster}
+                            width={300}
                         />
                     ) : (
                         <div
@@ -547,7 +549,9 @@ export default function UserSharesPage() {
                         <img
                             alt={share.itemName}
                             className="h-full w-full object-cover"
+                            height={96}
                             src={share.poster}
+                            width={64}
                         />
                     ) : (
                         <div

@@ -65,7 +65,13 @@ function TitleStrip({
                     <div className="flex h-24 w-16 items-center justify-center overflow-hidden rounded-md bg-surface-hover">
                         {t.poster ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img alt="" className="h-full w-full object-cover" src={t.poster} />
+                            <img
+                                alt=""
+                                className="h-full w-full object-cover"
+                                height={96}
+                                src={t.poster}
+                                width={64}
+                            />
                         ) : t.type === "series" ? (
                             <TvIcon className="h-5 w-5 text-subtle" />
                         ) : (

@@ -3989,7 +3989,9 @@ export default function SettingsPage() {
                                                         <img
                                                             alt="2FA QR code"
                                                             className="h-40 w-40 shrink-0 rounded-lg border border-default bg-white p-2"
+                                                            height={160}
                                                             src={twoFaSetup.qrCodeDataUrl}
+                                                            width={160}
                                                         />
                                                         <div className="min-w-0 space-y-2">
                                                             <p className="text-default text-sm">

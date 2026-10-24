@@ -71,7 +71,9 @@ function CatalogTile({
                     <img
                         alt=""
                         className={`absolute inset-0 h-full w-full object-cover transition-opacity ${c.on ? "" : "opacity-60 group-hover:opacity-90"}`}
+                        height={450}
                         src={src}
+                        width={300}
                     />
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center">

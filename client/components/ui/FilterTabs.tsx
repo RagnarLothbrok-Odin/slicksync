@@ -302,6 +302,7 @@ export function FilterTabs({
                                                             : "bg-primary text-white"
                                                 }
                   `}
+                                                role="img"
                                             >
                                                 {option.badge.value}
                                             </span>

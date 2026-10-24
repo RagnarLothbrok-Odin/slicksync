@@ -470,8 +470,10 @@ export function CommandPalette() {
                                                                 alt=""
                                                                 className="h-7 w-5 shrink-0 rounded-sm object-cover"
                                                                 decoding="async"
+                                                                height={28}
                                                                 loading="lazy"
                                                                 src={r.poster}
+                                                                width={20}
                                                             />
                                                         ) : (
                                                             <Icon

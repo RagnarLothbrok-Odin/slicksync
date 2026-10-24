@@ -48,9 +48,11 @@ export function CopyHistoryTile({ userId, name }: { userId: string; name: string
                     <img
                         alt=""
                         className="rounded-full object-cover"
+                        height={size}
                         key={p.side}
                         src={p.avatar}
                         style={{ background: p.color || undefined, height: size, width: size }}
+                        width={size}
                     />
                 ) : (
                     <span

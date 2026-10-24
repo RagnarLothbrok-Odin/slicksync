@@ -146,7 +146,9 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
                             <img
                                 alt={item.item.name}
                                 className="h-full w-full object-cover"
+                                height={64}
                                 src={item.item.poster}
+                                width={48}
                             />
                         ) : (
                             <div className="flex h-full w-full items-center justify-center">

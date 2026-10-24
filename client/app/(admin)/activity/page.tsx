@@ -634,6 +634,7 @@ const ActivityCard = memo(function ActivityCardLocal({
                         alt={activity.contentName}
                         className="h-full w-full object-cover"
                         decoding="async"
+                        height={64}
                         loading="lazy"
                         onError={() => setImageError(true)}
                         sizes="48px"
@@ -645,6 +646,7 @@ const ActivityCard = memo(function ActivityCardLocal({
                             { id: activity.contentId, poster: activity.poster },
                             rpdbEnabled
                         )}
+                        width={48}
                     />
                 </button>
             ) : (
@@ -872,6 +874,7 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
                             alt={activity.contentName}
                             className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
                             decoding="async"
+                            height={450}
                             loading="lazy"
                             onError={() => setImageError(true)}
                             sizes="(max-width: 640px) 22vw, (max-width: 1024px) 18vw, 170px"
@@ -883,6 +886,7 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
                                 { id: activity.contentId, poster: activity.poster },
                                 rpdbEnabled
                             )}
+                            width={300}
                         />
                         {/* Gradient overlay - subtle since no text on poster */}
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 to-transparent opacity-40 transition-opacity group-hover:opacity-60" />
@@ -1631,9 +1635,11 @@ function NowPlayingItemBody({
                         alt={np.item.name}
                         className="h-full w-full object-cover"
                         decoding="async"
+                        height={56}
                         sizes="40px"
                         src={posterUrl(np.item, rpdbEnabled)}
                         srcSet={posterSrcSet(np.item, rpdbEnabled)}
+                        width={40}
                     />
                 </div>
             ) : (

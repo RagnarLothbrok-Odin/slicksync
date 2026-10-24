@@ -63,9 +63,11 @@ function Poster({
                 <img
                     alt=""
                     className="h-full w-full object-cover"
+                    height={450}
                     loading="lazy"
                     onError={() => setFailed(true)}
                     src={src}
+                    width={300}
                 />
             ) : (
                 <TvIcon className="h-1/3 w-1/3 text-subtle" />

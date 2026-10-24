@@ -1702,7 +1702,9 @@ export function CreateUserModal({
                                                         <img
                                                             alt="Stremio"
                                                             className="h-10 w-10 object-contain"
+                                                            height={40}
                                                             src="/stremio-logo.svg"
+                                                            width={40}
                                                         />
                                                     </motion.div>
 

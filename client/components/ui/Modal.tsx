@@ -113,16 +113,20 @@ export function Modal({
                             alt=""
                             className="absolute inset-0 h-full w-full scale-110 object-cover"
                             decoding="async"
+                            height={360}
                             src={cachedImageUrl(backdropImage, 64) || backdropImage}
                             style={{ opacity: 0.45 }}
+                            width={640}
                         />
                     ) : (
                         <img
                             alt=""
                             className="absolute inset-0 h-full w-full scale-110 object-cover"
                             decoding="async"
+                            height={360}
                             src={backdropImage}
                             style={{ filter: "blur(20px) brightness(0.55)" }}
+                            width={640}
                         />
                     )}
                     <div

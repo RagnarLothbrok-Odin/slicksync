@@ -17,7 +17,9 @@ export function TorBoxBadge({ size = 36 }: { size?: number }) {
             <img
                 alt="TorBox"
                 className="h-full w-full"
+                height={size}
                 src="https://torbox.app/assets/logo-bb7a9579.svg"
+                width={size}
             />
         </a>
     );

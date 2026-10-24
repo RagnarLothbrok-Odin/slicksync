@@ -163,6 +163,7 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
                             decoding="async"
                             draggable={false}
                             fetchPriority={priority ? "high" : undefined}
+                            height={360}
                             loading={priority ? "eager" : "lazy"}
                             onError={() =>
                                 setFailedArtwork({ count: artworkIndex + 1, key: artworkKey })
@@ -170,6 +171,7 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
                             // Through the server's image cache at the card's size, like
                             // every poster grid - not the full-size original each launch.
                             src={(cacheImages ? cachedImageUrl(artworkUrl) : artworkUrl) || ""}
+                            width={640}
                         />
                     ) : (
                         <div className="flex h-full w-full items-center justify-center bg-slate-800">

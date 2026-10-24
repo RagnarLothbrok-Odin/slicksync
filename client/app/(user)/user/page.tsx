@@ -456,7 +456,9 @@ export default function UserHomePage() {
                                             <img
                                                 alt={np.item.name}
                                                 className="h-14 w-10 rounded object-cover"
+                                                height={56}
                                                 src={np.item.poster}
+                                                width={40}
                                             />
                                         ) : (
                                             <div
@@ -618,7 +620,9 @@ export default function UserHomePage() {
                                         <img
                                             alt={activityData.mostWatched.name}
                                             className="h-24 w-16 rounded-lg object-cover"
+                                            height={96}
                                             src={activityData.mostWatched.poster}
+                                            width={64}
                                         />
                                     ) : (
                                         <div
@@ -697,7 +701,9 @@ export default function UserHomePage() {
                                                 <img
                                                     alt={binge.name}
                                                     className="h-14 w-10 rounded object-cover"
+                                                    height={56}
                                                     src={binge.poster}
+                                                    width={40}
                                                 />
                                             ) : (
                                                 <div

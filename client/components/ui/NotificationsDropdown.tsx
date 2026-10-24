@@ -866,6 +866,7 @@ export function NotificationsDropdown({
                                                                                 notification.message
                                                                             }
                                                                             className="h-full w-full object-cover"
+                                                                            height={56}
                                                                             onError={(e) => {
                                                                                 // If image fails, just hide it (we'll fall back to icon)
                                                                                 (
@@ -876,6 +877,7 @@ export function NotificationsDropdown({
                                                                             src={
                                                                                 notification.poster
                                                                             }
+                                                                            width={40}
                                                                         />
                                                                     </div>
                                                                 ) : notification.type ===

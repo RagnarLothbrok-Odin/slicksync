@@ -637,7 +637,9 @@ export default function AiostreamsCollectionPage() {
                                                     <img
                                                         alt=""
                                                         className="absolute inset-0 h-full w-full object-cover"
+                                                        height={450}
                                                         src={cover}
+                                                        width={300}
                                                     />
                                                 ) : (
                                                     <div className="absolute inset-0 flex items-center justify-center">
@@ -913,7 +915,9 @@ export default function AiostreamsCollectionPage() {
                                                                             <img
                                                                                 alt=""
                                                                                 className={`absolute inset-0 h-full w-full object-cover transition-opacity ${on ? "" : "opacity-50 group-hover:opacity-90"}`}
+                                                                                height={450}
                                                                                 src={cat.cover}
+                                                                                width={300}
                                                                             />
                                                                         ) : (
                                                                             <div className="absolute inset-0 flex items-center justify-center">

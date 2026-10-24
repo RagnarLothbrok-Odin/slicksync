@@ -213,7 +213,9 @@ export default function PublicStatsPage() {
                                             <img
                                                 alt={t.name}
                                                 className="h-full w-full object-cover"
+                                                height={450}
                                                 src={t.poster}
+                                                width={300}
                                             />
                                         ) : (
                                             <div className="flex h-full w-full items-center justify-center">

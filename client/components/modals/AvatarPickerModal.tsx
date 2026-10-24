@@ -395,7 +395,9 @@ export function AvatarPickerModal({
                                 <img
                                     alt=""
                                     className="h-full w-full object-cover"
+                                    height={360}
                                     src={previewUrl}
+                                    width={640}
                                 />
                             ) : tab === "color" ? (
                                 <div
@@ -684,8 +686,10 @@ export function AvatarPickerModal({
                                             <img
                                                 alt={cover.title || ""}
                                                 className="h-full w-full object-cover"
+                                                height={360}
                                                 loading="lazy"
                                                 src={cover.image_url}
+                                                width={640}
                                             />
                                             {cover.title && (
                                                 <div

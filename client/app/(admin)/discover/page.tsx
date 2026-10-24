@@ -1497,7 +1497,9 @@ export default function DiscoverPage() {
                                                 <img
                                                     alt={person.person.name}
                                                     className="h-[104px] w-[104px] shrink-0 rounded-full object-cover sm:h-[132px] sm:w-[132px]"
+                                                    height={104}
                                                     src={person.person.profile}
+                                                    width={104}
                                                 />
                                             ) : (
                                                 <div
@@ -1665,8 +1667,10 @@ export default function DiscoverPage() {
                                                                         <img
                                                                             alt={r.title}
                                                                             className="h-full w-full object-cover transition-transform group-hover/pr:scale-105"
+                                                                            height={450}
                                                                             loading="lazy"
                                                                             src={r.poster}
+                                                                            width={300}
                                                                         />
                                                                     ) : (
                                                                         <div className="flex h-full w-full items-center justify-center p-2 text-center text-muted text-xs">
@@ -1678,6 +1682,7 @@ export default function DiscoverPage() {
                                                                             <span
                                                                                 aria-label="Watched"
                                                                                 className="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full"
+                                                                                role="img"
                                                                                 style={{
                                                                                     background:
                                                                                         "var(--color-success)",
@@ -1841,8 +1846,10 @@ export default function DiscoverPage() {
                                                             alt={a.name}
                                                             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                                                             decoding="async"
+                                                            height={450}
                                                             loading="lazy"
                                                             src={a.poster}
+                                                            width={300}
                                                         />
                                                     ) : (
                                                         <div className="flex h-full w-full items-center justify-center text-subtle text-xs">

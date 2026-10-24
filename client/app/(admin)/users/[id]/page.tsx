@@ -2661,7 +2661,9 @@ export default function UserDetailPage() {
                                                                             <img
                                                                                 alt={item.name}
                                                                                 className="h-full w-full object-cover"
+                                                                                height={64}
                                                                                 src={item.poster}
+                                                                                width={48}
                                                                             />
                                                                         ) : (
                                                                             <div
@@ -2785,10 +2787,12 @@ export default function UserDetailPage() {
                                                                                         s.item.name
                                                                                     }
                                                                                     className="h-full w-full object-cover"
+                                                                                    height={64}
                                                                                     src={
                                                                                         s.item
                                                                                             .poster
                                                                                     }
+                                                                                    width={48}
                                                                                 />
                                                                             ) : (
                                                                                 <div
@@ -3001,15 +3005,19 @@ export default function UserDetailPage() {
                                                                             <img
                                                                                 alt={addon.name}
                                                                                 className="h-6 w-6 object-contain"
+                                                                                height={24}
                                                                                 src={
                                                                                     addon.customLogo
                                                                                 }
+                                                                                width={24}
                                                                             />
                                                                         ) : addon.logo ? (
                                                                             <img
                                                                                 alt={addon.name}
                                                                                 className="h-6 w-6 object-contain"
+                                                                                height={24}
                                                                                 src={addon.logo}
+                                                                                width={24}
                                                                             />
                                                                         ) : (
                                                                             <PuzzlePieceIcon className="h-5 w-5 text-primary" />
@@ -3244,7 +3252,9 @@ export default function UserDetailPage() {
                                                                         <img
                                                                             alt={name}
                                                                             className="h-6 w-6 object-contain"
+                                                                            height={24}
                                                                             src={logo}
+                                                                            width={24}
                                                                         />
                                                                     ) : (
                                                                         <PuzzlePieceIcon className="h-5 w-5 text-primary" />

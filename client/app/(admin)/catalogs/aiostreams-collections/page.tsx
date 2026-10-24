@@ -117,7 +117,9 @@ function Tile({
                         alt=""
                         className="absolute inset-0 h-full w-full object-cover"
                         draggable={false}
+                        height={450}
                         src={coverSrc}
+                        width={300}
                     />
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center">

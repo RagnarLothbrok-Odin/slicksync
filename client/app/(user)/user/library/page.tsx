@@ -101,8 +101,10 @@ function LibraryCardItem({
                         <img
                             alt={item.name}
                             className="h-full w-full object-cover transition-all duration-700 group-hover:scale-110"
+                            height={450}
                             onError={() => setImageError(true)}
                             src={item.poster}
+                            width={300}
                         />
                         {/* Gradient overlay - subtle */}
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 to-transparent opacity-40 transition-opacity group-hover:opacity-60" />
@@ -255,8 +257,10 @@ function LibraryListItem({
                     <img
                         alt={item.name}
                         className="h-full w-full object-cover"
+                        height={64}
                         onError={() => setImageError(true)}
                         src={item.poster}
+                        width={48}
                     />
                 ) : (
                     <div

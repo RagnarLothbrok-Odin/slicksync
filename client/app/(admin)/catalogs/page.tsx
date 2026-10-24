@@ -555,13 +555,17 @@ export default function ListsPage() {
                                                                     alt=""
                                                                     aria-hidden
                                                                     className="absolute inset-0 h-full w-full scale-110 object-cover opacity-40 blur-xl"
+                                                                    height={360}
                                                                     src={hero.coverImageUrl}
+                                                                    width={640}
                                                                 />
                                                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                                                 <img
                                                                     alt=""
                                                                     className="relative h-full w-full object-contain"
+                                                                    height={360}
                                                                     src={hero.coverImageUrl}
+                                                                    width={640}
                                                                 />
                                                             </>
                                                         ) : hero.coverColorIndex !== null &&
@@ -680,13 +684,17 @@ export default function ListsPage() {
                                                                         alt=""
                                                                         aria-hidden
                                                                         className="absolute inset-0 h-full w-full scale-110 object-cover opacity-40 blur-xl"
+                                                                        height={360}
                                                                         src={list.coverImageUrl}
+                                                                        width={640}
                                                                     />
                                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                                     <img
                                                                         alt=""
                                                                         className="relative h-full w-full object-contain"
+                                                                        height={360}
                                                                         src={list.coverImageUrl}
+                                                                        width={640}
                                                                     />
                                                                 </div>
                                                             ) : list.coverColorIndex !== null &&
