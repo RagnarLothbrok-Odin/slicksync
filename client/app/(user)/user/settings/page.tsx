@@ -147,7 +147,10 @@ const ThemeCard = memo(function ThemeCard({
   );
 });
 
+import { AvatarPickerModal } from '@/components/modals/AvatarPickerModal';
+
 export default function UserSettingsPage() {
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const { userInfo, refreshUserInfo, provider, deleteAccount } = useUserAuth();
   const { userId, authKey, isReady } = useUserAuthHeaders();
   const providerLabel = providerTypeLabel(provider);
@@ -493,23 +496,29 @@ export default function UserSettingsPage() {
                 Profile Information
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Your account details
+                Your account details. Select your picture to change it.
               </p>
             </div>
           </div>
 
           <div className="p-6 space-y-4">
+            <AvatarPickerModal isOpen={avatarPickerOpen} onClose={() => setAvatarPickerOpen(false)} name={userInfo?.username || 'User'} currentAvatarUrl={userInfo?.avatarUrl} currentColorIndex={userInfo?.colorIndex}
+              onUpload={file => userAuth.uploadAvatar(userId!, authKey!, file)}
+              onSave={async data => { await userAuth.updateProfile(userId!, authKey!, data); await refreshUserInfo(); }} />
             {/* Avatar and name */}
             <div className="flex items-center gap-4">
+              <button type="button" aria-label="Change profile picture" onClick={() => setAvatarPickerOpen(true)} className="rounded-full shrink-0 focus-visible:ring-2 focus-visible:ring-primary">
               <Avatar 
                 name={userInfo?.username || 'User'}
                 email={userInfo?.email}
+                src={userInfo?.avatarUrl || undefined}
                 useGravatar={userInfo?.useGravatar}
                 colorIndex={userInfo?.colorIndex || 0}
                 size="xl"
                 showRing
                 className="w-16 h-16"
               />
+              </button>
               <div>
                 <h3 className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
                   {userInfo?.username}

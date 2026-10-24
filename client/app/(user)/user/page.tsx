@@ -228,6 +228,7 @@ export default function UserHomePage() {
           <Avatar
             name={userInfo?.username || 'User'}
             email={userInfo?.email}
+            src={userInfo?.avatarUrl || undefined}
             useGravatar={userInfo?.useGravatar}
             colorIndex={userInfo?.colorIndex || 0}
             size="xl"

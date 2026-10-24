@@ -357,6 +357,7 @@ const ActivityCard = memo(function ActivityCard({
       <Avatar
         name={userInfo?.username || 'You'}
         email={userInfo?.email}
+        src={userInfo?.avatarUrl || undefined}
         useGravatar={userInfo?.useGravatar}
         colorIndex={userInfo?.colorIndex || 0}
         size="sm"

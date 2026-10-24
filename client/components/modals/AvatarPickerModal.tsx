@@ -17,6 +17,7 @@ interface AvatarPickerModalProps {
   name: string;
   currentAvatarUrl?: string | null;
   currentColorIndex?: number;
+  onUpload?: (file: File) => Promise<{ url: string }>;
   onSave: (data: { avatarUrl?: string | null; colorIndex?: number; alsoOnServer?: boolean }) => Promise<void>;
   // For someone signed in to a Jellyfin, AIOStreams or AIOMetadata server:
   // its name, which adds "Also use it on their <server>" - the picture is
@@ -55,6 +56,7 @@ export function AvatarPickerModal({
   currentAvatarUrl,
   currentColorIndex,
   onSave,
+  onUpload,
   nuvioCoversUserId,
   title = 'Change Avatar',
   previewShape = 'circle',
@@ -201,7 +203,7 @@ export function AvatarPickerModal({
     if (!file) return;
     setIsUploading(true);
     try {
-      const result = await api.uploadAvatar(file);
+      const result = await (onUpload ? onUpload(file) : api.uploadAvatar(file));
       setPreviewUrl(result.url);
       setUrlInput(result.url);
       toast.success('Image uploaded — click Save to apply it');

@@ -44,7 +44,7 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new UserApiError(error.message || `HTTP ${response.status}`, response.status);
+    throw new UserApiError(error.message || error.error || `HTTP ${response.status}`, response.status);
   }
 
   return response.json();
@@ -56,6 +56,7 @@ export interface UserInfo {
   username: string;
   email: string;
   colorIndex?: number;
+  avatarUrl?: string | null;
   /** They switched Gravatar on, so their avatar may look their email up there. */
   useGravatar?: boolean;
   activityVisibility: 'public' | 'private';
@@ -480,6 +481,18 @@ export const userAuth = {
   /**
    * Get current user's info
    */
+  async updateProfile(userId: string, authKey: string, data: { avatarUrl?: string | null; colorIndex?: number }) {
+    return request('/public-library/user-settings', { method: 'PATCH', body: JSON.stringify({ userId, ...data }), authKey });
+  },
+
+  async uploadAvatar(userId: string, authKey: string, file: File): Promise<{ url: string }> {
+    const form = new FormData();
+    form.append('avatar', file);
+    const response = await fetch(`${API_BASE}/public-library/avatars/upload?${new URLSearchParams({ userId })}`, { method: 'POST', headers: { 'x-stremio-auth': authKey }, body: form });
+    if (!response.ok) throw new Error('Could not upload your picture');
+    return response.json();
+  },
+
   async getUserInfo(userId: string, authKey?: string): Promise<UserInfo> {
     const params = new URLSearchParams({ userId });
     return request(`/public-library/user-info?${params.toString()}`, { authKey });

@@ -166,3 +166,24 @@ test('a person can choose their own avatar but cannot change someone else or pro
   assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', avatarUrl: 'javascript:bad' }, headers)).status, 400)
   assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', colorIndex: -1 }, headers)).status, 400)
 })
+
+test('personal uploads verify identity before parsing files and expose no deletion route', async (t) => {
+  const db = fakeDb()
+  let parsed = 0
+  const call = await serve(t, app => {
+    app.use('/api/public-library', makePublicLibraryRouter({
+      prisma: db, DEFAULT_ACCOUNT_ID: 'default', encrypt: v => v, decrypt: v => v,
+      getCachedLibrary: () => [], setCachedLibrary: () => {}, JWT_SECRET: SECRET,
+      imageUpload: { single: () => (_req, _res, next) => { parsed++; next() } },
+    }))
+  })
+  const path = '/api/public-library/avatars/upload?userId=j1'
+  assert.equal((await call('POST', path, {})).status, 401)
+  assert.equal(parsed, 0)
+  assert.equal((await call('POST', path, {}, { 'x-stremio-auth': sessionFor('someone-else') })).status, 401)
+  assert.equal(parsed, 0)
+  // Authenticated, but no image was sent. The shared upload handler rejects it.
+  assert.equal((await call('POST', path, {}, { 'x-stremio-auth': sessionFor('j1') })).status, 400)
+  assert.equal(parsed, 1)
+  assert.equal((await call('DELETE', '/api/public-library/avatars/example.png', {}, { 'x-stremio-auth': sessionFor('j1') })).status, 404)
+})

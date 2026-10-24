@@ -202,6 +202,7 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
             userInfo ? (
               <Avatar
                 name={userInfo.username || 'U'}
+                src={userInfo.avatarUrl || undefined}
                 email={userInfo.email || undefined}
                 useGravatar={userInfo.useGravatar}
                 colorIndex={userInfo.colorIndex || 0}
