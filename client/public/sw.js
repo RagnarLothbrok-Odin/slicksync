@@ -26,7 +26,7 @@
 // WRONG, but a navigation served from the pages cache (which only happens
 // when the network is slow) hands back HTML that points at an older build's
 // hashes - and those are cached forever. One bump clears that out.
-const STATIC_CACHE = 'slicksync-static-v2';
+const STATIC_CACHE = 'slicksync-static-v3';
 const PAGES_CACHE = 'slicksync-pages-v2';
 // Resized posters and avatars from this instance's own image cache. Their
 // URLs are stable and the responses immutable, so cache-first is safe; the
@@ -36,6 +36,10 @@ const PAGES_CACHE = 'slicksync-pages-v2';
 const IMAGE_CACHE = 'slicksync-images-v1';
 const IMAGE_CACHE_MAX = 900;
 let imagePutsSinceTrim = 0;
+// Development chunks reuse URLs as their contents change. Cache-first is
+// only safe for production's content-hashed files.
+const DEVELOPMENT = new URL(self.location.href).searchParams.has('development') ||
+  ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -46,7 +50,7 @@ self.addEventListener('activate', (event) => {
     // Drop caches from older worker versions, then take over open tabs so
     // caching starts without waiting for the next full reload.
     const names = await caches.keys();
-    await Promise.all(names.filter((n) => n !== STATIC_CACHE && n !== PAGES_CACHE && n !== IMAGE_CACHE).map((n) => caches.delete(n)));
+    await Promise.all(names.filter((n) => DEVELOPMENT ? n.startsWith('slicksync-') : n !== STATIC_CACHE && n !== PAGES_CACHE && n !== IMAGE_CACHE).map((n) => caches.delete(n)));
     // Let the browser start a navigation's network request while this worker
     // is still waking up, instead of after. The navigate handler below picks
     // the preloaded response up when there is one.
@@ -56,6 +60,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  if (DEVELOPMENT) return;
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
