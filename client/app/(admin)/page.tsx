@@ -33,7 +33,6 @@ import {
   CheckCircleIcon,
   ExclamationCircleIcon,
   FireIcon,
-  PlayIcon,
 } from '@heroicons/react/24/outline';
 import dynamic from 'next/dynamic';
 import type { SyncStatusData } from '@/components/admin/SyncActivityChart';

@@ -17,6 +17,7 @@ import {
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
 import { Avatar } from '@/components/ui';
+import { PersonalContinueWatching } from '@/components/user/PersonalContinueWatching';
 import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
 import { userActivity, userSync, UserActivityData, AtRiskStatus, getOwnScreenTime } from '@/lib/user-api';
 import { MoonIcon as PausedMoonIcon, PauseCircleIcon as PausedIcon } from '@heroicons/react/24/outline';
@@ -376,6 +377,8 @@ export default function UserHomePage() {
           </p>
         </div>
       )}
+
+      <PersonalContinueWatching />
 
       {/* Stats Grid */}
       {!loading && !error && stats && (
