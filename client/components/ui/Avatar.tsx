@@ -207,6 +207,7 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
 
   const [gravatarSrc, setGravatarSrc] = useState<string | undefined>(undefined);
   const [imageError, setImageError] = useState(false);
+  const [generatedError, setGeneratedError] = useState(false);
 
   useEffect(() => {
     // Without the person's say-so nothing is sent to Gravatar at all.
@@ -221,11 +222,19 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
   }, [email, useGravatar]);
 
   // Small sizes render a static, resized copy - see avatarThumbUrl.
-  const finalSrc = src ? avatarThumbUrl(src, size) : gravatarSrc;
+  const primarySrc = src ? avatarThumbUrl(src, size) : gravatarSrc;
+  // Hash the identity locally so the public avatar service never receives
+  // names or email addresses. A fixed style version keeps defaults stable.
+  const seed = md5(`slicksync-avatar:${email?.trim().toLowerCase() || ''}:${name.trim().toLowerCase()}`).toString();
+  const generatedSrc = fallbackIcon ? undefined : `https://api.dicebear.com/10.x/notionists/svg?seed=${seed}`;
+  const finalSrc = imageError ? generatedSrc : (primarySrc || generatedSrc);
+  const showImage = !!finalSrc && !(finalSrc === generatedSrc && generatedError);
+  const isGenerated = finalSrc === generatedSrc;
 
   useEffect(() => {
     setImageError(false);
-  }, [finalSrc]);
+    setGeneratedError(false);
+  }, [primarySrc, generatedSrc]);
 
   return (
     <div className={clsx("relative inline-flex rounded-full", sizes[size], className)}>
@@ -235,7 +244,7 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
           background they already rewrote on an element, so a group set to
           red stayed purple on its own page while the list showed red. */}
       <motion.div
-        key={finalSrc && !imageError ? 'picture' : style.gradient}
+        key={showImage ? 'picture' : style.gradient}
         whileHover={{ scale: 1.05 }}
         className={clsx(
           'relative rounded-full overflow-hidden flex items-center justify-center font-semibold w-full h-full',
@@ -243,7 +252,7 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
           avatarClassName
         )}
         style={{
-          background: finalSrc && !imageError ? undefined : style.gradient,
+          background: showImage && !isGenerated ? undefined : style.gradient,
           color: 'white',
           textShadow: '0 1px 2px rgba(0,0,0,0.3)',
           boxShadow: showRing
@@ -251,17 +260,19 @@ export function Avatar({ name, src, email, useGravatar = false, size = 'md', sho
             : '0 0 0 2px var(--color-surface-border)'
         }}
       >
-        {finalSrc && !imageError ? (
+        {showImage ? (
           <img 
             src={finalSrc} 
             alt={name} 
             className={clsx("w-full h-full object-cover", imgClassName)}
             loading="lazy"
             decoding="async"
+            referrerPolicy="no-referrer"
             role="img"
             onError={() => {
-              console.warn(`[Avatar] Failed to load image, falling back to initials: ${finalSrc}`);
-              setImageError(true);
+              console.warn('[Avatar] Failed to load image, using the next fallback');
+              if (isGenerated) setGeneratedError(true);
+              else setImageError(true);
             }}
           />
         ) : fallbackIcon ? (

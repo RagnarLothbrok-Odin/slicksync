@@ -422,7 +422,7 @@ export function AvatarPickerModal({
           <div>
             <div className="mb-4"><AvatarColorSwatches value={selectedColor} onChange={setSelectedColor} /></div>
             <Button variant="primary" className="w-full" onClick={handleSaveColor} isLoading={isSaving}>
-              Use Color Avatar
+              {previewShape === 'circle' ? 'Use Default Avatar' : 'Use Color Cover'}
             </Button>
           </div>
         )}
