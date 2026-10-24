@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement to SlickSync.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Describe one main improvement per request and check existing issues first. Keep account details and credentials private.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you are trying to do and what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested behavior
+      description: Explain how you would expect the feature to work in SlickSync.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected integrations
+      multiple: true
+      options:
+        - Nuvio
+        - Stremio
+        - Jellyfin
+        - AIOStreams
+        - AIOMetadata
+        - Another addon or service
+        - No integration / interface only
+        - Not sure
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or current workaround
+      description: Include existing settings or tools you have tried, if any.
+  - type: textarea
+    id: context
+    attributes:
+      label: Examples or additional context
+      description: Include relevant screenshots, mockups, or links. Mention instance-mode or device constraints if they matter to the request.
