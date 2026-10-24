@@ -3469,6 +3469,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
+  router.use('/personal', require('./portalFeatures')({ prisma, personAsking, decrypt, createProvider }));
+
   return router;
 };
 

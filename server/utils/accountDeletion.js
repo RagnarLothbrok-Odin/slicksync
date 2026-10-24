@@ -16,7 +16,7 @@ const PERSON_TABLES = [
   'nuvioCollectionsSnapshot', 'nuvioHomeLayoutSnapshot', 'personPushSubscription', 'proxyDeviceClaim',
   'proxyUserIpAffinity', 'streamGateWrap', 'userSyncGuardState', 'watchActivity', 'watchCopyRun',
   'watchSession', 'watchSnapshot', 'watchStateCursor', 'watchStateEvent', 'watchSyncMove', 'watchSyncSetting',
-  'userProviderCredential',
+  'userProviderCredential', 'personalTitleState',
 ]
 
 // Every table scoped to an account (an accountId column), children first;
@@ -27,7 +27,7 @@ const ACCOUNT_TABLES = [
   'episodeWatchHistory', 'followedSubject', 'inviteRequest', 'jellyfinProfile', 'manualWatchOverride',
   'movieWatchHistory', 'mutedShow', 'notInterestedItem', 'notification', 'notificationDigestEntry',
   'nuvioCollectionsSnapshot', 'nuvioHomeLayoutSnapshot', 'nuvioProfileRoute', 'passkey', 'personPushSubscription',
-  'profileMerge', 'proxyDeviceClaim', 'proxyStreamSession', 'proxyUserIpAffinity', 'pushSubscription',
+  'personalTitleState', 'profileMerge', 'proxyDeviceClaim', 'proxyStreamSession', 'proxyUserIpAffinity', 'pushSubscription',
   'showEpisodeAlertState', 'streamGateWrap', 'titleRating', 'titleReaction', 'trashItem', 'userSyncGuardState',
   'vaultEntry', 'watchActivity', 'watchCopyRun', 'watchSession', 'watchSnapshot', 'watchStateCursor',
   'watchStateEvent', 'watchSyncMove', 'watchSyncSetting', 'watchTogetherShow', 'watchlistItem',
