@@ -9,7 +9,7 @@ import {
     TrashIcon,
     XCircleIcon,
 } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Badge, Button, Card, ConfirmModal, Modal, ToggleSwitch } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import type {
@@ -589,6 +589,9 @@ function RuleEditorModal({
     onClose: () => void;
     onSaved: (rule: AutomationRule) => void;
 }) {
+    const groupLabelId1 = useId();
+    const repeatedFieldId1 = useId();
+    const fieldId1 = useId();
     const [name, setName] = useState(rule?.name || prefill?.name || "");
     const [triggerType, setTriggerType] = useState(
         rule?.triggerType || prefill?.triggerType || registry.triggers[0]?.type || ""
@@ -663,9 +666,15 @@ function RuleEditorModal({
         <Modal isOpen onClose={onClose} size="lg" title={rule ? "Edit Rule" : "New Rule"}>
             <div className="space-y-5">
                 <div>
-                    <label className="mb-2 block font-medium text-muted text-sm">Name</label>
+                    <label
+                        className="mb-2 block font-medium text-muted text-sm"
+                        htmlFor={`${fieldId1}-1`}
+                    >
+                        Name
+                    </label>
                     <input
                         className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                        id={`${fieldId1}-1`}
                         onChange={(e) => setName(e.target.value)}
                         placeholder='e.g. "Notify me when a vault credential expires"'
                         style={{
@@ -701,9 +710,15 @@ function RuleEditorModal({
                 </div>
 
                 <div>
-                    <label className="mb-2 block font-medium text-muted text-sm">When</label>
+                    <label
+                        className="mb-2 block font-medium text-muted text-sm"
+                        htmlFor={`${fieldId1}-2`}
+                    >
+                        When
+                    </label>
                     <select
                         className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                        id={`${fieldId1}-2`}
                         onChange={(e) => handleTriggerChange(e.target.value)}
                         style={{
                             background: "var(--color-surface-hover)",
@@ -732,11 +747,15 @@ function RuleEditorModal({
                                 .filter((f) => f.type !== "weekdays")
                                 .map((field) => (
                                     <div className="flex-1" key={field.name}>
-                                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-1.5 block font-medium text-muted text-xs"
+                                            htmlFor={`${repeatedFieldId1}-1-${field.name}`}
+                                        >
                                             {field.label}
                                         </label>
                                         <input
                                             className="w-full rounded-xl px-4 py-2.5 focus:outline-none"
+                                            id={`${repeatedFieldId1}-1-${field.name}`}
                                             onChange={(e) =>
                                                 setTriggerConfig({
                                                     ...triggerConfig,
@@ -778,10 +797,17 @@ function RuleEditorModal({
                                     setTriggerConfig({ ...triggerConfig, [field.name]: next });
                                 };
                                 return (
-                                    <div key={field.name}>
-                                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                                    <fieldset
+                                        aria-labelledby={`${groupLabelId1}-1-${field.name}`}
+                                        className="mx-0 min-w-0 border-0 p-0"
+                                        key={field.name}
+                                    >
+                                        <p
+                                            className="mb-1.5 block font-medium text-muted text-xs"
+                                            id={`${groupLabelId1}-1-${field.name}`}
+                                        >
                                             {field.label}
-                                        </label>
+                                        </p>
                                         <div className="flex flex-wrap gap-1.5">
                                             {WEEKDAY_LABELS.map((label, day) => {
                                                 const on = selected.includes(day);
@@ -807,7 +833,7 @@ function RuleEditorModal({
                                                       .join(", ") +
                                                   " only."}
                                         </p>
-                                    </div>
+                                    </fieldset>
                                 );
                             })}
                     </div>
@@ -848,6 +874,7 @@ function ConditionBuilder({
     conditions: AutomationCondition[];
     onChange: (next: AutomationCondition[]) => void;
 }) {
+    const groupLabelId2 = useId();
     const addCondition = () => {
         const field = trigger.fields[0];
         if (!field) {
@@ -864,10 +891,13 @@ function ConditionBuilder({
 
     return (
         <div>
-            <div className="mb-2 flex items-center justify-between">
-                <label className="font-medium text-muted text-sm">
+            <fieldset
+                aria-labelledby={`${groupLabelId2}-2`}
+                className="mx-0 mb-2 flex min-w-0 items-center justify-between border-0 p-0"
+            >
+                <p className="font-medium text-muted text-sm" id={`${groupLabelId2}-2`}>
                     Only when (optional - leave empty and it runs every time)
-                </label>
+                </p>
                 <Button
                     leftIcon={<PlusIcon className="h-3.5 w-3.5" />}
                     onClick={addCondition}
@@ -876,7 +906,7 @@ function ConditionBuilder({
                 >
                     Add condition
                 </Button>
-            </div>
+            </fieldset>
             {conditions.length === 0 ? (
                 <p className="text-subtle text-xs">
                     No conditions - this rule runs every time the trigger fires.
@@ -964,6 +994,7 @@ function ActionBuilder({
     actions: AutomationActionConfig[];
     onChange: (next: AutomationActionConfig[]) => void;
 }) {
+    const accessibleFieldId1 = useId();
     const addAction = () => {
         const first = registry.actions[0];
         if (!first) {
@@ -981,7 +1012,12 @@ function ActionBuilder({
     return (
         <div>
             <div className="mb-2 flex items-center justify-between">
-                <label className="font-medium text-muted text-sm">Then do this</label>
+                <label
+                    className="font-medium text-muted text-sm"
+                    htmlFor={`${accessibleFieldId1}-4`}
+                >
+                    Then do this
+                </label>
                 <Button
                     leftIcon={<PlusIcon className="h-3.5 w-3.5" />}
                     onClick={addAction}
@@ -999,6 +1035,7 @@ function ActionBuilder({
                             <div className="flex items-center gap-2">
                                 <select
                                     className="flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                                    id={`${accessibleFieldId1}-4`}
                                     onChange={(e) =>
                                         updateAction(i, { config: {}, type: e.target.value })
                                     }

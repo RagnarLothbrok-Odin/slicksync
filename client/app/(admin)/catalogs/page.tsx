@@ -14,7 +14,7 @@ import {
 import { MapPinIcon as MapPinIconSolid, PlayIcon } from "@heroicons/react/24/solid";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { JellyfinLogo } from "@/components/jellyfin/JellyfinLogo";
 import { Breadcrumbs, Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
@@ -54,6 +54,7 @@ function coverColorStyle(colorIndex: number): React.CSSProperties {
 // title's detail modal elsewhere.
 
 export default function ListsPage() {
+    const fieldId1 = useId();
     const { layoutMode } = useLayoutMode();
     const router = useRouter();
     const [lists, setLists] = useState<CustomList[]>([]);
@@ -880,12 +881,16 @@ export default function ListsPage() {
             >
                 <div className="space-y-4">
                     <div>
-                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                        <label
+                            className="mb-1.5 block font-medium text-muted text-xs"
+                            htmlFor={`${fieldId1}-1`}
+                        >
                             Catalog URL
                         </label>
                         <input
                             autoFocus
                             className="w-full rounded-lg border border-transparent bg-surface-hover px-3 py-2 text-default text-sm focus:border-primary focus:outline-none"
+                            id={`${fieldId1}-1`}
                             onChange={(e) => setImportUrl(e.target.value)}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter") {
@@ -912,11 +917,15 @@ export default function ListsPage() {
 
                     {simklUsers.length > 0 && (
                         <div>
-                            <label className="mb-1.5 block font-medium text-muted text-xs">
+                            <label
+                                className="mb-1.5 block font-medium text-muted text-xs"
+                                htmlFor={`${fieldId1}-2`}
+                            >
                                 Or import from SIMKL
                             </label>
                             <select
                                 className="w-full rounded-lg border border-transparent bg-surface-hover px-3 py-2 text-default text-sm focus:border-primary focus:outline-none"
+                                id={`${fieldId1}-2`}
                                 onChange={(e) => setSelectedSimklUserId(e.target.value)}
                                 value={selectedSimklUserId}
                             >
@@ -935,7 +944,10 @@ export default function ListsPage() {
                     )}
 
                     <div>
-                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                        <label
+                            className="mb-1.5 block font-medium text-muted text-xs"
+                            htmlFor={`${fieldId1}-3`}
+                        >
                             Name{" "}
                             <span className="font-normal text-subtle">
                                 (optional — uses the source&apos;s name if blank)
@@ -943,6 +955,7 @@ export default function ListsPage() {
                         </label>
                         <input
                             className="w-full rounded-lg border border-transparent bg-surface-hover px-3 py-2 text-default text-sm focus:border-primary focus:outline-none"
+                            id={`${fieldId1}-3`}
                             onChange={(e) => setImportName(e.target.value)}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter") {

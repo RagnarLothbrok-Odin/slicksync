@@ -26,7 +26,7 @@ import {
     UserCircleIcon,
     XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
 import { PageSection } from "@/components/layout/PageContainer";
@@ -517,6 +517,9 @@ const SETTINGS_TABS_BY_SECTION: Record<string, SettingsTab> = {
 };
 
 export default function SettingsPage() {
+    const groupLabelId1 = useId();
+    const accessibleFieldId1 = useId();
+    const fieldId1 = useId();
     // Theme picking + the theme builder now live on their own page (Themes) —
     // only the sensitive-data toggle from useTheme() is still needed here.
     const { hideSensitive, toggleHideSensitive } = useTheme();
@@ -1569,7 +1572,10 @@ export default function SettingsPage() {
                                             >
                                                 {isPublicInstance && (
                                                     <div className="mt-5 border-default border-t pt-5">
-                                                        <label className="mb-1.5 block font-medium text-default text-sm">
+                                                        <label
+                                                            className="mb-1.5 block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-1`}
+                                                        >
                                                             Nickname
                                                         </label>
                                                         <p className="mb-2 text-muted text-xs">
@@ -1582,6 +1588,7 @@ export default function SettingsPage() {
                                                             <input
                                                                 autoComplete="off"
                                                                 className="input-base w-full px-3 py-2 text-sm"
+                                                                id={`${accessibleFieldId1}-1`}
                                                                 maxLength={60}
                                                                 onBlur={handleSaveDisplayName}
                                                                 onChange={(e) =>
@@ -1712,11 +1719,15 @@ export default function SettingsPage() {
                                                 </SettingRow>
 
                                                 <div className="rounded-lg bg-subtle p-4">
-                                                    <label className="mb-2 block font-medium text-default text-sm">
+                                                    <label
+                                                        className="mb-2 block font-medium text-default text-sm"
+                                                        htmlFor={`${fieldId1}-2`}
+                                                    >
                                                         Timezone
                                                     </label>
                                                     <select
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${fieldId1}-2`}
                                                         onChange={(e) =>
                                                             handleSaveSetting(
                                                                 "accountTimezone",
@@ -1844,25 +1855,35 @@ export default function SettingsPage() {
                                                 {/* Phone / desktop push - separate from Discord: install
                   SlickSync as an app and get new-episode alerts as native
                   notifications, even when it's closed. Per-device. */}
-                                                <div>
-                                                    <label className="mb-1 block font-medium text-default text-sm">
+                                                <fieldset
+                                                    aria-labelledby={`${groupLabelId1}-1`}
+                                                    className="mx-0 min-w-0 border-0 p-0"
+                                                >
+                                                    <p
+                                                        className="mb-1 block font-medium text-default text-sm"
+                                                        id={`${groupLabelId1}-1`}
+                                                    >
                                                         Phone notifications (PWA)
-                                                    </label>
+                                                    </p>
                                                     <p className="mb-3 text-muted text-xs">
                                                         Install SlickSync to your home screen, then
                                                         enable native new-episode notifications on
                                                         this device.
                                                     </p>
                                                     <PushNotificationToggle />
-                                                </div>
+                                                </fieldset>
 
                                                 <div className="border-default border-t pt-4">
-                                                    <label className="mb-2 block font-medium text-default text-sm">
+                                                    <label
+                                                        className="mb-2 block font-medium text-default text-sm"
+                                                        htmlFor={`${fieldId1}-4`}
+                                                    >
                                                         Webhook URL
                                                     </label>
                                                     <div className="flex gap-2">
                                                         <input
                                                             className="input-base flex-1 px-3 py-2 text-sm"
+                                                            id={`${fieldId1}-4`}
                                                             onBlur={() =>
                                                                 handleSaveSetting(
                                                                     "webhookUrl",
@@ -2183,7 +2204,10 @@ export default function SettingsPage() {
                   shelf instead of another settings list. */}
                                                 {pushDevices.length > 0 && (
                                                     <div className="border-default border-t pt-4">
-                                                        <label className="mb-1 block font-medium text-default text-sm">
+                                                        <label
+                                                            className="mb-1 block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-3`}
+                                                        >
                                                             Devices
                                                         </label>
                                                         <p className="mb-3 text-muted text-xs">
@@ -2252,6 +2276,7 @@ export default function SettingsPage() {
                                                                                 <input
                                                                                     autoFocus
                                                                                     className="input-base w-full px-2 py-1 text-xs"
+                                                                                    id={`${accessibleFieldId1}-3`}
                                                                                     onChange={(e) =>
                                                                                         setEditingLabel(
                                                                                             e.target
@@ -2659,7 +2684,10 @@ export default function SettingsPage() {
                                                     }}
                                                 >
                                                     <div className="mb-1.5 flex items-center justify-between">
-                                                        <label className="block font-medium text-default text-sm">
+                                                        <label
+                                                            className="block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-4`}
+                                                        >
                                                             AI Services{" "}
                                                             <span className="font-normal text-subtle">
                                                                 (optional)
@@ -2760,6 +2788,7 @@ export default function SettingsPage() {
                                                             <input
                                                                 autoComplete="off"
                                                                 className="input-base w-full px-3 py-2 pr-10 text-sm"
+                                                                id={`${accessibleFieldId1}-4`}
                                                                 onBlur={handleAiFieldBlur}
                                                                 onChange={(e) =>
                                                                     setAiApiKey(e.target.value)
@@ -2862,7 +2891,10 @@ export default function SettingsPage() {
                   same pattern as the webhook URL above. */}
                                                 <div>
                                                     <div className="mb-1.5 flex items-center justify-between">
-                                                        <label className="block font-medium text-default text-sm">
+                                                        <label
+                                                            className="block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-5`}
+                                                        >
                                                             TMDb API key{" "}
                                                             <span className="font-normal text-subtle">
                                                                 (optional)
@@ -2890,6 +2922,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-5`}
                                                         onBlur={async () => {
                                                             await handleSaveSetting(
                                                                 "tmdbApiKey" as keyof SyncSettings,
@@ -2949,7 +2982,10 @@ export default function SettingsPage() {
                   optional-text-field pattern as the TMDb key above. */}
                                                 <div className="pt-1">
                                                     <div className="mb-1.5 flex items-center justify-between">
-                                                        <label className="block font-medium text-default text-sm">
+                                                        <label
+                                                            className="block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-6`}
+                                                        >
                                                             MDBList API key{" "}
                                                             <span className="font-normal text-subtle">
                                                                 (optional)
@@ -2977,6 +3013,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-6`}
                                                         onBlur={async () => {
                                                             await handleSaveSetting(
                                                                 "mdblistApiKey" as keyof SyncSettings,
@@ -3039,7 +3076,10 @@ export default function SettingsPage() {
                   customizable badge styles - plenty for this purpose. */}
                                                 <div className="pt-1">
                                                     <div className="mb-1.5 flex items-center justify-between">
-                                                        <label className="block font-medium text-default text-sm">
+                                                        <label
+                                                            className="block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-7`}
+                                                        >
                                                             RPDB API key{" "}
                                                             <span className="font-normal text-subtle">
                                                                 (optional)
@@ -3068,6 +3108,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-7`}
                                                         onBlur={async () => {
                                                             await handleSaveSetting(
                                                                 "rpdbApiKey" as keyof SyncSettings,
@@ -3129,7 +3170,10 @@ export default function SettingsPage() {
                   else on the instance. */}
                                                 <div className="pt-1">
                                                     <div className="mb-1.5 flex items-center justify-between">
-                                                        <label className="block font-medium text-default text-sm">
+                                                        <label
+                                                            className="block font-medium text-default text-sm"
+                                                            htmlFor={`${accessibleFieldId1}-8`}
+                                                        >
                                                             OMDb API key{" "}
                                                             <span className="font-normal text-subtle">
                                                                 (optional)
@@ -3159,6 +3203,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-8`}
                                                         onBlur={async () => {
                                                             await handleSaveSetting(
                                                                 "omdbApiKey" as keyof SyncSettings,
@@ -3366,7 +3411,10 @@ export default function SettingsPage() {
                   keys above so this account isn't dependent on whatever the
                   server operator did or didn't configure in .env. */}
                                                 <div className="pt-1">
-                                                    <label className="mb-1.5 block font-medium text-default text-sm">
+                                                    <label
+                                                        className="mb-1.5 block font-medium text-default text-sm"
+                                                        htmlFor={`${accessibleFieldId1}-9`}
+                                                    >
                                                         SIMKL Client ID{" "}
                                                         <span className="font-normal text-subtle">
                                                             (optional)
@@ -3398,6 +3446,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-9`}
                                                         onBlur={() =>
                                                             handleSaveSetting(
                                                                 "simklClientId" as keyof SyncSettings,
@@ -3422,7 +3471,10 @@ export default function SettingsPage() {
                   free account to one connected app, so connecting SlickSync
                   would evict whatever Trakt app someone already uses. */}
                                                 <div className="pt-1">
-                                                    <label className="mb-1.5 block font-medium text-default text-sm">
+                                                    <label
+                                                        className="mb-1.5 block font-medium text-default text-sm"
+                                                        htmlFor={`${accessibleFieldId1}-10`}
+                                                    >
                                                         Trakt Client ID{" "}
                                                         <span className="font-normal text-subtle">
                                                             (optional)
@@ -3450,6 +3502,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-10`}
                                                         onBlur={() =>
                                                             handleSaveSetting(
                                                                 "traktClientId" as keyof SyncSettings,
@@ -3476,7 +3529,10 @@ export default function SettingsPage() {
                   "MyAnimeList refuses to connect", so a key that works beats
                   no key that does not. */}
                                                 <div className="pt-1">
-                                                    <label className="mb-1.5 block font-medium text-default text-sm">
+                                                    <label
+                                                        className="mb-1.5 block font-medium text-default text-sm"
+                                                        htmlFor={`${accessibleFieldId1}-11`}
+                                                    >
                                                         MyAnimeList Client ID{" "}
                                                         <span className="font-normal text-subtle">
                                                             (optional)
@@ -3504,6 +3560,7 @@ export default function SettingsPage() {
                                                     <input
                                                         autoComplete="off"
                                                         className="input-base w-full px-3 py-2 text-sm"
+                                                        id={`${accessibleFieldId1}-11`}
                                                         onBlur={() =>
                                                             handleSaveSetting(
                                                                 "malClientId" as keyof SyncSettings,
@@ -3528,7 +3585,10 @@ export default function SettingsPage() {
                   integration that could ONLY be set instance-wide via env
                   vars, needing a container restart to change. */}
                                                 <div className="pt-1">
-                                                    <label className="mb-1.5 block font-medium text-default text-sm">
+                                                    <label
+                                                        className="mb-1.5 block font-medium text-default text-sm"
+                                                        htmlFor={`${fieldId1}-nuvio-backend`}
+                                                    >
                                                         Nuvio backend URL{" "}
                                                         <span className="font-normal text-subtle">
                                                             (optional)
@@ -3556,6 +3616,7 @@ export default function SettingsPage() {
                                                         <input
                                                             autoComplete="off"
                                                             className="input-base min-w-0 flex-1 px-3 py-2 text-sm"
+                                                            id={`${fieldId1}-nuvio-backend`}
                                                             onBlur={() =>
                                                                 handleSaveSetting(
                                                                     "nuvioServerUrl" as keyof SyncSettings,
@@ -3686,10 +3747,16 @@ export default function SettingsPage() {
                                             </div>
 
                                             <div className="space-y-4">
-                                                <div>
-                                                    <label className="mb-2 block font-medium text-default text-sm">
+                                                <fieldset
+                                                    aria-labelledby={`${groupLabelId1}-2`}
+                                                    className="mx-0 min-w-0 border-0 p-0"
+                                                >
+                                                    <p
+                                                        className="mb-2 block font-medium text-default text-sm"
+                                                        id={`${groupLabelId1}-2`}
+                                                    >
                                                         Your API Key
-                                                    </label>
+                                                    </p>
                                                     <div className="flex gap-2">
                                                         <div className="flex flex-1 items-center gap-2 rounded-lg border border-default bg-subtle px-3 py-2">
                                                             <code className="flex-1 truncate font-mono text-muted text-sm">
@@ -3750,7 +3817,7 @@ export default function SettingsPage() {
                                                         Interactive API docs
                                                         <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
                                                     </a>
-                                                </div>
+                                                </fieldset>
 
                                                 {/* This key is account-level (this admin console) - a
                   genuinely different key from the per-user one Scrobbling
@@ -3937,13 +4004,17 @@ export default function SettingsPage() {
                                                         </div>
                                                     </div>
                                                     <div>
-                                                        <label className="mb-1.5 block font-medium text-default text-sm">
+                                                        <label
+                                                            className="mb-1.5 block font-medium text-default text-sm"
+                                                            htmlFor={`${fieldId1}-16`}
+                                                        >
                                                             Enter the 6-digit code it shows
                                                         </label>
                                                         <div className="flex gap-2">
                                                             <input
                                                                 autoFocus
                                                                 className="input-base w-32 px-3 py-2 font-mono text-sm tracking-widest"
+                                                                id={`${fieldId1}-16`}
                                                                 inputMode="numeric"
                                                                 onChange={(e) =>
                                                                     setTwoFaSetupCode(

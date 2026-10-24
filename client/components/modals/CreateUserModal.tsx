@@ -10,7 +10,7 @@ import {
     XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import JellyfinSignIn, {
     type JellyfinCredentials,
     type JellyfinServerInfo,
@@ -42,6 +42,7 @@ export function CreateUserModal({
     /** The provider of the user being reconnected; a Jellyfin login reconnects through its own sign-in. */
     providerType?: string;
 }) {
+    const fieldId1 = useId();
     const isReconnect = mode === "reconnect";
     const isJellyfinReconnect = isReconnect && providerType === "jellyfin";
     // A Nuvio person signs in to Nuvio again - never offered Stremio's options.
@@ -863,6 +864,7 @@ export function CreateUserModal({
                                                             <div>
                                                                 <label
                                                                     className="mb-2 block font-medium text-sm"
+                                                                    htmlFor={`${fieldId1}-1`}
                                                                     style={{
                                                                         color: "var(--color-text)",
                                                                     }}
@@ -871,6 +873,7 @@ export function CreateUserModal({
                                                                 </label>
                                                                 <input
                                                                     className="w-full rounded-xl px-4 py-3 text-sm"
+                                                                    id={`${fieldId1}-1`}
                                                                     onChange={(e) =>
                                                                         setJellyfinDisplayName(
                                                                             e.target.value
@@ -1113,6 +1116,7 @@ export function CreateUserModal({
                                                                             <div>
                                                                                 <label
                                                                                     className="mb-2 block font-medium text-sm"
+                                                                                    htmlFor={`${fieldId1}-2`}
                                                                                     style={{
                                                                                         color: "var(--color-text-muted)",
                                                                                     }}
@@ -1122,6 +1126,7 @@ export function CreateUserModal({
                                                                                 </label>
                                                                                 <input
                                                                                     className="w-full rounded-xl px-4 py-3 transition-all duration-200 focus:outline-none"
+                                                                                    id={`${fieldId1}-2`}
                                                                                     onChange={(e) =>
                                                                                         setUsername(
                                                                                             e.target
@@ -1147,6 +1152,7 @@ export function CreateUserModal({
                                                                                 <div>
                                                                                     <label
                                                                                         className="mb-2 block font-medium text-sm"
+                                                                                        htmlFor={`${fieldId1}-3`}
                                                                                         style={{
                                                                                             color: "var(--color-text-muted)",
                                                                                         }}
@@ -1162,6 +1168,7 @@ export function CreateUserModal({
                                                                                     </label>
                                                                                     <input
                                                                                         className="w-full rounded-xl px-4 py-3 transition-all duration-200 focus:outline-none"
+                                                                                        id={`${fieldId1}-3`}
                                                                                         onChange={(
                                                                                             e
                                                                                         ) =>
@@ -1192,6 +1199,7 @@ export function CreateUserModal({
                                                                                 <div>
                                                                                     <label
                                                                                         className="mb-2 block font-medium text-sm"
+                                                                                        htmlFor={`${fieldId1}-4`}
                                                                                         style={{
                                                                                             color: "var(--color-text-muted)",
                                                                                         }}
@@ -1208,6 +1216,7 @@ export function CreateUserModal({
                                                                                     <div className="relative">
                                                                                         <input
                                                                                             className="w-full rounded-xl py-3 pr-12 pl-4 transition-all duration-200 focus:outline-none"
+                                                                                            id={`${fieldId1}-4`}
                                                                                             onChange={(
                                                                                                 e
                                                                                             ) =>
@@ -1294,6 +1303,7 @@ export function CreateUserModal({
                                                                             <div>
                                                                                 <label
                                                                                     className="mb-2 block font-medium text-sm"
+                                                                                    htmlFor={`${fieldId1}-5`}
                                                                                     style={{
                                                                                         color: "var(--color-text-muted)",
                                                                                     }}
@@ -1303,6 +1313,7 @@ export function CreateUserModal({
                                                                                 <div className="relative">
                                                                                     <input
                                                                                         className="w-full rounded-xl py-3 pr-12 pl-4 transition-all duration-200 focus:outline-none"
+                                                                                        id={`${fieldId1}-5`}
                                                                                         onChange={(
                                                                                             e
                                                                                         ) =>
@@ -1444,6 +1455,7 @@ export function CreateUserModal({
                                                                         <div>
                                                                             <label
                                                                                 className="mb-2 block font-medium text-sm"
+                                                                                htmlFor={`${fieldId1}-6`}
                                                                                 style={{
                                                                                     color: "var(--color-text-muted)",
                                                                                 }}
@@ -1452,6 +1464,7 @@ export function CreateUserModal({
                                                                             </label>
                                                                             <input
                                                                                 className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                                                                                id={`${fieldId1}-6`}
                                                                                 onChange={(e) =>
                                                                                     setUsername(
                                                                                         e.target
@@ -1473,6 +1486,7 @@ export function CreateUserModal({
                                                                     <div>
                                                                         <label
                                                                             className="mb-2 block font-medium text-sm"
+                                                                            htmlFor={`${fieldId1}-7`}
                                                                             style={{
                                                                                 color: "var(--color-text-muted)",
                                                                             }}
@@ -1488,6 +1502,7 @@ export function CreateUserModal({
                                                                         </label>
                                                                         <input
                                                                             className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                                                                            id={`${fieldId1}-7`}
                                                                             onChange={(e) =>
                                                                                 setNuvioEmail(
                                                                                     e.target.value
@@ -1507,6 +1522,7 @@ export function CreateUserModal({
                                                                     <div>
                                                                         <label
                                                                             className="mb-2 block font-medium text-sm"
+                                                                            htmlFor={`${fieldId1}-8`}
                                                                             style={{
                                                                                 color: "var(--color-text-muted)",
                                                                             }}
@@ -1523,6 +1539,7 @@ export function CreateUserModal({
                                                                         <div className="relative">
                                                                             <input
                                                                                 className="w-full rounded-xl py-3 pr-12 pl-4 focus:outline-none"
+                                                                                id={`${fieldId1}-8`}
                                                                                 onChange={(e) =>
                                                                                     setNuvioPassword(
                                                                                         e.target

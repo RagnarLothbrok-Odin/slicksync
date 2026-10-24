@@ -32,7 +32,7 @@ import {
     WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Children, isValidElement, useEffect, useRef, useState } from "react";
+import { Children, isValidElement, useEffect, useId, useRef, useState } from "react";
 import { AutomationPanel } from "@/components/automation/AutomationPanel";
 import { Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
@@ -135,6 +135,9 @@ function ActionButton({
 }
 
 export default function TasksPage() {
+    const groupLabelId1 = useId();
+    const accessibleFieldId1 = useId();
+    const fieldId1 = useId();
     const [taskCategory, setTaskCategory] = useState<"daily" | "data" | "backup" | "schedule">(
         "daily"
     );
@@ -2083,13 +2086,17 @@ export default function TasksPage() {
 
                                 <div className="space-y-3">
                                     <div>
-                                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-1.5 block font-medium text-muted text-xs"
+                                            htmlFor={`${fieldId1}-1`}
+                                        >
                                             Export
                                         </label>
                                         <div className="flex items-center gap-2">
                                             <div className="relative flex-1">
                                                 <input
                                                     className="input-base w-full px-3 py-2 pr-9 text-sm"
+                                                    id={`${fieldId1}-1`}
                                                     onChange={(e) =>
                                                         setDrkExportPassphrase(e.target.value)
                                                     }
@@ -2137,13 +2144,17 @@ export default function TasksPage() {
                                     </div>
 
                                     <div className="border-default border-t pt-3">
-                                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-1.5 block font-medium text-muted text-xs"
+                                            htmlFor={`${fieldId1}-2`}
+                                        >
                                             Restore
                                         </label>
                                         <div className="flex items-center gap-2">
                                             <div className="relative flex-1">
                                                 <input
                                                     className="input-base w-full px-3 py-2 pr-9 text-sm"
+                                                    id={`${fieldId1}-2`}
                                                     onChange={(e) =>
                                                         setDrkImportPassphrase(e.target.value)
                                                     }
@@ -2222,10 +2233,16 @@ export default function TasksPage() {
                                     </div>
                                 </div>
                                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                                    <div>
-                                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                                    <fieldset
+                                        aria-labelledby={`${groupLabelId1}-1`}
+                                        className="mx-0 min-w-0 border-0 p-0"
+                                    >
+                                        <p
+                                            className="mb-1.5 block font-medium text-muted text-xs"
+                                            id={`${groupLabelId1}-1`}
+                                        >
                                             This is the OLD server
-                                        </label>
+                                        </p>
                                         <p className="mb-2 text-subtle text-xs">
                                             Generate a code here, paste it on the new instance.
                                             Single-use, dies in 15 minutes, and the new server
@@ -2260,9 +2277,12 @@ export default function TasksPage() {
                                                 </Button>
                                             </div>
                                         )}
-                                    </div>
+                                    </fieldset>
                                     <div>
-                                        <label className="mb-1.5 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-1.5 block font-medium text-muted text-xs"
+                                            htmlFor={`${accessibleFieldId1}-2`}
+                                        >
                                             This is the NEW server
                                         </label>
                                         <p className="mb-2 text-subtle text-xs">
@@ -2273,6 +2293,7 @@ export default function TasksPage() {
                                             <input
                                                 autoComplete="off"
                                                 className="input-base flex-1 px-3 py-2 font-mono text-sm"
+                                                id={`${accessibleFieldId1}-2`}
                                                 onChange={(e) => setReceiveCode(e.target.value)}
                                                 placeholder="slickmig1.…"
                                                 spellCheck={false}
@@ -2929,6 +2950,7 @@ export default function TasksPage() {
                     <div>
                         <label
                             className="mb-2 block font-medium text-sm"
+                            htmlFor={`${accessibleFieldId1}-4`}
                             style={{ color: "var(--color-text-muted)" }}
                         >
                             Source
@@ -2959,6 +2981,7 @@ export default function TasksPage() {
                         </div>
                         <select
                             className="input-base w-full px-3 py-2 text-sm"
+                            id={`${accessibleFieldId1}-4`}
                             onChange={(e) => setNewSnapshotSourceId(e.target.value)}
                             value={newSnapshotSourceId}
                         >
@@ -3008,12 +3031,14 @@ export default function TasksPage() {
                     <div>
                         <label
                             className="mb-2 block font-medium text-sm"
+                            htmlFor={`${fieldId1}-7`}
                             style={{ color: "var(--color-text-muted)" }}
                         >
                             Target User
                         </label>
                         <select
                             className="input-base w-full px-3 py-2 text-sm"
+                            id={`${fieldId1}-7`}
                             onChange={(e) => setDeployTargetUserId(e.target.value)}
                             value={deployTargetUserId}
                         >

@@ -23,7 +23,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { AnimatePresence, motion } from "framer-motion";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { SmartRuleForm } from "@/components/catalogs/SmartRuleForm";
 import { Breadcrumbs, Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
@@ -275,6 +275,7 @@ type SortKey = (typeof SORT_OPTIONS)[number]["key"];
 // Individual titles inside still open the shared MediaDetailModal - that part
 // IS a quick preview, unlike the list itself.
 export default function ListDetailPage() {
+    const fieldId1 = useId();
     const { layoutMode } = useLayoutMode();
     const params = useParams();
     const router = useRouter();
@@ -1732,11 +1733,15 @@ export default function ListDetailPage() {
                             </p>
 
                             <div>
-                                <label className="mb-1.5 block font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1.5 block font-medium text-muted text-xs"
+                                    htmlFor={`${fieldId1}-1`}
+                                >
                                     Share link
                                 </label>
                                 <input
                                     className="w-full rounded-lg px-3 py-2 font-mono text-xs focus:outline-none"
+                                    id={`${fieldId1}-1`}
                                     onFocus={(e) => e.currentTarget.select()}
                                     readOnly
                                     style={{
@@ -1904,11 +1909,15 @@ export default function ListDetailPage() {
                     ) : (
                         <>
                             <div>
-                                <label className="mb-1.5 block font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1.5 block font-medium text-muted text-xs"
+                                    htmlFor={`${fieldId1}-2`}
+                                >
                                     Add to which user&apos;s SIMKL Plan to Watch?
                                 </label>
                                 <select
                                     className="w-full rounded-lg border border-transparent bg-surface-hover px-3 py-2 text-default text-sm focus:border-primary focus:outline-none"
+                                    id={`${fieldId1}-2`}
                                     onChange={(e) => setExportSimklUserId(e.target.value)}
                                     value={exportSimklUserId}
                                 >

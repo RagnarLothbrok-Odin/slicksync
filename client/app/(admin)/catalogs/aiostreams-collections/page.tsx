@@ -33,7 +33,7 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ServerCollections } from "@/components/jellyfin/ServerCollections";
 import { Breadcrumbs, Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
@@ -170,6 +170,7 @@ function Tile({
 }
 
 export default function AiostreamsCollectionsPage() {
+    const groupLabelId1 = useId();
     const router = useRouter();
     const searchParams = useSearchParams();
     const userId = searchParams.get("user") || "";
@@ -326,10 +327,16 @@ export default function AiostreamsCollectionsPage() {
                                     </button>
 
                                     {selected.profiles.length > 0 && (
-                                        <div>
-                                            <label className="mb-1.5 block font-medium text-muted text-xs">
+                                        <fieldset
+                                            aria-labelledby={`${groupLabelId1}-1`}
+                                            className="mx-0 min-w-0 border-0 p-0"
+                                        >
+                                            <p
+                                                className="mb-1.5 block font-medium text-muted text-xs"
+                                                id={`${groupLabelId1}-1`}
+                                            >
                                                 Profile
-                                            </label>
+                                            </p>
                                             {/* Same profile pills as Nuvio Collections. A profile still on its
                           account's collections says so; one with its own is marked. */}
                                             <div className="flex flex-wrap gap-2">
@@ -371,15 +378,15 @@ export default function AiostreamsCollectionsPage() {
                                                     );
                                                 })}
                                             </div>
-                                        </div>
+                                        </fieldset>
                                     )}
                                 </div>
                             </Card>
                         ) : (
                             <Card className="mb-6" padding="lg">
-                                <label className="mb-3 block font-medium text-muted text-xs">
+                                <h3 className="mb-3 block font-medium text-muted text-xs">
                                     AIOStreams account or Jellyfin server
-                                </label>
+                                </h3>
                                 {loading || (!(userId || serverKey) && choices === 1) ? (
                                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                                         {Array.from({ length: 4 }).map((_, i) => (

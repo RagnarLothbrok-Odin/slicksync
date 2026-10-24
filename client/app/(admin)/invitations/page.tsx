@@ -19,7 +19,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { EditInvitationForm } from "@/components/invitations/EditInvitationForm";
 import { InviteJellyfinAccountPicker } from "@/components/jellyfin/InviteJellyfinAccountPicker";
 import { Header } from "@/components/layout/Header";
@@ -1653,6 +1653,8 @@ function CreateInvitationModal({
     onClose: () => void;
     groups: Group[];
 }) {
+    const groupLabelId1 = useId();
+    const fieldId1 = useId();
     const reduceMotion = useReducedMotion();
     const [isLoading, setIsLoading] = useState(false);
     const [formData, setFormData] = useState({
@@ -1856,6 +1858,7 @@ function CreateInvitationModal({
                                                     <div>
                                                         <label
                                                             className="mb-2 block font-medium text-sm"
+                                                            htmlFor={`${fieldId1}-1`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
@@ -1864,6 +1867,7 @@ function CreateInvitationModal({
                                                         </label>
                                                         <input
                                                             className="w-full rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                            id={`${fieldId1}-1`}
                                                             onChange={(e) =>
                                                                 setFormData({
                                                                     ...formData,
@@ -1893,6 +1897,7 @@ function CreateInvitationModal({
                                                     <div>
                                                         <label
                                                             className="mb-2 block font-medium text-sm"
+                                                            htmlFor={`${fieldId1}-2`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
@@ -1901,6 +1906,7 @@ function CreateInvitationModal({
                                                         </label>
                                                         <select
                                                             className="w-full appearance-none rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                            id={`${fieldId1}-2`}
                                                             onChange={(e) =>
                                                                 setFormData({
                                                                     ...formData,
@@ -1928,6 +1934,7 @@ function CreateInvitationModal({
                                                     <div>
                                                         <label
                                                             className="mb-2 block font-medium text-sm"
+                                                            htmlFor={`${fieldId1}-3`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
@@ -1936,6 +1943,7 @@ function CreateInvitationModal({
                                                         </label>
                                                         <input
                                                             className="w-full rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                            id={`${fieldId1}-3`}
                                                             onChange={(e) =>
                                                                 setFormData({
                                                                     ...formData,
@@ -1954,15 +1962,19 @@ function CreateInvitationModal({
                                                     </div>
 
                                                     {/* Expiration presets */}
-                                                    <div>
-                                                        <label
+                                                    <fieldset
+                                                        aria-labelledby={`${groupLabelId1}-1`}
+                                                        className="mx-0 min-w-0 border-0 p-0"
+                                                    >
+                                                        <p
                                                             className="mb-3 block font-medium text-sm"
+                                                            id={`${groupLabelId1}-1`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
                                                         >
                                                             Expiration
-                                                        </label>
+                                                        </p>
                                                         <div className="mb-3 flex flex-wrap gap-2">
                                                             {expirationPresets.map((preset) => (
                                                                 <motion.button
@@ -2010,18 +2022,22 @@ function CreateInvitationModal({
                                                                 ).toLocaleString()}
                                                             </p>
                                                         )}
-                                                    </div>
+                                                    </fieldset>
 
                                                     {/* Membership Duration */}
-                                                    <div>
-                                                        <label
+                                                    <fieldset
+                                                        aria-labelledby={`${groupLabelId1}-2`}
+                                                        className="mx-0 min-w-0 border-0 p-0"
+                                                    >
+                                                        <p
                                                             className="mb-3 block font-medium text-sm"
+                                                            id={`${groupLabelId1}-2`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
                                                         >
                                                             Membership Duration
-                                                        </label>
+                                                        </p>
                                                         <div className="flex flex-wrap gap-2">
                                                             {membershipPresets.map((preset) => (
                                                                 <motion.button
@@ -2040,7 +2056,7 @@ function CreateInvitationModal({
                                                                 </motion.button>
                                                             ))}
                                                         </div>
-                                                    </div>
+                                                    </fieldset>
 
                                                     {/* Sync on Join */}
                                                     <motion.button

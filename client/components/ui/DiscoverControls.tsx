@@ -254,10 +254,9 @@ export function DiscoverControls<Lens extends string>({
                         )}
                     </label>
                 )}
-                <div
+                <fieldset
                     aria-label="Kind"
-                    className="flex w-full rounded-xl p-1 sm:w-auto"
-                    role="group"
+                    className="mx-0 flex w-full min-w-0 rounded-xl border-0 p-0 p-1 sm:w-auto"
                     style={{ background: "var(--color-surface-hover)" }}
                 >
                     {KINDS.map((k) => (
@@ -272,7 +271,7 @@ export function DiscoverControls<Lens extends string>({
                             </button>
                         </Focus>
                     ))}
-                </div>
+                </fieldset>
                 <Focus
                     onEnter={() => {
                         void surprise();

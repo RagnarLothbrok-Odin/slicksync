@@ -26,7 +26,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AddonConfigModal } from "@/components/addons/AddonConfigModal";
 import { AddonHealthSettings } from "@/components/addons/AddonHealthSettings";
 import { DetailToolbar } from "@/components/layout/DetailToolbar";
@@ -474,6 +474,7 @@ function SortableCatalogItem({
 }
 
 export default function AddonDetailPage() {
+    const fieldId1 = useId();
     const { layoutMode } = useLayoutMode();
     const params = useParams();
     const router = useRouter();
@@ -2537,19 +2538,29 @@ export default function AddonDetailPage() {
             >
                 <div className="space-y-4">
                     <div>
-                        <label className="mb-1 block font-medium text-default text-sm">Name</label>
+                        <label
+                            className="mb-1 block font-medium text-default text-sm"
+                            htmlFor={`${fieldId1}-1`}
+                        >
+                            Name
+                        </label>
                         <Input
+                            id={`${fieldId1}-1`}
                             onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                             placeholder="Addon name"
                             value={editForm.name}
                         />
                     </div>
                     <div>
-                        <label className="mb-1 block font-medium text-default text-sm">
+                        <label
+                            className="mb-1 block font-medium text-default text-sm"
+                            htmlFor={`${fieldId1}-2`}
+                        >
                             Description
                         </label>
                         <textarea
                             className="min-h-[80px] w-full rounded-lg border border-default bg-surface px-3 py-2 text-default placeholder:text-subtle focus:border-theme-secondary focus:outline-none"
+                            id={`${fieldId1}-2`}
                             onChange={(e) =>
                                 setEditForm({ ...editForm, description: e.target.value })
                             }
@@ -2558,10 +2569,14 @@ export default function AddonDetailPage() {
                         />
                     </div>
                     <div>
-                        <label className="mb-1 block font-medium text-default text-sm">
+                        <label
+                            className="mb-1 block font-medium text-default text-sm"
+                            htmlFor={`${fieldId1}-3`}
+                        >
                             Custom Logo URL
                         </label>
                         <Input
+                            id={`${fieldId1}-3`}
                             onChange={(e) =>
                                 setEditForm({ ...editForm, customLogo: e.target.value })
                             }

@@ -3,7 +3,7 @@
 import { ArrowRightIcon, CheckIcon, ClipboardIcon } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { PasswordToggleButton } from "@/components/ui/Input";
 import { SlickSyncLogo } from "@/components/ui/SlickSyncLogo";
 import { api } from "@/lib/api";
@@ -14,6 +14,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 // actual page behind it: the backend's POST /auth/register endpoint existed
 // and worked, there was just nothing in the frontend that could reach it.
 export default function RegisterPage() {
+    const groupLabelId1 = useId();
     const router = useRouter();
     const INSTANCE_TYPE = (process.env.NEXT_PUBLIC_INSTANCE_TYPE || "private") as
         | "public"
@@ -177,13 +178,17 @@ export default function RegisterPage() {
                 permanent login identifier with no recovery flow, so it's
                 shown up front with a copy button and a clear warning rather
                 than buried until after registration completes. */}
-                        <div>
-                            <label
+                        <fieldset
+                            aria-labelledby={`${groupLabelId1}-1`}
+                            className="mx-0 min-w-0 border-0 p-0"
+                        >
+                            <p
                                 className="mb-2 block font-medium text-sm"
+                                id={`${groupLabelId1}-1`}
                                 style={{ color: "var(--color-text)" }}
                             >
                                 Your account ID
-                            </label>
+                            </p>
                             <div className="flex items-center gap-2">
                                 <div
                                     className="flex-1 truncate rounded-xl px-4 py-3 font-mono text-sm"
@@ -232,7 +237,7 @@ export default function RegisterPage() {
                                     </button>
                                 </p>
                             )}
-                        </div>
+                        </fieldset>
 
                         <form className="space-y-4" onSubmit={handleSubmit}>
                             <div>

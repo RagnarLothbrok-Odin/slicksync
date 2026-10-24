@@ -2,7 +2,7 @@
 
 import { BoltIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { toast } from "@/components/ui/Toast";
 import { type AddonHealthConfig, api } from "@/lib/api";
@@ -34,6 +34,7 @@ export function AddonHealthSettings({
     healthConfig,
     onSaved,
 }: AddonHealthSettingsProps) {
+    const fieldId1 = useId();
     const router = useRouter();
     const [expanded, setExpanded] = useState(false);
     const [probeUrl, setProbeUrl] = useState(healthConfig?.probeUrl || "");
@@ -142,6 +143,7 @@ export function AddonHealthSettings({
                     <div>
                         <label
                             className="mb-1 block font-medium text-xs"
+                            htmlFor={`${fieldId1}-1`}
                             style={{ color: "var(--color-text-muted)" }}
                         >
                             Custom probe URL{" "}
@@ -151,6 +153,7 @@ export function AddonHealthSettings({
                         </label>
                         <input
                             className={inputClass}
+                            id={`${fieldId1}-1`}
                             onChange={(e) => setProbeUrl(e.target.value)}
                             placeholder="https://… a catalog or status endpoint that only answers when the addon truly works"
                             spellCheck={false}
@@ -163,6 +166,7 @@ export function AddonHealthSettings({
                         <div>
                             <label
                                 className="mb-1 block font-medium text-xs"
+                                htmlFor={`${fieldId1}-2`}
                                 style={{ color: "var(--color-text-muted)" }}
                             >
                                 Failures before offline{" "}
@@ -170,6 +174,7 @@ export function AddonHealthSettings({
                             </label>
                             <input
                                 className={inputClass}
+                                id={`${fieldId1}-2`}
                                 max={10}
                                 min={1}
                                 onChange={(e) => setThreshold(e.target.value)}
@@ -182,6 +187,7 @@ export function AddonHealthSettings({
                         <div>
                             <label
                                 className="mb-1 block font-medium text-xs"
+                                htmlFor={`${fieldId1}-3`}
                                 style={{ color: "var(--color-text-muted)" }}
                             >
                                 Check interval, minutes{" "}
@@ -189,6 +195,7 @@ export function AddonHealthSettings({
                             </label>
                             <input
                                 className={inputClass}
+                                id={`${fieldId1}-3`}
                                 max={1440}
                                 min={5}
                                 onChange={(e) => setIntervalMin(e.target.value)}

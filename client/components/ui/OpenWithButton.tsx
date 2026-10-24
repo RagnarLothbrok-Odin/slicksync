@@ -7,7 +7,7 @@
 // uses the shared ContextMenu, so it always stays whole on screen.
 
 import { CheckIcon, ChevronDownIcon, PlayIcon } from "@heroicons/react/24/outline";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
@@ -54,6 +54,7 @@ export function OpenWithButton({
     type: "movie" | "series";
     isTV?: boolean;
 }) {
+    const fieldId1 = useId();
     const [targets, setTargets] = useState<OpenTargets | null>(null);
     // Read straight away: nothing renders until the targets load, on the client.
     const [chosen, setChosen] = useState<OpenWithAppId | null>(() =>
@@ -223,20 +224,28 @@ export function OpenWithButton({
                             <div className="mb-2 text-[13px] text-muted">
                                 Remembered on this device only
                             </div>
-                            <label className="mb-1 block text-[13px] text-muted">
+                            <label
+                                className="mb-1 block text-[13px] text-muted"
+                                htmlFor={`${fieldId1}-1`}
+                            >
                                 App name, for the button
                             </label>
                             <input
                                 className="input-base mb-2.5 w-full px-3 py-2 text-[15px]"
+                                id={`${fieldId1}-1`}
                                 onChange={(e) => setScDraft((d) => ({ ...d, app: e.target.value }))}
                                 placeholder="Odin"
                                 value={scDraft.app}
                             />
-                            <label className="mb-1 block text-[13px] text-muted">
+                            <label
+                                className="mb-1 block text-[13px] text-muted"
+                                htmlFor={`${fieldId1}-2`}
+                            >
                                 Shortcut name
                             </label>
                             <input
                                 className="input-base w-full px-3 py-2 text-[15px]"
+                                id={`${fieldId1}-2`}
                                 onChange={(e) =>
                                     setScDraft((d) => ({ ...d, shortcut: e.target.value }))
                                 }

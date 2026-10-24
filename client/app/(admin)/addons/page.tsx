@@ -30,7 +30,7 @@ import {
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import Head from "next/head";
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { AddonDirectoryModal } from "@/components/addons/AddonDirectoryModal";
 import { SharedConfigPill } from "@/components/addons/SharedConfigPill";
 import { Header } from "@/components/layout/Header";
@@ -225,6 +225,7 @@ function SortableAddonWrapper({
 }
 
 export default function AddonsPage() {
+    const fieldId1 = useId();
     const { layoutMode } = useLayoutMode();
     // Desktop-only: gives the 3 stat cards their own full-width row (same
     // grid-cols-3 block Users/Groups/Vault already use) instead of being
@@ -1423,12 +1424,14 @@ export default function AddonsPage() {
                     <div>
                         <label
                             className="mb-2 block font-medium text-sm"
+                            htmlFor={`${fieldId1}-1`}
                             style={{ color: "var(--color-text-muted)" }}
                         >
                             Vault category
                         </label>
                         <select
                             className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                            id={`${fieldId1}-1`}
                             onChange={(e) => setMoveToVaultCategory(e.target.value)}
                             style={{
                                 background: "var(--color-surface-hover)",
@@ -1496,12 +1499,14 @@ export default function AddonsPage() {
                     <div>
                         <label
                             className="mb-2 block font-medium text-sm"
+                            htmlFor={`${fieldId1}-2`}
                             style={{ color: "var(--color-text-muted)" }}
                         >
                             Vault category
                         </label>
                         <select
                             className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                            id={`${fieldId1}-2`}
                             onChange={(e) => setBulkMoveToVaultCategory(e.target.value)}
                             style={{
                                 background: "var(--color-surface-hover)",
@@ -2353,6 +2358,8 @@ function AddAddonModal({
     onClose: () => void;
     groups: any[];
 }) {
+    const groupLabelId1 = useId();
+    const fieldId2 = useId();
     const [isLoading, setIsLoading] = useState(false);
     const [manifestUrl, setManifestUrl] = useState("");
     const [error, setError] = useState("");
@@ -2661,6 +2668,7 @@ function AddAddonModal({
                                                     <div>
                                                         <label
                                                             className="mb-2 block font-medium text-sm"
+                                                            htmlFor={`${fieldId2}-3`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
@@ -2685,6 +2693,7 @@ function AddAddonModal({
                                                             </div>
                                                             <input
                                                                 className={`w-full rounded-xl py-3.5 pr-4 pl-12 transition-all duration-200 focus:outline-none ${error || urlError ? "bd-err" : "bd-ok"}`}
+                                                                id={`${fieldId2}-3`}
                                                                 onChange={(e) =>
                                                                     setManifestUrl(e.target.value)
                                                                 }
@@ -2755,16 +2764,20 @@ function AddAddonModal({
                                                                 animate={{ opacity: 1, y: 0 }}
                                                                 initial={{ opacity: 0, y: 10 }}
                                                             >
-                                                                <div className="mb-3 flex items-center justify-between">
-                                                                    <label
+                                                                <fieldset
+                                                                    aria-labelledby={`${groupLabelId1}-1`}
+                                                                    className="mx-0 mb-3 flex min-w-0 items-center justify-between border-0 p-0"
+                                                                >
+                                                                    <p
                                                                         className="block font-medium text-sm"
+                                                                        id={`${groupLabelId1}-1`}
                                                                         style={{
                                                                             color: "var(--color-text-muted)",
                                                                         }}
                                                                     >
                                                                         <UsersIcon className="mr-2 inline h-4 w-4" />
                                                                         Assign to Groups
-                                                                    </label>
+                                                                    </p>
                                                                     <span
                                                                         className="text-xs"
                                                                         style={{
@@ -2775,7 +2788,7 @@ function AddAddonModal({
                                                                             ? "No groups selected"
                                                                             : `${selectedGroupIds.size} group${selectedGroupIds.size > 1 ? "s" : ""} selected`}
                                                                     </span>
-                                                                </div>
+                                                                </fieldset>
                                                                 <div className="max-h-48 space-y-2 overflow-y-auto p-1">
                                                                     {groups.map((group, index) => {
                                                                         const isSelected =

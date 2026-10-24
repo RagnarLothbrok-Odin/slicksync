@@ -15,7 +15,7 @@ import {
     UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ProfilePictureSettings } from "@/components/settings/ProfilePictureSettings";
 import { SettingRow, ToggleSwitch } from "@/components/settings/SettingRow";
 import { SettingsNavigation } from "@/components/settings/SettingsNavigation";
@@ -111,6 +111,8 @@ const PERSONAL_SECTIONS = [
 ] as const;
 
 export default function UserSettingsPage() {
+    const groupLabelId1 = useId();
+    const fieldId1 = useId();
     const [activeSection, setActiveSection] =
         useState<(typeof PERSONAL_SECTIONS)[number]["key"]>("general");
     const [settingsQuery, setSettingsQuery] = useState("");
@@ -841,6 +843,7 @@ export default function UserSettingsPage() {
 
                                     <label
                                         className="mb-2 block font-medium text-sm"
+                                        htmlFor={`${fieldId1}-1`}
                                         style={{ color: "var(--color-text)" }}
                                     >
                                         Personal Discord Webhook (optional)
@@ -848,6 +851,7 @@ export default function UserSettingsPage() {
                                     <div className="flex gap-2">
                                         <input
                                             className="input-base min-w-0 flex-1 px-3 py-2 text-sm"
+                                            id={`${fieldId1}-1`}
                                             onBlur={() => {
                                                 if (discordWebhookUrl) {
                                                     handleSaveWebhook();
@@ -919,13 +923,17 @@ export default function UserSettingsPage() {
                                     </div>
                                 </div>
 
-                                <div className="space-y-4">
-                                    <label
+                                <fieldset
+                                    aria-labelledby={`${groupLabelId1}-1`}
+                                    className="mx-0 min-w-0 space-y-4 border-0 p-0"
+                                >
+                                    <p
                                         className="mb-2 block font-medium text-sm"
+                                        id={`${groupLabelId1}-1`}
                                         style={{ color: "var(--color-text)" }}
                                     >
                                         Your API Key
-                                    </label>
+                                    </p>
                                     <div className="flex gap-2">
                                         <div
                                             className="flex flex-1 items-center gap-2 rounded-lg px-3 py-2"
@@ -1035,7 +1043,7 @@ export default function UserSettingsPage() {
                                             using this same API key as the token.
                                         </p>
                                     </div>
-                                </div>
+                                </fieldset>
                             </Card>
                         </div>
                         <div className="space-y-6" hidden={activeSection !== "security"}>

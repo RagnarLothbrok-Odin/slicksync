@@ -119,10 +119,9 @@ export function DiceBearPicker({
                             value={query}
                         />
                     </label>
-                    <div
+                    <fieldset
                         aria-label="Avatar styles"
-                        className="grid grid-cols-3 gap-2 sm:grid-cols-4"
-                        role="group"
+                        className="mx-0 grid min-w-0 grid-cols-3 gap-2 border-0 p-0 sm:grid-cols-4"
                     >
                         {styles
                             .filter((value) =>
@@ -153,7 +152,7 @@ export function DiceBearPicker({
                                     </span>
                                 </button>
                             ))}
-                    </div>
+                    </fieldset>
                     {!styles.some((value) =>
                         styleName(value).toLowerCase().includes(query.toLowerCase())
                     ) && (

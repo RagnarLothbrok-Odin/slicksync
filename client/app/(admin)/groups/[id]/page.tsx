@@ -21,7 +21,7 @@ import {
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
     Bar,
     BarChart,
@@ -1691,6 +1691,7 @@ export default function GroupDetailPage() {
 
 // Edit Group Form Component
 function EditGroupForm({ group, onClose }: { group: Group | null; onClose: () => void }) {
+    const groupLabelId1 = useId();
     const [isLoading, setIsLoading] = useState(false);
     const [name, setName] = useState(group?.name || "");
     const [description, setDescription] = useState(group?.description || "");
@@ -1731,10 +1732,12 @@ function EditGroupForm({ group, onClose }: { group: Group | null; onClose: () =>
                 value={description}
             />
 
-            <div>
-                <label className="mb-3 block font-medium text-muted text-sm">Group Color</label>
+            <fieldset aria-labelledby={`${groupLabelId1}-1`} className="mx-0 min-w-0 border-0 p-0">
+                <p className="mb-3 block font-medium text-muted text-sm" id={`${groupLabelId1}-1`}>
+                    Group Color
+                </p>
                 <AvatarColorSwatches onChange={setSelectedColorIndex} value={selectedColorIndex} />
-            </div>
+            </fieldset>
 
             <div className="flex justify-end gap-3 pt-4">
                 <Button onClick={onClose} type="button" variant="secondary">

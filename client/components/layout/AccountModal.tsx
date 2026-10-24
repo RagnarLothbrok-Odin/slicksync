@@ -9,7 +9,7 @@ import {
     XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { PasswordToggleButton } from "@/components/ui/Input";
 import { toast } from "@/components/ui/Toast";
@@ -47,6 +47,7 @@ export function AccountModal({
     accountInfo,
     onAccountUpdated,
 }: AccountModalProps) {
+    const fieldId1 = useId();
     const [mounted, setMounted] = useState(false);
     useEffect(() => {
         setMounted(true);
@@ -478,6 +479,7 @@ export function AccountModal({
             <div>
                 <label
                     className="mb-1.5 block font-medium text-xs"
+                    htmlFor={`${fieldId1}-1`}
                     style={{ color: "var(--color-text-muted)" }}
                 >
                     Enter your password to confirm
@@ -485,6 +487,7 @@ export function AccountModal({
                 <div className="relative">
                     <input
                         className={`w-full rounded-xl py-2.5 pr-12 pl-4 text-sm focus:outline-none ${error ? "bd-err" : "bd-ok"}`}
+                        id={`${fieldId1}-1`}
                         onChange={(e) => {
                             setPassword(e.target.value);
                             setError(null);
@@ -626,6 +629,7 @@ export function AccountModal({
             <div>
                 <label
                     className="mb-1.5 block font-medium text-xs"
+                    htmlFor={`${fieldId1}-2`}
                     style={{ color: "var(--color-text-muted)" }}
                 >
                     New Password
@@ -633,6 +637,7 @@ export function AccountModal({
                 <div className="relative">
                     <input
                         className={`w-full rounded-xl py-2.5 pr-12 pl-4 text-sm focus:outline-none ${error ? "bd-err" : "bd-ok"}`}
+                        id={`${fieldId1}-2`}
                         onChange={(e) => {
                             setPassword(e.target.value);
                             setError(null);
@@ -655,6 +660,7 @@ export function AccountModal({
             <div>
                 <label
                     className="mb-1.5 block font-medium text-xs"
+                    htmlFor={`${fieldId1}-3`}
                     style={{ color: "var(--color-text-muted)" }}
                 >
                     Confirm Password
@@ -662,6 +668,7 @@ export function AccountModal({
                 <div className="relative">
                     <input
                         className={`w-full rounded-xl py-2.5 pr-12 pl-4 text-sm focus:outline-none ${error?.includes("match") ? "bd-err" : "bd-ok"}`}
+                        id={`${fieldId1}-3`}
                         onChange={(e) => {
                             setConfirmPassword(e.target.value);
                             setError(null);

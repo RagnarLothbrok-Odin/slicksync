@@ -1,7 +1,7 @@
 "use client";
 
 import { EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
@@ -36,6 +36,7 @@ export function AddonConfigModal({
     manifestUrl,
     onSave,
 }: AddonConfigModalProps) {
+    const configFieldId = useId();
     const decoded = useMemo(() => decodeAddonConfig(manifestUrl), [manifestUrl]);
     const [fields, setFields] = useState<AddonConfigField[] | null>(null);
     const [revealed, setRevealed] = useState<Set<string>>(new Set());
@@ -88,7 +89,10 @@ export function AddonConfigModal({
                     <div className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
                         {current.map((f) => (
                             <div key={f.key}>
-                                <label className="mb-1 flex items-center justify-between font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1 flex items-center justify-between font-medium text-muted text-xs"
+                                    htmlFor={`${configFieldId}-${f.key}`}
+                                >
                                     <span className="font-mono">{f.key}</span>
                                     <span className="flex items-center gap-2">
                                         {f.kind !== "string" && (
@@ -131,6 +135,7 @@ export function AddonConfigModal({
                                 {f.kind === "boolean" ? (
                                     <select
                                         className="w-full rounded-lg border border-transparent bg-surface-hover px-3 py-2 text-default text-sm focus:border-primary focus:outline-none"
+                                        id={`${configFieldId}-${f.key}`}
                                         onChange={(e) => setField(f.key, e.target.value)}
                                         value={f.value}
                                     >
@@ -140,6 +145,7 @@ export function AddonConfigModal({
                                 ) : (
                                     <input
                                         className="w-full rounded-lg border border-transparent bg-surface-hover px-3 py-2 font-mono text-default text-sm focus:border-primary focus:outline-none"
+                                        id={`${configFieldId}-${f.key}`}
                                         onChange={(e) => setField(f.key, e.target.value)}
                                         spellCheck={false}
                                         type={

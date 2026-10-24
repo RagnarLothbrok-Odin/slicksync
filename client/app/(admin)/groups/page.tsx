@@ -22,7 +22,7 @@ import {
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import Head from "next/head";
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import {
     NebulaCompactStatCard,
@@ -1181,6 +1181,8 @@ function GroupCard({
 
 // Create Group Modal - Premium styled
 function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+    const groupLabelId1 = useId();
+    const fieldId1 = useId();
     const [isLoading, setIsLoading] = useState(false);
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
@@ -1353,6 +1355,7 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                                                     <div>
                                                         <label
                                                             className="mb-2 block font-medium text-sm"
+                                                            htmlFor={`${fieldId1}-1`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
@@ -1368,6 +1371,7 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                                                         </label>
                                                         <input
                                                             className="w-full rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                            id={`${fieldId1}-1`}
                                                             onChange={(e) =>
                                                                 setName(e.target.value)
                                                             }
@@ -1385,6 +1389,7 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                                                     <div>
                                                         <label
                                                             className="mb-2 block font-medium text-sm"
+                                                            htmlFor={`${fieldId1}-2`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
@@ -1393,6 +1398,7 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                                                         </label>
                                                         <input
                                                             className="w-full rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                            id={`${fieldId1}-2`}
                                                             onChange={(e) =>
                                                                 setDescription(e.target.value)
                                                             }
@@ -1407,20 +1413,24 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                                                         />
                                                     </div>
 
-                                                    <div>
-                                                        <label
+                                                    <fieldset
+                                                        aria-labelledby={`${groupLabelId1}-1`}
+                                                        className="mx-0 min-w-0 border-0 p-0"
+                                                    >
+                                                        <p
                                                             className="mb-3 block font-medium text-sm"
+                                                            id={`${groupLabelId1}-1`}
                                                             style={{
                                                                 color: "var(--color-text-muted)",
                                                             }}
                                                         >
                                                             Group Color
-                                                        </label>
+                                                        </p>
                                                         <AvatarColorSwatches
                                                             onChange={setSelectedColorIndex}
                                                             value={selectedColorIndex}
                                                         />
-                                                    </div>
+                                                    </fieldset>
                                                 </div>
 
                                                 {/* Actions */}
@@ -1468,6 +1478,8 @@ function CloneGroupModal({
     onClose: () => void;
     group: GroupDisplay;
 }) {
+    const groupLabelId2 = useId();
+    const fieldId2 = useId();
     const [isLoading, setIsLoading] = useState(false);
     const [name, setName] = useState(`${group.name} (Copy)`);
     const [description, setDescription] = useState(group.description || "");
@@ -1592,6 +1604,7 @@ function CloneGroupModal({
                                         <div>
                                             <label
                                                 className="mb-2 block font-medium text-sm"
+                                                htmlFor={`${fieldId2}-4`}
                                                 style={{ color: "var(--color-text-muted)" }}
                                             >
                                                 Group Name{" "}
@@ -1601,6 +1614,7 @@ function CloneGroupModal({
                                             </label>
                                             <input
                                                 className="w-full rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                id={`${fieldId2}-4`}
                                                 onChange={(e) => setName(e.target.value)}
                                                 style={{
                                                     background: "var(--color-subtle)",
@@ -1615,12 +1629,14 @@ function CloneGroupModal({
                                         <div>
                                             <label
                                                 className="mb-2 block font-medium text-sm"
+                                                htmlFor={`${fieldId2}-5`}
                                                 style={{ color: "var(--color-text-muted)" }}
                                             >
                                                 Description
                                             </label>
                                             <input
                                                 className="w-full rounded-xl px-4 py-3.5 transition-all duration-200 focus:outline-none"
+                                                id={`${fieldId2}-5`}
                                                 onChange={(e) => setDescription(e.target.value)}
                                                 style={{
                                                     background: "var(--color-subtle)",
@@ -1632,18 +1648,22 @@ function CloneGroupModal({
                                             />
                                         </div>
 
-                                        <div>
-                                            <label
+                                        <fieldset
+                                            aria-labelledby={`${groupLabelId2}-2`}
+                                            className="mx-0 min-w-0 border-0 p-0"
+                                        >
+                                            <p
                                                 className="mb-3 block font-medium text-sm"
+                                                id={`${groupLabelId2}-2`}
                                                 style={{ color: "var(--color-text-muted)" }}
                                             >
                                                 Group Color
-                                            </label>
+                                            </p>
                                             <AvatarColorSwatches
                                                 onChange={setSelectedColorIndex}
                                                 value={selectedColorIndex}
                                             />
-                                        </div>
+                                        </fieldset>
 
                                         <motion.button
                                             className={`flex w-full cursor-pointer items-center gap-3 rounded-xl p-4 transition-all ${includeUsers ? "opt-row-on" : "opt-row-off"}`}

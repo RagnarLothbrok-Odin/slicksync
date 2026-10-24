@@ -9,7 +9,7 @@ import {
     TrashIcon,
 } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
 import { PageSection } from "@/components/layout/PageContainer";
@@ -186,12 +186,19 @@ const ColorOverride = memo(function ColorOverride({
     onSet: (v: string) => void;
     onClear: () => void;
 }) {
+    const accessibleFieldId1 = useId();
     return (
         <div>
-            <label className="mb-2 block font-medium text-muted text-xs">{label}</label>
+            <label
+                className="mb-2 block font-medium text-muted text-xs"
+                htmlFor={`${accessibleFieldId1}-1`}
+            >
+                {label}
+            </label>
             <div className="flex items-center gap-2">
                 <input
                     className="h-10 w-12 cursor-pointer rounded-lg border border-default bg-transparent p-0.5"
+                    id={`${accessibleFieldId1}-1`}
                     onChange={(e) => onSet(e.target.value)}
                     type="color"
                     value={value || seed}
@@ -377,6 +384,8 @@ export function ThemesPanel({
     embedded?: boolean;
     showLayout?: boolean;
 }) {
+    const groupLabelId1 = useId();
+    const fieldId1 = useId();
     const {
         themeId,
         setTheme,
@@ -672,10 +681,16 @@ export function ThemesPanel({
                   it's applied for real. Independent of
                   document.documentElement so it's accurate even mid-drag on a
                   color input. */}
-                                    <div>
-                                        <label className="mb-2 block font-medium text-muted text-xs">
+                                    <fieldset
+                                        aria-labelledby={`${groupLabelId1}-1`}
+                                        className="mx-0 min-w-0 border-0 p-0"
+                                    >
+                                        <p
+                                            className="mb-2 block font-medium text-muted text-xs"
+                                            id={`${groupLabelId1}-1`}
+                                        >
                                             Preview
-                                        </label>
+                                        </p>
                                         {(() => {
                                             const p = resolvePreviewPalette(builderBase, {
                                                 background: builderBackground,
@@ -990,14 +1005,18 @@ export function ThemesPanel({
                                                 </>
                                             );
                                         })()}
-                                    </div>
+                                    </fieldset>
 
                                     <div>
-                                        <label className="mb-2 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-2 block font-medium text-muted text-xs"
+                                            htmlFor={`${fieldId1}-3`}
+                                        >
                                             Theme name
                                         </label>
                                         <input
                                             className="input-base w-full max-w-xs px-3 py-2 text-sm"
+                                            id={`${fieldId1}-3`}
                                             onChange={(e) => setBuilderName(e.target.value)}
                                             placeholder={`Custom theme ${savedCustomThemes.length + 1}`}
                                             type="text"
@@ -1009,11 +1028,15 @@ export function ThemesPanel({
                                     </div>
 
                                     <div>
-                                        <label className="mb-2 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-2 block font-medium text-muted text-xs"
+                                            htmlFor={`${fieldId1}-4`}
+                                        >
                                             Base (background, surfaces, text)
                                         </label>
                                         <select
                                             className="input-base w-full max-w-xs px-3 py-2 text-sm"
+                                            id={`${fieldId1}-4`}
                                             onChange={(e) => {
                                                 const v = e.target.value as ThemeId;
                                                 const nextPrimary = themeMeta[v].colors.primary;
@@ -1213,12 +1236,16 @@ export function ThemesPanel({
                                         </h4>
                                         <div className="grid max-w-sm grid-cols-2 gap-4">
                                             <div>
-                                                <label className="mb-2 block font-medium text-muted text-xs">
+                                                <label
+                                                    className="mb-2 block font-medium text-muted text-xs"
+                                                    htmlFor={`${fieldId1}-5`}
+                                                >
                                                     Primary
                                                 </label>
                                                 <div className="flex items-center gap-2">
                                                     <input
                                                         className="h-10 w-12 cursor-pointer rounded-lg border border-default bg-transparent p-0.5"
+                                                        id={`${fieldId1}-5`}
                                                         onChange={(e) => {
                                                             setBuilderPrimary(e.target.value);
                                                             previewCustom({
@@ -1235,12 +1262,16 @@ export function ThemesPanel({
                                                 </div>
                                             </div>
                                             <div>
-                                                <label className="mb-2 block font-medium text-muted text-xs">
+                                                <label
+                                                    className="mb-2 block font-medium text-muted text-xs"
+                                                    htmlFor={`${fieldId1}-6`}
+                                                >
                                                     Secondary
                                                 </label>
                                                 <div className="flex items-center gap-2">
                                                     <input
                                                         className="h-10 w-12 cursor-pointer rounded-lg border border-default bg-transparent p-0.5"
+                                                        id={`${fieldId1}-6`}
                                                         onChange={(e) => {
                                                             setBuilderSecondary(e.target.value);
                                                             previewCustom({
@@ -1501,10 +1532,16 @@ export function ThemesPanel({
                                             Typography
                                         </h4>
                                         <div className="space-y-4">
-                                            <div>
-                                                <label className="mb-2 block font-medium text-muted text-xs">
+                                            <fieldset
+                                                aria-labelledby={`${groupLabelId1}-2`}
+                                                className="mx-0 min-w-0 border-0 p-0"
+                                            >
+                                                <p
+                                                    className="mb-2 block font-medium text-muted text-xs"
+                                                    id={`${groupLabelId1}-2`}
+                                                >
                                                     Font
-                                                </label>
+                                                </p>
                                                 <div className="flex flex-wrap gap-2">
                                                     {FONT_OPTIONS.map((f) => (
                                                         <button
@@ -1532,12 +1569,18 @@ export function ThemesPanel({
                                                         </button>
                                                     ))}
                                                 </div>
-                                            </div>
+                                            </fieldset>
 
-                                            <div>
-                                                <label className="mb-2 block font-medium text-muted text-xs">
+                                            <fieldset
+                                                aria-labelledby={`${groupLabelId1}-3`}
+                                                className="mx-0 min-w-0 border-0 p-0"
+                                            >
+                                                <p
+                                                    className="mb-2 block font-medium text-muted text-xs"
+                                                    id={`${groupLabelId1}-3`}
+                                                >
                                                     Text size
-                                                </label>
+                                                </p>
                                                 <div className="flex flex-wrap gap-2">
                                                     {(
                                                         Object.keys(
@@ -1571,7 +1614,7 @@ export function ThemesPanel({
                                                     Scales body text and most UI chrome app-wide,
                                                     not just this builder.
                                                 </p>
-                                            </div>
+                                            </fieldset>
                                         </div>
                                     </section>
                                 </div>

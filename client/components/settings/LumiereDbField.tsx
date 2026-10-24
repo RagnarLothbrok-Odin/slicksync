@@ -5,7 +5,7 @@ import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { api, type LumiereStatus } from "@/lib/api";
 
 /**
@@ -23,6 +23,7 @@ export function LumiereDbField({
     onChange: (v: string) => void;
     onSave: (v: string) => Promise<void>;
 }) {
+    const accessibleFieldId1 = useId();
     const [status, setStatus] = useState<LumiereStatus | null>(null);
 
     const check = useCallback(async (fresh: boolean) => {
@@ -89,7 +90,10 @@ export function LumiereDbField({
     return (
         <div className="pt-1">
             <div className="mb-1.5 flex items-center justify-between">
-                <label className="block font-medium text-default text-sm">
+                <label
+                    className="block font-medium text-default text-sm"
+                    htmlFor={`${accessibleFieldId1}-1`}
+                >
                     LumiereDB address <span className="font-normal text-subtle">(optional)</span>
                 </label>
                 {badge}
@@ -106,6 +110,7 @@ export function LumiereDbField({
             <input
                 autoComplete="off"
                 className="input-base w-full px-3 py-2 text-sm"
+                id={`${accessibleFieldId1}-1`}
                 onBlur={async () => {
                     // Saved as just the server's address, as the server does too - a
                     // pasted readiness check or search loses its path.

@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircleIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { Button, Card, ToggleSwitch } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import {
@@ -46,6 +46,8 @@ const inputStyle = {
 } as const;
 
 export function MaintenancePanel() {
+    const repeatedFieldId1 = useId();
+    const fieldId1 = useId();
     // History Doctor - scan is read-only; repair re-scans server-side (see
     // utils/historyDoctor.js) rather than trusting ids from this page.
     const [historyScan, setHistoryScan] = useState<Awaited<
@@ -527,11 +529,15 @@ export function MaintenancePanel() {
                     <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <label className="mb-1 block font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1 block font-medium text-muted text-xs"
+                                    htmlFor={`${fieldId1}-2`}
+                                >
                                     Destination
                                 </label>
                                 <select
                                     className={inputClass}
+                                    id={`${fieldId1}-2`}
                                     onChange={(e) =>
                                         saveTargets({
                                             type: e.target.value as BackupTargets["type"],
@@ -546,12 +552,16 @@ export function MaintenancePanel() {
                                 </select>
                             </div>
                             <div>
-                                <label className="mb-1 block font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1 block font-medium text-muted text-xs"
+                                    htmlFor={`${fieldId1}-3`}
+                                >
                                     Keep locally <span className="text-subtle">(0 = keep all)</span>
                                 </label>
                                 <input
                                     className={inputClass}
                                     defaultValue={targets.keepLocal}
+                                    id={`${fieldId1}-3`}
                                     max={1000}
                                     min={0}
                                     onBlur={(e) => {
@@ -579,12 +589,16 @@ export function MaintenancePanel() {
                                     ] as [keyof BackupTargets["s3"], string][]
                                 ).map(([key, label]) => (
                                     <div key={key}>
-                                        <label className="mb-1 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-1 block font-medium text-muted text-xs"
+                                            htmlFor={`${repeatedFieldId1}-2-${key}`}
+                                        >
                                             {label}
                                         </label>
                                         <input
                                             className={inputClass}
                                             defaultValue={targets.s3[key]}
+                                            id={`${repeatedFieldId1}-2-${key}`}
                                             onBlur={(e) => {
                                                 if (e.target.value !== targets.s3[key]) {
                                                     saveTargets({
@@ -614,12 +628,16 @@ export function MaintenancePanel() {
                                     ] as [keyof BackupTargets["webdav"], string][]
                                 ).map(([key, label]) => (
                                     <div key={key}>
-                                        <label className="mb-1 block font-medium text-muted text-xs">
+                                        <label
+                                            className="mb-1 block font-medium text-muted text-xs"
+                                            htmlFor={`${repeatedFieldId1}-3-${key}`}
+                                        >
                                             {label}
                                         </label>
                                         <input
                                             className={inputClass}
                                             defaultValue={targets.webdav[key]}
+                                            id={`${repeatedFieldId1}-3-${key}`}
                                             onBlur={(e) => {
                                                 if (e.target.value !== targets.webdav[key]) {
                                                     saveTargets({
@@ -641,13 +659,17 @@ export function MaintenancePanel() {
 
                         {targets.type !== "none" && (
                             <div>
-                                <label className="mb-1 block font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1 block font-medium text-muted text-xs"
+                                    htmlFor={`${fieldId1}-6`}
+                                >
                                     Encryption passphrase{" "}
                                     <span className="text-subtle">(optional)</span>
                                 </label>
                                 <input
                                     className={inputClass}
                                     defaultValue={targets.encryptPassphrase || ""}
+                                    id={`${fieldId1}-6`}
                                     onBlur={(e) => {
                                         if (e.target.value !== (targets.encryptPassphrase || "")) {
                                             saveTargets({ encryptPassphrase: e.target.value });

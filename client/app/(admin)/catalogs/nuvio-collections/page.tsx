@@ -31,7 +31,7 @@ import {
 import { MapPinIcon as MapPinIconSolid } from "@heroicons/react/24/solid";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Breadcrumbs, Header } from "@/components/layout/Header";
 import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
 import { PageSection } from "@/components/layout/PageContainer";
@@ -670,6 +670,8 @@ function CollectionSection({
 }
 
 export default function NuvioCollectionsPage() {
+    const groupLabelId1 = useId();
+    const fieldId1 = useId();
     const { layoutMode } = useLayoutMode();
     const router = useRouter();
     // Shared app-wide grid/list preference (Settings -> Themes), same hook
@@ -1763,10 +1765,16 @@ export default function NuvioCollectionsPage() {
                                     </button>
 
                                     {(profiles.length > 1 || profilesLoading) && (
-                                        <div>
-                                            <label className="mb-1.5 block font-medium text-muted text-xs">
+                                        <fieldset
+                                            aria-labelledby={`${groupLabelId1}-1`}
+                                            className="mx-0 min-w-0 border-0 p-0"
+                                        >
+                                            <p
+                                                className="mb-1.5 block font-medium text-muted text-xs"
+                                                id={`${groupLabelId1}-1`}
+                                            >
                                                 Profile
-                                            </label>
+                                            </p>
                                             {profilesLoading ? (
                                                 <div className="flex gap-2">
                                                     {Array.from({ length: 3 }).map((_, i) => (
@@ -1814,7 +1822,7 @@ export default function NuvioCollectionsPage() {
                                                     ))}
                                                 </div>
                                             )}
-                                        </div>
+                                        </fieldset>
                                     )}
 
                                     {selectedUser && (
@@ -1826,9 +1834,9 @@ export default function NuvioCollectionsPage() {
                             </Card>
                         ) : (
                             <Card className="mb-6" padding="lg">
-                                <label className="mb-3 block font-medium text-muted text-xs">
+                                <h3 className="mb-3 block font-medium text-muted text-xs">
                                     Nuvio account
-                                </label>
+                                </h3>
                                 {usersLoading ? (
                                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
                                         {Array.from({ length: 4 }).map((_, i) => (
@@ -3060,10 +3068,16 @@ export default function NuvioCollectionsPage() {
                     ) : (
                         <>
                             {slickCatalogs && slickCatalogs.length > 0 && (
-                                <div>
-                                    <label className="mb-1.5 block font-medium text-muted text-xs">
+                                <fieldset
+                                    aria-labelledby={`${groupLabelId1}-2`}
+                                    className="mx-0 min-w-0 border-0 p-0"
+                                >
+                                    <p
+                                        className="mb-1.5 block font-medium text-muted text-xs"
+                                        id={`${groupLabelId1}-2`}
+                                    >
                                         Link a SlickSync Catalog
-                                    </label>
+                                    </p>
                                     <p className="mb-2 text-[11px] text-subtle">
                                         A linked folder follows the catalog automatically - refresh
                                         it, auto-refresh it, edit it, and the folder updates on its
@@ -3108,15 +3122,19 @@ export default function NuvioCollectionsPage() {
                                             style={{ background: "var(--color-surface-border)" }}
                                         />
                                     </div>
-                                </div>
+                                </fieldset>
                             )}
 
                             <div>
-                                <label className="mb-1.5 block font-medium text-muted text-xs">
+                                <label
+                                    className="mb-1.5 block font-medium text-muted text-xs"
+                                    htmlFor={`${fieldId1}-5`}
+                                >
                                     Addon
                                 </label>
                                 <select
                                     className="input-base w-full appearance-none px-3 py-2 pr-10 text-sm"
+                                    id={`${fieldId1}-5`}
                                     onChange={(e) => {
                                         setPickerAddonId(e.target.value || null);
                                         setPickerCatalog(null);
@@ -3137,10 +3155,16 @@ export default function NuvioCollectionsPage() {
                             </div>
 
                             {pickerAddon && (
-                                <div>
-                                    <label className="mb-1.5 block font-medium text-muted text-xs">
+                                <fieldset
+                                    aria-labelledby={`${groupLabelId1}-3`}
+                                    className="mx-0 min-w-0 border-0 p-0"
+                                >
+                                    <p
+                                        className="mb-1.5 block font-medium text-muted text-xs"
+                                        id={`${groupLabelId1}-3`}
+                                    >
                                         Catalog
-                                    </label>
+                                    </p>
                                     {(pickerAddon.manifest?.catalogs || []).length === 0 ? (
                                         <p className="text-subtle text-xs">
                                             This addon has no catalogs.
@@ -3162,14 +3186,20 @@ export default function NuvioCollectionsPage() {
                                             ))}
                                         </div>
                                     )}
-                                </div>
+                                </fieldset>
                             )}
 
                             {pickerCatalog && (
-                                <div>
-                                    <label className="mb-1.5 block font-medium text-muted text-xs">
+                                <fieldset
+                                    aria-labelledby={`${groupLabelId1}-4`}
+                                    className="mx-0 min-w-0 border-0 p-0"
+                                >
+                                    <p
+                                        className="mb-1.5 block font-medium text-muted text-xs"
+                                        id={`${groupLabelId1}-4`}
+                                    >
                                         Preview
-                                    </label>
+                                    </p>
                                     {pickerPreviewLoading ? (
                                         <div className="flex gap-2">
                                             {[...new Array(6)].map((_, i) => (
@@ -3209,7 +3239,7 @@ export default function NuvioCollectionsPage() {
                                             ))}
                                         </ScrollRow>
                                     )}
-                                </div>
+                                </fieldset>
                             )}
 
                             <div className="flex justify-end gap-2 pt-2">

@@ -3,7 +3,7 @@
 import { CalendarIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { format } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 interface DateTimePickerProps {
     className?: string;
@@ -20,6 +20,7 @@ export function DateTimePicker({
     className = "",
     placeholder = "Select date and time",
 }: DateTimePickerProps) {
+    const fieldId1 = useId();
     const [isOpen, setIsOpen] = useState(false);
     const [dateValue, setDateValue] = useState("");
     const [timeValue, setTimeValue] = useState("");
@@ -130,11 +131,15 @@ export function DateTimePicker({
                     >
                         <div className="space-y-4">
                             <div>
-                                <label className="mb-2 block font-medium text-muted text-sm">
+                                <label
+                                    className="mb-2 block font-medium text-muted text-sm"
+                                    htmlFor={`${fieldId1}-1`}
+                                >
                                     Date
                                 </label>
                                 <input
                                     className="w-full rounded-lg border border-theme-surface-border px-4 py-2 transition-all focus:border-theme-secondary focus:outline-none"
+                                    id={`${fieldId1}-1`}
                                     min={minDate}
                                     onChange={handleDateChange}
                                     style={{
@@ -146,11 +151,15 @@ export function DateTimePicker({
                                 />
                             </div>
                             <div>
-                                <label className="mb-2 block font-medium text-muted text-sm">
+                                <label
+                                    className="mb-2 block font-medium text-muted text-sm"
+                                    htmlFor={`${fieldId1}-2`}
+                                >
                                     Time
                                 </label>
                                 <input
                                     className="w-full rounded-lg border border-theme-surface-border px-4 py-2 transition-all focus:border-theme-secondary focus:outline-none"
+                                    id={`${fieldId1}-2`}
                                     min={dateValue === minDate ? minTime : undefined}
                                     onChange={handleTimeChange}
                                     style={{

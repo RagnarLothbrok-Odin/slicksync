@@ -32,7 +32,7 @@ import { format } from "date-fns";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
     Area,
     AreaChart,
@@ -3954,6 +3954,7 @@ function EditUserDetailsModal({
     onUpdateGroup: (groupId: string) => Promise<void>;
     onUpdateExpiresAt: (date: string) => Promise<void>;
 }) {
+    const groupLabelId1 = useId();
     const [groupId, setGroupId] = useState(user.groupIds?.[0] || user.groupId || "");
     const [expiresAt, setExpiresAt] = useState(
         user.expiresAt ? format(new Date(user.expiresAt), "yyyy-MM-dd'T'HH:mm") : ""
@@ -4001,10 +4002,16 @@ function EditUserDetailsModal({
         >
             <div className="space-y-6">
                 {/* Group Selector */}
-                <div>
-                    <label className="mb-2 block font-medium text-default text-sm">
+                <fieldset
+                    aria-labelledby={`${groupLabelId1}-1`}
+                    className="mx-0 min-w-0 border-0 p-0"
+                >
+                    <p
+                        className="mb-2 block font-medium text-default text-sm"
+                        id={`${groupLabelId1}-1`}
+                    >
                         Group Assignment
-                    </label>
+                    </p>
                     <Select
                         onChange={setGroupId}
                         options={[
@@ -4016,13 +4023,19 @@ function EditUserDetailsModal({
                     <p className="mt-2 text-muted text-xs">
                         Assigning a group will automatically sync the group's addons to this user.
                     </p>
-                </div>
+                </fieldset>
 
                 {/* ExpiresAt */}
-                <div>
-                    <label className="mb-2 block font-medium text-default text-sm">
+                <fieldset
+                    aria-labelledby={`${groupLabelId1}-2`}
+                    className="mx-0 min-w-0 border-0 p-0"
+                >
+                    <p
+                        className="mb-2 block font-medium text-default text-sm"
+                        id={`${groupLabelId1}-2`}
+                    >
                         Membership Expiration
-                    </label>
+                    </p>
                     <DateTimePicker
                         min={new Date()}
                         onChange={setExpiresAt}
@@ -4032,7 +4045,7 @@ function EditUserDetailsModal({
                     <p className="mt-2 text-muted text-xs">
                         Leave empty for lifetime membership. User will lose access after this date.
                     </p>
-                </div>
+                </fieldset>
 
                 <div className="flex justify-end gap-3 border-default border-t pt-4">
                     <Button disabled={isLoading} onClick={onClose} variant="secondary">

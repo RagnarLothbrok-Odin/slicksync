@@ -23,7 +23,7 @@ import {
 } from "@heroicons/react/24/outline";
 import Head from "next/head";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import {
     NEBULA_GLASS_CLASS,
@@ -629,6 +629,8 @@ function SortableEntryCard({
 // boundary above it in the App Router - same pattern Activity's page
 // already uses for its own search-param-driven state.
 function VaultPageContent() {
+    const accessibleFieldId1 = useId();
+    const fieldId1 = useId();
     const { layoutMode } = useLayoutMode();
     const isTV = useIsTV();
     const Wrapper = isTV ? TVPageProvider : Fragment;
@@ -1551,12 +1553,18 @@ function VaultPageContent() {
                     {trackedCount > 0 && (
                         <>
                             <div className="mb-2 flex items-center justify-end">
-                                <label className="mr-2 text-muted text-xs">Currency</label>
+                                <label
+                                    className="mr-2 text-muted text-xs"
+                                    htmlFor={`${accessibleFieldId1}-1`}
+                                >
+                                    Currency
+                                </label>
                                 {/* Explicit narrow width - the shared input-base class forces
                 width:100%, which stretched this three-letter selector across
                 the whole page. */}
                                 <select
                                     className="input-base rounded-lg px-2 py-1 text-xs"
+                                    id={`${accessibleFieldId1}-1`}
                                     onChange={(e) => handleCurrencyChange(e.target.value)}
                                     style={{ width: "6rem" }}
                                     title="Currency for all cost figures"
@@ -1800,12 +1808,14 @@ function VaultPageContent() {
                     <div>
                         <label
                             className="mb-2 block font-medium text-sm"
+                            htmlFor={`${fieldId1}-2`}
                             style={{ color: "var(--color-text-muted)" }}
                         >
                             Category
                         </label>
                         <select
                             className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                            id={`${fieldId1}-2`}
                             onChange={(e) => handleCategoryChange(e.target.value as VaultCategory)}
                             style={{
                                 background: "var(--color-surface-hover)",
@@ -2005,12 +2015,14 @@ function VaultPageContent() {
                                     <div>
                                         <label
                                             className="mb-2 block font-medium text-sm"
+                                            htmlFor={`${fieldId1}-3`}
                                             style={{ color: "var(--color-text-muted)" }}
                                         >
                                             Active check
                                         </label>
                                         <select
                                             className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                                            id={`${fieldId1}-3`}
                                             onChange={(e) =>
                                                 setForm((f) => ({
                                                     ...f,
@@ -2094,6 +2106,7 @@ function VaultPageContent() {
                     <div>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <Input
+                                id={`${accessibleFieldId1}-2`}
                                 label="Cost (optional)"
                                 onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))}
                                 placeholder="e.g. 5.00"
@@ -2103,6 +2116,7 @@ function VaultPageContent() {
                             <div>
                                 <label
                                     className="mb-2 block font-medium text-sm"
+                                    htmlFor={`${accessibleFieldId1}-2`}
                                     style={{ color: "var(--color-text-muted)" }}
                                 >
                                     Billed
