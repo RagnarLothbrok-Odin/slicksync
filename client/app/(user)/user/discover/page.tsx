@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Modal } from '@/components/ui';
-import { UserPageHeader } from '@/components/user/UserPageContainer';
+import { Button, Card, Modal, PosterCard, type PosterCardItem } from '@/components/ui';
+import { DiscoverControls, DiscoverFilters, DiscoverHeading } from '@/components/ui/DiscoverControls';
 import { useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { personalRequest } from '@/lib/user-api';
 import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
-import { GENRES, DECADES, RATINGS, LENGTHS, SORTS } from '@/lib/discoverWords';
+import { GENRES, DECADES, RATINGS, LENGTHS, SORTS, type Kind, type SortKey } from '@/lib/discoverWords';
 import { toast } from '@/components/ui/Toast';
-import { BookmarkIcon, HandThumbUpIcon, HandThumbDownIcon, FilmIcon } from '@heroicons/react/24/outline';
+import { BookmarkIcon, HandThumbUpIcon, HandThumbDownIcon } from '@heroicons/react/24/outline';
 
 type Title = { id: string; type: 'movie' | 'series'; name: string; poster: string | null; releaseInfo?: string; imdbRating?: string };
 type TitleState = { itemId: string; itemType: 'movie' | 'series'; name: string; poster: string | null; saved: boolean; reaction: 'like' | 'dislike' | null };
@@ -18,15 +18,17 @@ type Page = { items: Title[]; nextSkip: number | null };
 export default function PersonalDiscoverPage() {
   const { userId, authKey, isReady, provider } = useUserAuthHeaders();
   const { preferences } = usePersonalPreferences();
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
-  const [kind, setKind] = useState('both');
-  const [sort, setSort] = useState('popular');
+  const [kind, setKind] = useState<Kind>('both');
+  const [sort, setSort] = useState<SortKey>('popular');
   const [genre, setGenre] = useState('');
   const [decade, setDecade] = useState('');
   const [minRating, setMinRating] = useState('');
   const [length, setLength] = useState('');
-  const [lens, setLens] = useState<'browse' | 'saved'>('browse');
+  const [lens, setLens] = useState<'titles' | 'watchlist'>('titles');
   const [items, setItems] = useState<Title[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,7 +61,7 @@ export default function PersonalDiscoverPage() {
     if (!isReady || !userId || !authKey) return;
     setBusy(true);
     const load = async () => {
-      if (lens === 'saved') {
+      if (lens === 'watchlist') {
         const data = await personalRequest<{ items: TitleState[] }>(userId, authKey, '/discover/saved');
         return { items: data.items.map(item => ({ id: item.itemId, type: item.itemType, name: item.name, poster: item.poster })), nextSkip: null } as Page;
       }
@@ -91,12 +93,22 @@ export default function PersonalDiscoverPage() {
     try {
       const next = await personalRequest<TitleState>(userId, authKey, `/discover/titles/${target.id}`, { method: 'PUT', body: JSON.stringify({ ...state, ...patch }) });
       if (selectedRef.current?.id === target.id) setState(next);
-      if (lens === 'saved') setRevision(value => value + 1);
+      setRevision(value => value + 1);
     } catch { toast.error('Could not save your choice'); }
     finally { setSaving(false); }
   };
+  useEffect(() => { let active = true; if (isReady && userId && authKey) personalRequest<{ items: TitleState[] }>(userId, authKey, '/discover/saved').then(data => { if (active) setSavedIds(new Set(data.items.map(item => item.itemId))); }).catch(() => {}); return () => { active = false; }; }, [isReady, userId, authKey, revision]);
+  const prefetch = (item: PosterCardItem) => { if (userId && authKey) void personalRequest(userId, authKey, `/discover/titles/${item.id}?type=${item.type}`).catch(() => {}); };
+  const toggleSaved = async (item: PosterCardItem, saved: boolean) => {
+    if (!userId || !authKey) return;
+    try {
+      const { state } = await personalRequest<{ state: TitleState | null }>(userId, authKey, `/discover/titles/${item.id}?type=${item.type}`);
+      await personalRequest(userId, authKey, `/discover/titles/${item.id}`, { method: 'PUT', body: JSON.stringify({ name: item.name, itemType: item.type, poster: item.poster, saved, reaction: state?.reaction || null }) });
+      setRevision(value => value + 1);
+    } catch { toast.error('Could not update your watchlist'); }
+  };
   const sorted = useMemo(() => {
-    const result = [...items];
+    const result = items.filter(item => lens !== 'watchlist' || ((!search || item.name.toLowerCase().includes(search.toLowerCase())) && (kind === 'both' || item.type === kind)));
     if (sort === 'az') result.sort((a, b) => a.name.localeCompare(b.name));
     if (sort === 'rated') {
       const score = (value?: string) => { const number = Number.parseFloat(value || ''); return Number.isFinite(number) ? number : -1; };
@@ -104,27 +116,24 @@ export default function PersonalDiscoverPage() {
     }
     if (sort === 'newest') result.sort((a, b) => (Number.parseInt(b.releaseInfo || '') || 0) - (Number.parseInt(a.releaseInfo || '') || 0));
     return result;
-  }, [items, sort]);
+  }, [items, sort, lens, search, kind]);
   const trailerId = details?.trailers.find(id => /^[\w-]{11}$/.test(id));
-  return <div className="pt-6 pb-8"><UserPageHeader title="Discover" subtitle="Find your next favourite." />
-
-    <div className="flex gap-2 mb-5" role="group" aria-label="Discover view"><Button size="sm" variant={lens === 'browse' ? 'primary' : 'secondary'} onClick={() => setLens('browse')}>Browse</Button><Button size="sm" variant={lens === 'saved' ? 'primary' : 'secondary'} onClick={() => setLens('saved')}>My watchlist</Button></div>
-    {lens === 'browse' && <Card padding="lg" className="mb-6"><label className="sr-only" htmlFor="discover-search">Search titles</label><input id="discover-search" className="input-base w-full px-4 py-3 text-sm mb-4" placeholder="Search movies and shows" value={query} onChange={event => setQuery(event.target.value)} />
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">{[
-        { label: 'Type', value: kind, set: setKind, options: [['both', 'Movies & shows'], ['movie', 'Movies'], ['series', 'Shows']] },
-        { label: 'Sort by', value: sort, set: setSort, options: SORTS.filter(item => item.key !== 'trending').map(item => [item.key, item.label]) },
-        { label: 'Genre', value: genre, set: setGenre, options: [['', 'All genres'], ...GENRES.map(item => [item, item])] },
-        { label: 'Decade', value: decade, set: setDecade, options: [['', 'Any decade'], ...DECADES.map(item => [item.key, item.label])] },
-        { label: 'Minimum rating', value: minRating, set: setMinRating, options: [['', 'Any rating'], ...RATINGS.map(item => [String(item), `${item}+`])] },
-        { label: 'Length', value: length, set: setLength, options: [['', 'Any length'], ...LENGTHS.map(item => [item.key, item.label])] },
-      ].map(filter => <label key={filter.label} className="text-xs text-muted min-w-0">{filter.label}<select aria-label={filter.label} className="input-base w-full mt-1 px-2 py-2 text-sm" value={filter.value} onChange={event => filter.set(event.target.value)}>{filter.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>)}</div>
-      <Button variant="ghost" size="sm" className="mt-3" onClick={() => { setQuery(''); setKind('both'); setSort('popular'); setGenre(''); setDecade(''); setMinRating(''); setLength(''); }}>Reset filters</Button>
-    </Card>}
+  const clearFilters = () => { setGenre(''); setDecade(''); setMinRating(''); setLength(''); };
+  const groups = [
+    { label: 'Genre', value: genre, onChange: setGenre, options: GENRES.map(value => ({ value, label: value })) },
+    { label: 'Decade', value: decade, onChange: setDecade, options: DECADES.map(item => ({ value: item.key, label: item.label })) },
+    { label: 'Rating', value: minRating, onChange: setMinRating, options: RATINGS.map(value => ({ value: String(value), label: `${value}+` })) },
+    { label: 'Length', value: length, onChange: setLength, options: LENGTHS.map(item => ({ value: item.key, label: item.label })) },
+  ];
+  const applied = lens === 'titles' ? groups.filter(group => group.value).map(group => ({ key: group.label, label: group.options.find(option => option.value === group.value)?.label || group.value, clear: () => group.onChange('') })) : [];
+  return <div className="pt-6 pb-8"><DiscoverHeading />
+    <DiscoverControls searchQuery={query} setSearchQuery={setQuery} searchPlaceholder={lens === 'watchlist' ? 'Search your watchlist' : 'Search a title'} kind={kind} setKind={setKind} surprise={() => { const item = sorted[Math.floor(Math.random() * sorted.length)]; if (item) setSelected(item); }} lens={lens} setLens={setLens} lenses={[{ key: 'titles', label: 'Titles' }, { key: 'watchlist', label: 'Watchlist', count: savedIds.size }]} sortOptions={SORTS.filter(item => item.key !== 'trending')} sortValue={sort} pickSort={value => setSort(value as SortKey)} hasFilters={lens === 'titles'} filterCount={applied.length} filtersBody={close => <DiscoverFilters groups={groups} count={applied.length} clear={clearFilters} close={close} />} applied={applied} />
+    <h2 className="text-lg sm:text-xl font-semibold font-display text-default mb-4">{lens === 'watchlist' ? 'Your watchlist' : search ? `Results for “${search}”` : SORTS.find(item => item.key === sort)?.label}</h2>
     {error && <div role="alert" className="flex gap-3 items-center text-sm text-error mb-5"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => next !== null ? loadMore() : setRevision(value => value + 1)}>Try again</Button></div>}
-    {!busy && !error && !items.length && <Card padding="lg"><p className="text-sm text-muted">{lens === 'saved' ? 'Your watchlist is empty. Open a title and save it for later.' : 'No titles match these filters. Try another search or reset your filters.'}</p></Card>}
-    <div className="discovery-poster-grid">{sorted.map(item => <button key={item.id} type="button" className="text-left min-w-0 group rounded-2xl focus-visible:ring-2 focus-visible:ring-primary" onClick={() => setSelected(item)} aria-label={`Details for ${item.name}`}><div className="aspect-[2/3] rounded-2xl overflow-hidden bg-subtle relative">{item.poster ? <img src={item.poster} alt="" loading="lazy" className="w-full h-full object-cover" /> : <div className="h-full grid place-items-center"><FilmIcon className="w-10 h-10 text-muted" /></div>}{preferences.posterRatings && item.imdbRating && <span className="absolute bottom-2 left-2 rounded-lg bg-black/80 text-white px-2 py-1 text-xs">IMDb {item.imdbRating}</span>}</div><p className="text-sm font-medium text-default mt-3 truncate">{item.name}</p><p className="text-xs text-muted mt-1">{item.releaseInfo || (item.type === 'series' ? 'Series' : 'Movie')}</p></button>)}</div>
+    {!busy && !error && !items.length && <Card padding="lg"><p className="text-sm text-muted">{lens === 'watchlist' ? 'Your watchlist is empty. Open a title and save it for later.' : 'No titles match these filters. Try another search or reset your filters.'}</p></Card>}
+    <div className="discovery-poster-grid">{sorted.map((item, index) => <PosterCard key={item.id} item={item} priority={index < 16} onOpenDetails={item => setSelected({ ...item, releaseInfo: item.releaseInfo || undefined, imdbRating: item.imdbRating || undefined })} onToggleWatchlist={toggleSaved} onToggleWatched={() => {}} showWatchedMenu={false} showWatchedBadge={false} showCatalogMenu={false} inWatchlist={savedIds.has(item.id)} onPrefetchDetails={prefetch} isMenuOpen={openMenuKey === item.id} onMenuOpenChange={(open, key) => setOpenMenuKey(open ? key : null)} />)}</div>
     {busy && <p role="status" className="text-sm text-muted py-6">Loading titles...</p>}
-    {next !== null && !search && lens === 'browse' && <div className="flex justify-center mt-6"><Button variant="secondary" disabled={busy} onClick={loadMore}>Load more</Button></div>}
+    {next !== null && !search && lens === 'titles' && <div className="flex justify-center mt-6"><Button variant="secondary" disabled={busy} onClick={loadMore}>Load more</Button></div>}
     {attribution && <p className="text-xs text-muted mt-8">{attribution}</p>}
     <Modal isOpen={!!selected} onClose={() => setSelected(null)} title={selected?.name || 'Title details'} size="lg"><div className="space-y-5">
       {detailError && <p role="alert" className="text-sm text-muted">{detailError}</p>}

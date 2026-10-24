@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 
 // Feature flags for the SlickSync-native personal features (Watchlist,
@@ -111,10 +111,14 @@ export function invalidatePersonalFeatures() {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
 }
 
+export const PersonalFeaturesContext = createContext<PersonalFeatures | null>(null);
+
 export function usePersonalFeatures(): PersonalFeatures {
+  const override = useContext(PersonalFeaturesContext);
   const [value, setValue] = useState<PersonalFeatures>(cached || DEFAULT);
 
   useEffect(() => {
+    if (override) return;
     let mounted = true;
     fetchOnce().then((v) => { if (mounted) setValue(v); });
     listeners.add(setValue);
@@ -127,7 +131,7 @@ export function usePersonalFeatures(): PersonalFeatures {
       listeners.delete(setValue);
       if (typeof window !== 'undefined') window.removeEventListener(REFRESH_EVENT, onChange);
     };
-  }, []);
+  }, [override]);
 
-  return value;
+  return override || value;
 }

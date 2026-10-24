@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { personalRequest, type PersonalPreferences } from '@/lib/user-api';
+import { PersonalFeaturesContext, type PersonalFeatures } from '@/lib/hooks/usePersonalFeatures';
 import { toast } from '@/components/ui/Toast';
 
 const defaults: PersonalPreferences = { beginnerMode: false, hideSensitive: false, posterRatings: false, autoplayTrailer: false, trailerSound: false };
@@ -39,6 +40,7 @@ export function PersonalPreferencesProvider({ children }: { children: ReactNode 
   // including the first render after a reload or an identity switch.
   const resolved = ready && loadedUserId === userId;
   const visiblePreferences = resolved ? preferences : { ...defaults, hideSensitive: true };
-  return <Context.Provider value={{ preferences: visiblePreferences, ready: resolved, saving, error, reload: () => setRevision(value => value + 1), save }}>{children}</Context.Provider>;
+  const features = useMemo<PersonalFeatures>(() => ({ enableWatchlist: true, enableWatchedIndicators: false, enableWatchTogether: false, enableRecommendations: false, enableAutoplayTrailer: preferences.autoplayTrailer, autoplayTrailerStartMuted: !preferences.trailerSound, rpdbEnabled: false, enablePosterRatings: preferences.posterRatings, enableReactions: true, enableWatchProviders: false }), [preferences]);
+  return <Context.Provider value={{ preferences: visiblePreferences, ready: resolved, saving, error, reload: () => setRevision(value => value + 1), save }}><PersonalFeaturesContext.Provider value={features}>{children}</PersonalFeaturesContext.Provider></Context.Provider>;
 }
 export const usePersonalPreferences = () => useContext(Context);

@@ -513,7 +513,7 @@ export default function UserLibraryPage() {
                 }}
               >
                 <TrashIcon className="w-4 h-4" />
-                Delete
+                Remove selected
               </button>
             )}
           </div>
@@ -539,8 +539,9 @@ export default function UserLibraryPage() {
             className="text-sm font-medium transition-colors hover:opacity-80"
             style={{ color: 'var(--color-primary)' }}
           >
-            {selectedItems.length === filteredLibrary.length ? 'Deselect All' : 'Select All'}
+            {selectedItems.length === filteredLibrary.length ? 'Clear selection' : 'Select all for removal'}
           </button>
+          <p className="text-xs text-muted">Select titles to remove them from your library and connected provider.</p>
         </motion.div>
       )}
 

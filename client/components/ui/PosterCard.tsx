@@ -82,6 +82,9 @@ export interface PosterCardProps {
   /** One of the first posters on screen: fetched at once, ahead of the rest,
    *  instead of waiting for the browser to work out it is visible. */
   priority?: boolean;
+  /** Personal panels supply their own data loader and omit household catalog actions. */
+  onPrefetchDetails?: (item: PosterCardItem) => void;
+  showCatalogMenu?: boolean;
 }
 
 export const PosterCard = memo(function PosterCard({
@@ -105,6 +108,8 @@ export const PosterCard = memo(function PosterCard({
   menuKey,
   focusable = false,
   priority = false,
+  onPrefetchDetails,
+  showCatalogMenu = true,
 }: PosterCardProps) {
   const [imageError, setImageError] = useState(false);
   // Timer for the hover prefetch below; cleared on leave and on unmount so
@@ -141,6 +146,10 @@ export const PosterCard = memo(function PosterCard({
 
   const card = (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Details for ${item.name}`}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpenDetails(item); } }}
       className="group relative cursor-pointer tap-card"
       onClick={() => {
         // Suppress the click that fires immediately after a long-press
@@ -162,7 +171,7 @@ export const PosterCard = memo(function PosterCard({
       onPointerEnter={(e) => {
         if (e.pointerType !== 'mouse') return;
         if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
-        prefetchTimer.current = setTimeout(() => { api.prefetchMediaDetails(item.id, item.type); }, 140);
+        prefetchTimer.current = setTimeout(() => { if (onPrefetchDetails) onPrefetchDetails(item); else api.prefetchMediaDetails(item.id, item.type); }, 140);
       }}
       onPointerLeave={() => {
         if (prefetchTimer.current) { clearTimeout(prefetchTimer.current); prefetchTimer.current = null; }
@@ -267,6 +276,7 @@ export const PosterCard = memo(function PosterCard({
                     : <><BookmarkOutlineIcon className="w-4 h-4" /> Add to Watchlist</>}
                 </button>
               )}
+              {showCatalogMenu && (
               <button
                 type="button"
                 onClick={() => setCatalogView(true)}
@@ -274,6 +284,7 @@ export const PosterCard = memo(function PosterCard({
               >
                 <RectangleStackIcon className="w-4 h-4" /> Add to Catalogs
               </button>
+              )}
               {showWatchedMenu && (
                 <button
                   type="button"
