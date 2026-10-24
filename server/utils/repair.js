@@ -33,7 +33,7 @@ async function repairAddonsList(
         filterManifestByResources,
         filterManifestByCatalogs,
         manifestHash: _manifestHash,
-        encrypt: _encrypt,
+        encrypt: _encryptLocal,
     },
     req,
     addonsList

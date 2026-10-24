@@ -1236,8 +1236,10 @@ export default function UsersPage() {
                                     >
                                         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-hover">
                                             <svg
+                                                aria-hidden="true"
                                                 className="h-8 w-8 text-subtle"
                                                 fill="none"
+                                                focusable="false"
                                                 stroke="currentColor"
                                                 viewBox="0 0 24 24"
                                             >

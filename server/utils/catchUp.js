@@ -26,8 +26,8 @@ const { mapLimit } = require("./mapLimit");
 const SERVER_CONCURRENCY = 4;
 const PROFILE_LABEL = "Caught up";
 
-function fail(message, status = 400) {
-    return Object.assign(new Error(message), { status });
+function fail(message, statusLocal = 400) {
+    return Object.assign(new Error(message), { status: statusLocal });
 }
 
 const jobs = new Map();

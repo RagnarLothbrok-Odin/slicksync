@@ -24,7 +24,7 @@ import { toast } from "./Toast";
 // continueWatching.js) opens natively in the same tab; webUrl (everyone
 // else, or Stremio's own fallback if no appUrl) opens as an ordinary link
 // in a new tab. The only JS involved is the drag-cancel.
-export const ContinueWatchingCard = memo(function ContinueWatchingCard({
+export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
     item,
     wasDraggedRef,
     onRemove,

@@ -596,9 +596,9 @@ async function importFromAniList(url, tmdbKey) {
         // telling someone their list is empty when the service is down sends
         // them looking for a problem on their own account.
         const { getServiceStatus } = require("./anilist");
-        const status = getServiceStatus();
-        if (!status.available) {
-            throw new Error(status.reason);
+        const statusLocal = getServiceStatus();
+        if (!statusLocal.available) {
+            throw new Error(statusLocal.reason);
         }
         throw new Error("That AniList list is empty, private, or has nothing in that section");
     }

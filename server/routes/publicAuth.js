@@ -2777,9 +2777,9 @@ module.exports = ({
                 for (const groupData of groups) {
                     const {
                         id: _exportGroupId,
-                        addons,
+                        addons: addonsLocal,
                         userIds: _legacyUserIds,
-                        users,
+                        users: usersLocal,
                         ...groupFields
                     } = groupData;
                     const group = await prisma.group.create({
@@ -2791,8 +2791,8 @@ module.exports = ({
                     });
                     const groupWithAddons = {
                         ...group,
-                        addons: Array.isArray(addons) ? addons : [],
-                        users: Array.isArray(users) ? users : [], // Expect usernames only
+                        addons: Array.isArray(addonsLocal) ? addonsLocal : [],
+                        users: Array.isArray(usersLocal) ? usersLocal : [], // Expect usernames only
                     };
                     console.log(
                         `🔍 Storing group "${groupWithAddons.name}" with addons:`,

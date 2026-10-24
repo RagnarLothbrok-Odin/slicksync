@@ -160,9 +160,9 @@ async function restoreKit(prisma, accountId, passphrase, kit, req, { encrypt }) 
             }
             const base = existingSync && typeof existingSync === "object" ? existingSync : {};
             const merged = { ...base };
-            for (const [key, value] of Object.entries(bundle.syncSecrets)) {
+            for (const [keyLocal, value] of Object.entries(bundle.syncSecrets)) {
                 if (value !== null && value !== undefined && value !== "") {
-                    merged[key] = value;
+                    merged[keyLocal] = value;
                 }
             }
             const valueToStore = typeof acct?.sync === "string" ? JSON.stringify(merged) : merged;

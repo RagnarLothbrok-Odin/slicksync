@@ -64,11 +64,11 @@ module.exports = ({
     scopedWhere,
     INSTANCE_TYPE,
     decrypt,
-    encrypt,
+    encrypt: encryptLocal,
     parseAddonIds,
     parseProtectedAddons,
-    getDecryptedManifestUrl,
-    StremioAPIClient,
+    getDecryptedManifestUrl: getDecryptedManifestUrlLocal,
+    StremioAPIClient: StremioAPIClientLocal,
     StremioAPIStore,
     assignUserToGroup,
     debug,
@@ -79,7 +79,7 @@ module.exports = ({
     aesGcmDecrypt: _aesGcmDecrypt,
     validateStremioAuthKey,
     manifestUrlHmac,
-    manifestHash,
+    manifestHash: manifestHashLocal,
     createProvider,
 }) => {
     const { findLatestEpisode, enrichPostersFromCinemeta } = require("../utils/libraryHelpers");
@@ -218,7 +218,7 @@ module.exports = ({
         const result = await getUserAddons(user, req, {
             createProvider,
             decrypt,
-            StremioAPIClient,
+            StremioAPIClient: StremioAPIClientLocal,
         });
         // A sign-in that can't answer is kept the same minute too - otherwise
         // every visit waits on it again.
@@ -2616,7 +2616,7 @@ module.exports = ({
             const { runGuardSweep } = require("../utils/accountGuard");
             const summary = await runGuardSweep(
                 prisma,
-                { createProvider, decrypt, StremioAPIClient },
+                { createProvider, decrypt, StremioAPIClient: StremioAPIClientLocal },
                 { onlyAccountId: getAccountId(req) }
             );
             res.json({ success: true, ...summary });
@@ -3059,19 +3059,19 @@ module.exports = ({
                     0
                 );
 
-                let liveAddonCount = null;
+                let liveAddonCountLocal = null;
                 if (live) {
                     try {
                         const fullUser = await prisma.user.findUnique({ where: { id: u.id } });
                         const provider = createProvider(fullUser, { decrypt, req });
                         if (provider) {
                             const result = await provider.getAddons();
-                            liveAddonCount = (result?.addons || []).length;
+                            liveAddonCountLocal = (result?.addons || []).length;
                         } else {
-                            liveAddonCount = "not-connected";
+                            liveAddonCountLocal = "not-connected";
                         }
                     } catch {
-                        liveAddonCount = "error";
+                        liveAddonCountLocal = "error";
                     }
                 }
 
@@ -3082,7 +3082,7 @@ module.exports = ({
                     groups: memberGroups.map((g) => g.name),
                     id: u.id,
                     isActive: u.isActive,
-                    liveAddonCount,
+                    liveAddonCount: liveAddonCountLocal,
                     provider: u.providerType,
                     username: u.username,
                 });
@@ -4534,11 +4534,11 @@ module.exports = ({
                 createProvider,
                 decrypt,
                 getAccountId,
-                getDecryptedManifestUrl,
+                getDecryptedManifestUrl: getDecryptedManifestUrlLocal,
                 parseAddonIds,
                 parseProtectedAddons,
                 prisma,
-                StremioAPIClient,
+                StremioAPIClient: StremioAPIClientLocal,
             });
 
             const result = await getUserSyncStatus(id, { groupId, unsafe: unsafeMode }, req);
@@ -4620,7 +4620,7 @@ module.exports = ({
                 parseAddonIds,
                 parseProtectedAddons,
                 prisma,
-                StremioAPIClient,
+                StremioAPIClient: StremioAPIClientLocal,
                 unsafeMode,
                 useCustomFields,
             });
@@ -4733,7 +4733,7 @@ module.exports = ({
             const result = await getUserAddons(user, req, {
                 createProvider,
                 decrypt,
-                StremioAPIClient,
+                StremioAPIClient: StremioAPIClientLocal,
             });
 
             if (!result.success) {
@@ -4936,7 +4936,7 @@ module.exports = ({
 
             // Use stateless client with authKey to fetch addon collection directly
             try {
-                const apiClient = new StremioAPIClient({
+                const apiClient = new StremioAPIClientLocal({
                     authKey: authKeyPlain,
                     endpoint: "https://api.strem.io",
                 });
@@ -5161,7 +5161,7 @@ module.exports = ({
                     email: user.email,
                     isActive: true,
                     nuvioProfileId: profileIndex,
-                    nuvioRefreshToken: encrypt(plainToken, req),
+                    nuvioRefreshToken: encryptLocal(plainToken, req),
                     nuvioUserId: user.nuvioUserId,
                     providerType: "nuvio",
                     username,
@@ -5362,7 +5362,7 @@ module.exports = ({
                 email: baseUser.email,
                 isActive: true,
                 nuvioProfileId: profileIndex,
-                nuvioRefreshToken: encrypt(plainToken, req),
+                nuvioRefreshToken: encryptLocal(plainToken, req),
                 nuvioUserId: baseUser.nuvioUserId,
                 providerType: "nuvio",
                 username,
@@ -6038,7 +6038,7 @@ module.exports = ({
             const live = await getUserAddons(r.user, req, {
                 createProvider,
                 decrypt,
-                StremioAPIClient,
+                StremioAPIClient: StremioAPIClientLocal,
             }).catch(() => ({ addons: [] }));
             const result = await readLayoutForEdit(r.provider, Number(profileId), live?.addons, {
                 prisma,
@@ -6302,7 +6302,7 @@ module.exports = ({
                 parseAddonIds,
                 parseProtectedAddons,
                 prisma,
-                StremioAPIClient,
+                StremioAPIClient: StremioAPIClientLocal,
                 unsafeMode: unsafe,
             });
 
@@ -6778,14 +6778,14 @@ module.exports = ({
             const { unsafe } = req.query;
 
             // Default Stremio addons (name-based) in safe mode
-            const defaultAddons = {
+            const defaultAddonsLocal = {
                 names: ["Cinemeta", "Local Files", "Local Files (without catalog support)"],
             };
 
             // Check if this is a default addon in safe mode (match by name)
             const isDefaultAddon =
                 typeof name === "string" &&
-                defaultAddons.names.some((n) => (name || "").includes(n));
+                defaultAddonsLocal.names.some((n) => (name || "").includes(n));
 
             if (isDefaultAddon && unsafe !== "true") {
                 return res.status(403).json({
@@ -7098,7 +7098,7 @@ module.exports = ({
                         user.stremioAuthKey
                     ) {
                         const authKeyPlain = decrypt(user.stremioAuthKey, req);
-                        const apiClient = new StremioAPIClient({
+                        const apiClient = new StremioAPIClientLocal({
                             authKey: authKeyPlain,
                             endpoint: "https://api.strem.io",
                         });
@@ -7782,8 +7782,8 @@ module.exports = ({
             // Decrypt auth key
             const authKeyPlain = decrypt(user.stremioAuthKey, req);
 
-            const { StremioAPIClient } = require("stremio-api-client");
-            const apiClient = new StremioAPIClient({
+            const { StremioAPIClient: StremioAPIClientLocal } = require("stremio-api-client");
+            const apiClient = new StremioAPIClientLocal({
                 authKey: authKeyPlain,
                 endpoint: "https://api.strem.io",
             });
@@ -8550,7 +8550,7 @@ module.exports = ({
             // Protected addons logic (name-based):
             // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
             // 2. User-defined protected addons: ALWAYS protected regardless of mode
-            const { defaultAddons } = require("../utils/config");
+            const { defaultAddons: defaultAddonsLocal } = require("../utils/config");
             const normalizeName = (n) =>
                 String(n || "")
                     .trim()
@@ -8558,7 +8558,7 @@ module.exports = ({
             const targetNameNormalized = normalizeName(addonName);
 
             // Default protected addon names (only in safe mode)
-            const defaultProtectedNames = unsafe === "true" ? [] : defaultAddons.names || [];
+            const defaultProtectedNames = unsafe === "true" ? [] : defaultAddonsLocal.names || [];
             const defaultProtectedNameSet = new Set(defaultProtectedNames.map(normalizeName));
 
             // Parse user-defined protected addons (ALWAYS protected regardless of mode) - stored as plaintext names
@@ -8719,7 +8719,7 @@ module.exports = ({
             }
 
             // Encrypt and store the auth key
-            const encryptedAuthKey = encrypt(authKey, req);
+            const encryptedAuthKey = encryptLocal(authKey, req);
 
             await prisma.user.update({
                 data: {
@@ -8828,7 +8828,7 @@ module.exports = ({
                 return res.json({ status: "pending" });
             }
 
-            const encryptedToken = encrypt(result.accessToken, req);
+            const encryptedToken = encryptLocal(result.accessToken, req);
             await prisma.user.update({
                 data: {
                     simklAccessToken: encryptedToken,
@@ -8908,7 +8908,7 @@ module.exports = ({
             }
 
             // Encrypt and store the auth key
-            const encryptedAuthKey = encrypt(authKey, req);
+            const encryptedAuthKey = encryptLocal(authKey, req);
 
             await prisma.user.update({
                 data: {
@@ -9095,12 +9095,12 @@ module.exports = ({
                                 description: manifest.description || "",
                                 iconUrl: manifest.logo || null,
                                 isActive: true,
-                                manifest: encrypt(JSON.stringify(manifest), req),
-                                manifestHash: manifestHash(manifest),
-                                manifestUrl: encrypt(addonUrl, req),
+                                manifest: encryptLocal(JSON.stringify(manifest), req),
+                                manifestHash: manifestHashLocal(manifest),
+                                manifestUrl: encryptLocal(addonUrl, req),
                                 manifestUrlHash: manifestUrlHmac(req, addonUrl),
                                 name: manifest.name || "Unknown",
-                                originalManifest: encrypt(JSON.stringify(manifest), req),
+                                originalManifest: encryptLocal(JSON.stringify(manifest), req),
                                 resources: JSON.stringify(resourcesNames),
                                 stremioAddonId: manifest.id || null,
                                 version: manifest.version || null,
@@ -9335,7 +9335,7 @@ module.exports = ({
             const nextEncrypted = nextUrls
                 .map((u) => {
                     try {
-                        return encrypt(u, req);
+                        return encryptLocal(u, req);
                     } catch {
                         return null;
                     }
@@ -9396,7 +9396,7 @@ module.exports = ({
                 return res.status(400).json({ message: "Could not validate auth key" });
             }
 
-            const encryptedAuthKey = encrypt(authKey, req);
+            const encryptedAuthKey = encryptLocal(authKey, req);
 
             const updated = await prisma.user.update({
                 data: {
@@ -9519,7 +9519,7 @@ module.exports = ({
             });
 
             // Create Stremio API client
-            const apiClient = new StremioAPIClient(apiStore);
+            const apiClient = new StremioAPIClientLocal(apiStore);
 
             // Authenticate with Stremio using the same method as new user creation
             const loginEmailOnly = async () => {
@@ -9642,7 +9642,7 @@ module.exports = ({
             }
 
             // Encrypt the auth key for secure storage
-            const encryptedAuthKey = encrypt(authKey, req);
+            const encryptedAuthKey = encryptLocal(authKey, req);
 
             // Update user with Stremio credentials
             const updatedUser = await prisma.user.update({
@@ -9788,7 +9788,7 @@ module.exports = ({
                         select: { accountId: true, id: true, manifestUrl: true, name: true },
                         where: {
                             accountId: getAccountId(req),
-                            manifestHash: manifestHash(manifestData),
+                            manifestHash: manifestHashLocal(manifestData),
                         },
                     });
                     if (existingAddon) {
@@ -9925,14 +9925,14 @@ module.exports = ({
                                 iconUrl: manifestData?.logo || addonData.iconUrl || null,
                                 isActive: true,
                                 manifest: manifestData
-                                    ? encrypt(JSON.stringify(manifestData), req)
+                                    ? encryptLocal(JSON.stringify(manifestData), req)
                                     : null,
-                                manifestHash: manifestData ? manifestHash(manifestData) : null,
-                                manifestUrl: encrypt(addonUrl, req),
+                                manifestHash: manifestData ? manifestHashLocal(manifestData) : null,
+                                manifestUrl: encryptLocal(addonUrl, req),
                                 manifestUrlHash: manifestUrlHmac(req, addonUrl),
                                 name: finalAddonName,
                                 originalManifest: originalManifestObj
-                                    ? encrypt(JSON.stringify(originalManifestObj), req)
+                                    ? encryptLocal(JSON.stringify(originalManifestObj), req)
                                     : null,
                                 resources: resourcesNames,
                                 stremioAddonId:
@@ -10096,7 +10096,7 @@ module.exports = ({
             }
 
             // Import notify utilities
-            const { postDiscord } = require("../utils/notify");
+            const { postDiscord: postDiscordLocal } = require("../utils/notify");
 
             let embed;
 
@@ -10187,7 +10187,7 @@ module.exports = ({
                 embed.footer = { text: `SlickSync v${appVersion}` };
             }
 
-            await postDiscord(webhookUrl, null, {
+            await postDiscordLocal(webhookUrl, null, {
                 avatar_url:
                     "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
                 embeds: [embed],

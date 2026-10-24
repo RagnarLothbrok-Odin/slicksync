@@ -177,9 +177,11 @@ export default function PersonalDiscoverPage() {
                     setNext(data.nextSkip);
                 }
             })
-            .catch((error) => {
+            .catch((errorLocal) => {
                 if (version === generation.current) {
-                    setError(error instanceof Error ? error.message : "Could not load titles");
+                    setError(
+                        errorLocal instanceof Error ? errorLocal.message : "Could not load titles"
+                    );
                 }
             })
             .finally(() => {
@@ -420,11 +422,11 @@ export default function PersonalDiscoverPage() {
                         item={item}
                         key={item.id}
                         onMenuOpenChange={(open, key) => setOpenMenuKey(open ? key : null)}
-                        onOpenDetails={(item) =>
+                        onOpenDetails={(itemLocal) =>
                             setSelected({
-                                ...item,
-                                imdbRating: item.imdbRating || undefined,
-                                releaseInfo: item.releaseInfo || undefined,
+                                ...itemLocal,
+                                imdbRating: itemLocal.imdbRating || undefined,
+                                releaseInfo: itemLocal.releaseInfo || undefined,
                             })
                         }
                         onPrefetchDetails={prefetch}

@@ -30,7 +30,7 @@ test("up, down and partly failing servers, each once", async () => {
             person("f", "Fay", "aio1", "Reconnect needed: 401", t1),
         ]),
         "acc",
-        { versions: async (rows) => rows }
+        { versions: async (rowsLocal) => rowsLocal }
     );
     const by = Object.fromEntries(rows.map((r) => [r.key, r]));
     assert.equal(rows.length, 3);

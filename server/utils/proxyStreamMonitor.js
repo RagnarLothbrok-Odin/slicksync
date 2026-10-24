@@ -907,8 +907,8 @@ function getIgnoredIps() {
 // "went offline / came back" edge-trigger pattern.
 async function notifyProxyHealthChange(prisma, accountId, isOk, errorMessage) {
     try {
-        const { notifyPushForType } = require("./pushNotifications");
-        await notifyPushForType(prisma, accountId, "notifyOnProxyHealth", {
+        const { notifyPushForType: notifyPushForTypeLocal } = require("./pushNotifications");
+        await notifyPushForTypeLocal(prisma, accountId, "notifyOnProxyHealth", {
             body: isOk
                 ? "Now Playing polling has recovered."
                 : errorMessage || "Now Playing polling can't reach AIOStreams.",

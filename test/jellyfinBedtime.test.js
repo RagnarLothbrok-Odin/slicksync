@@ -95,18 +95,18 @@ function setup({ schedule = [], log = "[2026-10-06 12:00:00.000 +00:00] [INF] up
         },
     };
     const server = { schedule: JSON.parse(JSON.stringify(schedule)), writes: 0 };
-    const call = async (_session, path, opts = {}) => {
+    const call = async (_session, path, optsLocal = {}) => {
         if (path === "/System/Logs") {
             return [{ DateModified: "2026-10-06T12:00:00Z", Name: "log_20261006.log" }];
         }
         if (path.startsWith("/System/Logs/Log")) {
             return log;
         }
-        if (path === "/Users/u1" && !opts.method) {
+        if (path === "/Users/u1" && !optsLocal.method) {
             return { Policy: { AccessSchedules: server.schedule, IsAdministrator: false } };
         }
-        if (path === "/Users/u1/Policy" && opts.method === "POST") {
-            server.schedule = opts.body.AccessSchedules;
+        if (path === "/Users/u1/Policy" && optsLocal.method === "POST") {
+            server.schedule = optsLocal.body.AccessSchedules;
             server.writes++;
             return "";
         }

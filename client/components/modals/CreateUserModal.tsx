@@ -969,8 +969,10 @@ export function CreateUserModal({
                                                                     <div className="relative flex items-center gap-4">
                                                                         <div className="ao-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
                                                                             <svg
+                                                                                aria-hidden="true"
                                                                                 className="ao-glyph h-5 w-5"
                                                                                 fill="none"
+                                                                                focusable="false"
                                                                                 stroke="currentColor"
                                                                                 strokeWidth="2"
                                                                                 viewBox="0 0 24 24"
@@ -1015,8 +1017,10 @@ export function CreateUserModal({
                                                                     <div className="relative flex items-center gap-4">
                                                                         <div className="ao-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
                                                                             <svg
+                                                                                aria-hidden="true"
                                                                                 className="ao-glyph h-5 w-5"
                                                                                 fill="none"
+                                                                                focusable="false"
                                                                                 stroke="currentColor"
                                                                                 strokeWidth="2"
                                                                                 viewBox="0 0 24 24"
@@ -1071,8 +1075,10 @@ export function CreateUserModal({
                                                                     <div className="relative flex items-center gap-4">
                                                                         <div className="ao-icon-grad flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
                                                                             <svg
+                                                                                aria-hidden="true"
                                                                                 className="h-5 w-5 text-white"
                                                                                 fill="none"
+                                                                                focusable="false"
                                                                                 stroke="currentColor"
                                                                                 strokeWidth="2"
                                                                                 viewBox="0 0 24 24"

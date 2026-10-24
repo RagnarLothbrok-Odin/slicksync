@@ -79,7 +79,10 @@ test('changes: what changes on its own does not count, anything else is "other s
 });
 
 test('a change to the catalog order is named as one, not "other settings"', () => {
-    const { summarize, describeChanges } = require("../server/utils/aiostreamsConfig");
+    const {
+        summarize: summarizeLocal,
+        describeChanges: describeChangesLocal,
+    } = require("../server/utils/aiostreamsConfig");
     const base = {
         catalogModifications: [
             { id: "a.top", type: "movie" },
@@ -91,13 +94,13 @@ test('a change to the catalog order is named as one, not "other settings"', () =
         ...base,
         catalogModifications: [base.catalogModifications[1], base.catalogModifications[0]],
     };
-    assert.deepEqual(describeChanges(summarize(base), summarize(moved)), [
+    assert.deepEqual(describeChangesLocal(summarizeLocal(base), summarizeLocal(moved)), [
         "changed the catalog order",
     ]);
     // A look kept before the order was summarised has nothing to compare against.
-    const old = { ...summarize(base) };
+    const old = { ...summarizeLocal(base) };
     delete old.catalogOrder;
-    assert.deepEqual(describeChanges(old, summarize(moved)), ["changed other settings"]);
+    assert.deepEqual(describeChangesLocal(old, summarizeLocal(moved)), ["changed other settings"]);
 });
 
 test("account: a personal address names a person, so only a typed configuration UUID counts", () => {

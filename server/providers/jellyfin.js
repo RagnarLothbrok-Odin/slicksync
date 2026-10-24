@@ -431,7 +431,7 @@ function createJellyfinProvider({
         const entries = new Map();
         function consider(
             it,
-            { livePos = null, liveAt = null, paused = false, device = null } = {}
+            { livePos = null, liveAt = null, paused = false, device: deviceLocal = null } = {}
         ) {
             if (!it || (it.Type !== "Movie" && it.Type !== "Episode")) {
                 return;
@@ -483,7 +483,7 @@ function createJellyfinProvider({
                 _ctime: lastWatchedMs || now,
                 _id: id,
                 _jf: {
-                    device,
+                    device: deviceLocal,
                     itemId: normId(it.Id),
                     live: livePos != null,
                     paused,

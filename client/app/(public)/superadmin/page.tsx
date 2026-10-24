@@ -144,8 +144,10 @@ function GrowthSparkline({ series }: { series: { date: string; count: number }[]
     return (
         <div className="flex items-center gap-3">
             <svg
+                aria-label="Activity over time"
                 className="h-8 w-24 overflow-visible"
                 preserveAspectRatio="none"
+                role="img"
                 viewBox={`0 0 ${width} ${height}`}
             >
                 <polyline

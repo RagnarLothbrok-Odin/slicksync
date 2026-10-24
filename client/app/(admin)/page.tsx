@@ -68,7 +68,7 @@ const SyncActivityChart = dynamic(
 const ACTIVITY_CARD_HEIGHT = "h-[420px]";
 
 // Recent Addon Item component with error handling
-const RecentAddonItem = memo(function RecentAddonItem({
+const RecentAddonItem = memo(function RecentAddonItemLocal({
     addon,
     isReloading,
     onReload,
@@ -682,7 +682,9 @@ export default function DashboardPage() {
                             >
                                 <NebulaGlassStripe />
                                 <svg
+                                    aria-hidden="true"
                                     className="shrink-0 -rotate-90"
+                                    focusable="false"
                                     height="56"
                                     viewBox="0 0 64 64"
                                     width="56"

@@ -16,7 +16,7 @@ const { createJellyfinProvider } = require("./jellyfin");
 const { resolveServerConfigForAccount } = require("./supabase");
 
 function makeCreateProvider({ prisma, encrypt, getAccountId } = {}) {
-    return function createProvider(user, { decrypt, req }) {
+    return function createProviderLocal(user, { decrypt, req }) {
         const type = user.providerType || "stremio";
 
         try {

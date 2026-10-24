@@ -72,9 +72,9 @@ function table(rows) {
             return r ? pick(r, select) : null;
         },
         rows,
-        update: async ({ where, data, select }) => {
+        update: async ({ where, data: dataLocal, select }) => {
             const r = rows.find((x) => match(x, where));
-            Object.assign(r, data);
+            Object.assign(r, dataLocal);
             return pick(r, select);
         },
     };
@@ -493,15 +493,18 @@ test("the API key: a different person's credential gets neither the key nor a ne
 // ---- the addon address -------------------------------------------------
 
 // Names in these tests resolve to whatever the test says, never the network.
-function resolveTo(t, table) {
+function resolveTo(t, tableLocal) {
     const original = dns.lookup;
     dns.lookup = async (host) => {
-        if (!(host in table)) {
+        if (!(host in tableLocal)) {
             const e = new Error(`getaddrinfo ENOTFOUND ${host}`);
             e.code = "ENOTFOUND";
             throw e;
         }
-        return table[host].map((address) => ({ address, family: address.includes(":") ? 6 : 4 }));
+        return tableLocal[host].map((address) => ({
+            address,
+            family: address.includes(":") ? 6 : 4,
+        }));
     };
     t.after(() => {
         dns.lookup = original;
@@ -627,9 +630,9 @@ for (const type of ["public", "private"]) {
 }
 
 test("an authenticated person can read their own profile before joining a group", async () => {
-    const person = data.user.rows.find((row) => row.id === "jA");
-    const previous = person.accountId;
-    person.accountId = "household-without-groups";
+    const personLocal = data.user.rows.find((row) => row.id === "jA");
+    const previous = personLocal.accountId;
+    personLocal.accountId = "household-without-groups";
     try {
         const response = await call("GET", "/user-info", {
             key: session("jA", "jellyfin"),
@@ -637,7 +640,7 @@ test("an authenticated person can read their own profile before joining a group"
         });
         assert.equal(response.status, 200);
     } finally {
-        person.accountId = previous;
+        personLocal.accountId = previous;
     }
 });
 

@@ -662,10 +662,10 @@ test("catalog preview: a SlickTrax catalog is still read over loopback on an ins
     resolveTo(t, {});
     const seen = [];
     let own;
-    const upstream = await listen(t, (req, res) => {
+    const upstream = await listen(t, (req, resLocal) => {
         seen.push(req.url);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(
+        resLocal.writeHead(200, { "content-type": "application/json" });
+        resLocal.end(
             JSON.stringify({
                 metas: [
                     {

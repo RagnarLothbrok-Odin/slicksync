@@ -83,8 +83,8 @@ async function main() {
 
             // Show who the fix kept for the same (item, day) instead, for
             // direct comparison.
-            const dayKeyOf = (r, isEpisode) => {
-                const id = isEpisode ? `${r.showId}::${r.videoId || ""}` : r.itemId;
+            const dayKeyOf = (r, isEpisodeLocal) => {
+                const id = isEpisodeLocal ? `${r.showId}::${r.videoId || ""}` : r.itemId;
                 const d = new Date(r.watchedAt);
                 return `${id}::${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
             };

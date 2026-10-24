@@ -115,7 +115,7 @@ function formatMinutes(minutes: number): string {
 }
 
 // Group Watch Time Chart - shows per-user lines
-const GroupWatchTimeChart = memo(function GroupWatchTimeChart({
+const GroupWatchTimeChart = memo(function GroupWatchTimeChartLocal({
     data,
     users,
 }: {
@@ -264,7 +264,7 @@ const UserLabel = (props: any) => {
 };
 
 // Group Content Breakdown Chart - grouped stacked bars by date per user
-const GroupContentBreakdownChart = memo(function GroupContentBreakdownChart({
+const GroupContentBreakdownChart = memo(function GroupContentBreakdownChartLocal({
     data,
     users,
 }: {

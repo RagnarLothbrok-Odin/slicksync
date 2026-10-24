@@ -45,7 +45,7 @@ import { ThemeCard } from "./ThemeChoice";
 // (which has no themeMeta entry) and adds a delete affordance in the corner —
 // built-in themes shouldn't ever be deletable, so this is a separate component
 // rather than a `deletable?` prop on ThemeCard.
-const CustomThemeCard = memo(function CustomThemeCard({
+const CustomThemeCard = memo(function CustomThemeCardLocal({
     theme,
     isSelected,
     onSelect,
@@ -173,7 +173,7 @@ const CustomThemeCard = memo(function CustomThemeCard({
 // a color picker seeded with a fallback when there's no override, a hex label,
 // and a "reset" affordance to clear the override back to the base theme's own
 // value. Extracted so adding a new override is one JSX line, not thirty.
-const ColorOverride = memo(function ColorOverride({
+const ColorOverride = memo(function ColorOverrideLocal({
     label,
     value,
     seed,
@@ -272,7 +272,7 @@ function resolvePreviewPalette(
 // Layout mode card - structure preview only (sidebar-vs-topbar), not colors,
 // since layout mode is orthogonal to the Theme setting and should read as
 // "shape," not "another color choice."
-const LayoutModeCard = memo(function LayoutModeCard({
+const LayoutModeCard = memo(function LayoutModeCardLocal({
     layoutId,
     isSelected,
     onSelect,

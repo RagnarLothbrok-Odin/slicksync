@@ -20,8 +20,8 @@ const locks = require("./locks");
 const UNDO_DAYS = 7;
 const KIND_LABEL = { aiometadata: "AIOMetadata", aiostreams: "AIOStreams", jellyfin: "Jellyfin" };
 
-function fail(message, status = 400) {
-    return Object.assign(new Error(message), { status });
+function fail(message, statusLocal = 400) {
+    return Object.assign(new Error(message), { status: statusLocal });
 }
 
 const maskEmail = (email) => {

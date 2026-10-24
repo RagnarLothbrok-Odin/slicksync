@@ -36,6 +36,7 @@ export function ResumeTourIcon({
     return (
         <svg
             aria-hidden={title ? undefined : true}
+            aria-label={title}
             className={className}
             fill="none"
             role={title ? "img" : "presentation"}

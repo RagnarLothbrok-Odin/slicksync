@@ -1750,8 +1750,8 @@ module.exports = ({
                 }
 
                 // Check if requesting user is in the same group and target user is public
-                const { getGroupMembers } = require("../utils/sharesManager");
-                const groupMembers = await getGroupMembers(
+                const { getGroupMembers: getGroupMembersLocal } = require("../utils/sharesManager");
+                const groupMembers = await getGroupMembersLocal(
                     prisma,
                     user.accountId,
                     requestingUserId

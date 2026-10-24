@@ -401,13 +401,13 @@ const pollLimiter = rateLimit({
     windowMs: 60_000,
 });
 app.use("/api/nuvio/poll-oauth", pollLimiter);
-for (const path of [
+for (const pathLocal of [
     "/api/jellyfin/quick-connect-status",
     "/api/auth/jellyfin-quick-connect-status",
     "/api/public-auth/jellyfin-quick-connect-status",
     "/api/public-library/jellyfin-quick-connect-status",
 ]) {
-    app.use(path, pollLimiter);
+    app.use(pathLocal, pollLimiter);
 }
 app.use("/api/auth/nuvio-poll-oauth", pollLimiter);
 app.use("/api/public-auth/nuvio-poll-oauth", pollLimiter);
@@ -1003,7 +1003,7 @@ async function bootstrap() {
         }
 
         try {
-            const _fs = require("node:fs");
+            const _fsLocal = require("node:fs");
             require("./utils/debugLogFile").appendCapped(
                 "/app/data/activity-monitor-debug.log",
                 `[${new Date().toISOString()}] index.js:before_scheduleSyncs {}\n`
@@ -1020,7 +1020,7 @@ async function bootstrap() {
             INSTANCE_TYPE
         );
         try {
-            const _fs = require("node:fs");
+            const _fsLocal = require("node:fs");
             require("./utils/debugLogFile").appendCapped(
                 "/app/data/activity-monitor-debug.log",
                 `[${new Date().toISOString()}] index.js:after_scheduleSyncs {}\n`
@@ -1036,7 +1036,7 @@ async function bootstrap() {
 
         // Schedule activity monitor (checks for new watch activity every 5 minutes)
         try {
-            const _fs = require("node:fs");
+            const _fsLocal = require("node:fs");
             require("./utils/debugLogFile").appendCapped(
                 "/app/data/activity-monitor-debug.log",
                 `[${new Date().toISOString()}] index.js:about_to_call_scheduleActivityMonitor {}\n`
@@ -1046,7 +1046,7 @@ async function bootstrap() {
             scheduleActivityMonitor(prisma, decrypt, getAccountId, INSTANCE_TYPE);
         } catch (err) {
             try {
-                const _fs = require("node:fs");
+                const _fsLocal = require("node:fs");
                 require("./utils/debugLogFile").appendCapped(
                     "/app/data/activity-monitor-debug.log",
                     `[${new Date().toISOString()}] index.js:scheduleActivityMonitor_threw ${JSON.stringify({ message: err.message, stack: err.stack })}\n`
@@ -1099,8 +1099,8 @@ async function bootstrap() {
             // would be indistinguishable from the update never running.
             try {
                 const fs = require("node:fs");
-                const path = require("node:path");
-                const marker = path.join(process.cwd(), "data", "pending-update-check.json");
+                const pathLocal = require("node:path");
+                const marker = pathLocal.join(process.cwd(), "data", "pending-update-check.json");
                 if (fs.existsSync(marker)) {
                     let info = null;
                     try {

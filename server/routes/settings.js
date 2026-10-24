@@ -826,9 +826,9 @@ module.exports = ({
                 }
 
                 const { restoreKit } = require("../utils/disasterRecoveryKit");
-                const { encrypt } = require("../utils/encryption");
+                const { encrypt: encryptLocal } = require("../utils/encryption");
                 const result = await restoreKit(prisma, accountId, parsed.k, bundle, req, {
-                    encrypt,
+                    encrypt: encryptLocal,
                 });
                 return res.json(result);
             } catch (e) {
@@ -2512,14 +2512,14 @@ module.exports = ({
 
                 const { reloadGroupAddons } = require("../routes/users");
                 const scopedWhere = require("../utils/helpers").scopedWhere;
-                const decrypt = require("../utils/encryption").decrypt;
+                const decryptLocal = require("../utils/encryption").decrypt;
                 const schedulerReq = { appAccountId: DEFAULT_ACCOUNT_ID };
                 scheduleSyncs(
                     nextMinutes,
                     prisma,
                     getAccountId,
                     scopedWhere,
-                    decrypt,
+                    decryptLocal,
                     reloadGroupAddons,
                     schedulerReq,
                     INSTANCE_TYPE
@@ -2705,13 +2705,13 @@ module.exports = ({
             // Reschedule heap with new config (scheduler will re-seed on next scheduleSyncs call)
             const { reloadGroupAddons } = require("../routes/users");
             const scopedWhere = require("../utils/helpers").scopedWhere;
-            const decrypt = require("../utils/encryption").decrypt;
+            const decryptLocal = require("../utils/encryption").decrypt;
             scheduleSyncs(
                 0,
                 prisma,
                 getAccountId,
                 scopedWhere,
-                decrypt,
+                decryptLocal,
                 reloadGroupAddons,
                 req,
                 INSTANCE_TYPE
@@ -2721,7 +2721,7 @@ module.exports = ({
                 prisma,
                 getAccountId,
                 scopedWhere,
-                decrypt,
+                decryptLocal,
                 reloadGroupAddons,
                 req,
                 INSTANCE_TYPE
@@ -2989,7 +2989,7 @@ module.exports = ({
         try {
             const { syncGroupUsers } = require("../routes/groups");
             const scopedWhere = require("../utils/helpers").scopedWhere;
-            const decrypt = require("../utils/encryption").decrypt;
+            const decryptLocal = require("../utils/encryption").decrypt;
 
             const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
             const syncReq = { appAccountId: accountId, body: {}, headers: {} };
@@ -3017,7 +3017,7 @@ module.exports = ({
                         prisma,
                         getAccountId,
                         scopedWhere,
-                        decrypt,
+                        decryptLocal,
                         group.id,
                         syncReq
                     );
@@ -3181,10 +3181,10 @@ module.exports = ({
             if (!entry) {
                 return res.status(404).json({ message: "AI Services not configured" });
             }
-            const decrypt = require("../utils/encryption").decrypt;
+            const decryptLocal = require("../utils/encryption").decrypt;
             let secret;
             try {
-                secret = decrypt(entry.encryptedSecret, req);
+                secret = decryptLocal(entry.encryptedSecret, req);
             } catch {
                 return res.status(500).json({ message: "Failed to decrypt secret" });
             }

@@ -33,7 +33,7 @@ const CHART_TOOLTIP_STYLE = {
 
 const CHART_LABEL_STYLE = { color: "var(--color-text)" } as const;
 
-export const SyncActivityChart = memo(function SyncActivityChart({
+export const SyncActivityChart = memo(function SyncActivityChartLocal({
     data,
 }: {
     data: SyncStatusData[];

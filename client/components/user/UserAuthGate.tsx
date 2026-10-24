@@ -101,8 +101,10 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
                         style={{ background: "var(--color-error-muted)" }}
                     >
                         <svg
+                            aria-hidden="true"
                             className="h-8 w-8"
                             fill="none"
+                            focusable="false"
                             stroke="currentColor"
                             style={{ color: "var(--color-error)" }}
                             viewBox="0 0 24 24"

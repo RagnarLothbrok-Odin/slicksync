@@ -749,7 +749,7 @@ test("Nuvio undo: keeps what was watched after the copy, and puts an earlier res
         pushLibraryItems: async () => undefined,
         pushWatchedItems: async (_p, rows) => calls.push(["watched", rows.length]),
         pushWatchProgress: async (_p, rows) =>
-            calls.push(["progress", rows.map((r) => [r.progress_key, r.position])]),
+            calls.push(["progress", rows.map((rLocal) => [rLocal.progress_key, rLocal.position])]),
     };
     const read = await ADAPTERS.nuvio.read(provider, 1);
     state = {

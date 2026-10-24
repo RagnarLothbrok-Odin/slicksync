@@ -2736,8 +2736,10 @@ function BackupAddonPickerModal({
                     }}
                 >
                     <svg
+                        aria-hidden="true"
                         className="h-4 w-4 shrink-0"
                         fill="none"
+                        focusable="false"
                         stroke="currentColor"
                         strokeWidth={2}
                         style={{ color: "var(--color-text-muted)" }}
@@ -2934,11 +2936,11 @@ function AddonBackupSection({
         const chain: any[] = [];
 
         // Recursive function to traverse the entire chain
-        const traverse = (addon: any) => {
-            if (addon?.backupAddon) {
-                chain.push(addon.backupAddon);
+        const traverse = (addonLocal: any) => {
+            if (addonLocal?.backupAddon) {
+                chain.push(addonLocal.backupAddon);
                 // Continue traversing if this backup also has a backup
-                traverse(addon.backupAddon);
+                traverse(addonLocal.backupAddon);
             }
         };
 
@@ -3119,8 +3121,10 @@ function AddonBackupSection({
                             className={`flex h-6 w-6 items-center justify-center rounded-full ${backupChain.length > 0 ? "chain-link-on" : "chain-link-off"}`}
                         >
                             <svg
+                                aria-hidden="true"
                                 className="h-3 w-3"
                                 fill="none"
+                                focusable="false"
                                 stroke="currentColor"
                                 strokeWidth={2.5}
                                 viewBox="0 0 24 24"
@@ -3254,8 +3258,10 @@ function AddonBackupSection({
                                 }}
                             >
                                 <svg
+                                    aria-hidden="true"
                                     className="h-3 w-3"
                                     fill="none"
+                                    focusable="false"
                                     stroke="currentColor"
                                     strokeWidth={2.5}
                                     style={{ color: "#f59e0b" }}

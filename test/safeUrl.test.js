@@ -160,17 +160,17 @@ test("assertSafeUrl: a household install may reach its own network, but never li
 });
 
 test("safeFetch: follows an ordinary redirect chain", async (t) => {
-    const base = await listen(t, (req, res) => {
+    const base = await listen(t, (req, resLocal) => {
         if (req.url === "/a") {
-            res.writeHead(302, { location: "/b" });
-            return res.end();
+            resLocal.writeHead(302, { location: "/b" });
+            return resLocal.end();
         }
         if (req.url === "/b") {
-            res.writeHead(301, { location: "/c" });
-            return res.end();
+            resLocal.writeHead(301, { location: "/c" });
+            return resLocal.end();
         }
-        res.writeHead(200, { "content-type": "text/plain" });
-        res.end(`done ${req.url}`);
+        resLocal.writeHead(200, { "content-type": "text/plain" });
+        resLocal.end(`done ${req.url}`);
     });
     const res = await safeFetch(`${base}/a`, {}, { allowPrivate: true });
     assert.equal(res.status, 200);
@@ -212,13 +212,13 @@ test("safeFetch: gives up on a redirect loop", async (t) => {
 
 test("safeFetch: credentials for the first host are not sent on to another", async (t) => {
     let seen = null;
-    const other = await listen(t, (req, res) => {
+    const other = await listen(t, (req, resLocal) => {
         seen = req.headers;
-        res.end("other");
+        resLocal.end("other");
     });
-    const first = await listen(t, (_req, res) => {
-        res.writeHead(307, { location: `${other}/landing` });
-        res.end();
+    const first = await listen(t, (_req, resLocal) => {
+        resLocal.writeHead(307, { location: `${other}/landing` });
+        resLocal.end();
     });
     const res = await safeFetch(
         `${first}/start`,
@@ -233,13 +233,13 @@ test("safeFetch: credentials for the first host are not sent on to another", asy
 
 test("safeFetch: a redirected POST arrives as a GET without its body", async (t) => {
     let landed = null;
-    const base = await listen(t, (req, res) => {
+    const base = await listen(t, (req, resLocal) => {
         if (req.url === "/submit") {
-            res.writeHead(303, { location: "/result" });
-            return res.end();
+            resLocal.writeHead(303, { location: "/result" });
+            return resLocal.end();
         }
         landed = req.method;
-        res.end("ok");
+        resLocal.end("ok");
     });
     const res = await safeFetch(
         `${base}/submit`,
@@ -306,7 +306,7 @@ test("safeFetch: a lookup that fails after the caller gave up raises no unhandle
 });
 
 test("safeFetch: without a signal the lookup is waited for and the fetch goes ahead as before", async (t) => {
-    const base = await listen(t, (_req, res) => res.end("fine"));
+    const base = await listen(t, (_req, resLocal) => resLocal.end("fine"));
     const res = await safeFetch(`${base}/`, {}, { allowPrivate: true });
     assert.equal(await res.text(), "fine");
 });

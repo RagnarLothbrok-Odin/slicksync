@@ -173,7 +173,7 @@ function StatCard({
 }
 
 // Watch Time Chart Component
-const WatchTimeChart = memo(function WatchTimeChart({
+const WatchTimeChart = memo(function WatchTimeChartLocal({
     data,
 }: {
     data: Array<{ date: string; minutes: number }>;
@@ -259,7 +259,7 @@ const WatchTimeChart = memo(function WatchTimeChart({
 });
 
 // Content Breakdown Chart Component
-const ContentBreakdownChart = memo(function ContentBreakdownChart({
+const ContentBreakdownChart = memo(function ContentBreakdownChartLocal({
     data,
 }: {
     data: Array<{ date: string; movies: number; series: number }>;
@@ -333,7 +333,7 @@ const ContentBreakdownChart = memo(function ContentBreakdownChart({
 });
 
 // Activity Card Component - matches admin design
-const ActivityCard = memo(function ActivityCard({
+const ActivityCard = memo(function ActivityCardLocal({
     session,
     userInfo,
     onFilterByContent,
@@ -474,7 +474,7 @@ const ActivityCard = memo(function ActivityCard({
 });
 
 // Grid view activity card - Cinematic poster design (matches admin)
-const ActivityCardGrid = memo(function ActivityCardGrid({
+const ActivityCardGrid = memo(function ActivityCardGridLocal({
     session,
     onFilterByContent,
 }: {

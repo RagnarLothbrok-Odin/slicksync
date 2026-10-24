@@ -153,15 +153,15 @@ test("a server behind a sign-in proxy (401) keeps the old posters; an unreachabl
     images.forgetForTests();
 });
 
-function fakeServer(routes, imageStatus = 200) {
+function fakeServer(routesLocal, imageStatus = 200) {
     const original = global.fetch;
     global.fetch = async (url) => {
         const { pathname, searchParams } = new URL(url);
         if (pathname.includes("/Images/Primary")) {
             return { body: null, ok: imageStatus < 400, status: imageStatus, text: async () => "" };
         }
-        const key = Object.keys(routes).find((k) => `${pathname}?${searchParams}`.includes(k));
-        const body = key ? routes[key](searchParams) : { Items: [] };
+        const key = Object.keys(routesLocal).find((k) => `${pathname}?${searchParams}`.includes(k));
+        const body = key ? routesLocal[key](searchParams) : { Items: [] };
         return { ok: true, status: 200, text: async () => JSON.stringify(body) };
     };
     return () => {

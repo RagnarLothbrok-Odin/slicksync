@@ -161,7 +161,7 @@ const TOOLTIP_STYLE = {
 const TOOLTIP_LABEL_STYLE = { color: "#fff" } as const;
 
 // Memoized chart components to prevent unnecessary re-renders (Vercel best practice: rerender-memo)
-const WatchTimeChart = memo(function WatchTimeChart({ data }: { data: WatchTimeDataPoint[] }) {
+const WatchTimeChart = memo(function WatchTimeChartLocal({ data }: { data: WatchTimeDataPoint[] }) {
     // Calculate max minutes to determine ticks dynamically
     const maxMinutes = Math.max(...data.map((d) => d.minutes), 60);
     const hourTicks = Math.ceil(maxMinutes / 30);
@@ -250,7 +250,7 @@ const WatchTimeChart = memo(function WatchTimeChart({ data }: { data: WatchTimeD
     );
 });
 
-const ContentBreakdownChart = memo(function ContentBreakdownChart({
+const ContentBreakdownChart = memo(function ContentBreakdownChartLocal({
     data,
 }: {
     data: WatchTimeDataPoint[];

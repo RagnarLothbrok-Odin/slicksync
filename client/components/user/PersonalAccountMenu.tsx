@@ -59,8 +59,10 @@ export function PersonalAccountMenu({ onLogout }: { onLogout: () => void }) {
                 })
             );
             window.location.assign(new URL("/user", window.location.origin).href);
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "Could not switch profiles");
+        } catch (errorLocal) {
+            setError(
+                errorLocal instanceof Error ? errorLocal.message : "Could not switch profiles"
+            );
             setBusy(false);
         }
     };

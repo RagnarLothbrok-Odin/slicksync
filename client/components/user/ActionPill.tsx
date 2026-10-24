@@ -36,7 +36,7 @@ export const ActionPill = forwardRef<
         size?: "md" | "sm";
         title?: string;
     }
->(function ActionPill(
+>(function ActionPillLocal(
     { icon: Icon, tone = "neutral", open, onClick, children, size = "md", title },
     ref
 ) {

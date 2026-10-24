@@ -163,7 +163,7 @@ function toPosterCardItem(item: CustomListItem): PosterCardItem {
 // onToggleWatchlist/onToggleWatched/onRemove now take the item itself
 // (matching what PosterCard already asks its own callers for) so the
 // parent's handlers can be defined once, not once per rendered item.
-const CatalogGridCard = memo(function CatalogGridCard({
+const CatalogGridCard = memo(function CatalogGridCardLocal({
     item,
     ratings,
     watched,

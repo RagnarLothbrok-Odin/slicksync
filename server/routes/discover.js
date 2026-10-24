@@ -171,8 +171,10 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
             if (type !== "movie" && type !== "series" && type !== "both") {
                 return res.status(400).json({ error: "type must be movie, series or both" });
             }
-            const send = (items) =>
-                req.query.paged ? res.json({ items, nextSkip: null }) : res.json(items);
+            const send = (itemsLocal) =>
+                req.query.paged
+                    ? res.json({ items: itemsLocal, nextSkip: null })
+                    : res.json(itemsLocal);
             if (!query?.trim()) {
                 return send([]);
             }

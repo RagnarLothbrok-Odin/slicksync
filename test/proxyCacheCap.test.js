@@ -381,9 +381,9 @@ test("proxy upstream: a public addon that redirects to an internal address is no
         return json({ ok: true });
     });
     const base = await mountProxyFor(t, "https://addon.example/manifest.json");
-    for (const path of ["to-metadata.json", "to-lan.json"]) {
-        const res = await get(`${base}/${path}`);
-        assert.equal(res.status, 403, path);
+    for (const pathLocal of ["to-metadata.json", "to-lan.json"]) {
+        const res = await get(`${base}/${pathLocal}`);
+        assert.equal(res.status, 403, pathLocal);
     }
     assert.ok(
         !calls.some((c) => c.url.includes("169.254") || c.url.includes("10.0.0.5")),
@@ -431,10 +431,10 @@ test("proxy upstream: a household install still reaches an addon on its own netw
     clearCache();
     instanceType(t, "private");
     let hits = 0;
-    const local = await listen(t, (_req, res) => {
+    const local = await listen(t, (_req, resLocal) => {
         hits++;
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end('{"metas":[]}');
+        resLocal.writeHead(200, { "content-type": "application/json" });
+        resLocal.end('{"metas":[]}');
     });
     const lan = await mountProxyFor(t, `${local}/manifest.json`);
     assert.equal((await get(`${lan}/catalog/movie/lan.json`)).status, 200);

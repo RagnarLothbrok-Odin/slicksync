@@ -450,38 +450,42 @@ function createNuvioProvider({
                 );
             });
         },
-        async deleteLibraryItems(profileId, keys) {
+        async deleteLibraryItems(profileIdLocal, keys) {
             if (!keys?.length) {
                 return;
             }
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_delete_library_items",
-                { p_keys: keys, p_origin_client_id: "slicksync", p_profile_id: profileId },
+                { p_keys: keys, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
                 accessToken,
                 await getServerConfig()
             );
         },
-        async deleteWatchedItems(profileId, keys) {
+        async deleteWatchedItems(profileIdLocal, keys) {
             if (!keys?.length) {
                 return;
             }
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_delete_watched_items",
-                { p_keys: keys, p_origin_client_id: "slicksync", p_profile_id: profileId },
+                { p_keys: keys, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
                 accessToken,
                 await getServerConfig()
             );
         },
-        async deleteWatchProgress(profileId, progressKeys) {
+        async deleteWatchProgress(profileIdLocal, progressKeys) {
             if (!progressKeys?.length) {
                 return;
             }
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_delete_watch_progress",
-                { p_keys: progressKeys, p_origin_client_id: "slicksync", p_profile_id: profileId },
+                {
+                    p_keys: progressKeys,
+                    p_origin_client_id: "slicksync",
+                    p_profile_id: profileIdLocal,
+                },
                 accessToken,
                 await getServerConfig()
             );
@@ -522,11 +526,11 @@ function createNuvioProvider({
         // profileId here is Nuvio's own profile_index (an integer, e.g. 1) -
         // NOT the profile row's id (a UUID). Easy to mix up since getProfiles()
         // returns both on the same row.
-        async getCollections(profileId) {
+        async getCollections(profileIdLocal) {
             const accessToken = await ensureAuth();
             const rows = await supabaseRpc(
                 "sync_pull_collections",
-                { p_profile_id: profileId },
+                { p_profile_id: profileIdLocal },
                 accessToken,
                 await getServerConfig()
             );
@@ -614,13 +618,13 @@ function createNuvioProvider({
         // utils/nuvioHomePlacement.js for the full shape, learned from the
         // desktop client's own HomeCatalogSettingsSyncService). Platform is
         // 'mobile' / 'desktop' / the 'home_catalog_shared' fallback bucket.
-        async getHomeCatalogSettings(profileId, platform) {
+        async getHomeCatalogSettings(profileIdLocal, platform) {
             const accessToken = await ensureAuth();
             const rows = await supabaseRpc(
                 "sync_pull_home_catalog_settings",
                 {
                     p_platform: platform,
-                    p_profile_id: profileId,
+                    p_profile_id: profileIdLocal,
                 },
                 accessToken,
                 await getServerConfig()
@@ -693,24 +697,24 @@ function createNuvioProvider({
 
             // Combine library + watch progress to build libraryItem shape, per profile
             const perProfile = await Promise.all(
-                profileIds.map(async (profileId) => {
+                profileIds.map(async (profileIdLocal) => {
                     const [libraryResult, progressResult, watchedResult] = await Promise.allSettled(
                         [
                             supabaseRpc(
                                 "sync_pull_library",
-                                { p_profile_id: profileId },
+                                { p_profile_id: profileIdLocal },
                                 accessToken,
                                 await getServerConfig()
                             ),
                             supabaseRpc(
                                 "sync_pull_watch_progress",
-                                { p_profile_id: profileId },
+                                { p_profile_id: profileIdLocal },
                                 accessToken,
                                 await getServerConfig()
                             ),
                             supabaseRpc(
                                 "sync_pull_watched_items",
-                                { p_profile_id: profileId },
+                                { p_profile_id: profileIdLocal },
                                 accessToken,
                                 await getServerConfig()
                             ),
@@ -719,8 +723,8 @@ function createNuvioProvider({
                     return {
                         library: libraryResult.status === "fulfilled" ? libraryResult.value : [],
                         libraryFailed: libraryResult.status === "rejected",
-                        profileId,
-                        profileName: profileNames.get(profileId) || null,
+                        profileId: profileIdLocal,
+                        profileName: profileNames.get(profileIdLocal) || null,
                         progress: progressResult.status === "fulfilled" ? progressResult.value : [],
                         progressFailed: progressResult.status === "rejected",
                         watched: watchedResult.status === "fulfilled" ? watchedResult.value : [],
@@ -865,11 +869,11 @@ function createNuvioProvider({
         // A profile's media servers (Jellyfin / Emby) - the list Nuvio's apps
         // sign in to. One list per profile, replaced whole on every write, so a
         // caller always pulls first and keeps what isn't theirs.
-        async getMediaServers(profileId) {
+        async getMediaServers(profileIdLocal) {
             const accessToken = await ensureAuth();
             const rows = await supabaseRpc(
                 "sync_pull_media_servers",
-                { p_profile_id: profileId },
+                { p_profile_id: profileIdLocal },
                 accessToken,
                 await getServerConfig()
             );
@@ -936,7 +940,7 @@ function createNuvioProvider({
         // and episodes (watched_items, with the date), resume points
         // (watch_progress) and the library. Read a page at a time - the backend
         // may cap one answer below what a long history holds.
-        async getWatchState(profileId) {
+        async getWatchState(profileIdLocal) {
             const accessToken = await ensureAuth();
             const config = await getServerConfig();
             const PAGE = 1000;
@@ -944,7 +948,7 @@ function createNuvioProvider({
             for (let page = 1; page <= 200; page++) {
                 const rows = await supabaseRpc(
                     "sync_pull_watched_items",
-                    { p_page: page, p_page_size: PAGE, p_profile_id: profileId },
+                    { p_page: page, p_page_size: PAGE, p_profile_id: profileIdLocal },
                     accessToken,
                     config
                 );
@@ -956,7 +960,7 @@ function createNuvioProvider({
             }
             const progress = await supabaseRpc(
                 "sync_pull_watch_progress",
-                { p_profile_id: profileId },
+                { p_profile_id: profileIdLocal },
                 accessToken,
                 config
             );
@@ -964,7 +968,7 @@ function createNuvioProvider({
             for (let offset = 0; offset < 100_000; offset += 500) {
                 const rows = await supabaseRpc(
                     "sync_pull_library",
-                    { p_limit: 500, p_offset: offset, p_profile_id: profileId },
+                    { p_limit: 500, p_offset: offset, p_profile_id: profileIdLocal },
                     accessToken,
                     config
                 );
@@ -980,27 +984,27 @@ function createNuvioProvider({
         // p_settings_json must be the raw object, NOT a JSON string - same
         // double-encoding trap sync_push_collections already taught us (see
         // setCollections below).
-        async pushHomeCatalogSettings(profileId, platform, settings) {
+        async pushHomeCatalogSettings(profileIdLocal, platform, settings) {
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_push_home_catalog_settings",
                 {
                     p_platform: platform,
-                    p_profile_id: profileId,
+                    p_profile_id: profileIdLocal,
                     p_settings_json: settings,
                 },
                 accessToken,
                 await getServerConfig()
             );
         },
-        async pushLibraryItems(profileId, items) {
+        async pushLibraryItems(profileIdLocal, items) {
             if (!items?.length) {
                 return;
             }
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_push_library_items",
-                { p_items: items, p_origin_client_id: "slicksync", p_profile_id: profileId },
+                { p_items: items, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
                 accessToken,
                 await getServerConfig()
             );
@@ -1009,26 +1013,30 @@ function createNuvioProvider({
         // Writes for Copy watch history and Keep in step. Each is an upsert (or a
         // delete by key) on one profile, tagged with SlickSync as the origin so
         // Nuvio's apps pick the change up as coming from elsewhere.
-        async pushWatchedItems(profileId, items) {
+        async pushWatchedItems(profileIdLocal, items) {
             if (!items?.length) {
                 return;
             }
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_push_watched_items",
-                { p_items: items, p_origin_client_id: "slicksync", p_profile_id: profileId },
+                { p_items: items, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
                 accessToken,
                 await getServerConfig()
             );
         },
-        async pushWatchProgress(profileId, entries) {
+        async pushWatchProgress(profileIdLocal, entries) {
             if (!entries?.length) {
                 return;
             }
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_push_watch_progress",
-                { p_entries: entries, p_origin_client_id: "slicksync", p_profile_id: profileId },
+                {
+                    p_entries: entries,
+                    p_origin_client_id: "slicksync",
+                    p_profile_id: profileIdLocal,
+                },
                 accessToken,
                 await getServerConfig()
             );
@@ -1247,13 +1255,13 @@ function createNuvioProvider({
         // completely from every read this app ever did of its own writes,
         // since getCollections() already defensively re-parses a string return
         // back into an array - see that function's own comment.
-        async setCollections(profileId, collections) {
+        async setCollections(profileIdLocal, collections) {
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_push_collections",
                 {
                     p_collections_json: collections,
-                    p_profile_id: profileId,
+                    p_profile_id: profileIdLocal,
                 },
                 accessToken,
                 await getServerConfig()
@@ -1265,13 +1273,13 @@ function createNuvioProvider({
 
         // p_servers is the raw array, not a JSON string (the same double-encoding
         // trap as sync_push_collections).
-        async setMediaServers(profileId, servers) {
+        async setMediaServers(profileIdLocal, servers) {
             const accessToken = await ensureAuth();
             await supabaseRpc(
                 "sync_push_media_servers",
                 {
                     p_origin_client_id: "slicksync",
-                    p_profile_id: profileId,
+                    p_profile_id: profileIdLocal,
                     p_servers: servers,
                 },
                 accessToken,

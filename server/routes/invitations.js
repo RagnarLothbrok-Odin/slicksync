@@ -1078,11 +1078,11 @@ module.exports = ({
 
 // Helper function to get Stremio user info from authKey
 async function getStremioUserInfo(authKey, username, email) {
-    const { validateStremioAuthKey } = require("../utils/stremio");
+    const { validateStremioAuthKey: validateStremioAuthKeyLocal } = require("../utils/stremio");
 
     let verifiedUser = null;
     try {
-        const validation = await validateStremioAuthKey(authKey);
+        const validation = await validateStremioAuthKeyLocal(authKey);
         verifiedUser = validation?.user ? validation.user : null;
     } catch (e) {
         const msg = (e && (e.message || e.error || "")) || "";
@@ -1378,10 +1378,12 @@ module.exports.createPublicRouter = ({
             }
 
             // Validate authKey and get email
-            const { validateStremioAuthKey } = require("../utils/stremio");
+            const {
+                validateStremioAuthKey: validateStremioAuthKeyLocal,
+            } = require("../utils/stremio");
             let stremioEmail = null;
             try {
-                const validation = await validateStremioAuthKey(authKey);
+                const validation = await validateStremioAuthKeyLocal(authKey);
                 if (validation?.user?.email) {
                     stremioEmail = validation.user.email.toLowerCase().trim();
                 }

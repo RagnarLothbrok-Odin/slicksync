@@ -144,8 +144,12 @@ export function PersonalSyncPanel() {
         setPlan(null);
         try {
             setPlan(await personalRequest<PersonalSyncPlan>(userId, authKey, "/sync-plan"));
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "Could not load your sync preview.");
+        } catch (errorLocal) {
+            setError(
+                errorLocal instanceof Error
+                    ? errorLocal.message
+                    : "Could not load your sync preview."
+            );
         } finally {
             setBusy(false);
         }
@@ -404,8 +408,8 @@ export function PersonalHistoryPanel({
                     method: "POST",
                 })
             );
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "Could not read your file");
+        } catch (errorLocal) {
+            setError(errorLocal instanceof Error ? errorLocal.message : "Could not read your file");
         } finally {
             setBusy(false);
         }
@@ -417,16 +421,20 @@ export function PersonalHistoryPanel({
         setBusy(true);
         setError("");
         try {
-            const result = await personalRequest<{ imported: number; skipped: number }>(
+            const resultLocal = await personalRequest<{ imported: number; skipped: number }>(
                 userId,
                 authKey,
                 "/history/import",
                 { body: JSON.stringify({ token: preview.token }), method: "POST" }
             );
-            setResult(`Imported ${result.imported} movies. ${result.skipped} already present.`);
+            setResult(
+                `Imported ${resultLocal.imported} movies. ${resultLocal.skipped} already present.`
+            );
             setPreview(null);
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "Could not import your history");
+        } catch (errorLocal) {
+            setError(
+                errorLocal instanceof Error ? errorLocal.message : "Could not import your history"
+            );
         } finally {
             setBusy(false);
         }

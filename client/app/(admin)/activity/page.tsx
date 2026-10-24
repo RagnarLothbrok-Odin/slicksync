@@ -590,7 +590,7 @@ function getActivityText(activity: ActivityItem): string {
 }
 
 // Memoized activity card component
-const ActivityCard = memo(function ActivityCard({
+const ActivityCard = memo(function ActivityCardLocal({
     activity,
     onFilterByContent,
     onFilterByEpisode: _onFilterByEpisode,
@@ -785,7 +785,7 @@ const ActivityCard = memo(function ActivityCard({
 let activePopoverClose: (() => void) | null = null;
 
 // Grid view activity card component - Cinematic poster design
-const ActivityCardGrid = memo(function ActivityCardGrid({
+const ActivityCardGrid = memo(function ActivityCardGridLocal({
     activity,
     onFilterByContent,
     onOpenDetails,
@@ -1199,7 +1199,7 @@ function formatTaskDuration(seconds: number): string {
 }
 
 // Task History Card component
-const TaskHistoryCard = memo(function TaskHistoryCard({ task }: { task: TaskHistoryItem }) {
+const TaskHistoryCard = memo(function TaskHistoryCardLocal({ task }: { task: TaskHistoryItem }) {
     // Get the task type icon with color based on status
     const getColoredTaskIcon = () => {
         const statusColor =
@@ -2468,20 +2468,20 @@ function ActivityPageContent() {
 
     // Group visible activities by date (each day gets its own group)
     const groupedActivities = useMemo(() => {
-        const groups = new Map<string, ActivityItem[]>();
+        const groupsLocal = new Map<string, ActivityItem[]>();
 
         for (const activity of visibleActivities) {
             const dateKey = getDateKey(activity.timestamp);
-            const bucket = groups.get(dateKey);
+            const bucket = groupsLocal.get(dateKey);
             if (bucket) {
                 bucket.push(activity);
             } else {
-                groups.set(dateKey, [activity]);
+                groupsLocal.set(dateKey, [activity]);
             }
         }
 
         // Convert to sorted array (most recent first)
-        return Array.from(groups.entries())
+        return Array.from(groupsLocal.entries())
             .sort(([a], [b]) => b.localeCompare(a))
             .map(([dateKey, activities]) => {
                 const totalDuration = activities.reduce(

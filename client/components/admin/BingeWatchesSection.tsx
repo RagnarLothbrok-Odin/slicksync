@@ -18,7 +18,7 @@ interface BingeWatchesSectionProps {
     items: BingeWatchItem[];
 }
 
-export const BingeWatchesSection = memo(function BingeWatchesSection({
+export const BingeWatchesSection = memo(function BingeWatchesSectionLocal({
     items,
 }: BingeWatchesSectionProps) {
     if (items.length === 0) {

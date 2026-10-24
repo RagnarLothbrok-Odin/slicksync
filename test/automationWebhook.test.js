@@ -12,8 +12,8 @@ const config = require("../server/utils/config");
 const { ACTIONS } = require("../server/utils/automation/registry");
 const { runActions } = require("../server/utils/automation/engine");
 
-const webhook = (config) =>
-    ACTIONS.webhook.run({ config, payload: { addonName: "Example Addon" } });
+const webhook = (configLocal) =>
+    ACTIONS.webhook.run({ config: configLocal, payload: { addonName: "Example Addon" } });
 
 const configuredType = config.INSTANCE_TYPE;
 function instanceType(t, type) {

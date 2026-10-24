@@ -84,7 +84,10 @@ function offsetFromLog(text) {
  * server's clock. `skipNight` (an account date) leaves that night open - Resume
  * now. Empty when there is nothing to close.
  */
-function scheduleFor(bedtime, { accountOffset = 0, serverOffset = 0, skipNight = null } = {}) {
+function scheduleFor(
+    bedtime,
+    { accountOffset = 0, serverOffset: serverOffsetLocal = 0, skipNight = null } = {}
+) {
     const from = minutesOf(bedtime?.from);
     const to = minutesOf(bedtime?.to);
     if (from === null || to === null || from === to) {
@@ -94,7 +97,7 @@ function scheduleFor(bedtime, { accountOffset = 0, serverOffset = 0, skipNight =
         Array.isArray(bedtime.days) && bedtime.days.length ? bedtime.days : [0, 1, 2, 3, 4, 5, 6];
     const skipDay = skipNight ? new Date(`${skipNight}T12:00:00Z`).getUTCDay() : null;
     // Server time = account time + shift.
-    const shift = serverOffset - accountOffset;
+    const shift = serverOffsetLocal - accountOffset;
     const length = to > from ? to - from : DAY - from + to;
     const closed = [];
     for (const d of nights) {

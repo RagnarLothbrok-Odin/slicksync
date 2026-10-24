@@ -97,7 +97,7 @@ export interface PosterCardProps {
     watched?: boolean;
 }
 
-export const PosterCard = memo(function PosterCard({
+export const PosterCard = memo(function PosterCardLocal({
     item,
     ratings,
     watched,

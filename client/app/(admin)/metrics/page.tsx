@@ -106,7 +106,7 @@ const TOOLTIP_STYLE = {
 const TOOLTIP_LABEL_STYLE = { color: "#fff" } as const;
 
 // Memoized chart component
-const WatchTimeChart = memo(function WatchTimeChart({
+const WatchTimeChart = memo(function WatchTimeChartLocal({
     data,
 }: {
     data: Array<{ date: string; hours: number }>;
@@ -183,7 +183,7 @@ const WatchTimeChart = memo(function WatchTimeChart({
     );
 });
 
-const ContentBreakdownChart = memo(function ContentBreakdownChart({
+const ContentBreakdownChart = memo(function ContentBreakdownChartLocal({
     data,
 }: {
     data: Array<{ date: string; movies: number; series: number }>;

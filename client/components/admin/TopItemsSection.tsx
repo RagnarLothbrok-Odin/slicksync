@@ -31,7 +31,7 @@ interface TopItemsSectionProps {
     series: TopItem[];
 }
 
-export const TopItemsSection = memo(function TopItemsSection({
+export const TopItemsSection = memo(function TopItemsSectionLocal({
     movies,
     series,
 }: TopItemsSectionProps) {

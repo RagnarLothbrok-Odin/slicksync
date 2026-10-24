@@ -166,7 +166,14 @@ export function AddonPerformanceCard({
 // Helper icon component
 function CheckIcon({ className }: { className?: string }) {
     return (
-        <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg
+            aria-hidden="true"
+            className={className}
+            fill="none"
+            focusable="false"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+        >
             <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
         </svg>
     );

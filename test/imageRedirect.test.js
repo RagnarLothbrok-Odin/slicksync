@@ -91,7 +91,8 @@ function stubUpstream(t, handler) {
 }
 
 const image = () => new Response(png, { headers: { "content-type": "image/png" } });
-const redirect = (location, status = 302) => new Response(null, { headers: { location }, status });
+const redirect = (location, statusLocal = 302) =>
+    new Response(null, { headers: { location }, status: statusLocal });
 
 // What a browser or a device would see: the redirect itself, not where it
 // leads. node:http rather than fetch, because fetch sets its own Sec-Fetch-*

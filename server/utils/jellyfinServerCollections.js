@@ -155,8 +155,8 @@ function sessionFor(person, decrypt) {
     };
 }
 
-const call = (s, path, opts = {}) =>
-    jfRequest(s.base, path, { deviceId: s.deviceId, token: s.token, ...opts });
+const call = (s, pathLocal, opts = {}) =>
+    jfRequest(s.base, pathLocal, { deviceId: s.deviceId, token: s.token, ...opts });
 
 /**
  * The sign-in changes are made through: an administrator if anyone here signs

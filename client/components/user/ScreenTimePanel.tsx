@@ -170,16 +170,16 @@ export function ScreenTimePanel({
     const [saving, setSaving] = useState(false);
     const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const adopt = (limit: Limit | null) => {
-        if (!limit) {
+    const adopt = (limitLocal: Limit | null) => {
+        if (!limitLocal) {
             return;
         }
-        setDraft(limit);
-        if (limit.bedtime) {
-            lastBedtime.current = limit.bedtime;
+        setDraft(limitLocal);
+        if (limitLocal.bedtime) {
+            lastBedtime.current = limitLocal.bedtime;
         }
-        if (limit.minutes) {
-            lastMinutes.current = limit.minutes;
+        if (limitLocal.minutes) {
+            lastMinutes.current = limitLocal.minutes;
         }
     };
 
@@ -206,10 +206,10 @@ export function ScreenTimePanel({
         }
     }, [state]);
 
-    const save = async (limit: Limit | null) => {
+    const save = async (limitLocal: Limit | null) => {
         setSaving(true);
         try {
-            setState(await api.setScreenTime(userId, limit));
+            setState(await api.setScreenTime(userId, limitLocal));
         } catch (e) {
             toast.error((e as Error)?.message || "Could not save the daily limit");
             api.getScreenTime(userId)
@@ -372,10 +372,12 @@ export function ScreenTimePanel({
     const chip = chipClass;
     const miniSwitch = (
         checked: boolean,
-        onChange: (v: boolean) => void,
+        onChangeLocal: (v: boolean) => void,
         label: string,
         disabled = false
-    ) => <MiniSwitch checked={checked} disabled={disabled} label={label} onChange={onChange} />;
+    ) => (
+        <MiniSwitch checked={checked} disabled={disabled} label={label} onChange={onChangeLocal} />
+    );
     const timeChips = (
         presets: string[],
         value: string,

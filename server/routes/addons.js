@@ -3281,7 +3281,7 @@ module.exports = ({
             if (used.length === 0) {
                 return res.status(400).json({
                     buriedEntryNames: buried
-                        .map((id) => entries.find((e) => e.id === id)?.name)
+                        .map((idLocal) => entries.find((e) => e.id === idLocal)?.name)
                         .filter(Boolean),
                     error:
                         buried.length > 0

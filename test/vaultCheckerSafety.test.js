@@ -479,9 +479,9 @@ test("the model list on Settings: the same rule, and a plain message when the ad
     assert.equal(internal.seen.length, 0);
 
     instanceType(t, "private");
-    const ollama = await listen(t, (_req, res) => {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end('{"data":[{"id":"zeta"},{"id":"alpha"}]}');
+    const ollama = await listen(t, (_req, resLocal) => {
+        resLocal.writeHead(200, { "content-type": "application/json" });
+        resLocal.end('{"data":[{"id":"zeta"},{"id":"alpha"}]}');
     });
     const res = await post({ apiKey: "example-key", baseUrl: `${ollama.url}/v1` });
     assert.equal(res.status, 200);

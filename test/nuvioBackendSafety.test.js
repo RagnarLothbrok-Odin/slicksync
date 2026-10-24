@@ -474,8 +474,8 @@ function redirectingTo(t, to, status = 307) {
     return asked;
 }
 
-const everyCall = (config, token = "tok") => [
-    ["read", () => supabase.supabaseGet("addons", { select: "*" }, token, config)],
+const everyCall = (configLocal, token = "tok") => [
+    ["read", () => supabase.supabaseGet("addons", { select: "*" }, token, configLocal)],
     [
         "insert",
         () =>
@@ -483,11 +483,11 @@ const everyCall = (config, token = "tok") => [
                 "addons",
                 [{ url: "https://a.example/manifest.json" }],
                 token,
-                config
+                configLocal
             ),
     ],
-    ["delete", () => supabase.supabaseDelete("addons", { user_id: "eq.u1" }, token, config)],
-    ["rpc", () => supabase.supabaseRpc("sync_pull_profiles", {}, token, config)],
+    ["delete", () => supabase.supabaseDelete("addons", { user_id: "eq.u1" }, token, configLocal)],
+    ["rpc", () => supabase.supabaseRpc("sync_pull_profiles", {}, token, configLocal)],
 ];
 
 test("on an instance serving strangers a redirect from an account backend to somewhere internal is not followed", async (t) => {
@@ -593,14 +593,14 @@ test("the standard backend is called with a plain fetch: no address check, no re
             return rowsJson();
         };
         try {
-            for (const config of [
+            for (const configLocal of [
                 undefined,
                 {},
                 { anonKey: "", url: "" },
                 { anonKey: "other", url: `${supabase.SUPABASE_URL}/` },
             ]) {
                 seen.length = 0;
-                await supabase.supabaseGet("addons", { select: "*" }, "tok", config);
+                await supabase.supabaseGet("addons", { select: "*" }, "tok", configLocal);
                 assert.deepEqual(
                     seen,
                     [
@@ -609,7 +609,7 @@ test("the standard backend is called with a plain fetch: no address check, no re
                             url: `${supabase.SUPABASE_URL}/rest/v1/addons?select=*`,
                         },
                     ],
-                    `${type} ${JSON.stringify(config)}`
+                    `${type} ${JSON.stringify(configLocal)}`
                 );
             }
         } finally {

@@ -16,7 +16,13 @@ interface SlickSyncLogoProps {
  */
 export function SlickSyncLogo({ className = "w-7 h-7" }: SlickSyncLogoProps) {
     return (
-        <svg className={className} viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <svg
+            aria-label="SlickSync"
+            className={className}
+            role="img"
+            viewBox="0 0 200 200"
+            xmlns="http://www.w3.org/2000/svg"
+        >
             <g fill="none" stroke="#ffffff" strokeLinecap="round" strokeWidth={18}>
                 <rect height="50" rx="25" transform="rotate(-35 75 90)" width="90" x="30" y="65" />
                 <rect

@@ -112,7 +112,7 @@ function groupByDay(
 
 // A single row. Extracted so each has its own context-menu hook, otherwise the
 // menu's shared position would jump to whichever row was right-clicked last.
-const UpcomingRow = memo(function UpcomingRow({
+const UpcomingRow = memo(function UpcomingRowLocal({
     item,
     onOpen,
     onDismiss,
@@ -261,7 +261,7 @@ type CalendarClient = Pick<
     "getUpcomingEpisodes" | "dismissUpcomingEpisode" | "muteShow" | "getMutedShows" | "unmuteShow"
 >;
 
-export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel({
+export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
     client = api,
     householdActions = true,
     renderDetail,
