@@ -1201,7 +1201,9 @@ async function buildMetricsForAccount({
                     });
                 }
             }
-        } catch {}
+        } catch {
+            // A damaged cached library must not hide metrics from other users.
+        }
     }
 
     // Sort by most recent first (legacy library-derived nowPlaying)

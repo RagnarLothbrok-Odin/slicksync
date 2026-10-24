@@ -59,7 +59,9 @@ function getAppVersion() {
     if (!appVersion) {
         try {
             appVersion = require("../../package.json")?.version || "";
-        } catch {}
+        } catch {
+            // The version label is optional when package metadata is unavailable.
+        }
     }
     return appVersion;
 }

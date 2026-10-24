@@ -159,7 +159,9 @@ function heartbeat(event, data = {}) {
         const _fs = require("node:fs");
         const line = `[${new Date().toISOString()}] ${event} ${JSON.stringify(data)}\n`;
         require("./debugLogFile").appendCapped("/app/data/proxy-stream-monitor-debug.log", line);
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 }
 
 function clearProxyStreamMonitor() {
@@ -292,8 +294,8 @@ function noteLoginFailed() {
     heartbeat("login_failed_backing_off", { consecutive: consecutiveLoginFailures, waitMs: wait });
 }
 
-function authError(message) {
-    const err = new Error(message);
+function authError(message, options) {
+    const err = new Error(message, options);
     err.authFailed = true;
     return err;
 }
@@ -473,11 +475,13 @@ async function fetchLiveStreams(baseUrl, username, password) {
     let json;
     try {
         json = await res.json();
-    } catch {
+    } catch (cause) {
         // Not JSON after all - sign in afresh next time rather than repeating this.
         cachedCookie = null;
         noteFreshCookieRejected(fresh);
-        throw authError("AIOStreams answered with something that is not its stream list");
+        throw authError("AIOStreams answered with something that is not its stream list", {
+            cause,
+        });
     }
     // Real data: the sign-in works, so any back-off is over.
     consecutiveFreshRejections = 0;
@@ -522,10 +526,12 @@ async function fetchLegacyProxyStats(baseUrl, fresh = false) {
     let stats;
     try {
         stats = await res.json();
-    } catch {
+    } catch (cause) {
         cachedCookie = null;
         noteFreshCookieRejected(fresh);
-        throw authError("AIOStreams answered with something that is not its proxy stats");
+        throw authError("AIOStreams answered with something that is not its proxy stats", {
+            cause,
+        });
     }
     // Real data: the sign-in works, so any back-off is over.
     consecutiveFreshRejections = 0;
@@ -938,7 +944,9 @@ async function closeUnconfirmedRows(prisma, accountId) {
             heartbeat("closed_unconfirmed_rows", { count: closed.count });
             try {
                 require("./liveEvents").emitLive(accountId, "nowplaying");
-            } catch {}
+            } catch {
+                // Live updates are advisory; the persisted operation has already completed.
+            }
         }
     } catch (e) {
         heartbeat("close_unconfirmed_rows_failed", { message: e.message });
@@ -1127,7 +1135,9 @@ async function pollOnce(prisma, accountId, config) {
                 // Playing immediately rather than on their next 30s tick.
                 try {
                     require("./liveEvents").emitLive(accountId, "nowplaying");
-                } catch {}
+                } catch {
+                    // Live updates are advisory; the persisted operation has already completed.
+                }
             }
         }
 
@@ -1173,7 +1183,9 @@ async function pollOnce(prisma, accountId, config) {
             // dashboard's poll interval.
             try {
                 require("./liveEvents").emitLive(accountId, "nowplaying");
-            } catch {}
+            } catch {
+                // Live updates are advisory; the persisted operation has already completed.
+            }
             // No "finished watching" notification here - see the comment where
             // maybeNotifyStop used to be defined for why. The native pipeline's
             // own "watched" notification (real title, real poster) already covers

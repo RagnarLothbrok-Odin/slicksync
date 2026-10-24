@@ -99,6 +99,10 @@ async function assertImageUrl(src) {
         try {
             url = new URL(src);
         } catch {
+            // The original address-policy refusal remains authoritative.
+            url = null;
+        }
+        if (!url) {
             throw e;
         }
         const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -116,7 +120,8 @@ async function assertImageUrl(src) {
             try {
                 addresses = (await dns.lookup(host, { all: true })).map((a) => a.address);
             } catch {
-                throw e;
+                // An unresolved fallback cannot make a refused address safe.
+                addresses = [];
             }
         }
         if (

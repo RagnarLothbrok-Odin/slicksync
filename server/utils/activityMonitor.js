@@ -39,7 +39,9 @@ function heartbeat(event, data = {}) {
         const _fs = require("node:fs");
         const line = `[${new Date().toISOString()}] ${event} ${JSON.stringify(data)}\n`;
         require("./debugLogFile").appendCapped("/app/data/activity-monitor-debug.log", line);
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 }
 
 function clearActivityMonitor() {

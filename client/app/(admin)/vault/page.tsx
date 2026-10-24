@@ -809,7 +809,7 @@ function VaultPageContent() {
     const openEditModal = async (entry: VaultEntry) => {
         setEditingId(entry.id);
         setArrivedViaAlert(false);
-        const cfg: any = entry.testConfig || {};
+        const cfg = entry.testConfig || {};
         setForm({
             aiBaseUrl: cfg.baseUrl || "",
             aiModel: cfg.model || "",

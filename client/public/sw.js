@@ -68,7 +68,9 @@ self.addEventListener("activate", (event) => {
                 if (self.registration.navigationPreload) {
                     await self.registration.navigationPreload.enable();
                 }
-            } catch {}
+            } catch {
+                // Navigation preload is an optional browser capability.
+            }
             await self.clients.claim();
         })()
     );

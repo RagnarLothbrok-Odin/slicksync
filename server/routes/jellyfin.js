@@ -544,7 +544,9 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
                             name =
                                 (await jfRequest(s.url, "/System/Info/Public", { timeoutMs: 5000 }))
                                     ?.ServerName || null;
-                        } catch {}
+                        } catch {
+                            // A missing server name does not invalidate the saved server address.
+                        }
                         return {
                             address: s.address,
                             key: s.key,

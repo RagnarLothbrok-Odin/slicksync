@@ -28,7 +28,9 @@ function heartbeat(event, data = {}) {
             "/app/data/activity-monitor-debug.log",
             `[${new Date().toISOString()}] ${event} ${JSON.stringify(data)}\n`
         );
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 }
 
 const VAPID_FILE = path.join(process.cwd(), "data", "vapid.json");

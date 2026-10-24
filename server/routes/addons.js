@@ -371,7 +371,9 @@ async function reloadAddon(
                 console.log(`🧩 ${addon.name} diffs → ${parts.join(" | ")}`);
             }
         }
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 
     // Original manifest summary removed
 
@@ -2284,7 +2286,9 @@ module.exports = ({
                         if (addon.manifestUrl) {
                             return decrypt(addon.manifestUrl, req);
                         }
-                    } catch {}
+                    } catch {
+                        // An unavailable key leaves the fallback value or next key candidate in use.
+                    }
                     return addon.manifestUrl;
                 })(),
                 users: totalUsers,

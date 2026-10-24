@@ -330,7 +330,9 @@ function scheduleSyncs(
                     if (!QUIET) {
                         console.log(msg);
                     }
-                } catch {}
+                } catch {
+                    // Diagnostic logging must not interrupt the operation it describes.
+                }
                 // Import syncGroupUsers - it's exported from groups router
                 const { syncGroupUsers } = require("../routes/groups");
                 let _totalSynced = 0;
@@ -491,7 +493,9 @@ function scheduleSyncs(
                     if (!QUIET) {
                         console.log(msg);
                     }
-                } catch {}
+                } catch {
+                    // Diagnostic logging must not interrupt the operation it describes.
+                }
                 const { syncGroupUsers } = require("../routes/groups");
                 for (const g of groups) {
                     await syncGroupUsers(prisma, getAccountId, scopedWhere, decrypt, g.id, req);

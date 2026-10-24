@@ -33,7 +33,9 @@ function normalizeToBuffer(raw) {
                 return b.subarray(0, 32);
             }
         }
-    } catch {}
+    } catch {
+        // Use the raw-key normalization below when base64 decoding fails.
+    }
     return Buffer.from(String(raw).padEnd(32, "0").slice(0, 32), "utf8");
 }
 

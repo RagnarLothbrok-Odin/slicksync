@@ -1559,12 +1559,6 @@ function UserCard({
         },
     });
 
-    const _handleMouseDown = (e: React.MouseEvent) => {
-        // Right click handled by onContextMenu
-        if (e.button === 2) {
-        }
-    };
-
     const [_isSyncing, setIsSyncing] = useState(false);
 
     const handleSync = async (e: React.MouseEvent) => {

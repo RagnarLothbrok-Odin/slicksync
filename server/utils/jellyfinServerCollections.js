@@ -173,7 +173,9 @@ async function findActor(server, decrypt) {
             if (!serverName) {
                 try {
                     serverName = (await call(s, "/System/Info/Public"))?.ServerName || null;
-                } catch {}
+                } catch {
+                    // A missing server name does not invalidate the saved server address.
+                }
             }
             const policy = me?.Policy || {};
             if (policy.IsAdministrator) {
@@ -387,7 +389,9 @@ async function syncCover(s, collectionId, list, entry, admin) {
             await call(s, `/Items/${encodeURIComponent(collectionId)}/Images/Primary`, {
                 method: "DELETE",
             });
-        } catch {}
+        } catch {
+            // Clearing an already-missing cover is idempotent.
+        }
         return { cover: null };
     }
     const picture = await readCover(wanted);

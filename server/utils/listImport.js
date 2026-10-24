@@ -189,7 +189,9 @@ function detectProvider(url) {
         if (host === "myanimelist.net") {
             return "myanimelist";
         }
-    } catch {}
+    } catch {
+        // Keep the original address when it cannot be normalized.
+    }
     return null;
 }
 

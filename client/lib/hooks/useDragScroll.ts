@@ -40,7 +40,9 @@ export function useDragScroll() {
         if (Math.abs(dx) > 5 && !capturedRef.current) {
             try {
                 ref.current.setPointerCapture(e.pointerId);
-            } catch {}
+            } catch {
+                // Dragging still works while the pointer stays over this row without capture.
+            }
             capturedRef.current = true;
         }
         if (capturedRef.current) {
@@ -53,7 +55,9 @@ export function useDragScroll() {
         if (capturedRef.current && ref.current) {
             try {
                 ref.current.releasePointerCapture(e.pointerId);
-            } catch {}
+            } catch {
+                // The browser may already have released this pointer.
+            }
             capturedRef.current = false;
             // The release after a drag must not also press whatever tab or card it
             // ended over.

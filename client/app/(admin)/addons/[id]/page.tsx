@@ -1998,7 +1998,7 @@ export default function AddonDetailPage() {
 
                             {allResources.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
-                                    {allResources.map((resource: any, index: number) => {
+                                    {allResources.map((resource, index: number) => {
                                         const name =
                                             typeof resource === "string" ? resource : resource.name;
                                         const isSelected = selectedResources.has(name);
@@ -2148,7 +2148,7 @@ export default function AddonDetailPage() {
                                                 strategy={verticalListSortingStrategy}
                                             >
                                                 <div className="space-y-2">
-                                                    {orderedRegularCatalogs.map((catalog: any) => (
+                                                    {orderedRegularCatalogs.map((catalog) => (
                                                         <SortableCatalogItem
                                                             catalog={catalog}
                                                             isSelected={selectedCatalogs.has(
@@ -2194,7 +2194,7 @@ export default function AddonDetailPage() {
                                                 strategy={verticalListSortingStrategy}
                                             >
                                                 <div className="space-y-2">
-                                                    {orderedSearchCatalogs.map((catalog: any) => (
+                                                    {orderedSearchCatalogs.map((catalog) => (
                                                         <SortableCatalogItem
                                                             catalog={catalog}
                                                             isSelected={selectedCatalogs.has(

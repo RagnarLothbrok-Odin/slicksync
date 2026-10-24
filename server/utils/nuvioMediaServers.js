@@ -225,7 +225,9 @@ async function serverIdentity(jellyfin) {
     let info = null;
     try {
         info = await jfRequest(jellyfin.jellyfinServerUrl, "/System/Info/Public");
-    } catch {}
+    } catch {
+        // A missing server name does not invalidate the saved server address.
+    }
     const serverId = jellyfin.jellyfinServerId || info?.Id || null;
     if (!serverId) {
         throw Object.assign(new Error("Could not reach their server"), { status: 502 });
@@ -288,7 +290,9 @@ async function setEnabled(prisma, { createProvider, decrypt, req }, userId, enab
                 token: existing.token,
             });
             token = existing.token;
-        } catch {}
+        } catch {
+            // An expired saved session leaves the reconnect path available.
+        }
     }
     if (!token) {
         token = (await signInForNuvio(jellyfin, personToken)).token;

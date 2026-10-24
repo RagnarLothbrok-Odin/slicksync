@@ -474,7 +474,9 @@ async function mergeProfileBack(prisma, { profile, owner }) {
     });
     try {
         require("./jellyfinLive").forgetUser(person.id);
-    } catch {}
+    } catch {
+        // Live updates are advisory; the persisted operation has already completed.
+    }
     return { mergedInto: owner.id, removed: { id: person.id, username: person.username } };
 }
 

@@ -149,9 +149,13 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
                     try {
                         await attempt();
                         break;
-                    } catch {}
+                    } catch {
+                        // Try the next supported connection method before reporting failure.
+                    }
                 }
-            } catch {}
+            } catch {
+                // Try the next supported connection method before reporting failure.
+            }
 
             const authKey = apiStore.authKey || tempStorage.auth || tempStorage.authKey || null;
 
@@ -272,7 +276,9 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
             try {
                 const { password: _pw, authKey: _ak, ...rest } = req.body || {};
                 console.log("🔍 Request fields (redacted):", rest);
-            } catch {}
+            } catch {
+                // Diagnostic logging must not interrupt the operation it describes.
+            }
 
             if (!(email && password)) {
                 return res
@@ -427,7 +433,9 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
                             try {
                                 await attempt();
                                 break;
-                            } catch {}
+                            } catch {
+                                // Try the next supported connection method before reporting failure.
+                            }
                         }
                         await loginEmailOnly();
                     } catch {

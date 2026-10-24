@@ -41,7 +41,9 @@ function createUserApiKeyMiddleware(prisma) {
                         req.appAccountId = user.accountId || "default";
                         return next();
                     }
-                } catch {}
+                } catch {
+                    // An unavailable key leaves the fallback value or next key candidate in use.
+                }
             }
 
             // API key not found, but don't fail - might be account API key or session auth

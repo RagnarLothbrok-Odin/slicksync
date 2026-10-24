@@ -170,7 +170,9 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE }) => {
                         u.username = "";
                         u.password = "";
                         address = u.host + (u.pathname === "/" ? "" : u.pathname);
-                    } catch {}
+                    } catch {
+                        // Keep the original address when it cannot be normalized.
+                    }
                     lumiere = { ...status, address };
                 }
             } catch (e) {
@@ -293,7 +295,9 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE }) => {
                         ...getProxyMonitorStatus(),
                         configured: !!process.env.AIOSTREAMS_URL,
                     };
-                } catch {}
+                } catch {
+                    // The health response remains available when the optional proxy monitor is absent.
+                }
                 proxy.healthIgnored = !!appAccount?.proxyHealthIgnored;
             }
 

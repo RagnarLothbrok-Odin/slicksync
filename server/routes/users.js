@@ -7782,8 +7782,8 @@ module.exports = ({
             // Decrypt auth key
             const authKeyPlain = decrypt(user.stremioAuthKey, req);
 
-            const { StremioAPIClient: StremioAPIClientLocal } = require("stremio-api-client");
-            const apiClient = new StremioAPIClientLocal({
+            const { StremioAPIClient: LibraryApiClient } = require("stremio-api-client");
+            const apiClient = new LibraryApiClient({
                 authKey: authKeyPlain,
                 endpoint: "https://api.strem.io",
             });
@@ -10181,7 +10181,9 @@ module.exports = ({
             if (!appVersion) {
                 try {
                     appVersion = require("../../package.json")?.version || "";
-                } catch {}
+                } catch {
+                    // The version label is optional when package metadata is unavailable.
+                }
             }
             if (appVersion) {
                 embed.footer = { text: `SlickSync v${appVersion}` };
@@ -10766,7 +10768,9 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
         if (names.length > 0) {
             console.log(`🔄 Reloading addons: ${names.join(", ")}`);
         }
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 
     // Warm every manifest at once before reloading them one by one - the
     // fetches are independent, so waiting for them in sequence was pure dead
@@ -10793,7 +10797,9 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
                 );
             }
         }
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 
     for (const addon of groupAddons) {
         try {
@@ -10908,16 +10914,22 @@ async function syncCredentialsAddons(
             if (dek) {
                 keys.push(dek);
             }
-        } catch {}
+        } catch {
+            // An unavailable key leaves the fallback value or next key candidate in use.
+        }
         try {
             keys.push(getServerKeyUtil());
-        } catch {}
+        } catch {
+            // An unavailable key leaves the fallback value or next key candidate in use.
+        }
         try {
             const { ENCRYPTION_KEY_FALLBACKS } = require("../utils/config");
             for (const k of ENCRYPTION_KEY_FALLBACKS || []) {
                 keys.push(k);
             }
-        } catch {}
+        } catch {
+            // Continue with the primary keys when no legacy fallback keys are configured.
+        }
         let lastErr;
         for (const key of keys) {
             if (!key) {
@@ -10992,7 +11004,9 @@ async function syncCredentialsAddons(
                 .filter(Boolean);
             console.log(`📥 Current addons (${currentNames.length}):`, currentNames.join(", "));
             console.log(`🎯 Desired addons (${desiredNames.length}):`, desiredNames.join(", "));
-        } catch {}
+        } catch {
+            // Diagnostic logging must not interrupt the operation it describes.
+        }
 
         // `force` pushes even when the set already matches. The comparison is
         // order-insensitive on purpose (a person's own reorder inside their app

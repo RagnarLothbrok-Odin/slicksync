@@ -171,7 +171,9 @@ async function repairAddonsList(
                 }
                 try {
                     console.log(`${addonName} - repaired: ${reasons.join(", ")}`);
-                } catch {}
+                } catch {
+                    // Diagnostic logging must not interrupt the operation it describes.
+                }
                 updated++;
             }
         } catch {

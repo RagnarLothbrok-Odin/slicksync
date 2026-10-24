@@ -580,7 +580,9 @@ async function sendActivityNotification(webhookUrl, activities, prisma, accountI
             if (!appVersion) {
                 try {
                     appVersion = require("../../package.json")?.version || "";
-                } catch {}
+                } catch {
+                    // The version label is optional when package metadata is unavailable.
+                }
             }
             if (appVersion) {
                 embed.footer = { text: `SlickSync v${appVersion}` };
@@ -706,7 +708,9 @@ async function sendShareNotification(
         if (!appVersion) {
             try {
                 appVersion = require("../../package.json")?.version || "";
-            } catch {}
+            } catch {
+                // The version label is optional when package metadata is unavailable.
+            }
         }
         if (appVersion) {
             embed.footer = { text: `SlickSync v${appVersion}` };
@@ -826,7 +830,9 @@ function createSyncEmbed({
     if (!appVersion) {
         try {
             appVersion = require("../../package.json")?.version || "";
-        } catch {}
+        } catch {
+            // The version label is optional when package metadata is unavailable.
+        }
     }
     if (appVersion) {
         embed.footer = { text: `SlickSync v${appVersion}` };
@@ -899,7 +905,9 @@ async function postNtfy(ntfyUrl, topic, { title, message, priority = "default", 
             { body: message || "", headers, method: "POST" },
             require("./safeUrl").instancePolicy()
         );
-    } catch {}
+    } catch {
+        // A failed notification delivery must not interrupt the operation being reported.
+    }
 }
 
 module.exports = {

@@ -48,7 +48,9 @@ async function createNotification(
     // their next 30s tick. Fire-and-forget - see utils/liveEvents.js.
     try {
         require("./liveEvents").emitLive(accountId, "notification");
-    } catch {}
+    } catch {
+        // Live updates are advisory; the persisted operation has already completed.
+    }
     try {
         if (dedupeKey) {
             // upsert on the (accountId, dedupeKey) unique constraint so the same

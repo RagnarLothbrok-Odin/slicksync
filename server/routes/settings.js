@@ -573,7 +573,9 @@ module.exports = ({
                     let currentPlain = null;
                     try {
                         currentPlain = current[field] ? decrypt(current[field], req) : null;
-                    } catch {}
+                    } catch {
+                        // An unavailable key leaves the fallback value or next key candidate in use.
+                    }
                     const bVal = bUser[field] || null;
                     if ((currentPlain || null) !== (bVal || null)) {
                         updates[field] = bVal ? encrypt(bVal, req) : null;
@@ -3827,7 +3829,9 @@ module.exports = ({
                     u.password = "";
                     shown = u.toString().replace(/\/+$/, "");
                 }
-            } catch {}
+            } catch {
+                // Keep the original address when it cannot be normalized.
+            }
             return res.json({ ...status, address: shown });
         } catch (e) {
             return res.status(500).json({ error: publicMessage(e, "Could not check LumiereDB") });

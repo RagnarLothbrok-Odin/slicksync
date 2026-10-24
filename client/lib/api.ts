@@ -1,5 +1,6 @@
+import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import type { ErrorPayload } from "@/lib/errors";
-import type { StremioManifest } from "@/lib/stremio-manifest";
+import type { StremioCatalog, StremioManifest } from "@/lib/stremio-manifest";
 // API client for connecting to SlickSync backend
 // Use relative path if NEXT_PUBLIC_API_URL is not set (Next.js will proxy via rewrites)
 // Otherwise use the explicit URL (useful for production or different ports)
@@ -886,7 +887,11 @@ class ApiClient {
         const url = groupId
             ? `/users/${id}/sync-status?groupId=${groupId}`
             : `/users/${id}/sync-status`;
-        return this.fetch<any>(url);
+        return this.fetch<{
+            status: "synced" | "unsynced" | "stale" | "connect" | "error" | "unsupported";
+            message?: string;
+            isSynced?: boolean;
+        }>(url);
     }
 
     async getUserSyncPlan(id: string) {
@@ -918,16 +923,18 @@ class ApiClient {
     }
 
     async getUserStremioAddons(id: string) {
-        const response = await this.fetch<{ userId: string; count: number; addons: any[] }>(
-            `/users/${id}/stremio-addons`
-        );
+        const response = await this.fetch<{
+            userId: string;
+            count: number;
+            addons: ProviderAddon[];
+        }>(`/users/${id}/stremio-addons`);
         // Normalize the response - backend returns manifestUrl but we need transportUrl
-        const normalized = (response.addons || []).map((addon: any) => ({
+        const normalized = (response.addons || []).map((addon) => ({
             ...addon,
             manifest: addon.manifest || {
                 description: addon.description || "",
                 id: addon.id || "unknown",
-                logo: addon.iconUrl || addon.logo || null,
+                logo: addon.iconUrl || addon.logo || undefined,
                 name: addon.name || "Unknown",
                 resources: addon.resources || [],
                 types: addon.types || [],
@@ -935,7 +942,7 @@ class ApiClient {
             },
             transportUrl: addon.transportUrl || addon.manifestUrl || addon.url || "",
         }));
-        return normalized as StremioAddon[];
+        return normalized;
     }
 
     // Nuvio Collections (admin) — pull/edit/push a Nuvio profile's own
@@ -1203,10 +1210,14 @@ class ApiClient {
     // Import user addons to a new group (copied from old UI)
     async importUserAddons(id: string) {
         // Fetch live addons from Stremio for this user first
-        const stremioResponse = await this.fetch<{ userId: string; count: number; addons: any[] }>(
-            `/users/${id}/stremio-addons`
-        );
-        const addons: any[] = Array.isArray(stremioResponse?.addons) ? stremioResponse.addons : [];
+        const stremioResponse = await this.fetch<{
+            userId: string;
+            count: number;
+            addons: ProviderAddon[];
+        }>(`/users/${id}/stremio-addons`);
+        const addons: ProviderAddon[] = Array.isArray(stremioResponse?.addons)
+            ? stremioResponse.addons
+            : [];
 
         // Post the collected addons to the import endpoint
         return this.fetch<{ importedCount: number; message: string }>(
@@ -1290,7 +1301,7 @@ class ApiClient {
 
     async getGroupAddons(id: string) {
         // Backend returns { addons: [...] } with a slightly different shape
-        const response = await this.fetch<{ addons: any[] }>(`/groups/${id}/addons`);
+        const response = await this.fetch<{ addons: ProviderAddon[] }>(`/groups/${id}/addons`);
         const rawAddons = Array.isArray(response?.addons) ? response.addons : [];
 
         // Normalize to the Addon type used by the UI
@@ -1304,7 +1315,7 @@ class ApiClient {
                 return true;
             })
             .map((a) => {
-                const manifest = a.manifest || {};
+                const manifest: Partial<StremioAddon["manifest"]> = a.manifest || {};
                 // Get logo from multiple sources
                 const logo =
                     a.customLogo ||
@@ -1321,7 +1332,7 @@ class ApiClient {
                     name: a.name || manifest.name || "Unnamed Addon",
                     resources: Array.isArray(manifest.resources)
                         ? manifest.resources
-                              .map((r: any) => (typeof r === "string" ? r : r.name))
+                              .map((r) => (typeof r === "string" ? r : r.name))
                               .filter(Boolean)
                         : [],
                     stremioAddonId: manifest.id,
@@ -1345,24 +1356,31 @@ class ApiClient {
                 body: JSON.stringify({ orderedAddonIds }),
                 method: "POST",
             });
-        } catch (error: any) {
+        } catch (error) {
+            const apiError = error instanceof ApiError ? error : undefined;
             // Log error details separately to avoid serialization issues
-            console.error("API reorderGroupAddons error - message:", error?.message);
-            if (error?.data) {
-                console.error("API reorderGroupAddons error - data:", error.data);
+            console.error(
+                "API reorderGroupAddons error - message:",
+                error instanceof Error ? error.message : "Request failed"
+            );
+            if (apiError?.data) {
+                console.error("API reorderGroupAddons error - data:", apiError.data);
             }
             console.error("API reorderGroupAddons error - type:", typeof error);
-            console.error("API reorderGroupAddons error - response data:", error?.response?.data);
+            console.error(
+                "API reorderGroupAddons error - response data:",
+                apiError?.response?.data
+            );
             console.error(
                 "API reorderGroupAddons error - response status:",
-                error?.response?.status
+                apiError?.response?.status
             );
             console.error("API reorderGroupAddons error - groupId:", groupId);
             console.error("API reorderGroupAddons error - orderedAddonIds:", orderedAddonIds);
-            if (error?.response?.data?.details?.availableAddonIds) {
+            if (apiError?.response?.data?.details?.availableAddonIds) {
                 console.error(
                     "API reorderGroupAddons error - available addon IDs from backend:",
-                    error.response.data.details.availableAddonIds
+                    apiError.response.data.details.availableAddonIds
                 );
             }
             console.error("API reorderGroupAddons error - full error:", error);
@@ -1413,7 +1431,7 @@ class ApiClient {
     }
 
     async getPasskeyRegistrationOptions() {
-        return this.fetch<any>("/passkeys/register/options", {
+        return this.fetch<PublicKeyCredentialCreationOptionsJSON>("/passkeys/register/options", {
             body: JSON.stringify({}),
             method: "POST",
         });
@@ -1498,7 +1516,7 @@ class ApiClient {
 
     async createAddon(data: CreateAddonData) {
         // Backend expects 'url' but we use 'manifestUrl' in the interface
-        const payload: any = { ...data };
+        const payload: Partial<CreateAddonData> & { url?: string } = { ...data };
         if (payload.manifestUrl && !payload.url) {
             payload.url = payload.manifestUrl;
             delete payload.manifestUrl;
@@ -1512,17 +1530,17 @@ class ApiClient {
         if (payload.manifestData) {
             // manifestData is already in the payload
         }
-        const result = await this.fetch<any>("/addons", {
+        const result = await this.fetch<Addon | { addon: Addon }>("/addons", {
             body: JSON.stringify(payload),
             method: "POST",
         });
         // Backend sometimes wraps addon in { addon, message }
-        return (result?.addon || result) as Addon;
+        return "addon" in result ? result.addon : result;
     }
 
     async updateAddon(id: string, data: Partial<Addon>) {
         // Backend expects 'url' but we use 'manifestUrl' in the interface
-        const payload: any = { ...data };
+        const payload: Partial<Addon> = { ...data };
         if (payload.manifestUrl && !payload.url) {
             payload.url = payload.manifestUrl;
             delete payload.manifestUrl;
@@ -1678,7 +1696,7 @@ class ApiClient {
         id: string,
         limit?: number,
         offset?: number
-    ): Promise<{ logs: any[]; total: number; limit: number; offset: number }> {
+    ): Promise<{ logs: ProxyRequestLog[]; total: number; limit: number; offset: number }> {
         const params = new URLSearchParams();
         if (limit) {
             params.append("limit", limit.toString());
@@ -1689,7 +1707,7 @@ class ApiClient {
         const query = params.toString() ? `?${params.toString()}` : "";
         const response = await this.fetch<{
             success: boolean;
-            data: { logs: any[]; total: number; limit: number; offset: number };
+            data: { logs: ProxyRequestLog[]; total: number; limit: number; offset: number };
         }>(`/addons/${id}/proxy-logs${query}`);
         return response.data;
     }
@@ -1698,7 +1716,7 @@ class ApiClient {
         limit?: number,
         offset?: number,
         addonId?: string
-    ): Promise<{ logs: any[]; total: number; limit: number; offset: number }> {
+    ): Promise<{ logs: ProxyRequestLog[]; total: number; limit: number; offset: number }> {
         const params = new URLSearchParams();
         if (limit) {
             params.append("limit", limit.toString());
@@ -1712,7 +1730,7 @@ class ApiClient {
         const query = params.toString() ? `?${params.toString()}` : "";
         const response = await this.fetch<{
             success: boolean;
-            data: { logs: any[]; total: number; limit: number; offset: number };
+            data: { logs: ProxyRequestLog[]; total: number; limit: number; offset: number };
         }>(`/addons/proxy-logs/all${query}`);
         return response.data;
     }
@@ -1725,14 +1743,17 @@ class ApiClient {
     // Just what the notification bell shows: waiting requests and the last
     // month's accepted ones.
     async getInvitationBell() {
-        return this.fetch<{ pending: any[]; accepted: any[] }>("/invitations/bell");
+        return this.fetch<{
+            pending: (InviteRequest & { groupName?: string; invitationName?: string })[];
+            accepted: (InviteRequest & { groupName?: string; invitationName?: string })[];
+        }>("/invitations/bell");
     }
 
     async createInvitation(data: CreateInvitationData) {
         // Map frontend field names to backend field names
         // IMPORTANT: Use null instead of undefined so JSON.stringify includes the key
         // Backend treats null/undefined as unlimited (0)
-        const payload: any = {
+        const payload = {
             expiresAt: data.expiresAt || null,
             groupName: data.groupName || null,
             jellyfinServerKey: data.jellyfinServerKey || null,
@@ -1743,17 +1764,25 @@ class ApiClient {
             name: data.name || null,
             syncOnJoin: data.syncOnJoin ?? false,
         };
-        const result = await this.fetch<any>("/invitations", {
+        const result = await this.fetch<Invitation | { invitation: Invitation }>("/invitations", {
             body: JSON.stringify(payload),
             method: "POST",
         });
-        return (result?.invitation || result) as Invitation;
+        return "invitation" in result ? result.invitation : result;
     }
 
     async updateInvitation(id: string, data: Partial<CreateInvitationData>) {
         // Map frontend field names to backend field names
         // Use null instead of undefined so JSON.stringify includes the key
-        const payload: any = {};
+        const payload: Partial<{
+            name: string | null;
+            groupName: string | null;
+            maxUses: number | null;
+            expiresAt: string | null;
+            membershipDurationDays: number | null;
+            syncOnJoin: boolean;
+            jellyfinServerKey: string | null;
+        }> = {};
         if (data.name !== undefined) {
             payload.name = data.name || null;
         }
@@ -2857,12 +2886,12 @@ class ApiClient {
             username: data.username,
         };
 
-        const result = await this.fetch<any>("/stremio/connect-authkey", {
+        const result = await this.fetch<User | { user: User }>("/stremio/connect-authkey", {
             body: JSON.stringify(payload),
             method: "POST",
         });
         // Normalize to plain User
-        return (result?.user || result) as User;
+        return "user" in result ? result.user : result;
     }
 
     async createUserWithCredentials(data: {
@@ -2883,11 +2912,11 @@ class ApiClient {
         };
 
         const endpoint = data.registerNew ? "/stremio/register" : "/stremio/connect";
-        const result = await this.fetch<any>(endpoint, {
+        const result = await this.fetch<User | { user: User }>(endpoint, {
             body: JSON.stringify(payload),
             method: "POST",
         });
-        return (result?.user || result) as User;
+        return "user" in result ? result.user : result;
     }
 
     // --- Jellyfin-compatible servers (a real Jellyfin, AIOStreams, AIOMetadata) ---
@@ -2936,15 +2965,17 @@ class ApiClient {
             userId?: string;
         }
     ) {
-        const result = await this.fetch<any>("/jellyfin/connect", {
+        const result = await this.fetch<
+            (User | { user: User }) & { household?: HouseholdProfile[] }
+        >("/jellyfin/connect", {
             body: JSON.stringify(data),
             method: "POST",
         });
         // The household that came along as profiles, for AIOStreams and AIOMetadata.
         return {
-            ...(result?.user || result),
-            household: (result?.household || []) as HouseholdProfile[],
-        } as User & { household: HouseholdProfile[] };
+            ...("user" in result ? result.user : result),
+            household: result.household || [],
+        };
     }
 
     // --- AIOStreams Collections: SlickSync's catalogs as collections in AIOStreams' apps ---
@@ -3528,11 +3559,11 @@ class ApiClient {
         colorIndex?: number;
         nuvioProfileId?: number;
     }) {
-        const result = await this.fetch<any>("/nuvio/connect-authkey", {
+        const result = await this.fetch<User | { user: User }>("/nuvio/connect-authkey", {
             body: JSON.stringify({ ...data, create: true }),
             method: "POST",
         });
-        return (result?.user || result) as User;
+        return "user" in result ? result.user : result;
     }
 
     /** Sign an existing Nuvio person in again - email and password, or the tokens from Nuvio's sign-in code. */
@@ -3590,11 +3621,11 @@ class ApiClient {
         colorIndex?: number;
         nuvioProfileId?: number;
     }) {
-        const result = await this.fetch<any>("/nuvio/connect-authkey", {
+        const result = await this.fetch<User | { user: User }>("/nuvio/connect-authkey", {
             body: JSON.stringify({ ...data, create: true }),
             method: "POST",
         });
-        return (result?.user || result) as User;
+        return "user" in result ? result.user : result;
     }
 
     // --- Avatars ---
@@ -4782,7 +4813,7 @@ class ApiClient {
 
     // Manual sync (same as scheduled 5‑minute sync, but on demand)
     async triggerSyncNow() {
-        return this.fetch<{ message: string; result?: any }>("/settings/sync-now", {
+        return this.fetch<{ message: string; result?: unknown }>("/settings/sync-now", {
             method: "POST",
         });
     }
@@ -5415,7 +5446,7 @@ export interface VaultEntry {
     provider?: string | null;
     secretLabel: string;
     snoozedUntil?: string | null;
-    testConfig?: Record<string, any> | null;
+    testConfig?: VaultTestConfig | null;
     testType: VaultTestType;
     updatedAt: string;
 }
@@ -5448,7 +5479,7 @@ export interface VaultEntryInput {
     provider?: string;
     secret: string;
     secretLabel?: string;
-    testConfig?: Record<string, any>;
+    testConfig?: VaultTestConfig;
     testType?: VaultTestType;
 }
 
@@ -5589,7 +5620,7 @@ export interface Addon {
 }
 
 export interface CreateAddonData {
-    manifestData?: any; // Optional pre-fetched manifest data
+    manifestData?: Partial<StremioManifest>; // Optional pre-fetched manifest data
     manifestUrl: string;
     name?: string;
 }
@@ -5671,6 +5702,49 @@ export interface VelocityData {
     monthly: number;
     trend: "up" | "down" | "stable";
     weekly: number;
+}
+
+interface ProviderAddon {
+    customLogo?: string | null;
+    description?: string;
+    iconUrl?: string;
+    id?: string;
+    logo?: string;
+    manifest?: StremioAddon["manifest"];
+    manifestUrl?: string;
+    name?: string;
+    resources?: StremioAddon["manifest"]["resources"];
+    transportUrl?: string;
+    types?: string[];
+    url?: string;
+    version?: string;
+}
+
+export interface VaultTestConfig {
+    baseUrl?: string;
+    dataCapGB?: number;
+    host?: string;
+    model?: string;
+    port?: number;
+    ssl?: boolean;
+    url?: string;
+}
+
+export interface ProxyRequestLog {
+    addonId?: string;
+    addonName?: string;
+    cacheHit: boolean;
+    error: string | null;
+    ip: string | null;
+    method: string;
+    path: string;
+    proxyUuid?: string;
+    responseTimeMs: number | null;
+    statusCode: number | null;
+    timestamp: string;
+    upstreamUrl: string | null;
+    url: string | null;
+    userAgent: string | null;
 }
 
 export interface StremioAddon {
@@ -6138,7 +6212,7 @@ export interface NuvioCatalogSource {
     // sources) or absent both mean "no genre filter."
     genre?: string;
     type: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface NuvioCollectionFolder {
@@ -6164,14 +6238,14 @@ export interface NuvioCollectionFolder {
     // newFolderDefaults() in the Nuvio Collections page).
     tileShape?: "LANDSCAPE" | "SQUARE" | "POSTER";
     title: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface NuvioCollection {
     folders?: NuvioCollectionFolder[];
     id: string;
     title: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface SeriesSeason {
@@ -6954,7 +7028,7 @@ export interface OperationalAlert {
 }
 
 export interface AddonStat {
-    catalogs: any[];
+    catalogs: StremioCatalog[];
     enabledGroups: number;
     iconUrl?: string;
     id: string;

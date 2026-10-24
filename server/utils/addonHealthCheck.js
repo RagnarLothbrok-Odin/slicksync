@@ -297,7 +297,7 @@ async function performHealthChecks(prisma, accountId = null) {
                     continue;
                 }
 
-                let manifestUrl = getDecryptedManifestUrlLocal(addon);
+                let manifestUrl = getDecryptedManifestUrl(addon);
                 // Vault-injected addons carry {{vault:...}} placeholders - resolve
                 // them here (server-side, same as /proxy does) so the health check
                 // probes the real upstream instead of failing on a placeholder URL.

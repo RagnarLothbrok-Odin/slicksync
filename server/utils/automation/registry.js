@@ -520,10 +520,14 @@ const ACTIONS = {
                     newSecret = null;
                 try {
                     oldSecret = decrypt(entry.encryptedSecret, reqLike);
-                } catch {}
+                } catch {
+                    // An unavailable key leaves the fallback value or next key candidate in use.
+                }
                 try {
                     newSecret = decrypt(backup.encryptedSecret, reqLike);
-                } catch {}
+                } catch {
+                    // An unavailable key leaves the fallback value or next key candidate in use.
+                }
                 if (!newSecret) {
                     throw new Error("Could not decrypt the backup credential");
                 }

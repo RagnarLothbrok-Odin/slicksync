@@ -229,7 +229,9 @@ async function notifyNativeWatchDetected(
             if (!appVersion) {
                 try {
                     appVersion = require("../../package.json")?.version || "";
-                } catch {}
+                } catch {
+                    // The version label is optional when package metadata is unavailable.
+                }
             }
             if (appVersion) {
                 embed.footer = { text: `SlickSync v${appVersion}` };

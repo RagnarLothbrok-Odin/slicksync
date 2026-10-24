@@ -201,7 +201,9 @@ function createJellyfinProvider({
                 if (viewer === self && typeof onUnauthorized === "function") {
                     try {
                         await onUnauthorized();
-                    } catch {}
+                    } catch {
+                        // A failed session callback must not replace the original authentication error.
+                    }
                 }
                 throw Object.assign(
                     new Error(
@@ -744,7 +746,9 @@ function createJellyfinProvider({
                         if (e?.status === 401 && typeof onProfileUnauthorized === "function") {
                             try {
                                 await onProfileUnauthorized(viewer);
-                            } catch {}
+                            } catch {
+                                // A failed session callback must not replace the original authentication error.
+                            }
                         }
                         return null;
                     })
@@ -796,7 +800,9 @@ function createJellyfinProvider({
                     }
                 }
                 require("../utils/jellyfinLive").recordLive(slicksyncUserId, playing);
-            } catch {}
+            } catch {
+                // Live updates are advisory; the persisted operation has already completed.
+            }
 
             return [...merged.values()];
         },

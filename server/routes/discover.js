@@ -885,7 +885,9 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
                         for (const g of Array.isArray(meta?.genres) ? meta.genres : []) {
                             genreVotes.set(g, (genreVotes.get(g) || 0) + 1);
                         }
-                    } catch {}
+                    } catch {
+                        // Malformed cached genres must not exclude the other recommendation signals.
+                    }
                 }
             }
 
@@ -1583,7 +1585,9 @@ module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
                         for (const g of Array.isArray(meta?.genres) ? meta.genres : []) {
                             genreVotes.set(g, (genreVotes.get(g) || 0) + 1);
                         }
-                    } catch {}
+                    } catch {
+                        // Malformed cached genres must not exclude the other recommendation signals.
+                    }
                 }
                 const topGenres = [...genreVotes.entries()]
                     .sort((a, b) => b[1] - a[1])

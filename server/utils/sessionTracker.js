@@ -22,7 +22,9 @@ function heartbeat(event, data = {}) {
         const _fs = require("node:fs");
         const line = `[${new Date().toISOString()}] ${event} ${JSON.stringify(data)}\n`;
         require("./debugLogFile").appendCapped("/app/data/activity-monitor-debug.log", line);
-    } catch {}
+    } catch {
+        // Diagnostic logging must not interrupt the operation it describes.
+    }
 }
 
 // Intentionally NOT tied to activityMonitor's poll scheduling interval
@@ -167,7 +169,9 @@ async function sendSessionStartNotification(webhookUrl, session, user) {
         if (!appVersion) {
             try {
                 appVersion = require("../../package.json")?.version || "";
-            } catch {}
+            } catch {
+                // The version label is optional when package metadata is unavailable.
+            }
         }
         if (appVersion) {
             embed.footer = { text: `SlickSync v${appVersion}` };
@@ -262,7 +266,9 @@ async function sendSessionStopNotification(webhookUrl, session, user) {
         if (!appVersion) {
             try {
                 appVersion = require("../../package.json")?.version || "";
-            } catch {}
+            } catch {
+                // The version label is optional when package metadata is unavailable.
+            }
         }
         if (appVersion) {
             embed.footer = { text: `SlickSync v${appVersion}` };

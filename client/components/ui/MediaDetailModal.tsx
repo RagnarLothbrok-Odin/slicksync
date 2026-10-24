@@ -1348,7 +1348,9 @@ export function MediaDetailModal({
                 // trailerSrc's own comment above).
                 try {
                     trailerPlayerRef.current?.unMute?.();
-                } catch {}
+                } catch {
+                    // The embedded player may have been detached before this call completes.
+                }
             }
         };
         document.addEventListener("fullscreenchange", handleFullscreenChange);
@@ -1441,7 +1443,9 @@ export function MediaDetailModal({
         // the still-live embed to stop before that happened.
         try {
             trailerPlayerRef.current?.stopVideo?.();
-        } catch {}
+        } catch {
+            // The embedded player may have been detached before this call completes.
+        }
         setIsTrailerPlaying(false);
         setTrailerSrc(null);
         onClose();

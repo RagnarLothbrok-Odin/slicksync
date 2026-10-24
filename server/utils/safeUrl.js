@@ -205,7 +205,9 @@ async function safeFetch(raw, init = {}, { allowPrivate = false, maxRedirects = 
         }
         try {
             await res.body?.cancel();
-        } catch {}
+        } catch {
+            // An already-closed response body needs no further cleanup.
+        }
         const next = new URL(location, current);
         const method = String(options.method || "GET").toUpperCase();
         // A redirected POST becomes a GET, as browsers do it (always for 303).

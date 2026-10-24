@@ -244,7 +244,9 @@ async function performBackupOnce(prisma, opts = {}) {
                 data = await buildConfigExportPayload({
                     appAccountId: process.env.DEFAULT_ACCOUNT_ID || "default",
                 });
-            } catch {}
+            } catch {
+                // Try the legacy self-fetch below when direct export is unavailable.
+            }
         }
         if (!data) {
             const baseUrl = `http://localhost:${process.env.PORT || 4000}`;

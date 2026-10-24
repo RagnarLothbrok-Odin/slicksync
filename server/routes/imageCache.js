@@ -80,7 +80,9 @@ module.exports = ({ prisma } = {}) => {
             }
             try {
                 res.redirect(302, src);
-            } catch {}
+            } catch {
+                // A disconnected client cannot receive the fallback redirect.
+            }
         };
 
         // Cache hit, in either format. The other format is served immediately

@@ -294,7 +294,9 @@ async function proveImportedSignIns(users, { limit = 4, max = 200 } = {}) {
                 const job = jobs[next++];
                 try {
                     await job();
-                } catch {}
+                } catch {
+                    // One unreachable household member must not prevent the remaining probes.
+                }
             }
         };
         await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));

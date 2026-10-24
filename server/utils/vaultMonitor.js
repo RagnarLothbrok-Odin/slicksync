@@ -158,10 +158,14 @@ async function runVaultChecks({ prisma, decrypt, getAccountId: _getAccountId }) 
                                             primaryEntry.encryptedSecret,
                                             mockReq
                                         );
-                                    } catch {}
+                                    } catch {
+                                        // An unavailable key leaves the fallback value or next key candidate in use.
+                                    }
                                     try {
                                         recoveredPlain = decrypt(entry.encryptedSecret, mockReq);
-                                    } catch {}
+                                    } catch {
+                                        // An unavailable key leaves the fallback value or next key candidate in use.
+                                    }
                                     await prisma.$transaction([
                                         prisma.vaultEntry.update({
                                             data: {

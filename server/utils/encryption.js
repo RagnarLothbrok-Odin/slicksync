@@ -199,7 +199,9 @@ function decrypt(text, req) {
             for (const fallbackKey of ENCRYPTION_KEY_FALLBACKS || []) {
                 try {
                     return aesGcmDecrypt(fallbackKey, text);
-                } catch {}
+                } catch {
+                    // An unavailable key leaves the fallback value or next key candidate in use.
+                }
             }
         }
         throw err;

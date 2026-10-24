@@ -2226,7 +2226,9 @@ module.exports = ({
                 } else if (typeof user.protectedAddons !== "string" && user.protectedAddons) {
                     decryptedUser.protectedAddons = JSON.stringify([]);
                 }
-            } catch {}
+            } catch {
+                // An unavailable key leaves the fallback value or next key candidate in use.
+            }
             // Omit internal fields. `ref` is the person's id, kept so an import
             // back into this instance can give them the same id again - their
             // watch history, sessions and stats are all filed under it.

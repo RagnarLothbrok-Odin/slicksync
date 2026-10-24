@@ -1008,7 +1008,9 @@ async function bootstrap() {
                 "/app/data/activity-monitor-debug.log",
                 `[${new Date().toISOString()}] index.js:before_scheduleSyncs {}\n`
             );
-        } catch {}
+        } catch {
+            // Diagnostic logging must not interrupt the operation it describes.
+        }
         scheduleSyncs(
             readSyncFrequencyMinutes(),
             prisma,
@@ -1025,7 +1027,9 @@ async function bootstrap() {
                 "/app/data/activity-monitor-debug.log",
                 `[${new Date().toISOString()}] index.js:after_scheduleSyncs {}\n`
             );
-        } catch {}
+        } catch {
+            // Diagnostic logging must not interrupt the operation it describes.
+        }
 
         // Schedule user expiration cleanup (runs at midnight)
         try {
@@ -1041,7 +1045,9 @@ async function bootstrap() {
                 "/app/data/activity-monitor-debug.log",
                 `[${new Date().toISOString()}] index.js:about_to_call_scheduleActivityMonitor {}\n`
             );
-        } catch {}
+        } catch {
+            // Diagnostic logging must not interrupt the operation it describes.
+        }
         try {
             scheduleActivityMonitor(prisma, decrypt, getAccountId, INSTANCE_TYPE);
         } catch (err) {
@@ -1051,7 +1057,9 @@ async function bootstrap() {
                     "/app/data/activity-monitor-debug.log",
                     `[${new Date().toISOString()}] index.js:scheduleActivityMonitor_threw ${JSON.stringify({ message: err.message, stack: err.stack })}\n`
                 );
-            } catch {}
+            } catch {
+                // Diagnostic logging must not interrupt the operation it describes.
+            }
             console.error("⚠️ Failed to initialize activity monitor:", err);
         }
 

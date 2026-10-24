@@ -178,7 +178,9 @@ async function imagesOpen(serverKey, posterUrl, { fetchImpl = fetch } = {}) {
         });
         try {
             await res.body?.cancel?.();
-        } catch {}
+        } catch {
+            // An already-closed response body needs no further cleanup.
+        }
         const open = res.status !== 401 && res.status !== 403;
         openByServer.set(serverKey, { at: Date.now(), open });
         return open;

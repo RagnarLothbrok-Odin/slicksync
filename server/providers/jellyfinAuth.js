@@ -25,7 +25,9 @@ const ADDRESS_REFUSALS = new Set([
 let appVersion = "1.0.0";
 try {
     appVersion = require("../../package.json").version || appVersion;
-} catch {}
+} catch {
+    // The version label is optional when package metadata is unavailable.
+}
 
 // On an instance that serves strangers, a server address is something anyone
 // with an account typed in, so it may not point this server at its own
@@ -335,7 +337,9 @@ async function probeServer(rawUrl) {
     let quickConnect = false;
     try {
         quickConnect = (await jfRequest(baseUrl, "/QuickConnect/Enabled")) === true;
-    } catch {}
+    } catch {
+        // Keep password sign-in available when Quick Connect is unsupported.
+    }
 
     return {
         kind,
@@ -486,7 +490,9 @@ async function signOut(baseUrl, token, { deviceId } = {}) {
             timeoutMs: 5000,
             token,
         });
-    } catch {}
+    } catch {
+        // A failed remote logout must not keep the local session signed in.
+    }
 }
 
 /**
@@ -521,7 +527,9 @@ function identityEmail(serverUrl, userId) {
     let host = "jellyfin";
     try {
         host = new URL(serverUrl).hostname.toLowerCase();
-    } catch {}
+    } catch {
+        // Keep the original address when it cannot be normalized.
+    }
     return `${String(userId || "").toLowerCase()}@${host}`;
 }
 
