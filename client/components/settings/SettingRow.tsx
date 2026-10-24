@@ -48,7 +48,7 @@ export function SettingRow({
   disabled,
 }: {
   label: string;
-  description: string;
+  description: React.ReactNode;
   children: React.ReactNode;
   disabled?: boolean;
 }) {
@@ -57,9 +57,9 @@ export function SettingRow({
     // palette's settings deep-search (lib/settingsIndex.ts) can scroll to
     // and flash this exact row via /settings?highlight=<label>.
     <div data-setting={label} className={`settings-row flex items-center justify-between gap-6 p-4 rounded-lg bg-subtle ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      <div>
+      <div className="min-w-0 flex-1">
         <p className="font-medium text-sm text-default">{label}</p>
-        <p className="text-xs text-muted">{description}</p>
+        <div className="text-xs text-muted">{description}</div>
       </div>
       {isValidElement<{ label?: string }>(children) && children.type === ToggleSwitch
         ? cloneElement(children, { label }) : children}

@@ -276,7 +276,7 @@ const LayoutModeCard = memo(function LayoutModeCard({
 // live inside Settings as a section (user's call - it is a preference, and it
 // was the only preference living outside Settings). `embedded` drops the page
 // chrome - header, heading and page padding - since Settings supplies those.
-export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
+export function ThemesPanel({ embedded = false, showLayout = true }: { embedded?: boolean; showLayout?: boolean }) {
   const {
     themeId, setTheme,
     isCustom, activeCustomTheme, savedCustomThemes,
@@ -399,6 +399,7 @@ export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
       )}
 
         {/* Navigation layout is independent of the theme palette. */}
+        {showLayout && (
         <PageSection className="mb-6">
           <Card padding="lg">
             <div className="flex items-center gap-3 mb-5">
@@ -443,6 +444,7 @@ export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
             </div>
           </Card>
         </PageSection>
+        )}
 
         {/* Theme Selection */}
         <PageSection delay={0.05} className="mb-6">

@@ -20,12 +20,13 @@ import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { copyToClipboard } from '@/lib/clipboard';
 import { userAuth, userExport, getUserApiKey } from '@/lib/user-api';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
-import { ToggleSwitch, Avatar, ConfirmModal, Button } from '@/components/ui';
-import { useTheme, themeMeta, themeIds } from '@/lib/theme';
+import { Card, ConfirmModal, Button } from '@/components/ui';
+import { ThemesPanel } from '@/components/settings/ThemesPanel';
+import { ToggleSwitch, SettingRow } from '@/components/settings/SettingRow';
+import { ProfilePictureSettings } from '@/components/settings/ProfilePictureSettings';
 import { toast } from '@/components/ui/Toast';
 import { providerTypeLabel } from '@/lib/providers';
 import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
-import { ThemeCard } from '@/components/settings/ThemeChoice';
 import { PersonPushRow } from '@/components/user/PersonPushRow';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
@@ -51,7 +52,6 @@ export default function UserSettingsPage() {
   const { userInfo, refreshUserInfo, provider, deleteAccount } = useUserAuth();
   const { userId, authKey, isReady } = useUserAuthHeaders();
   const providerLabel = providerTypeLabel(provider);
-  const { themeId, setTheme } = useTheme();
 
   // Self-service "delete my account" - only this user's own data, not the
   // whole shared instance (that's an admin-only action). Works in both
@@ -381,67 +381,11 @@ export default function UserSettingsPage() {
           </section>}
           <div className="space-y-6" hidden={!!settingsQuery.trim()}>
         <div hidden={activeSection !== 'general'} className="space-y-6">
-        {/* Profile Info */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1, y: 0 }}
-          className="settings-panel rounded-2xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
-          <div
-            className="px-6 py-4 flex items-center gap-3"
-          >
-            <div 
-              className="w-9 h-9 rounded-lg flex items-center justify-center"
-              style={{ background: 'var(--color-primary-muted)' }}
-            >
-              <UserCircleIcon className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
-            </div>
-            <div>
-              <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                Profile Information
-              </h3>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Your account details
-              </p>
-            </div>
-          </div>
-
-          <div className="p-6 space-y-4">
-            <AvatarPickerModal isOpen={avatarPickerOpen} onClose={() => setAvatarPickerOpen(false)} name={userInfo?.username || 'User'} currentAvatarUrl={userInfo?.avatarUrl} currentColorIndex={userInfo?.colorIndex}
-              onUpload={file => userAuth.uploadAvatar(userId!, authKey!, file)}
-              onSave={async data => { await userAuth.updateProfile(userId!, authKey!, data); await refreshUserInfo(); }} />
-            {/* Avatar and name */}
-            <div className="flex items-center gap-4">
-              <button type="button" aria-label="Change profile picture" onClick={() => setAvatarPickerOpen(true)} className="rounded-full shrink-0 focus-visible:ring-2 focus-visible:ring-primary">
-              <Avatar 
-                name={userInfo?.username || 'User'}
-                email={userInfo?.email}
-                src={userInfo?.avatarUrl || undefined}
-                useGravatar={userInfo?.useGravatar}
-                colorIndex={userInfo?.colorIndex || 0}
-                size="xl"
-                showRing
-                className="w-16 h-16"
-              />
-              </button>
-              <div>
-                <h3 className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
-                  {userInfo?.username}
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  {userInfo?.email}
-                </p>
-                <Button variant="secondary" size="sm" className="mt-3" onClick={() => setAvatarPickerOpen(true)}>Change Picture</Button>
-                <p className="text-xs text-muted mt-2">Choose an avatar, upload an image, or paste a link.</p>
-              </div>
-            </div>
-
-            {/* Details grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+        <ProfilePictureSettings name={userInfo?.username || 'User'} email={userInfo?.email} src={userInfo?.avatarUrl || undefined} useGravatar={userInfo?.useGravatar} colorIndex={userInfo?.colorIndex || 0} onChange={() => setAvatarPickerOpen(true)}>
+            {/* Provider details are read-only; picture changes belong to this account. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-default">
+              <div><p className="text-xs text-muted mb-1">Name</p><p className="text-sm font-medium text-default">{userInfo?.username}</p></div>
+              <div className="min-w-0"><p className="text-xs text-muted mb-1">Email</p><p className="text-sm font-medium text-default break-all">{userInfo?.email}</p></div>
               <div>
                 <p className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-subtle)' }}>
                   Groups
@@ -469,71 +413,21 @@ export default function UserSettingsPage() {
                 </div>
               )}
             </div>
-          </div>
-        </motion.div>
+        </ProfilePictureSettings>
+            <AvatarPickerModal isOpen={avatarPickerOpen} onClose={() => setAvatarPickerOpen(false)} name={userInfo?.username || 'User'} currentAvatarUrl={userInfo?.avatarUrl} currentColorIndex={userInfo?.colorIndex}
+              onUpload={file => userAuth.uploadAvatar(userId!, authKey!, file)}
+              onSave={async data => { await userAuth.updateProfile(userId!, authKey!, data); await refreshUserInfo(); }} />
 
         </div>
         <div hidden={activeSection !== 'themes'} className="space-y-6">
-        {/* Theme Selection */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="settings-panel rounded-2xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
-          <div
-            className="px-6 py-4 flex items-center gap-3"
-          >
-            <div 
-              className="w-9 h-9 rounded-lg flex items-center justify-center"
-              style={{ background: 'var(--color-secondary-muted)' }}
-            >
-              <PaintBrushIcon className="w-5 h-5" style={{ color: 'var(--color-secondary)' }} />
-            </div>
-            <div>
-              <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                Appearance
-              </h3>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Choose your preferred color scheme
-              </p>
-            </div>
-          </div>
-
-          <div className="p-6">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {themeIds.map((id) => (
-                <ThemeCard
-                  key={id}
-                  themeId={id}
-                  meta={themeMeta[id]}
-                  isSelected={themeId === id}
-                  onSelect={() => setTheme(id)}
-                />
-              ))}
-            </div>
-          </div>
-        </motion.div>
+        <ThemesPanel embedded showLayout={false} />
 
         </div>
         <div hidden={activeSection !== 'general'} className="space-y-6">
         {/* Privacy Settings */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="settings-panel rounded-2xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -542,7 +436,7 @@ export default function UserSettingsPage() {
               <ShieldCheckIcon className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
             </div>
             <div>
-              <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 Privacy
               </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -551,22 +445,11 @@ export default function UserSettingsPage() {
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             {/* Activity Visibility Toggle */}
-            <div 
-              className="flex items-center justify-between p-4 rounded-lg"
-              style={{ background: 'var(--color-surface-elevated)' }}
-            >
-              <div className="flex-1">
-                <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                  Activity Visibility
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  {isPublic
+            <SettingRow label="Activity Visibility" description={<>{isPublic
                     ? 'Your watch activity is visible to group members'
-                    : 'Your watch activity is hidden from group members'}
-                </p>
-              </div>
+                    : 'Your watch activity is hidden from group members'}</>}>
 
               {activityVisibilityLoaded && (
                 <div className="flex items-center gap-3">
@@ -576,31 +459,20 @@ export default function UserSettingsPage() {
                     {isPublic ? 'Public' : 'Private'}
                   </span>
                   <ToggleSwitch
-                    checked={isPublic}
+                    label="Activity Visibility" enabled={isPublic}
                     onChange={handleToggleVisibility}
                     disabled={updating}
                   />
                 </div>
               )}
-            </div>
+            </SettingRow>
 
             {/* Public Stats Share Link - a genuinely public, unauthenticated
                 page anyone with the link can view, unlike Activity
                 Visibility above (household members only). */}
-            <div
-              className="flex items-center justify-between p-4 rounded-lg mt-3"
-              style={{ background: 'var(--color-surface-elevated)' }}
-            >
-              <div className="flex-1">
-                <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                  Public Stats Page
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  {publicStatsEnabled
+            <SettingRow label="Public Stats Page" description={<>{publicStatsEnabled
                     ? 'Anyone with this link can view your watch stats - no login required'
-                    : 'Get a shareable link to your watch stats, viewable by anyone without logging in'}
-                </p>
-                {publicStatsEnabled && publicStatsUrl && (
+                    : 'Get a shareable link to your watch stats, viewable by anyone without logging in'}{publicStatsEnabled && publicStatsUrl && (
                   <div className="flex items-center gap-2 mt-2">
                     <code
                       className="text-xs px-2 py-1 rounded truncate max-w-[220px] sm:max-w-xs"
@@ -616,58 +488,32 @@ export default function UserSettingsPage() {
                       Copy
                     </button>
                   </div>
-                )}
-              </div>
+                )}</>}>
 
               {publicStatsLoaded && (
                 <ToggleSwitch
-                  checked={publicStatsEnabled}
+                  label="Public Stats Page" enabled={publicStatsEnabled}
                   onChange={handleTogglePublicStats}
                   disabled={savingPublicStats}
                 />
               )}
-            </div>
+            </SettingRow>
 
             {/* Data export */}
-            <div
-              className="flex items-center justify-between p-4 rounded-lg mt-3"
-              style={{ background: 'var(--color-surface-elevated)' }}
-            >
-              <div className="flex-1">
-                <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                  Your Data
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  Download your watch history and the household watchlist as a JSON file
-                </p>
-              </div>
-              <button
-                onClick={handleExportMyData}
-                disabled={isExportingMyData}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-opacity disabled:opacity-50"
-                style={{ background: 'var(--color-primary)', color: 'var(--color-bg)' }}
-              >
+            <SettingRow label="Your Data" description={<>Download your watch history and the household watchlist as a JSON file</>}>
+              <Button variant="secondary" size="sm" onClick={handleExportMyData} disabled={isExportingMyData}>
                 {isExportingMyData ? 'Exporting...' : 'Download'}
-              </button>
-            </div>
+              </Button>
+            </SettingRow>
           </div>
-        </motion.div>
+        </Card>
 
         </div>
         <div hidden={activeSection !== 'notifications'} className="space-y-6">
         {/* Discord Webhook */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="settings-panel rounded-2xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -676,7 +522,7 @@ export default function UserSettingsPage() {
               <GlobeAltIcon className="w-5 h-5" style={{ color: '#5865F2' }} />
             </div>
             <div>
-              <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 Notifications
               </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -685,7 +531,7 @@ export default function UserSettingsPage() {
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             {/* This device: their sign-in stopping, and a daily limit or
                 bedtime about to pause them. Off until they turn it on. */}
             <PersonPushRow userId={userId} authKey={authKey} />
@@ -694,18 +540,7 @@ export default function UserSettingsPage() {
                 notification settings; opting out here only affects pings
                 about MY OWN watch activity, nobody else's. */}
             {notifyOnWatchLoaded && (
-              <div
-                className="flex items-center justify-between p-4 rounded-lg mb-4"
-                style={{ background: 'var(--color-surface-elevated)' }}
-              >
-                <div className="flex-1">
-                  <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                    Watch notifications
-                  </h3>
-                  <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                    Notify (Discord + push) when I start or finish watching something
-                  </p>
-                </div>
+              <SettingRow label="Watch notifications" description={<>Notify (Discord + push) when I start or finish watching something</>}>
                 <div className="flex items-center gap-3">
                   <span
                     className={`text-sm font-medium ${notifyOnWatch ? 'text-success' : 'text-muted'}`}
@@ -713,12 +548,12 @@ export default function UserSettingsPage() {
                     {notifyOnWatch ? 'On' : 'Off'}
                   </span>
                   <ToggleSwitch
-                    checked={notifyOnWatch}
+                    label="Watch notifications" enabled={notifyOnWatch}
                     onChange={handleToggleNotifyOnWatch}
                     disabled={isSavingNotifyOnWatch}
                   />
                 </div>
-              </div>
+              </SettingRow>
             )}
 
             <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>
@@ -735,54 +570,34 @@ export default function UserSettingsPage() {
                   }
                 }}
                 placeholder="https://discord.com/api/webhooks/..."
-                className="flex-1 px-3 py-2 text-sm rounded-lg"
+                className="input-base min-w-0 flex-1 px-3 py-2 text-sm"
                 style={{
                   background: 'var(--color-surface-elevated)',
                   border: '1px solid var(--color-surface-border)',
                   color: 'var(--color-text)',
                 }}
               />
-              <button
-                onClick={handleTestWebhook}
-                disabled={isTestingWebhook || !discordWebhookUrl.trim()}
-                className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                style={{
-                  background: 'var(--color-surface-elevated)',
-                  border: '1px solid var(--color-surface-border)',
-                  color: 'var(--color-text-muted)',
-                  opacity: (!discordWebhookUrl.trim() || isTestingWebhook) ? 0.5 : 1,
-                }}
-                title="Send test message"
-              >
+              <Button variant="secondary" size="sm" onClick={handleTestWebhook} disabled={isTestingWebhook || !discordWebhookUrl.trim()}>
                 {isTestingWebhook ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
                   <BeakerIcon className="w-4 h-4" />
                 )}
                 <span className="text-sm">Test</span>
-              </button>
+              </Button>
             </div>
             <p className="text-xs mt-2" style={{ color: 'var(--color-text-subtle)' }}>
-              Always used for share notifications. Set this and your watch notifications route here too, instead of the shared family channel — leave it blank to keep using that.
+              Always used for share notifications. Set this and your watch notifications route here too, instead of the shared family channel. Leave it blank to keep using that.
             </p>
           </div>
-        </motion.div>
+        </Card>
 
         </div>
         <div hidden={activeSection !== 'integrations'} className="space-y-6">
         {/* API Key */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="settings-panel rounded-2xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -791,7 +606,7 @@ export default function UserSettingsPage() {
               <KeyIcon className="w-5 h-5" style={{ color: 'var(--color-warning)' }} />
             </div>
             <div>
-              <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 API Access
               </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -800,7 +615,7 @@ export default function UserSettingsPage() {
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>
               Your API Key
             </label>
@@ -840,21 +655,10 @@ export default function UserSettingsPage() {
                   <ClipboardDocumentIcon className="w-4 h-4" />
                 </button>
               </div>
-              <button
-                onClick={handleGenerateApiKey}
-                disabled={isGeneratingKey}
-                className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                style={{
-                  background: 'var(--color-surface-elevated)',
-                  border: '1px solid var(--color-surface-border)',
-                  color: 'var(--color-text-muted)',
-                  opacity: isGeneratingKey ? 0.5 : 1,
-                }}
-                title={currentApiKey ? 'Rotate API key' : 'Generate API key'}
-              >
+              <Button variant="secondary" size="sm" onClick={handleGenerateApiKey} disabled={isGeneratingKey}>
                 <ArrowPathIcon className={`w-4 h-4 ${isGeneratingKey ? 'animate-spin' : ''}`} />
                 <span className="text-sm">{currentApiKey ? 'Rotate' : 'Generate'}</span>
-              </button>
+              </Button>
             </div>
             <p className="text-xs mt-2" style={{ color: 'var(--color-text-subtle)' }}>
               Use this key in the Authorization header:{' '}
@@ -875,7 +679,7 @@ export default function UserSettingsPage() {
             </p>
 
             <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-surface-border)' }}>
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>
+              <p className="text-sm font-medium text-sm mb-1" style={{ color: 'var(--color-text)' }}>
                 Scrobble from other apps
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
@@ -885,23 +689,14 @@ export default function UserSettingsPage() {
               </p>
             </div>
           </div>
-        </motion.div>
+        </Card>
 
         </div>
         <div hidden={activeSection !== 'security'} className="space-y-6">
         {/* Account Actions */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="settings-panel rounded-2xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -910,7 +705,7 @@ export default function UserSettingsPage() {
               <Cog6ToothIcon className="w-5 h-5" style={{ color: 'var(--color-error)' }} />
             </div>
             <div>
-              <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 Account
               </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -919,7 +714,7 @@ export default function UserSettingsPage() {
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             <div
               className="flex items-center justify-between p-4 rounded-lg"
               style={{ background: 'var(--color-error-muted)' }}
@@ -930,19 +725,10 @@ export default function UserSettingsPage() {
                   Permanently deletes your own watch history, watchlist, and account - not the shared addons/groups. No undo.
                 </p>
               </div>
-              <button
-                onClick={() => setIsDeleteModalOpen(true)}
-                className="shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-                style={{
-                  background: 'var(--color-error)',
-                  color: 'white',
-                }}
-              >
-                Delete Account
-              </button>
+              <Button variant="danger" size="sm" onClick={() => setIsDeleteModalOpen(true)}>Delete Account</Button>
             </div>
           </div>
-        </motion.div>
+        </Card>
 
         </div>
         <div hidden={activeSection !== 'general'} className="space-y-6">
@@ -954,7 +740,7 @@ export default function UserSettingsPage() {
           className="p-4 rounded-xl"
           style={{ background: 'var(--color-primary-muted)' }}
         >
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
             <strong style={{ color: 'var(--color-text)' }}>Note:</strong> Profile information is synced from your {providerLabel} account.
             To change your username or email, update them in the {providerLabel} app.
           </p>
