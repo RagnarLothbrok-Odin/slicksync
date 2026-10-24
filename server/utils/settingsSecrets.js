@@ -11,23 +11,23 @@
 //
 // So: add a new secret settings field HERE and both sides pick it up.
 const SETTINGS_SECRET_FIELDS = [
-  'webhookUrl',
-  'tmdbApiKey',
-  'omdbApiKey',
-  'mdblistApiKey',
-  'rpdbApiKey',
-  'simklClientId',
-  'nuvioAnonKey',
-  // Failover partners - real keys, same handling as the primaries.
-  'tmdbApiKeyBackup',
-  'omdbApiKeyBackup',
-  'mdblistApiKeyBackup',
-  'rpdbApiKeyBackup',
-  // Key Pool extras - arrays of real keys, same treatment as the scalars.
-  'tmdbApiKeyPool',
-  'omdbApiKeyPool',
-  'mdblistApiKeyPool',
-  'rpdbApiKeyPool',
-]
+    "webhookUrl",
+    "tmdbApiKey",
+    "omdbApiKey",
+    "mdblistApiKey",
+    "rpdbApiKey",
+    "simklClientId",
+    "nuvioAnonKey",
+    // Failover partners - real keys, same handling as the primaries.
+    "tmdbApiKeyBackup",
+    "omdbApiKeyBackup",
+    "mdblistApiKeyBackup",
+    "rpdbApiKeyBackup",
+    // Key Pool extras - arrays of real keys, same treatment as the scalars.
+    "tmdbApiKeyPool",
+    "omdbApiKeyPool",
+    "mdblistApiKeyPool",
+    "rpdbApiKeyPool",
+];
 
-module.exports = { SETTINGS_SECRET_FIELDS }
+module.exports = { SETTINGS_SECRET_FIELDS };

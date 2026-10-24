@@ -22,40 +22,48 @@
  * another, which the UI says plainly rather than leaving as a mystery.
  */
 
-const crypto = require('crypto')
+const crypto = require("node:crypto");
 
-let libPromise = null
+let libPromise = null;
 function getLib() {
-  if (!libPromise) libPromise = import('@simplewebauthn/server')
-  return libPromise
+    if (!libPromise) {
+        libPromise = import("@simplewebauthn/server");
+    }
+    return libPromise;
 }
 
 // Challenges live for one exchange and are consumed on use. In memory on
 // purpose: they are worthless after 5 minutes, and writing them to the
 // database would mean a table of dead rows to prune for no gain.
-const CHALLENGE_TTL_MS = 5 * 60 * 1000
-const challenges = new Map()
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const challenges = new Map();
 
 function putChallenge(key, value) {
-  challenges.set(key, { value, at: Date.now() })
-  // Opportunistic sweep - this map only ever holds seconds' worth of logins.
-  if (challenges.size > 200) {
-    for (const [k, v] of challenges) {
-      if (Date.now() - v.at > CHALLENGE_TTL_MS) challenges.delete(k)
+    challenges.set(key, { at: Date.now(), value });
+    // Opportunistic sweep - this map only ever holds seconds' worth of logins.
+    if (challenges.size > 200) {
+        for (const [k, v] of challenges) {
+            if (Date.now() - v.at > CHALLENGE_TTL_MS) {
+                challenges.delete(k);
+            }
+        }
     }
-  }
 }
 
 function takeChallenge(key) {
-  const hit = challenges.get(key)
-  challenges.delete(key)
-  if (!hit) return null
-  if (Date.now() - hit.at > CHALLENGE_TTL_MS) return null
-  return hit.value
+    const hit = challenges.get(key);
+    challenges.delete(key);
+    if (!hit) {
+        return null;
+    }
+    if (Date.now() - hit.at > CHALLENGE_TTL_MS) {
+        return null;
+    }
+    return hit.value;
 }
 
 function newChallengeId() {
-  return crypto.randomBytes(24).toString('base64url')
+    return crypto.randomBytes(24).toString("base64url");
 }
 
 /**
@@ -68,26 +76,31 @@ function newChallengeId() {
  * passkeys that can never be used again.
  */
 function rpFromRequest(req) {
-  const origin = req.get('origin') || (req.get('host') ? `${req.protocol}://${req.get('host')}` : '')
-  if (!origin) return null
-  let parsed
-  try {
-    parsed = new URL(origin)
-  } catch {
-    return null
-  }
-  if (!parsed.hostname) return null
-  return { rpID: parsed.hostname, origin: parsed.origin }
+    const origin =
+        req.get("origin") || (req.get("host") ? `${req.protocol}://${req.get("host")}` : "");
+    if (!origin) {
+        return null;
+    }
+    let parsed;
+    try {
+        parsed = new URL(origin);
+    } catch {
+        return null;
+    }
+    if (!parsed.hostname) {
+        return null;
+    }
+    return { origin: parsed.origin, rpID: parsed.hostname };
 }
 
-const RP_NAME = 'SlickSync'
+const RP_NAME = "SlickSync";
 
 module.exports = {
-  getLib,
-  putChallenge,
-  takeChallenge,
-  newChallengeId,
-  rpFromRequest,
-  RP_NAME,
-  CHALLENGE_TTL_MS,
-}
+    CHALLENGE_TTL_MS,
+    getLib,
+    newChallengeId,
+    putChallenge,
+    RP_NAME,
+    rpFromRequest,
+    takeChallenge,
+};

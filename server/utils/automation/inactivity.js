@@ -11,71 +11,112 @@
 // in the future - someone set that on purpose, so an inactivity rule doesn't
 // second-guess it.
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseJson(raw, fallback) {
-  try {
-    const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw
-    return parsed && typeof parsed === 'object' ? parsed : fallback
-  } catch { return fallback }
+    try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw || "{}") : raw;
+        return parsed && typeof parsed === "object" ? parsed : fallback;
+    } catch {
+        return fallback;
+    }
 }
 
 async function alreadyFired(prisma, ruleId, userId, marker) {
-  const run = await prisma.automationRun.findFirst({
-    where: { ruleId, triggerType: 'user.inactive', AND: [{ payload: { contains: `"userId":"${userId}"` } }, { payload: { contains: `"lastSeen":"${marker}"` } }] },
-    select: { id: true },
-  })
-  return !!run
+    const run = await prisma.automationRun.findFirst({
+        select: { id: true },
+        where: {
+            AND: [
+                { payload: { contains: `"userId":"${userId}"` } },
+                { payload: { contains: `"lastSeen":"${marker}"` } },
+            ],
+            ruleId,
+            triggerType: "user.inactive",
+        },
+    });
+    return !!run;
 }
 
 async function runInactivityCheck(prisma, { now = Date.now(), emit } = {}) {
-  const fire = emit || require('./engine').emitAutomationEvent
-  const rules = await prisma.automationRule.findMany({ where: { triggerType: 'user.inactive', enabled: true } })
-  if (rules.length === 0) return 0
-  const { lastSeenByUser } = require('../lastSeen')
-  const byAccount = new Map()
-  for (const rule of rules) {
-    if (!byAccount.has(rule.accountId)) byAccount.set(rule.accountId, [])
-    byAccount.get(rule.accountId).push(rule)
-  }
-
-  let fired = 0
-  for (const [accountId, accountRules] of byAccount) {
-    try {
-      const users = await prisma.user.findMany({
-        where: { accountId, isActive: true },
-        select: { id: true, username: true, email: true, providerType: true, expiresAt: true, createdAt: true },
-      })
-      const seen = await lastSeenByUser(prisma, accountId, users)
-      for (const rule of accountRules) {
-        const days = Number(parseJson(rule.triggerConfig, {}).days)
-        if (!(days >= 1)) continue
-        for (const user of users) {
-          if (user.expiresAt && new Date(user.expiresAt).getTime() > now) continue
-          // Never seen watching: quiet since they were added.
-          const last = seen.get(user.id) || (user.createdAt ? new Date(user.createdAt) : null)
-          if (!last) continue
-          const daysInactive = Math.floor((now - last.getTime()) / DAY_MS)
-          if (daysInactive < days) continue
-          const marker = last.toISOString()
-          if (await alreadyFired(prisma, rule.id, user.id, marker)) continue
-          const result = await fire(prisma, accountId, 'user.inactive', {
-            username: user.username,
-            userId: user.id,
-            email: user.email,
-            providerType: user.providerType || 'stremio',
-            daysInactive,
-            lastSeen: marker,
-            neverSeen: !seen.has(user.id),
-          }, { ruleId: rule.id })
-          if (result?.fired) fired++
-        }
-      }
-    } catch (e) {
-      console.warn(`[AutomationInactivity] ${accountId}:`, e?.message || e)
+    const fire = emit || require("./engine").emitAutomationEvent;
+    const rules = await prisma.automationRule.findMany({
+        where: { enabled: true, triggerType: "user.inactive" },
+    });
+    if (rules.length === 0) {
+        return 0;
     }
-  }
-  return fired
+    const { lastSeenByUser } = require("../lastSeen");
+    const byAccount = new Map();
+    for (const rule of rules) {
+        if (!byAccount.has(rule.accountId)) {
+            byAccount.set(rule.accountId, []);
+        }
+        byAccount.get(rule.accountId).push(rule);
+    }
+
+    let fired = 0;
+    for (const [accountId, accountRules] of byAccount) {
+        try {
+            const users = await prisma.user.findMany({
+                select: {
+                    createdAt: true,
+                    email: true,
+                    expiresAt: true,
+                    id: true,
+                    providerType: true,
+                    username: true,
+                },
+                where: { accountId, isActive: true },
+            });
+            const seen = await lastSeenByUser(prisma, accountId, users);
+            for (const rule of accountRules) {
+                const days = Number(parseJson(rule.triggerConfig, {}).days);
+                if (!(days >= 1)) {
+                    continue;
+                }
+                for (const user of users) {
+                    if (user.expiresAt && new Date(user.expiresAt).getTime() > now) {
+                        continue;
+                    }
+                    // Never seen watching: quiet since they were added.
+                    const last =
+                        seen.get(user.id) || (user.createdAt ? new Date(user.createdAt) : null);
+                    if (!last) {
+                        continue;
+                    }
+                    const daysInactive = Math.floor((now - last.getTime()) / DAY_MS);
+                    if (daysInactive < days) {
+                        continue;
+                    }
+                    const marker = last.toISOString();
+                    if (await alreadyFired(prisma, rule.id, user.id, marker)) {
+                        continue;
+                    }
+                    const result = await fire(
+                        prisma,
+                        accountId,
+                        "user.inactive",
+                        {
+                            daysInactive,
+                            email: user.email,
+                            lastSeen: marker,
+                            neverSeen: !seen.has(user.id),
+                            providerType: user.providerType || "stremio",
+                            userId: user.id,
+                            username: user.username,
+                        },
+                        { ruleId: rule.id }
+                    );
+                    if (result?.fired) {
+                        fired++;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn(`[AutomationInactivity] ${accountId}:`, e?.message || e);
+        }
+    }
+    return fired;
 }
 
-module.exports = { runInactivityCheck }
+module.exports = { runInactivityCheck };

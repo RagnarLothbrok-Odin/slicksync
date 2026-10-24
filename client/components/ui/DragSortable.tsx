@@ -1,158 +1,143 @@
-'use client';
+"use client";
 
-import { ReactNode, useEffect } from 'react';
 import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  DragOverlay,
-} from '@dnd-kit/core';
+    type DragEndEvent,
+    KeyboardSensor,
+    PointerSensor,
+    TouchSensor,
+    useSensor,
+    useSensors,
+} from "@dnd-kit/core";
 import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { motion } from 'framer-motion';
-import { useVaultDrag } from '@/components/providers/VaultDragContext';
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { type ReactNode, useEffect } from "react";
+import { useVaultDrag } from "@/components/providers/VaultDragContext";
 
+export { closestCenter, DndContext, DragOverlay } from "@dnd-kit/core";
 export {
-  useSortable,
-  SortableContext,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-
-export { closestCenter, DndContext, DragOverlay } from '@dnd-kit/core';
-export { CSS } from '@dnd-kit/utilities';
+    SortableContext,
+    useSortable,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+export { CSS } from "@dnd-kit/utilities";
 
 export function useSortableSensors() {
-  return useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
-    }),
-    // delay:0/distance:0 meant a drag engaged on the very first touchmove
-    // event, with nothing to tell it apart from the start of a vertical
-    // scroll swipe - on a phone, that made reordering (Addons grid, Vault
-    // categories) grab the card instead of scrolling the page almost every
-    // time. A short delay is dnd-kit's own documented fix for exactly this
-    // tension (see their docs on touch vs scroll): a deliberate press-and-
-    // hold engages the drag, a normal swipe (which moves immediately, not
-    // held still) passes through to native scroll untouched. tolerance
-    // allows a little finger drift during the hold before it's cancelled as
-    // an accidental touch.
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 8 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
+    return useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: { distance: 8 },
+        }),
+        // delay:0/distance:0 meant a drag engaged on the very first touchmove
+        // event, with nothing to tell it apart from the start of a vertical
+        // scroll swipe - on a phone, that made reordering (Addons grid, Vault
+        // categories) grab the card instead of scrolling the page almost every
+        // time. A short delay is dnd-kit's own documented fix for exactly this
+        // tension (see their docs on touch vs scroll): a deliberate press-and-
+        // hold engages the drag, a normal swipe (which moves immediately, not
+        // held still) passes through to native scroll untouched. tolerance
+        // allows a little finger drift during the hold before it's cancelled as
+        // an accidental touch.
+        useSensor(TouchSensor, {
+            activationConstraint: { delay: 200, tolerance: 8 },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
 }
 
 export function useSortableDragState(id: string) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id,
+    });
 
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition: isDragging ? 'none' : transition,
-    zIndex: isDragging ? 100 : undefined,
-    isolation: 'isolate',
-  };
+    const style: React.CSSProperties = {
+        isolation: "isolate",
+        transform: CSS.Transform.toString(transform),
+        transition: isDragging ? "none" : transition,
+        zIndex: isDragging ? 100 : undefined,
+    };
 
-  const dragHandleProps = {
-    ...attributes,
-    ...listeners,
-    style: { touchAction: 'none' } as React.CSSProperties,
-    className: 'cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover',
-  };
+    const dragHandleProps = {
+        ...attributes,
+        ...listeners,
+        className: "cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover",
+        style: { touchAction: "none" } as React.CSSProperties,
+    };
 
-  return {
-    dragHandleProps,
-    itemProps: {
-      ref: setNodeRef,
-      style,
-      className: isDragging ? 'shadow-lg ring-2 ring-primary' : '',
-    },
-    isDragging,
-  };
+    return {
+        dragHandleProps,
+        isDragging,
+        itemProps: {
+            className: isDragging ? "shadow-lg ring-2 ring-primary" : "",
+            ref: setNodeRef,
+            style,
+        },
+    };
 }
 
 interface SortableItemRenderProps {
-  id: string;
-  dragHandleProps: Record<string, unknown>;
-  itemProps: {
-    ref: React.RefCallback<HTMLElement>;
-    style: React.CSSProperties;
-    className: string;
-  };
-  isDragging: boolean;
+    dragHandleProps: Record<string, unknown>;
+    id: string;
+    isDragging: boolean;
+    itemProps: {
+        ref: React.RefCallback<HTMLElement>;
+        style: React.CSSProperties;
+        className: string;
+    };
 }
 
 interface DraggableListProps {
-  items: string[];
-  renderItem: (props: SortableItemRenderProps) => ReactNode;
-  onDragEnd?: (event: DragEndEvent) => void;
+    items: string[];
+    onDragEnd?: (event: DragEndEvent) => void;
+    renderItem: (props: SortableItemRenderProps) => ReactNode;
 }
 
 function SortableItem({
-  id,
-  renderItem,
+    id,
+    renderItem,
 }: {
-  id: string;
-  renderItem: (props: SortableItemRenderProps) => ReactNode;
+    id: string;
+    renderItem: (props: SortableItemRenderProps) => ReactNode;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id,
+    });
 
-  // opacity: 0 while dragging used to be correct here - it hid the
-  // original item so only the DragOverlay's ghost copy (following the
-  // cursor) was visible, avoiding a visual duplicate. That overlay no
-  // longer exists (removed along with the nested DndContext it needed -
-  // see DraggableList's own comment), so hiding the original left nothing
-  // to replace it: the dragged item just vanished until dropped, confirmed
-  // real. Matches useSortableDragState's style now - no opacity rule, the
-  // item tracks the cursor via its own transform and stays visible the
-  // whole time, same as Addons/Users/Groups' own reorder already does.
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition: isDragging ? 'none' : transition,
-    zIndex: isDragging ? 100 : undefined,
-    isolation: 'isolate',
-  };
+    // opacity: 0 while dragging used to be correct here - it hid the
+    // original item so only the DragOverlay's ghost copy (following the
+    // cursor) was visible, avoiding a visual duplicate. That overlay no
+    // longer exists (removed along with the nested DndContext it needed -
+    // see DraggableList's own comment), so hiding the original left nothing
+    // to replace it: the dragged item just vanished until dropped, confirmed
+    // real. Matches useSortableDragState's style now - no opacity rule, the
+    // item tracks the cursor via its own transform and stays visible the
+    // whole time, same as Addons/Users/Groups' own reorder already does.
+    const style: React.CSSProperties = {
+        isolation: "isolate",
+        transform: CSS.Transform.toString(transform),
+        transition: isDragging ? "none" : transition,
+        zIndex: isDragging ? 100 : undefined,
+    };
 
-  const dragHandleProps = {
-    ...attributes,
-    ...listeners,
-    style: { touchAction: 'none' } as React.CSSProperties,
-    className: 'cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover',
-  };
+    const dragHandleProps = {
+        ...attributes,
+        ...listeners,
+        className: "cursor-grab active:cursor-grabbing p-1 rounded hover:bg-surface-hover",
+        style: { touchAction: "none" } as React.CSSProperties,
+    };
 
-  const itemProps = {
-    ref: setNodeRef,
-    style,
-    className: isDragging ? 'shadow-lg ring-2 ring-primary' : '',
-  };
+    const itemProps = {
+        className: isDragging ? "shadow-lg ring-2 ring-primary" : "",
+        ref: setNodeRef,
+        style,
+    };
 
-  return renderItem({ id, dragHandleProps, itemProps, isDragging });
+    return renderItem({ dragHandleProps, id, isDragging, itemProps });
 }
 
 // Registers with the shared layout-level DndContext (AdminClientLayout)
@@ -166,25 +151,23 @@ function SortableItem({
 // (it needs its own DndContext ancestor) - falls back to the same in-place
 // transform animation Addons/Users/Groups' own reorder already uses
 // successfully with no overlay.
-export function DraggableList({
-  items,
-  renderItem,
-  onDragEnd,
-}: DraggableListProps) {
-  const { registerDragEndHandler } = useVaultDrag();
+export function DraggableList({ items, renderItem, onDragEnd }: DraggableListProps) {
+    const { registerDragEndHandler } = useVaultDrag();
 
-  useEffect(() => {
-    if (!onDragEnd) return;
-    return registerDragEndHandler(onDragEnd);
-  }, [onDragEnd, registerDragEndHandler]);
+    useEffect(() => {
+        if (!onDragEnd) {
+            return;
+        }
+        return registerDragEndHandler(onDragEnd);
+    }, [onDragEnd, registerDragEndHandler]);
 
-  return (
-    <SortableContext items={items} strategy={verticalListSortingStrategy}>
-      <div className="space-y-3" style={{ touchAction: 'none', userSelect: 'none' }}>
-        {items.map((id) => (
-          <SortableItem key={id} id={id} renderItem={renderItem} />
-        ))}
-      </div>
-    </SortableContext>
-  );
+    return (
+        <SortableContext items={items} strategy={verticalListSortingStrategy}>
+            <div className="space-y-3" style={{ touchAction: "none", userSelect: "none" }}>
+                {items.map((id) => (
+                    <SortableItem id={id} key={id} renderItem={renderItem} />
+                ))}
+            </div>
+        </SortableContext>
+    );
 }

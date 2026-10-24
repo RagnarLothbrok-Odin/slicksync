@@ -1,275 +1,282 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { SlickSyncLogo } from '@/components/ui/SlickSyncLogo';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useDroppable } from '@dnd-kit/core';
-import { SIDEBAR_ADDONS_DROPZONE_ID } from '@/components/providers/VaultDragContext';
+import { useDroppable } from "@dnd-kit/core";
 import {
-  HomeIcon,
-  UsersIcon,
-  UserGroupIcon,
-  PuzzlePieceIcon,
-  EnvelopeIcon,
-  Cog6ToothIcon,
-  ChartBarIcon,
-  ClockIcon,
-  QueueListIcon,
-  DocumentTextIcon,
-  XMarkIcon,
-  ShieldCheckIcon,
-  MagnifyingGlassIcon,
-  SwatchIcon,
-  RectangleStackIcon,
-} from '@heroicons/react/24/outline';
-import { PanelSwitcher } from './PanelSwitcher';
-import { api } from '@/lib/api';
+    ChartBarIcon,
+    ClockIcon,
+    Cog6ToothIcon,
+    DocumentTextIcon,
+    EnvelopeIcon,
+    HomeIcon,
+    MagnifyingGlassIcon,
+    PuzzlePieceIcon,
+    QueueListIcon,
+    RectangleStackIcon,
+    ShieldCheckIcon,
+    UserGroupIcon,
+    UsersIcon,
+    XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { SIDEBAR_ADDONS_DROPZONE_ID } from "@/components/providers/VaultDragContext";
+import { SlickSyncLogo } from "@/components/ui/SlickSyncLogo";
+import { api } from "@/lib/api";
+import { PanelSwitcher } from "./PanelSwitcher";
 
 interface SidebarProps {
-  isOpen?: boolean;
-  onClose?: () => void;
+    isOpen?: boolean;
+    onClose?: () => void;
 }
 
 // Navigation structure with grouped sections
 const navigationSections = [
-  {
-    id: 'overview',
-    label: 'Overview',
-    items: [
-      { name: 'Dashboard', href: '/', icon: HomeIcon },
-      { name: 'Discover', href: '/discover', icon: MagnifyingGlassIcon },
-      { name: 'Catalogs', href: '/catalogs', icon: RectangleStackIcon },
-      { name: 'Activity', href: '/activity', icon: ClockIcon },
-      { name: 'Metrics', href: '/metrics', icon: ChartBarIcon },
-    ],
-  },
-  {
-    id: 'management',
-    label: 'Management',
-    items: [
-      { name: 'Users', href: '/users', icon: UsersIcon },
-      { name: 'Groups', href: '/groups', icon: UserGroupIcon },
-      { name: 'Addons', href: '/addons', icon: PuzzlePieceIcon },
-      { name: 'Vault', href: '/vault', icon: ShieldCheckIcon },
-      { name: 'Invitations', href: '/invitations', icon: EnvelopeIcon },
-    ],
-  },
-  {
-    id: 'system',
-    label: 'System',
-    items: [
-      { name: 'Tasks', href: '/tasks', icon: QueueListIcon },
-      { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
-      { name: 'Changelog', href: '/changelog', icon: DocumentTextIcon },
-    ],
-  },
+    {
+        id: "overview",
+        items: [
+            { href: "/", icon: HomeIcon, name: "Dashboard" },
+            { href: "/discover", icon: MagnifyingGlassIcon, name: "Discover" },
+            { href: "/catalogs", icon: RectangleStackIcon, name: "Catalogs" },
+            { href: "/activity", icon: ClockIcon, name: "Activity" },
+            { href: "/metrics", icon: ChartBarIcon, name: "Metrics" },
+        ],
+        label: "Overview",
+    },
+    {
+        id: "management",
+        items: [
+            { href: "/users", icon: UsersIcon, name: "Users" },
+            { href: "/groups", icon: UserGroupIcon, name: "Groups" },
+            { href: "/addons", icon: PuzzlePieceIcon, name: "Addons" },
+            { href: "/vault", icon: ShieldCheckIcon, name: "Vault" },
+            { href: "/invitations", icon: EnvelopeIcon, name: "Invitations" },
+        ],
+        label: "Management",
+    },
+    {
+        id: "system",
+        items: [
+            { href: "/tasks", icon: QueueListIcon, name: "Tasks" },
+            { href: "/settings", icon: Cog6ToothIcon, name: "Settings" },
+            { href: "/changelog", icon: DocumentTextIcon, name: "Changelog" },
+        ],
+        label: "System",
+    },
 ];
 
 interface NavItemProps {
-  name: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-  isActive: boolean;
-  index: number;
-  onNavigate?: () => void;
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+    index: number;
+    isActive: boolean;
+    name: string;
+    onNavigate?: () => void;
 }
 
 function NavItem({ name, href, icon: Icon, isActive, index, onNavigate }: NavItemProps) {
-  const isAddonsLink = href === '/addons';
-  const { setNodeRef, isOver } = useDroppable({ id: SIDEBAR_ADDONS_DROPZONE_ID, disabled: !isAddonsLink });
+    const isAddonsLink = href === "/addons";
+    const { setNodeRef, isOver } = useDroppable({
+        disabled: !isAddonsLink,
+        id: SIDEBAR_ADDONS_DROPZONE_ID,
+    });
 
-  return (
-    <motion.div
-      ref={isAddonsLink ? setNodeRef : undefined}
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.03 }}
-    >
-      <Link
-        href={href}
-        onClick={onNavigate}
-        className={`nav-item-hover-pill relative flex items-center gap-3 px-3 py-2.5 rounded-xl group overflow-hidden ${isActive ? 'text-primary' : 'text-muted'} ${isOver ? 'side-link-over' : ''}`}
-        style={{
-          transition: 'background 0.15s ease, box-shadow 0.15s ease',
-        }}
-      >
-        {isActive && (
-          <span
-            aria-hidden
-            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full"
-            style={{ background: 'var(--color-primary)' }}
-          />
-        )}
-
-        <Icon
-          className="nav-item-icon w-[18px] h-[18px] relative z-10 transition-colors"
-        />
-        <span
-          className={`nav-item-label text-base font-medium relative z-10 font-display transition-colors ${isActive ? 'text-default' : ''}`}
-          style={{ fontWeight: isActive ? 600 : 500 }}
+    return (
+        <motion.div
+            animate={{ opacity: 1, x: 0 }}
+            initial={{ opacity: 0, x: -20 }}
+            ref={isAddonsLink ? setNodeRef : undefined}
+            transition={{ delay: index * 0.03 }}
         >
-          {name}
-        </span>
-        {isOver && (
-          <span className="ml-auto text-xs font-medium relative z-10" style={{ color: 'var(--color-primary)' }}>
-            Drop to move
-          </span>
-        )}
-      </Link>
-    </motion.div>
-  );
+            <Link
+                className={`nav-item-hover-pill group relative flex items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 ${isActive ? "text-primary" : "text-muted"} ${isOver ? "side-link-over" : ""}`}
+                href={href}
+                onClick={onNavigate}
+                style={{
+                    transition: "background 0.15s ease, box-shadow 0.15s ease",
+                }}
+            >
+                {isActive && (
+                    <span
+                        aria-hidden
+                        className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full"
+                        style={{ background: "var(--color-primary)" }}
+                    />
+                )}
+
+                <Icon className="nav-item-icon relative z-10 h-[18px] w-[18px] transition-colors" />
+                <span
+                    className={`nav-item-label relative z-10 font-display font-medium text-base transition-colors ${isActive ? "text-default" : ""}`}
+                    style={{ fontWeight: isActive ? 600 : 500 }}
+                >
+                    {name}
+                </span>
+                {isOver && (
+                    <span
+                        className="relative z-10 ml-auto font-medium text-xs"
+                        style={{ color: "var(--color-primary)" }}
+                    >
+                        Drop to move
+                    </span>
+                )}
+            </Link>
+        </motion.div>
+    );
 }
 
 interface NavSectionProps {
-  label: string;
-  children: React.ReactNode;
-  delay?: number;
+    children: React.ReactNode;
+    delay?: number;
+    label: string;
 }
 
 function NavSection({ label, children, delay = 0 }: NavSectionProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ delay }}
-      className="space-y-0.5"
-    >
-      <h3
-        className="px-3 py-2 text-xs font-semibold uppercase tracking-wider"
-        style={{ color: 'var(--color-text-subtle)' }}
-      >
-        {label}
-      </h3>
-      {children}
-    </motion.div>
-  );
+    return (
+        <motion.div
+            animate={{ opacity: 1 }}
+            className="space-y-0.5"
+            initial={{ opacity: 0 }}
+            transition={{ delay }}
+        >
+            <h3
+                className="px-3 py-2 font-semibold text-xs uppercase tracking-wider"
+                style={{ color: "var(--color-text-subtle)" }}
+            >
+                {label}
+            </h3>
+            {children}
+        </motion.div>
+    );
 }
 
 export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const [accountInfo, setAccountInfo] = useState<{ username?: string; email?: string | null; uuid?: string | null; linkedProvider?: 'stremio' | 'nuvio' | null; avatarUrl?: string | null } | null>(null);
+    const pathname = usePathname();
+    const _router = useRouter();
+    const [accountInfo, setAccountInfo] = useState<{
+        username?: string;
+        email?: string | null;
+        uuid?: string | null;
+        linkedProvider?: "stremio" | "nuvio" | null;
+        avatarUrl?: string | null;
+    } | null>(null);
 
-  const isPublicInstance = (process.env.NEXT_PUBLIC_INSTANCE_TYPE || 'private') === 'public';
+    const isPublicInstance = (process.env.NEXT_PUBLIC_INSTANCE_TYPE || "private") === "public";
 
-  useEffect(() => {
-    api.getAccountStats()
-      .then(stats => {
-        const uuid = stats.uuid || null;
-        const email = stats.email || null;
-        setAccountInfo({
-          username: isPublicInstance ? (uuid || email || 'Admin') : 'Administrator',
-          email: email,
-          uuid: uuid,
-          linkedProvider: stats.linkedProvider || null,
-          avatarUrl: stats.avatarUrl || null,
-        });
-      })
-      .catch(() => { });
-  }, []);
+    useEffect(() => {
+        api.getAccountStats()
+            .then((stats) => {
+                const uuid = stats.uuid || null;
+                const email = stats.email || null;
+                setAccountInfo({
+                    avatarUrl: stats.avatarUrl || null,
+                    email,
+                    linkedProvider: stats.linkedProvider || null,
+                    username: isPublicInstance ? uuid || email || "Admin" : "Administrator",
+                    uuid,
+                });
+            })
+            .catch(() => undefined);
+    }, []);
 
-  const isItemActive = (href: string) => {
-    if (href === '/') {
-      return pathname === '/';
-    }
-    return pathname === href || pathname.startsWith(href + '/');
-  };
+    const isItemActive = (href: string) => {
+        if (href === "/") {
+            return pathname === "/";
+        }
+        return pathname === href || pathname.startsWith(`${href}/`);
+    };
 
-  // Ends the session on the server too (api.logout) - dropping the local
-  // token alone left the cookies, and so the session, alive.
-  const handleLogout = async () => {
-    await api.logout();
-    window.location.href = '/login?mode=admin';
-  };
+    // Ends the session on the server too (api.logout) - dropping the local
+    // token alone left the cookies, and so the session, alive.
+    const handleLogout = async () => {
+        await api.logout();
+        window.location.href = "/login?mode=admin";
+    };
 
-  const handleNavigate = () => {
-    if (onClose) {
-      onClose();
-    }
-  };
+    const handleNavigate = () => {
+        if (onClose) {
+            onClose();
+        }
+    };
 
-  let globalIndex = 0;
+    let globalIndex = 0;
 
-  return (
-    <>
-      {/* Mobile Backdrop */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-black/50 z-40 md:hidden"
-            onClick={onClose}
-          />
-        )}
-      </AnimatePresence>
+    return (
+        <>
+            {/* Mobile Backdrop */}
+            <AnimatePresence>
+                {isOpen && (
+                    <motion.div
+                        animate={{ opacity: 1 }}
+                        className="fixed inset-0 z-40 bg-black/50 md:hidden"
+                        exit={{ opacity: 0 }}
+                        initial={{ opacity: 0 }}
+                        onClick={onClose}
+                        transition={{ duration: 0.2 }}
+                    />
+                )}
+            </AnimatePresence>
 
-      {/* Sidebar */}
-      <motion.aside
-        initial={{ x: -280 }}
-        animate={{ x: 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        className={`
-          interface-sidebar fixed left-0 top-0 bottom-0 w-60 flex flex-col z-50
-          md:z-40 md:translate-x-0 md:flex
-          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+            {/* Sidebar */}
+            <motion.aside
+                animate={{ x: 0 }}
+                className={`interface-sidebar fixed top-0 bottom-0 left-0 z-50 flex w-60 flex-col md:z-40 md:flex md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}
         `}
-        style={{
-          background: 'var(--interface-material)',
-          borderRight: '1px solid var(--color-surface-border)',
-          boxShadow: '4px 0 24px -12px rgba(0,0,0,0.5)',
-        }}
-      >
-        {/* Mobile Close Button */}
-        <div className="flex items-center justify-between p-4 md:hidden">
-          <span className="text-sm font-medium text-muted">Menu</span>
-          <button
-            onClick={onClose}
-            aria-label="Close navigation"
-            className="p-2 rounded-lg hover:bg-surface-hover transition-colors"
-          >
-            <XMarkIcon className="w-5 h-5 text-muted" />
-          </button>
-        </div>
-
-        {/* Logo */}
-        <div
-          className="p-5 hidden md:block"
-          style={{ borderBottom: '1px solid var(--color-surface-border)' }}
-        >
-          <Link href="/" className="flex items-center gap-3">
-            <motion.div
-              whileHover={{ scale: 1.08, rotate: 3 }}
-              transition={{ duration: 0.2 }}
-              className="w-14 h-14 rounded-xl flex items-center justify-center overflow-hidden"
-              style={{
-                background: 'var(--color-primary)',
-                boxShadow: '0 8px 24px -6px var(--color-primary)',
-              }}
-            >
-              <SlickSyncLogo className="w-10 h-10" />
-            </motion.div>
-            <div>
-              <h1
-                className="text-2xl font-bold font-display tracking-tight"
+                initial={{ x: -280 }}
                 style={{
-                  background: 'linear-gradient(135deg, var(--color-text) 0%, var(--color-primary) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
+                    background: "var(--interface-material)",
+                    borderRight: "1px solid var(--color-surface-border)",
+                    boxShadow: "4px 0 24px -12px rgba(0,0,0,0.5)",
                 }}
-              >
-                SlickSync
-              </h1>
-            </div>
-          </Link>
-        </div>
+                transition={{ damping: 30, stiffness: 300, type: "spring" }}
+            >
+                {/* Mobile Close Button */}
+                <div className="flex items-center justify-between p-4 md:hidden">
+                    <span className="font-medium text-muted text-sm">Menu</span>
+                    <button
+                        aria-label="Close navigation"
+                        className="rounded-lg p-2 transition-colors hover:bg-surface-hover"
+                        onClick={onClose}
+                    >
+                        <XMarkIcon className="h-5 w-5 text-muted" />
+                    </button>
+                </div>
 
-        {/* Navigation Sections. overscroll-contain stops scroll chaining -
+                {/* Logo */}
+                <div
+                    className="hidden p-5 md:block"
+                    style={{ borderBottom: "1px solid var(--color-surface-border)" }}
+                >
+                    <Link className="flex items-center gap-3" href="/">
+                        <motion.div
+                            className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl"
+                            style={{
+                                background: "var(--color-primary)",
+                                boxShadow: "0 8px 24px -6px var(--color-primary)",
+                            }}
+                            transition={{ duration: 0.2 }}
+                            whileHover={{ rotate: 3, scale: 1.08 }}
+                        >
+                            <SlickSyncLogo className="h-10 w-10" />
+                        </motion.div>
+                        <div>
+                            <h1
+                                className="font-bold font-display text-2xl tracking-tight"
+                                style={{
+                                    background:
+                                        "linear-gradient(135deg, var(--color-text) 0%, var(--color-primary) 100%)",
+                                    backgroundClip: "text",
+                                    WebkitBackgroundClip: "text",
+                                    WebkitTextFillColor: "transparent",
+                                }}
+                            >
+                                SlickSync
+                            </h1>
+                        </div>
+                    </Link>
+                </div>
+
+                {/* Navigation Sections. overscroll-contain stops scroll chaining -
             without it, dragging past this list's own top/bottom edge (or
             even a small drag when there's barely anything to scroll)
             hands the gesture off to whatever scrollable ancestor is next,
@@ -280,57 +287,61 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             room to move). Confirmed live: touching over the nav and
             dragging moved the page instead once the list had little/no
             room left to scroll in that direction. */}
-        <nav className="flex-1 p-3 space-y-5 overflow-y-auto overscroll-contain custom-scrollbar">
-          {navigationSections.map((section, sectionIndex) => (
-            <NavSection key={section.id} label={section.label} delay={sectionIndex * 0.1}>
-              {section.items.map((item) => {
-                const itemIndex = globalIndex++;
-                return (
-                  <NavItem
-                    key={item.href}
-                    name={item.name}
-                    href={item.href}
-                    icon={item.icon}
-                    isActive={isItemActive(item.href)}
-                    index={itemIndex}
-                    onNavigate={handleNavigate}
-                  />
-                );
-              })}
-            </NavSection>
-          ))}
-        </nav>
+                <nav className="custom-scrollbar flex-1 space-y-5 overflow-y-auto overscroll-contain p-3">
+                    {navigationSections.map((section, sectionIndex) => (
+                        <NavSection
+                            delay={sectionIndex * 0.1}
+                            key={section.id}
+                            label={section.label}
+                        >
+                            {section.items.map((item) => {
+                                const itemIndex = globalIndex++;
+                                return (
+                                    <NavItem
+                                        href={item.href}
+                                        icon={item.icon}
+                                        index={itemIndex}
+                                        isActive={isItemActive(item.href)}
+                                        key={item.href}
+                                        name={item.name}
+                                        onNavigate={handleNavigate}
+                                    />
+                                );
+                            })}
+                        </NavSection>
+                    ))}
+                </nav>
 
-        {/* Version */}
-        <div
-          className="mt-auto px-4 py-2 flex items-center justify-center"
-          style={{ borderTop: '1px solid var(--color-surface-border)' }}
-        >
-          <span
-            className="text-[10px] font-medium tracking-wide"
-            style={{ color: 'var(--color-text-subtle)' }}
-          >
-            v{(process.env.NEXT_PUBLIC_APP_VERSION as string) || 'dev'}
-          </span>
-        </div>
+                {/* Version */}
+                <div
+                    className="mt-auto flex items-center justify-center px-4 py-2"
+                    style={{ borderTop: "1px solid var(--color-surface-border)" }}
+                >
+                    <span
+                        className="font-medium text-[10px] tracking-wide"
+                        style={{ color: "var(--color-text-subtle)" }}
+                    >
+                        v{(process.env.NEXT_PUBLIC_APP_VERSION as string) || "dev"}
+                    </span>
+                </div>
 
-        {/* Panel Switcher - TorBox referral moved into its dropdown (System
+                {/* Panel Switcher - TorBox referral moved into its dropdown (System
             group, alongside Tasks/Settings/Themes/Changelog) instead of
             floating here as its own badge - one stable spot instead of a
             positioning pass on every layout. */}
-        <div
-          className="p-3 flex flex-col items-start gap-2"
-          style={{ borderTop: '1px solid var(--color-surface-border)' }}
-        >
-          <div className="w-full min-w-0">
-            <PanelSwitcher
-              mode="admin"
-              userInfo={accountInfo}
-              onLogout={handleLogout}
-            />
-          </div>
-        </div>
-      </motion.aside>
-    </>
-  );
+                <div
+                    className="flex flex-col items-start gap-2 p-3"
+                    style={{ borderTop: "1px solid var(--color-surface-border)" }}
+                >
+                    <div className="w-full min-w-0">
+                        <PanelSwitcher
+                            mode="admin"
+                            onLogout={handleLogout}
+                            userInfo={accountInfo}
+                        />
+                    </div>
+                </div>
+            </motion.aside>
+        </>
+    );
 }

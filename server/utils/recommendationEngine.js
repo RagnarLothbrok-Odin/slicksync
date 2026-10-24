@@ -34,7 +34,7 @@
 // For a show, baseline accrues per episode watched, so a full binge still
 // meaningfully outweighs a one-episode drop even with zero WatchActivity
 // coverage for either.
-const BASELINE_SECONDS = 600
+const BASELINE_SECONDS = 600;
 
 /**
  * Per-user "how much real time did they spend on each title" vectors, from
@@ -49,61 +49,81 @@ const BASELINE_SECONDS = 600
 // Watch history moves once a minute at the very fastest, so an answer is
 // held briefly and shared. Concurrent callers wait on the same build rather
 // than starting their own.
-const VECTOR_MEMO_MS = 60 * 1000
-const vectorMemo = new Map() // accountId -> { at, value } | { building: Promise }
+const VECTOR_MEMO_MS = 60 * 1000;
+const vectorMemo = new Map(); // accountId -> { at, value } | { building: Promise }
 
 async function buildUserVectors(prisma, accountId) {
-  const key = accountId || 'default'
-  const hit = vectorMemo.get(key)
-  if (hit?.value && Date.now() - hit.at < VECTOR_MEMO_MS) return hit.value
-  if (hit?.building) return hit.building
+    const key = accountId || "default";
+    const hit = vectorMemo.get(key);
+    if (hit?.value && Date.now() - hit.at < VECTOR_MEMO_MS) {
+        return hit.value;
+    }
+    if (hit?.building) {
+        return hit.building;
+    }
 
-  const building = computeUserVectors(prisma, accountId)
-    .then((value) => { vectorMemo.set(key, { at: Date.now(), value }); return value })
-    .catch((e) => { vectorMemo.delete(key); throw e })
-  vectorMemo.set(key, { building })
-  return building
+    const building = computeUserVectors(prisma, accountId)
+        .then((value) => {
+            vectorMemo.set(key, { at: Date.now(), value });
+            return value;
+        })
+        .catch((e) => {
+            vectorMemo.delete(key);
+            throw e;
+        });
+    vectorMemo.set(key, { building });
+    return building;
 }
 
 async function computeUserVectors(prisma, accountId) {
-  const [movies, episodes, activity] = await Promise.all([
-    prisma.movieWatchHistory.findMany({
-      where: { accountId },
-      select: { userId: true, itemId: true, itemName: true, poster: true },
-    }),
-    prisma.episodeWatchHistory.findMany({
-      where: { accountId },
-      select: { userId: true, showId: true, showName: true, poster: true },
-    }),
-    prisma.watchActivity.findMany({
-      where: { accountId },
-      select: { userId: true, itemId: true, itemType: true, watchTimeSeconds: true },
-    }),
-  ])
+    const [movies, episodes, activity] = await Promise.all([
+        prisma.movieWatchHistory.findMany({
+            select: { itemId: true, itemName: true, poster: true, userId: true },
+            where: { accountId },
+        }),
+        prisma.episodeWatchHistory.findMany({
+            select: { poster: true, showId: true, showName: true, userId: true },
+            where: { accountId },
+        }),
+        prisma.watchActivity.findMany({
+            select: { itemId: true, itemType: true, userId: true, watchTimeSeconds: true },
+            where: { accountId },
+        }),
+    ]);
 
-  const vectors = new Map()
-  const itemMeta = new Map()
+    const vectors = new Map();
+    const itemMeta = new Map();
 
-  const bump = (userId, key, seconds, name, poster, type) => {
-    if (!vectors.has(userId)) vectors.set(userId, new Map())
-    const v = vectors.get(userId)
-    v.set(key, (v.get(key) || 0) + seconds)
-    if (name && (!itemMeta.has(key) || !itemMeta.get(key).poster)) itemMeta.set(key, { name, poster: poster || null, type })
-  }
+    const bump = (userId, key, seconds, name, poster, type) => {
+        if (!vectors.has(userId)) {
+            vectors.set(userId, new Map());
+        }
+        const v = vectors.get(userId);
+        v.set(key, (v.get(key) || 0) + seconds);
+        if (name && !(itemMeta.has(key) && itemMeta.get(key).poster)) {
+            itemMeta.set(key, { name, poster: poster || null, type });
+        }
+    };
 
-  for (const m of movies) bump(m.userId, `movie:${m.itemId}`, BASELINE_SECONDS, m.itemName, m.poster, 'movie')
-  for (const e of episodes) bump(e.userId, `series:${e.showId}`, BASELINE_SECONDS, e.showName, e.poster, 'series')
+    for (const m of movies) {
+        bump(m.userId, `movie:${m.itemId}`, BASELINE_SECONDS, m.itemName, m.poster, "movie");
+    }
+    for (const e of episodes) {
+        bump(e.userId, `series:${e.showId}`, BASELINE_SECONDS, e.showName, e.poster, "series");
+    }
 
-  // Real signal layered on top, only for titles we already have a real
-  // watch-history row for (a WatchActivity row with no matching history
-  // row would mean an id-format mismatch, not a real title to weight).
-  for (const a of activity) {
-    const key = `${a.itemType === 'series' ? 'series' : 'movie'}:${a.itemId}`
-    if (!itemMeta.has(key)) continue
-    bump(a.userId, key, a.watchTimeSeconds, null, null, null)
-  }
+    // Real signal layered on top, only for titles we already have a real
+    // watch-history row for (a WatchActivity row with no matching history
+    // row would mean an id-format mismatch, not a real title to weight).
+    for (const a of activity) {
+        const key = `${a.itemType === "series" ? "series" : "movie"}:${a.itemId}`;
+        if (!itemMeta.has(key)) {
+            continue;
+        }
+        bump(a.userId, key, a.watchTimeSeconds, null, null, null);
+    }
 
-  return { vectors, itemMeta }
+    return { itemMeta, vectors };
 }
 
 /**
@@ -114,47 +134,53 @@ async function computeUserVectors(prisma, accountId) {
  * watched.
  */
 function computePairwiseOverlap(vectors, itemMeta, { topN = 5 } = {}) {
-  const userIds = [...vectors.keys()]
-  const pairs = []
+    const userIds = [...vectors.keys()];
+    const pairs = [];
 
-  for (let i = 0; i < userIds.length; i++) {
-    for (let j = i + 1; j < userIds.length; j++) {
-      const a = userIds[i]
-      const b = userIds[j]
-      const va = vectors.get(a)
-      const vb = vectors.get(b)
+    for (let i = 0; i < userIds.length; i++) {
+        for (let j = i + 1; j < userIds.length; j++) {
+            const a = userIds[i];
+            const b = userIds[j];
+            const va = vectors.get(a);
+            const vb = vectors.get(b);
 
-      let dot = 0
-      let magA = 0
-      let magB = 0
-      const shared = []
+            let dot = 0;
+            let magA = 0;
+            let magB = 0;
+            const shared = [];
 
-      for (const [key, secA] of va) {
-        magA += secA * secA
-        if (vb.has(key)) {
-          const secB = vb.get(key)
-          dot += secA * secB
-          shared.push({ key, weight: Math.min(secA, secB) })
+            for (const [key, secA] of va) {
+                magA += secA * secA;
+                if (vb.has(key)) {
+                    const secB = vb.get(key);
+                    dot += secA * secB;
+                    shared.push({ key, weight: Math.min(secA, secB) });
+                }
+            }
+            for (const secB of vb.values()) {
+                magB += secB * secB;
+            }
+
+            if (shared.length === 0) {
+                continue;
+            }
+
+            const similarity = magA > 0 && magB > 0 ? dot / (Math.sqrt(magA) * Math.sqrt(magB)) : 0;
+            shared.sort((x, y) => y.weight - x.weight);
+
+            pairs.push({
+                shared: shared
+                    .slice(0, topN)
+                    .map((s) => ({ key: s.key, ...(itemMeta.get(s.key) || {}) })),
+                sharedCount: shared.length,
+                similarity,
+                userA: a,
+                userB: b,
+            });
         }
-      }
-      for (const secB of vb.values()) magB += secB * secB
-
-      if (shared.length === 0) continue
-
-      const similarity = magA > 0 && magB > 0 ? dot / (Math.sqrt(magA) * Math.sqrt(magB)) : 0
-      shared.sort((x, y) => y.weight - x.weight)
-
-      pairs.push({
-        userA: a,
-        userB: b,
-        similarity,
-        sharedCount: shared.length,
-        shared: shared.slice(0, topN).map((s) => ({ key: s.key, ...(itemMeta.get(s.key) || {}) })),
-      })
     }
-  }
 
-  return pairs.sort((x, y) => y.similarity - x.similarity)
+    return pairs.sort((x, y) => y.similarity - x.similarity);
 }
 
 /**
@@ -190,31 +216,52 @@ function computePairwiseOverlap(vectors, itemMeta, { topN = 5 } = {}) {
  * @param {Map<string, Map<string, number>>} affinity - computeItemSimilarity's output
  * @returns {{ userA: string, userB: string, similarity: number, sharedCount: number, matchedItem: object } | null}
  */
-function findAttributionForSeed(seedKey, pairwiseOverlaps, affinity, { neighborThreshold = BASELINE_SECONDS / 2 } = {}) {
-  const matches = []
-  const neighbors = affinity.get(seedKey)
+function findAttributionForSeed(
+    seedKey,
+    pairwiseOverlaps,
+    affinity,
+    { neighborThreshold = BASELINE_SECONDS / 2 } = {}
+) {
+    const matches = [];
+    const neighbors = affinity.get(seedKey);
 
-  for (const pair of pairwiseOverlaps) {
-    const directHit = pair.shared.find((s) => s.key === seedKey)
-    if (directHit) {
-      matches.push({ userA: pair.userA, userB: pair.userB, similarity: pair.similarity, sharedCount: pair.sharedCount, matchedItem: directHit })
-      continue
+    for (const pair of pairwiseOverlaps) {
+        const directHit = pair.shared.find((s) => s.key === seedKey);
+        if (directHit) {
+            matches.push({
+                matchedItem: directHit,
+                sharedCount: pair.sharedCount,
+                similarity: pair.similarity,
+                userA: pair.userA,
+                userB: pair.userB,
+            });
+            continue;
+        }
+
+        if (neighbors) {
+            const neighborHit = pair.shared.find(
+                (s) => (neighbors.get(s.key) || 0) >= neighborThreshold
+            );
+            if (neighborHit) {
+                matches.push({
+                    matchedItem: neighborHit,
+                    sharedCount: pair.sharedCount,
+                    similarity: pair.similarity,
+                    userA: pair.userA,
+                    userB: pair.userB,
+                });
+            }
+        }
     }
 
-    if (neighbors) {
-      const neighborHit = pair.shared.find((s) => (neighbors.get(s.key) || 0) >= neighborThreshold)
-      if (neighborHit) {
-        matches.push({ userA: pair.userA, userB: pair.userB, similarity: pair.similarity, sharedCount: pair.sharedCount, matchedItem: neighborHit })
-      }
-    }
-  }
-
-  return matches.length > 0 ? pickStrongestAttribution(matches) : null
+    return matches.length > 0 ? pickStrongestAttribution(matches) : null;
 }
 
 /** Strongest of several candidate attributions - highest similarity, then most shared titles. */
 function pickStrongestAttribution(matches) {
-  return [...matches].sort((a, b) => b.similarity - a.similarity || b.sharedCount - a.sharedCount)[0]
+    return [...matches].sort(
+        (a, b) => b.similarity - a.similarity || b.sharedCount - a.sharedCount
+    )[0];
 }
 
 /**
@@ -225,37 +272,45 @@ function pickStrongestAttribution(matches) {
  * @returns {Map<string, Map<string, number>>}
  */
 function computeItemSimilarity(vectors) {
-  const affinity = new Map()
-  const bump = (a, b, score) => {
-    if (!affinity.has(a)) affinity.set(a, new Map())
-    const m = affinity.get(a)
-    m.set(b, (m.get(b) || 0) + score)
-  }
+    const affinity = new Map();
+    const bump = (a, b, score) => {
+        if (!affinity.has(a)) {
+            affinity.set(a, new Map());
+        }
+        const m = affinity.get(a);
+        m.set(b, (m.get(b) || 0) + score);
+    };
 
-  for (const v of vectors.values()) {
-    const entries = [...v.entries()]
-    for (let i = 0; i < entries.length; i++) {
-      for (let j = i + 1; j < entries.length; j++) {
-        const [keyA, secA] = entries[i]
-        const [keyB, secB] = entries[j]
-        const score = Math.min(secA, secB)
-        if (score <= 0) continue
-        bump(keyA, keyB, score)
-        bump(keyB, keyA, score)
-      }
+    for (const v of vectors.values()) {
+        const entries = [...v.entries()];
+        for (let i = 0; i < entries.length; i++) {
+            for (let j = i + 1; j < entries.length; j++) {
+                const [keyA, secA] = entries[i];
+                const [keyB, secB] = entries[j];
+                const score = Math.min(secA, secB);
+                if (score <= 0) {
+                    continue;
+                }
+                bump(keyA, keyB, score);
+                bump(keyB, keyA, score);
+            }
+        }
     }
-  }
 
-  return affinity
+    return affinity;
 }
 
 /** Total collaborative weight a title carries across the whole household. */
 function collaborativeBoost(affinity, key) {
-  const m = affinity.get(key)
-  if (!m) return 0
-  let total = 0
-  for (const v of m.values()) total += v
-  return total
+    const m = affinity.get(key);
+    if (!m) {
+        return 0;
+    }
+    let total = 0;
+    for (const v of m.values()) {
+        total += v;
+    }
+    return total;
 }
 
 /**
@@ -269,15 +324,17 @@ function collaborativeBoost(affinity, key) {
  * @returns {Map<string, number>} candidateKey -> raw penalty (uncapped)
  */
 function computeNotInterestedPenalties(affinity, notInterestedKeys, { decay = 0.5 } = {}) {
-  const penalties = new Map()
-  for (const niKey of notInterestedKeys) {
-    const neighbors = affinity.get(niKey)
-    if (!neighbors) continue
-    for (const [neighborKey, weight] of neighbors) {
-      penalties.set(neighborKey, (penalties.get(neighborKey) || 0) + weight * decay)
+    const penalties = new Map();
+    for (const niKey of notInterestedKeys) {
+        const neighbors = affinity.get(niKey);
+        if (!neighbors) {
+            continue;
+        }
+        for (const [neighborKey, weight] of neighbors) {
+            penalties.set(neighborKey, (penalties.get(neighborKey) || 0) + weight * decay);
+        }
     }
-  }
-  return penalties
+    return penalties;
 }
 
 /**
@@ -288,9 +345,11 @@ function computeNotInterestedPenalties(affinity, notInterestedKeys, { decay = 0.
  * candidate filter in /recommendations.
  */
 function applyNotInterestedPenalty(score, penalty, { maxPenaltyRatio = 0.9 } = {}) {
-  if (!penalty || penalty <= 0 || score <= 0) return score
-  const cappedPenalty = Math.min(penalty, score * maxPenaltyRatio)
-  return score - cappedPenalty
+    if (!penalty || penalty <= 0 || score <= 0) {
+        return score;
+    }
+    const cappedPenalty = Math.min(penalty, score * maxPenaltyRatio);
+    return score - cappedPenalty;
 }
 
 /**
@@ -316,11 +375,11 @@ function applyNotInterestedPenalty(score, penalty, { maxPenaltyRatio = 0.9 } = {
  * a 5 or 6 comes out near-zero, correctly read as "no strong opinion" rather
  * than a mild boost or penalty.
  */
-const REACTION_WEIGHTS = { happy: 1200, sad: -1200 }
-const RATING_SCALE = 1200 / 4.5 // so rating=10 -> +1200 (happy), rating=1 -> -1200
+const REACTION_WEIGHTS = { happy: 1200, sad: -1200 };
+const RATING_SCALE = 1200 / 4.5; // so rating=10 -> +1200 (happy), rating=1 -> -1200
 
 function ratingToWeight(rating) {
-  return (rating - 5.5) * RATING_SCALE
+    return (rating - 5.5) * RATING_SCALE;
 }
 
 /**
@@ -330,25 +389,35 @@ function ratingToWeight(rating) {
  * @returns {Map<string, number>} candidateKey -> signed adjustment (direct entries included at full weight)
  */
 function computeSignedAdjustments(affinity, signedEntries, { decay = 0.5 } = {}) {
-  const adjustments = new Map()
-  for (const { key, weight } of signedEntries) {
-    if (!weight) continue
-    adjustments.set(key, (adjustments.get(key) || 0) + weight)
-    const neighbors = affinity.get(key)
-    if (!neighbors) continue
-    const sign = weight > 0 ? 1 : -1
-    for (const [neighborKey, affinityWeight] of neighbors) {
-      adjustments.set(neighborKey, (adjustments.get(neighborKey) || 0) + sign * affinityWeight * decay)
+    const adjustments = new Map();
+    for (const { key, weight } of signedEntries) {
+        if (!weight) {
+            continue;
+        }
+        adjustments.set(key, (adjustments.get(key) || 0) + weight);
+        const neighbors = affinity.get(key);
+        if (!neighbors) {
+            continue;
+        }
+        const sign = weight > 0 ? 1 : -1;
+        for (const [neighborKey, affinityWeight] of neighbors) {
+            adjustments.set(
+                neighborKey,
+                (adjustments.get(neighborKey) || 0) + sign * affinityWeight * decay
+            );
+        }
     }
-  }
-  return adjustments
+    return adjustments;
 }
 
 /** Reaction rows (server/utils/titleFeedback.js's getAllReactions) -> signed entries for computeSignedAdjustments. */
 function reactionsToSignedEntries(reactions) {
-  return reactions
-    .filter((r) => REACTION_WEIGHTS[r.reaction])
-    .map((r) => ({ key: `${r.itemType === 'series' ? 'series' : 'movie'}:${r.itemId}`, weight: REACTION_WEIGHTS[r.reaction] }))
+    return reactions
+        .filter((r) => REACTION_WEIGHTS[r.reaction])
+        .map((r) => ({
+            key: `${r.itemType === "series" ? "series" : "movie"}:${r.itemId}`,
+            weight: REACTION_WEIGHTS[r.reaction],
+        }));
 }
 
 /**
@@ -361,29 +430,29 @@ function reactionsToSignedEntries(reactions) {
  * just being whichever row happened to load last).
  */
 function ratingsToSignedEntries(ratings) {
-  const sums = new Map() // key -> { total, count }
-  for (const r of ratings) {
-    const key = `${r.itemType === 'series' ? 'series' : 'movie'}:${r.itemId}`
-    const entry = sums.get(key) || { total: 0, count: 0 }
-    entry.total += ratingToWeight(r.rating)
-    entry.count += 1
-    sums.set(key, entry)
-  }
-  return [...sums.entries()].map(([key, { total, count }]) => ({ key, weight: total / count }))
+    const sums = new Map(); // key -> { total, count }
+    for (const r of ratings) {
+        const key = `${r.itemType === "series" ? "series" : "movie"}:${r.itemId}`;
+        const entry = sums.get(key) || { count: 0, total: 0 };
+        entry.total += ratingToWeight(r.rating);
+        entry.count += 1;
+        sums.set(key, entry);
+    }
+    return [...sums.entries()].map(([key, { total, count }]) => ({ key, weight: total / count }));
 }
 
 module.exports = {
-  buildUserVectors,
-  computePairwiseOverlap,
-  computeItemSimilarity,
-  collaborativeBoost,
-  computeNotInterestedPenalties,
-  applyNotInterestedPenalty,
-  findAttributionForSeed,
-  pickStrongestAttribution,
-  computeSignedAdjustments,
-  reactionsToSignedEntries,
-  ratingsToSignedEntries,
-  REACTION_WEIGHTS,
-  ratingToWeight,
-}
+    applyNotInterestedPenalty,
+    buildUserVectors,
+    collaborativeBoost,
+    computeItemSimilarity,
+    computeNotInterestedPenalties,
+    computePairwiseOverlap,
+    computeSignedAdjustments,
+    findAttributionForSeed,
+    pickStrongestAttribution,
+    REACTION_WEIGHTS,
+    ratingsToSignedEntries,
+    ratingToWeight,
+    reactionsToSignedEntries,
+};

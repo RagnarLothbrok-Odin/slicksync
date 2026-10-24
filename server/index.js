@@ -1,114 +1,188 @@
-const { createDefaultAvatar } = require('./utils/defaultAvatar')
+const { createDefaultAvatar } = require("./utils/defaultAvatar");
 // Restart trigger: 2026-01-29 - Refreshing backend state for library cache fixes
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const { ipKeyGenerator } = rateLimit;
-const multer = require('multer');
-const { PrismaClient } = require('@prisma/client');
+const _multer = require("multer");
+const { PrismaClient } = require("@prisma/client");
 // Ensure Prisma uses the right provider at runtime
 if (!process.env.PRISMA_PROVIDER) {
-  // Infer from DATABASE_URL
-  const dbUrl = process.env.DATABASE_URL || ''
-  process.env.PRISMA_PROVIDER = dbUrl.startsWith('postgres') ? 'postgresql' : 'sqlite'
+    // Infer from DATABASE_URL
+    const dbUrl = process.env.DATABASE_URL || "";
+    process.env.PRISMA_PROVIDER = dbUrl.startsWith("postgres") ? "postgresql" : "sqlite";
 }
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { StremioAPIStore, StremioAPIClient } = require('stremio-api-client');
-const debug = require('./utils/debug');
-require('dotenv').config();
+const bcrypt = require("bcryptjs");
+const _jwt = require("jsonwebtoken");
+const _crypto = require("node:crypto");
+const _fs = require("node:fs");
+const path = require("node:path");
+const { StremioAPIStore, StremioAPIClient } = require("stremio-api-client");
+const debug = require("./utils/debug");
+require("dotenv").config();
 
 // Import modular routers
-const addonsRouter = require('./routes/addons');
-const groupsRouter = require('./routes/groups');
-const usersRouter = require('./routes/users');
-const stremioRouter = require('./routes/stremio');
-const settingsRouter = require('./routes/settings');
-const externalApiRouter = require('./routes/externalApi');
-const publicAuthRouter = require('./routes/publicAuth');
-const invitationsRouter = require('./routes/invitations');
-const publicLibraryRouter = require('./routes/publicLibrary');
-const proxyRouter = require('./routes/proxy');
-const streamProxyRouter = require('./routes/streamProxy');
-const nuvioRouter = require('./routes/nuvio');
-const jellyfinRouter = require('./routes/jellyfin');
-const snapshotsRouter = require('./routes/snapshots');
-const pushRouter = require('./routes/push');
-const watchlistRouter = require('./routes/watchlist');
-const avatarsRouter = require('./routes/avatars');
-const vaultRouter = require('./routes/vault');
-const automationRouter = require('./routes/automation');
-const discoverRouter = require('./routes/discover');
-const listsRouter = require('./routes/lists');
-const healthRouter = require('./routes/health');
-const postersRouter = require('./routes/posters');
-const { makeCreateProvider } = require('./providers');
+const addonsRouter = require("./routes/addons");
+const groupsRouter = require("./routes/groups");
+const usersRouter = require("./routes/users");
+const stremioRouter = require("./routes/stremio");
+const settingsRouter = require("./routes/settings");
+const externalApiRouter = require("./routes/externalApi");
+const publicAuthRouter = require("./routes/publicAuth");
+const invitationsRouter = require("./routes/invitations");
+const publicLibraryRouter = require("./routes/publicLibrary");
+const proxyRouter = require("./routes/proxy");
+const streamProxyRouter = require("./routes/streamProxy");
+const nuvioRouter = require("./routes/nuvio");
+const jellyfinRouter = require("./routes/jellyfin");
+const snapshotsRouter = require("./routes/snapshots");
+const pushRouter = require("./routes/push");
+const watchlistRouter = require("./routes/watchlist");
+const avatarsRouter = require("./routes/avatars");
+const vaultRouter = require("./routes/vault");
+const automationRouter = require("./routes/automation");
+const discoverRouter = require("./routes/discover");
+const listsRouter = require("./routes/lists");
+const healthRouter = require("./routes/health");
+const postersRouter = require("./routes/posters");
+const { makeCreateProvider } = require("./providers");
 
 // Import configuration constants
-const { INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, JWT_SECRET, DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID, defaultAddons, BACKUP_DIR, BACKUP_CFG, ENCRYPTION_KEY, allowedOrigins, QUIET, DEBUG_ENABLED, PORT } = require('./utils/config');
+const {
+    INSTANCE_TYPE,
+    PRIVATE_AUTH_ENABLED,
+    PRIVATE_AUTH_USERNAME,
+    PRIVATE_AUTH_PASSWORD,
+    JWT_SECRET,
+    DEFAULT_ACCOUNT_ID,
+    DEFAULT_ACCOUNT_UUID,
+    defaultAddons,
+    BACKUP_DIR,
+    BACKUP_CFG,
+    ENCRYPTION_KEY,
+    allowedOrigins,
+    QUIET,
+    DEBUG_ENABLED,
+    PORT,
+} = require("./utils/config");
 
 // Import utility modules
-const { parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, normalizeUrl, isProdEnv, filterManifestByResources, filterManifestByCatalogs } = require('./utils/validation');
-const { sha256Hex, hmacHex, manifestUrlHmac, getAccountHmacKey, normalizeManifestObject, manifestHash, manifestHmac } = require('./utils/hashing');
-const { validateStremioAuthKey, filterDefaultAddons, buildAddonDbData } = require('./utils/stremio');
-const { pathIsAllowlisted, extractBearerToken, parseCookies, cookieName, issueAccessToken, issueRefreshToken, verifyAccountToken, randomCsrfToken } = require('./utils/auth');
-const { getAccountId: getAccountIdHelper, scopedWhere, assignUserToGroup } = require('./utils/helpers');
-const { selectKeyForRequest, encrypt, decrypt, getAccountHmacKey: getAccountHmacKeyEnc, encryptIf, decryptIf, getDecryptedManifestUrl, decryptWithFallback } = require('./utils/encryption');
+const {
+    parseAddonIds,
+    parseProtectedAddons,
+    canonicalizeManifestUrl,
+    normalizeUrl,
+    isProdEnv,
+    filterManifestByResources,
+    filterManifestByCatalogs,
+} = require("./utils/validation");
+const {
+    sha256Hex,
+    hmacHex,
+    manifestUrlHmac,
+    getAccountHmacKey,
+    normalizeManifestObject,
+    manifestHash,
+    manifestHmac,
+} = require("./utils/hashing");
+const {
+    validateStremioAuthKey,
+    filterDefaultAddons,
+    buildAddonDbData,
+} = require("./utils/stremio");
+const {
+    pathIsAllowlisted,
+    extractBearerToken,
+    parseCookies,
+    cookieName,
+    issueAccessToken,
+    issueRefreshToken,
+    verifyAccountToken,
+    randomCsrfToken,
+} = require("./utils/auth");
+const {
+    getAccountId: getAccountIdHelper,
+    scopedWhere,
+    assignUserToGroup,
+} = require("./utils/helpers");
+const {
+    selectKeyForRequest,
+    encrypt,
+    decrypt,
+    getAccountHmacKey: getAccountHmacKeyEnc,
+    encryptIf,
+    decryptIf,
+    getDecryptedManifestUrl,
+    decryptWithFallback,
+} = require("./utils/encryption");
 
 async function ensureDefaultAccount(prismaClient) {
-  if (INSTANCE_TYPE === 'public') return
-
-  const defaultPassword = process.env.PRIVATE_ACCOUNT_PASSWORD || 'private-mode'
-  const existing = await prismaClient.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } })
-
-  if (!existing) {
-    const passwordHash = await bcrypt.hash(defaultPassword, 12)
-    await prismaClient.appAccount.create({
-      data: {
-        avatarUrl: createDefaultAvatar(),
-        id: DEFAULT_ACCOUNT_ID,
-        uuid: DEFAULT_ACCOUNT_UUID,
-        passwordHash,
-        sync: JSON.stringify({ enabled: false, frequency: '0' })
-      }
-    })
-  } else {
-    const updates = {}
-    if (!existing.uuid || existing.uuid !== DEFAULT_ACCOUNT_UUID) {
-      updates.uuid = DEFAULT_ACCOUNT_UUID
+    if (INSTANCE_TYPE === "public") {
+        return;
     }
-    if (!existing.sync) {
-      updates.sync = JSON.stringify({ enabled: false, frequency: '0' })
-    }
-    if (!existing.passwordHash) {
-      updates.passwordHash = await bcrypt.hash(defaultPassword, 12)
-    }
-    if (Object.keys(updates).length > 0) {
-      await prismaClient.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: updates })
-    }
-  }
 
-  // Normalize existing data to default account scope
-  await Promise.all([
-    prismaClient.user.updateMany({ where: { OR: [{ accountId: null }, { accountId: '' }] }, data: { accountId: DEFAULT_ACCOUNT_ID } }),
-    prismaClient.group.updateMany({ where: { OR: [{ accountId: null }, { accountId: '' }] }, data: { accountId: DEFAULT_ACCOUNT_ID } }),
-    prismaClient.addon.updateMany({ where: { OR: [{ accountId: null }, { accountId: '' }] }, data: { accountId: DEFAULT_ACCOUNT_ID } })
-  ])
+    const defaultPassword = process.env.PRIVATE_ACCOUNT_PASSWORD || "private-mode";
+    const existing = await prismaClient.appAccount.findUnique({
+        where: { id: DEFAULT_ACCOUNT_ID },
+    });
 
-  console.log('👤 Private mode: default account ready')
+    if (existing) {
+        const updates = {};
+        if (!existing.uuid || existing.uuid !== DEFAULT_ACCOUNT_UUID) {
+            updates.uuid = DEFAULT_ACCOUNT_UUID;
+        }
+        if (!existing.sync) {
+            updates.sync = JSON.stringify({ enabled: false, frequency: "0" });
+        }
+        if (!existing.passwordHash) {
+            updates.passwordHash = await bcrypt.hash(defaultPassword, 12);
+        }
+        if (Object.keys(updates).length > 0) {
+            await prismaClient.appAccount.update({
+                data: updates,
+                where: { id: DEFAULT_ACCOUNT_ID },
+            });
+        }
+    } else {
+        const passwordHash = await bcrypt.hash(defaultPassword, 12);
+        await prismaClient.appAccount.create({
+            data: {
+                avatarUrl: createDefaultAvatar(),
+                id: DEFAULT_ACCOUNT_ID,
+                passwordHash,
+                sync: JSON.stringify({ enabled: false, frequency: "0" }),
+                uuid: DEFAULT_ACCOUNT_UUID,
+            },
+        });
+    }
+
+    // Normalize existing data to default account scope
+    await Promise.all([
+        prismaClient.user.updateMany({
+            data: { accountId: DEFAULT_ACCOUNT_ID },
+            where: { OR: [{ accountId: null }, { accountId: "" }] },
+        }),
+        prismaClient.group.updateMany({
+            data: { accountId: DEFAULT_ACCOUNT_ID },
+            where: { OR: [{ accountId: null }, { accountId: "" }] },
+        }),
+        prismaClient.addon.updateMany({
+            data: { accountId: DEFAULT_ACCOUNT_ID },
+            where: { OR: [{ accountId: null }, { accountId: "" }] },
+        }),
+    ]);
+
+    console.log("👤 Private mode: default account ready");
 }
 
 // Optional quiet mode: suppress non-error console output when QUIET=true or DEBUG is not enabled
 // QUIET and DEBUG_ENABLED are now imported from utils/config
 if (QUIET || !DEBUG_ENABLED) {
-  const noop = () => { }
-  console.log = noop
-  console.info = noop
-  console.warn = noop
+    const noop = () => undefined;
+    console.log = noop;
+    console.info = noop;
+    console.warn = noop;
 }
 
 const app = express();
@@ -116,24 +190,29 @@ const app = express();
 const prisma = new PrismaClient();
 // SQLite runtime settings (WAL, busy timeout, page cache) - see the file.
 // Postgres instances get null back and skip this.
-require('./utils/sqlitePragmas').applySqlitePragmas(prisma)
-  .then((applied) => { if (applied) console.log('[SQLite] runtime settings:', JSON.stringify(applied)) })
-  .catch((e) => console.warn('[SQLite] could not apply runtime settings:', e?.message));
-require('./utils/sqlitePragmas').scheduleSqliteOptimize(prisma);
-console.log('Prisma client initialized:', !!prisma);
+require("./utils/sqlitePragmas")
+    .applySqlitePragmas(prisma)
+    .then((applied) => {
+        if (applied) {
+            console.log("[SQLite] runtime settings:", JSON.stringify(applied));
+        }
+    })
+    .catch((e) => console.warn("[SQLite] could not apply runtime settings:", e?.message));
+require("./utils/sqlitePragmas").scheduleSqliteOptimize(prisma);
+console.log("Prisma client initialized:", !!prisma);
 
 // Provider factory: routes addon operations to Stremio or Nuvio based on user.providerType
-const createProvider = makeCreateProvider({ prisma, encrypt, getAccountId: getAccountIdHelper });
+const createProvider = makeCreateProvider({ encrypt, getAccountId: getAccountIdHelper, prisma });
 
 // Trust proxy headers (for correct client IP behind reverse proxies)
 // Trust exactly one hop (the Traefik reverse proxy in front of this container).
 // NOTE: trust proxy = true (trust ALL hops) is intentionally avoided — it lets a
 // client spoof X-Forwarded-For and bypass IP-based rate limiting entirely, and
 // express-rate-limit refuses to start with that setting for exactly this reason.
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
 // Use helper-provided getAccountId (account scoping rules centralized)
-const getAccountId = getAccountIdHelper
+const getAccountId = getAccountIdHelper;
 
 // Conditional GETs: Express already computes a weak ETag for JSON responses,
 // so a repeat fetch of unchanged data can answer 304 with no body at all
@@ -141,7 +220,7 @@ const getAccountId = getAccountIdHelper
 // default in Express only for the strong/weak choice - the header itself is
 // on, so this is really about making the freshness contract explicit and
 // keeping it that way if a future default changes.
-app.set('etag', 'weak');
+app.set("etag", "weak");
 
 // Response compression - JSON payloads (users, history, discover) shrink
 // several-fold over the wire, which is most of what a phone on cell data
@@ -149,18 +228,22 @@ app.set('etag', 'weak');
 // that are compressed by nature (the poster cache's webp/jpeg included);
 // the explicit check skips SSE streams, where buffering a gzip window
 // would hold events hostage instead of delivering them.
-const compression = require('compression');
-app.use(compression({
-  filter: (req, res) => {
-    if ((res.getHeader('Content-Type') || '').toString().includes('text/event-stream')) return false;
-    return compression.filter(req, res);
-  },
-}));
+const compression = require("compression");
+app.use(
+    compression({
+        filter: (req, res) => {
+            if ((res.getHeader("Content-Type") || "").toString().includes("text/event-stream")) {
+                return false;
+            }
+            return compression.filter(req, res);
+        },
+    })
+);
 
 // Parse JSON bodies - once, here. A second express.json further down with
 // a bigger limit never ran: this one had already read (and capped) the body
 // at the 100kb default, so large config imports failed with 413.
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
 
 // A body that is not valid JSON, or is literally `null`, is a mistake in the
 // request - it should say so rather than reading as a server failure. The
@@ -168,35 +251,49 @@ app.use(express.json({ limit: '10mb' }));
 // generic handler at the bottom of this file and came back as 500 Internal
 // server error, which is the wrong thing to tell someone whose script sent a
 // stray comma.
-app.use((err, req, res, next) => {
-  if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError) && 'body' in err) {
-    return res.status(400).json({ message: 'Request body is not valid JSON' });
-  }
-  return next(err);
+app.use((err, _req, res, next) => {
+    if (
+        err &&
+        (err.type === "entity.parse.failed" || err instanceof SyntaxError) &&
+        "body" in err
+    ) {
+        return res.status(400).json({ message: "Request body is not valid JSON" });
+    }
+    return next(err);
 });
 
 // Express passes a literal `null` body straight through, and routes that
 // destructure it throw on the spot. An absent body is an empty object
 // everywhere else, so make that one consistent too.
-app.use((req, res, next) => {
-  if (req.body === null || req.body === undefined) req.body = {};
-  next();
+app.use((req, _res, next) => {
+    if (req.body === null || req.body === undefined) {
+        req.body = {};
+    }
+    next();
 });
 
 // Security middleware
-app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-}));
+app.use(
+    helmet({
+        crossOriginEmbedderPolicy: false,
+    })
+);
 
 // CORS
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.some((re) => re.test(origin))) return cb(null, true);
-    return cb(null, false);
-  },
-  credentials: true,
-}));
+app.use(
+    cors({
+        credentials: true,
+        origin: (origin, cb) => {
+            if (!origin) {
+                return cb(null, true);
+            }
+            if (allowedOrigins.some((re) => re.test(origin))) {
+                return cb(null, true);
+            }
+            return cb(null, false);
+        },
+    })
+);
 
 // Rate limiting (disabled by default)
 // Default max raised from 1000 - a household with a few open tabs plus
@@ -208,65 +305,73 @@ app.use(cors({
 // primarily an undersized limit, but this is cheap, real defense-in-depth
 // for whatever the next chatty component turns out to be.
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'),
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '4000'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: 'Too many requests from this IP, please try again later.',
+    legacyHeaders: false,
+    max: Number.parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "4000", 10),
+    message: "Too many requests from this IP, please try again later.",
+    standardHeaders: true,
+    windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000", 10),
 });
-app.use('/api', limiter);
+app.use("/api", limiter);
 
 // Stricter limiter for credential-handling endpoints (login/OAuth/token exchange)
 // The sign-in forms read a JSON body and show its `message`; a plain-text
 // answer failed to parse and was reported as "Failed to connect to server".
 const authLimiter = rateLimit({
-  windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000'),
-  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '20'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Too many sign-in attempts from this address. Please wait a few minutes and try again.' },
+    legacyHeaders: false,
+    max: Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || "20", 10),
+    message: {
+        message:
+            "Too many sign-in attempts from this address. Please wait a few minutes and try again.",
+    },
+    standardHeaders: true,
+    windowMs: Number.parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || "900000", 10),
 });
-app.use('/api/nuvio/validate', authLimiter);
-app.use('/api/nuvio/connect', authLimiter);
-app.use('/api/nuvio/start-oauth', authLimiter);
-app.use('/api/nuvio/exchange-oauth', authLimiter);
-app.use('/api/nuvio/connect-authkey', authLimiter);
+app.use("/api/nuvio/validate", authLimiter);
+app.use("/api/nuvio/connect", authLimiter);
+app.use("/api/nuvio/start-oauth", authLimiter);
+app.use("/api/nuvio/exchange-oauth", authLimiter);
+app.use("/api/nuvio/connect-authkey", authLimiter);
 // Jellyfin-compatible servers (routes/jellyfin.js admin side, plus the
 // pre-auth sign-in steps the user portal and the public admin sign-in
 // mount). Signing in is a credential check like the ones above; asking
 // whether a Quick Connect code was approved is polling.
-for (const base of ['/api/jellyfin', '/api/auth/jellyfin-', '/api/public-auth/jellyfin-', '/api/public-library/jellyfin-']) {
-  const sep = base.endsWith('-') ? '' : '/'
-  app.use(`${base}${sep}connect`, authLimiter);
-  app.use(`${base}${sep}login`, authLimiter);
-  app.use(`${base}${sep}quick-connect`, authLimiter);
-  app.use(`${base}${sep}probe`, authLimiter);
+for (const base of [
+    "/api/jellyfin",
+    "/api/auth/jellyfin-",
+    "/api/public-auth/jellyfin-",
+    "/api/public-library/jellyfin-",
+]) {
+    const sep = base.endsWith("-") ? "" : "/";
+    app.use(`${base}${sep}connect`, authLimiter);
+    app.use(`${base}${sep}login`, authLimiter);
+    app.use(`${base}${sep}quick-connect`, authLimiter);
+    app.use(`${base}${sep}probe`, authLimiter);
 }
-app.use('/api/public-library/authenticate-jellyfin', authLimiter);
+app.use("/api/public-library/authenticate-jellyfin", authLimiter);
 // Nuvio admin login (publicAuth.js) - same shape as the /api/nuvio ones
 // above, but reachable pre-auth, so it needs its own limiter mounts on both
 // aliases the router is mounted under.
-app.use('/api/auth/nuvio-start-oauth', authLimiter);
-app.use('/api/public-auth/nuvio-start-oauth', authLimiter);
-app.use('/api/auth/nuvio-login', authLimiter);
-app.use('/api/public-auth/nuvio-login', authLimiter);
+app.use("/api/auth/nuvio-start-oauth", authLimiter);
+app.use("/api/public-auth/nuvio-start-oauth", authLimiter);
+app.use("/api/auth/nuvio-login", authLimiter);
+app.use("/api/public-auth/nuvio-login", authLimiter);
 // UUID/password login+register and the superadmin operator login - only
 // the generic 4000-req/15min-per-IP limiter covered these before, which is
 // several requests a second and does nothing to slow down someone
 // hammering account credentials or the single shared superadmin password
 // (no MFA on that one - this limiter is its only throttle).
-app.use('/api/auth/login', authLimiter);
-app.use('/api/public-auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/public-auth/register', authLimiter);
-app.use('/api/superadmin/login', authLimiter);
+app.use("/api/auth/login", authLimiter);
+app.use("/api/public-auth/login", authLimiter);
+app.use("/api/auth/register", authLimiter);
+app.use("/api/public-auth/register", authLimiter);
+app.use("/api/superadmin/login", authLimiter);
 // 2FA code verification - a 6-digit TOTP is brute-forceable (1-in-a-million
 // per guess, but that's nothing without a hard cap on attempts); same
 // 20-req/15min throttle as the credential checks above.
-app.use('/api/auth/verify-2fa', authLimiter);
-app.use('/api/auth/passkey/verify', authLimiter);
-app.use('/api/public-auth/passkey/verify', authLimiter);
-app.use('/api/public-auth/verify-2fa', authLimiter);
+app.use("/api/auth/verify-2fa", authLimiter);
+app.use("/api/auth/passkey/verify", authLimiter);
+app.use("/api/public-auth/passkey/verify", authLimiter);
+app.use("/api/public-auth/verify-2fa", authLimiter);
 // Private-instance login: one shared username and password from the
 // environment, and the one credential a stranger can sit and guess at. It gets
 // its own counter rather than sharing authLimiter's, and only FAILED attempts
@@ -275,46 +380,54 @@ app.use('/api/public-auth/verify-2fa', authLimiter);
 // of its own instance. Same window and ceiling as every other credential
 // route (AUTH_RATE_LIMIT_*).
 const privateLoginLimiter = rateLimit({
-  windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000'),
-  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '20'),
-  skipSuccessfulRequests: true,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Too many sign-in attempts from this address. Please wait a few minutes and try again.' },
+    legacyHeaders: false,
+    max: Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || "20", 10),
+    message: {
+        message:
+            "Too many sign-in attempts from this address. Please wait a few minutes and try again.",
+    },
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    windowMs: Number.parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || "900000", 10),
 });
-app.use('/api/auth/private-login', privateLoginLimiter);
-app.use('/api/public-auth/private-login', privateLoginLimiter);
+app.use("/api/auth/private-login", privateLoginLimiter);
+app.use("/api/public-auth/private-login", privateLoginLimiter);
 
 // Higher-frequency limiter for OAuth polling (device-code flow polls every few seconds)
 const pollLimiter = rateLimit({
-  windowMs: 60000,
-  max: parseInt(process.env.POLL_RATE_LIMIT_MAX_REQUESTS || '60'),
-  standardHeaders: true,
-  legacyHeaders: false,
+    legacyHeaders: false,
+    max: Number.parseInt(process.env.POLL_RATE_LIMIT_MAX_REQUESTS || "60", 10),
+    standardHeaders: true,
+    windowMs: 60_000,
 });
-app.use('/api/nuvio/poll-oauth', pollLimiter);
-for (const path of ['/api/jellyfin/quick-connect-status', '/api/auth/jellyfin-quick-connect-status', '/api/public-auth/jellyfin-quick-connect-status', '/api/public-library/jellyfin-quick-connect-status']) {
-  app.use(path, pollLimiter);
+app.use("/api/nuvio/poll-oauth", pollLimiter);
+for (const path of [
+    "/api/jellyfin/quick-connect-status",
+    "/api/auth/jellyfin-quick-connect-status",
+    "/api/public-auth/jellyfin-quick-connect-status",
+    "/api/public-library/jellyfin-quick-connect-status",
+]) {
+    app.use(path, pollLimiter);
 }
-app.use('/api/auth/nuvio-poll-oauth', pollLimiter);
-app.use('/api/public-auth/nuvio-poll-oauth', pollLimiter);
+app.use("/api/auth/nuvio-poll-oauth", pollLimiter);
+app.use("/api/public-auth/nuvio-poll-oauth", pollLimiter);
 // User-panel Nuvio login (publicLibrary.js) - same shape as the admin/
 // account-level Nuvio OAuth mounts above, for the same public, pre-auth
 // device-code flow.
-app.use('/api/public-library/generate-oauth-nuvio', authLimiter);
-app.use('/api/public-library/authenticate-nuvio', authLimiter);
-app.use('/api/public-library/poll-oauth-nuvio', pollLimiter);
+app.use("/api/public-library/generate-oauth-nuvio", authLimiter);
+app.use("/api/public-library/authenticate-nuvio", authLimiter);
+app.use("/api/public-library/poll-oauth-nuvio", pollLimiter);
 
 // The shareable stats page (/u/<slug>) is read with no login at all, so the
 // only thing to count against is the visitor's address.
 const publicStatsLimiter = rateLimit({
-  windowMs: 60000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: 'Too many requests, please slow down.',
+    legacyHeaders: false,
+    max: 60,
+    message: "Too many requests, please slow down.",
+    standardHeaders: true,
+    windowMs: 60_000,
 });
-app.use('/api/users/public-stats', publicStatsLimiter);
+app.use("/api/users/public-stats", publicStatsLimiter);
 
 // Invitation links (/invite/...) are opened by people with no account yet, so
 // nothing else throttles them: no login to count against, and they sit outside
@@ -333,36 +446,39 @@ app.use('/api/users/public-stats', publicStatsLimiter);
 // `trust proxy` (set at the top) reads it.
 const INVITE_POLL_PATH = /^\/[^/]+\/(status|nuvio\/poll|jellyfin\/quick-connect-status)\/?$/;
 const inviteLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 600,
-  skip: (req) => INVITE_POLL_PATH.test(req.path),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests from this address, please try again in a few minutes.' },
+    legacyHeaders: false,
+    max: 600,
+    message: { error: "Too many requests from this address, please try again in a few minutes." },
+    skip: (req) => INVITE_POLL_PATH.test(req.path),
+    standardHeaders: true,
+    windowMs: 15 * 60 * 1000,
 });
 const invitePollLimiter = rateLimit({
-  windowMs: 60000,
-  max: 600,
-  skip: (req) => !INVITE_POLL_PATH.test(req.path),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests from this address, please try again in a moment.' },
+    legacyHeaders: false,
+    max: 600,
+    message: { error: "Too many requests from this address, please try again in a moment." },
+    skip: (req) => !INVITE_POLL_PATH.test(req.path),
+    standardHeaders: true,
+    windowMs: 60_000,
 });
-app.use('/invite', inviteLimiter, invitePollLimiter);
+app.use("/invite", inviteLimiter, invitePollLimiter);
 
 // Multer - use centralized configuration
-const { standardUpload, imageUpload } = require('./utils/helpers');
-const upload = standardUpload;
+const { standardUpload, imageUpload } = require("./utils/helpers");
+const _upload = standardUpload;
 
 // Serve uploaded avatar images. data/avatars is the same bind-mounted volume
 // as the rest of persistent data, so uploads survive container recreation.
 // Avatar filenames are per-upload UUIDs (routes/avatars.js), so a file never
 // changes under its name - it can be cached hard. With max-age 0 every page
 // re-validated every avatar it showed, a round trip per face for a 304.
-app.use('/uploads/avatars', express.static(path.join(process.cwd(), 'data', 'avatars'), { maxAge: '7d', immutable: true }));
+app.use(
+    "/uploads/avatars",
+    express.static(path.join(process.cwd(), "data", "avatars"), { immutable: true, maxAge: "7d" })
+);
 
 // Encryption helpers
-const { getServerKey, aesGcmEncrypt, aesGcmDecrypt, getAccountDek } = require('./utils/encryption')
+const { getServerKey, aesGcmEncrypt, aesGcmDecrypt, getAccountDek } = require("./utils/encryption");
 
 // Liveness/readiness probe. Deliberately registered BEFORE the auth gate
 // and kept separate from /api/health (routes/health.js), which is the
@@ -381,43 +497,67 @@ const { getServerKey, aesGcmEncrypt, aesGcmDecrypt, getAccountDek } = require('.
 // database is not reachable, which is the state an orchestrator (or Docker's
 // own restart policy) needs to distinguish from a hard crash. The boot log
 // has always advertised this path; until now nothing served it and it 404'd.
-app.get('/health', async (req, res) => {
-  try {
-    // Cheapest possible round-trip that proves the connection is live, and
-    // works identically on SQLite and PostgreSQL.
-    await prisma.$queryRaw`SELECT 1`
-    res.status(200).json({ status: 'ok', database: 'up' })
-  } catch (e) {
-    // The driver's message names the database host and port, and this route
-    // answers anyone who can reach it - the log has it, the response only the
-    // status a probe acts on.
-    console.error('Health check: the database did not answer:', e?.message)
-    res.status(503).json({ status: 'degraded', database: 'down' })
-  }
-})
+app.get("/health", async (_req, res) => {
+    try {
+        // Cheapest possible round-trip that proves the connection is live, and
+        // works identically on SQLite and PostgreSQL.
+        await prisma.$queryRaw`SELECT 1`;
+        res.status(200).json({ database: "up", status: "ok" });
+    } catch (e) {
+        // The driver's message names the database host and port, and this route
+        // answers anyone who can reach it - the log has it, the response only the
+        // status a probe acts on.
+        console.error("Health check: the database did not answer:", e?.message);
+        res.status(503).json({ database: "down", status: "degraded" });
+    }
+});
 
 // Global auth and CSRF gates via middleware factories
-const { createAuthGate, createCsrfGuard } = require('./middleware/auth')
-app.use(createAuthGate({ INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, JWT_SECRET, pathIsAllowlisted, parseCookies, cookieName, extractBearerToken, issueAccessToken, randomCsrfToken, isProdEnv, prisma }))
-app.use(createCsrfGuard({ INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, pathIsAllowlisted, parseCookies, cookieName }))
+const { createAuthGate, createCsrfGuard } = require("./middleware/auth");
+app.use(
+    createAuthGate({
+        cookieName,
+        extractBearerToken,
+        INSTANCE_TYPE,
+        isProdEnv,
+        issueAccessToken,
+        JWT_SECRET,
+        PRIVATE_AUTH_ENABLED,
+        parseCookies,
+        pathIsAllowlisted,
+        prisma,
+        randomCsrfToken,
+    })
+);
+app.use(
+    createCsrfGuard({
+        cookieName,
+        INSTANCE_TYPE,
+        PRIVATE_AUTH_ENABLED,
+        parseCookies,
+        pathIsAllowlisted,
+    })
+);
 
-if (INSTANCE_TYPE !== 'public' && !PRIVATE_AUTH_ENABLED) {
-  // No login of SlickSync's own: whoever reaches this address manages
-  // everything. Fine behind a login proxy (Authelia, Authentik...), not
-  // otherwise - so say it where the operator will see it.
-  console.warn('⚠️  No login is set (SLICKSYNC_PRIVATE_USERNAME / SLICKSYNC_PRIVATE_PASSWORD). Anyone who can open this address can manage this instance - set both, or keep it behind a login proxy.')
-  app.use((req, res, next) => {
-    if (!req.appAccountId) {
-      req.appAccountId = DEFAULT_ACCOUNT_ID
-    }
-    next()
-  })
+if (INSTANCE_TYPE !== "public" && !PRIVATE_AUTH_ENABLED) {
+    // No login of SlickSync's own: whoever reaches this address manages
+    // everything. Fine behind a login proxy (Authelia, Authentik...), not
+    // otherwise - so say it where the operator will see it.
+    console.warn(
+        "⚠️  No login is set (SLICKSYNC_PRIVATE_USERNAME / SLICKSYNC_PRIVATE_PASSWORD). Anyone who can open this address can manage this instance - set both, or keep it behind a login proxy."
+    );
+    app.use((req, _res, next) => {
+        if (!req.appAccountId) {
+            req.appAccountId = DEFAULT_ACCOUNT_ID;
+        }
+        next();
+    });
 }
 
 // The address devices reach this instance at, learned from an admin's own
 // visits (utils/ownAddress.js) - so SlickTrax, pictures and the stream gate
 // need nothing typed into Settings.
-app.use('/api', require('./utils/ownAddress').learnOwnAddress(prisma))
+app.use("/api", require("./utils/ownAddress").learnOwnAddress(prisma));
 
 // Per-account rate limiter, public multi-tenant mode only - private mode's
 // single shared DEFAULT_ACCOUNT_ID makes this redundant with (and strictly
@@ -429,109 +569,225 @@ app.use('/api', require('./utils/ownAddress').learnOwnAddress(prisma))
 // cookie, so it's available here; keyGenerator falls back to IP for the
 // handful of pre-account-resolution requests (login/register) that already
 // have their own stricter authLimiter mounted above anyway.
-if (INSTANCE_TYPE === 'public') {
-  const accountLimiter = rateLimit({
-    windowMs: parseInt(process.env.ACCOUNT_RATE_LIMIT_WINDOW_MS || '900000'),
-    max: parseInt(process.env.ACCOUNT_RATE_LIMIT_MAX_REQUESTS || '6000'),
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req) => req.appAccountId || ipKeyGenerator(req.ip),
-    message: 'Too many requests from this account, please try again later.',
-  })
-  app.use('/api', accountLimiter)
+if (INSTANCE_TYPE === "public") {
+    const accountLimiter = rateLimit({
+        keyGenerator: (req) => req.appAccountId || ipKeyGenerator(req.ip),
+        legacyHeaders: false,
+        max: Number.parseInt(process.env.ACCOUNT_RATE_LIMIT_MAX_REQUESTS || "6000", 10),
+        message: "Too many requests from this account, please try again later.",
+        standardHeaders: true,
+        windowMs: Number.parseInt(process.env.ACCOUNT_RATE_LIMIT_WINDOW_MS || "900000", 10),
+    });
+    app.use("/api", accountLimiter);
 }
 
 // Account scoping middleware - ensures req.appAccountId is set before these
 // routes run; the routes themselves do the actual per-query accountId
 // filtering (see server/middleware/accountScoping.js for why this used to
 // also swap a global Prisma reference, and why that was removed).
-const { createAccountScopingMiddleware } = require('./middleware/accountScoping');
+const { createAccountScopingMiddleware } = require("./middleware/accountScoping");
 const accountScopingMiddleware = createAccountScopingMiddleware();
-app.use('/api/groups', accountScopingMiddleware);
+app.use("/api/groups", accountScopingMiddleware);
 // The shareable stats page is read by visitors with no account at all (it is
 // on the auth allowlist for that reason), so on a public instance this would
 // turn every one of them away. Every other /api/users route needs an account.
-app.use('/api/users', (req, res, next) => (
-  req.path.startsWith('/public-stats/') ? next() : accountScopingMiddleware(req, res, next)
-));
-app.use('/api/addons', accountScopingMiddleware);
-app.use('/api/stremio', accountScopingMiddleware);
-app.use('/api/nuvio', accountScopingMiddleware);
-app.use('/api/jellyfin', accountScopingMiddleware);
-app.use('/api/snapshots', accountScopingMiddleware);
-app.use('/api/vault', accountScopingMiddleware);
-app.use('/api/automation', accountScopingMiddleware);
-app.use('/api/watch-together', accountScopingMiddleware);
+app.use("/api/users", (req, res, next) =>
+    req.path.startsWith("/public-stats/") ? next() : accountScopingMiddleware(req, res, next)
+);
+app.use("/api/addons", accountScopingMiddleware);
+app.use("/api/stremio", accountScopingMiddleware);
+app.use("/api/nuvio", accountScopingMiddleware);
+app.use("/api/jellyfin", accountScopingMiddleware);
+app.use("/api/snapshots", accountScopingMiddleware);
+app.use("/api/vault", accountScopingMiddleware);
+app.use("/api/automation", accountScopingMiddleware);
+app.use("/api/watch-together", accountScopingMiddleware);
 
 // Mount routers
-const publicAuthRouterInstance = publicAuthRouter({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, JWT_SECRET, verifyAccountToken });
-app.use('/api/auth', publicAuthRouterInstance);
-app.use('/api/public-auth', publicAuthRouterInstance);
-app.use('/api/addons', addonsRouter({ prisma, getAccountId, decrypt, encrypt, getDecryptedManifestUrl, scopedWhere, INSTANCE_TYPE, manifestHash, filterManifestByResources, filterManifestByCatalogs, manifestUrlHmac }));
-app.use('/api/groups', groupsRouter({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt, createProvider }));
-app.use('/api/users', usersRouter({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash, createProvider }));
-app.use('/api/scrobble', require('./routes/scrobble')({ prisma }));
-app.use('/api/stremio', stremioRouter({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, INSTANCE_TYPE }));
-app.use('/api/nuvio', nuvioRouter({ prisma, getAccountId, encrypt, decrypt }));
-app.use('/api/jellyfin', jellyfinRouter({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup }));
-app.use('/api/snapshots', snapshotsRouter({ prisma, getAccountId, encrypt, decrypt, createProvider }));
-app.use('/api/avatars', avatarsRouter({ imageUpload }));
-app.use('/api/vault', vaultRouter({ prisma, getAccountId, encrypt, decrypt }));
-app.use('/api/automation', automationRouter({ prisma, getAccountId }));
-app.use('/api/watch-together', require('./routes/watchTogether')({ prisma, getAccountId }));
-app.use('/api/settings', settingsRouter({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUrl, getAccountId }));
+const publicAuthRouterInstance = publicAuthRouter({
+    cookieName,
+    DEFAULT_ACCOUNT_ID,
+    decrypt,
+    decryptWithFallback,
+    encrypt,
+    filterManifestByCatalogs,
+    filterManifestByResources,
+    getAccountDek,
+    getAccountId,
+    getDecryptedManifestUrl,
+    INSTANCE_TYPE,
+    isProdEnv,
+    issueAccessToken,
+    issueRefreshToken,
+    JWT_SECRET,
+    manifestHash,
+    manifestUrlHmac,
+    PRIVATE_AUTH_ENABLED,
+    PRIVATE_AUTH_PASSWORD,
+    PRIVATE_AUTH_USERNAME,
+    parseCookies,
+    prisma,
+    scopedWhere,
+    verifyAccountToken,
+});
+app.use("/api/auth", publicAuthRouterInstance);
+app.use("/api/public-auth", publicAuthRouterInstance);
+app.use(
+    "/api/addons",
+    addonsRouter({
+        decrypt,
+        encrypt,
+        filterManifestByCatalogs,
+        filterManifestByResources,
+        getAccountId,
+        getDecryptedManifestUrl,
+        INSTANCE_TYPE,
+        manifestHash,
+        manifestUrlHmac,
+        prisma,
+        scopedWhere,
+    })
+);
+app.use(
+    "/api/groups",
+    groupsRouter({
+        assignUserToGroup,
+        createProvider,
+        decrypt,
+        getAccountId,
+        getDecryptedManifestUrl,
+        INSTANCE_TYPE,
+        manifestUrlHmac,
+        prisma,
+        scopedWhere,
+    })
+);
+app.use(
+    "/api/users",
+    usersRouter({
+        aesGcmDecrypt,
+        assignUserToGroup,
+        canonicalizeManifestUrl,
+        createProvider,
+        debug,
+        decrypt,
+        defaultAddons,
+        encrypt,
+        getAccountDek,
+        getAccountId,
+        getDecryptedManifestUrl,
+        getServerKey,
+        INSTANCE_TYPE,
+        manifestHash,
+        manifestUrlHmac,
+        parseAddonIds,
+        parseProtectedAddons,
+        prisma,
+        StremioAPIClient,
+        StremioAPIStore,
+        scopedWhere,
+        validateStremioAuthKey,
+    })
+);
+app.use("/api/scrobble", require("./routes/scrobble")({ prisma }));
+app.use(
+    "/api/stremio",
+    stremioRouter({ assignUserToGroup, decrypt, encrypt, getAccountId, INSTANCE_TYPE, prisma })
+);
+app.use("/api/nuvio", nuvioRouter({ decrypt, encrypt, getAccountId, prisma }));
+app.use(
+    "/api/jellyfin",
+    jellyfinRouter({ assignUserToGroup, decrypt, encrypt, getAccountId, prisma })
+);
+app.use(
+    "/api/snapshots",
+    snapshotsRouter({ createProvider, decrypt, encrypt, getAccountId, prisma })
+);
+app.use("/api/avatars", avatarsRouter({ imageUpload }));
+app.use("/api/vault", vaultRouter({ decrypt, encrypt, getAccountId, prisma }));
+app.use("/api/automation", automationRouter({ getAccountId, prisma }));
+app.use("/api/watch-together", require("./routes/watchTogether")({ getAccountId, prisma }));
+app.use(
+    "/api/settings",
+    settingsRouter({ getAccountDek, getAccountId, getDecryptedManifestUrl, INSTANCE_TYPE, prisma })
+);
 // Passkeys: managing them needs a session (this router), signing in with one
 // does not and lives in publicAuth.
-app.use('/api/passkeys', require('./routes/passkeys')({ prisma, getAccountId }));
-app.use('/api/push', pushRouter({ prisma, getAccountId }));
-app.use('/api/watchlist', watchlistRouter({ prisma, getAccountId }));
+app.use("/api/passkeys", require("./routes/passkeys")({ getAccountId, prisma }));
+app.use("/api/push", pushRouter({ getAccountId, prisma }));
+app.use("/api/watchlist", watchlistRouter({ getAccountId, prisma }));
 // Discover proxies to Cinemeta on every single request (browse/search/
 // people-search/cast lookups) - the one endpoint under the broad account
 // limiter above where a moderate request COUNT still means real, repeated
 // external-API cost per request, not just DB reads. Tighter, per-minute
 // cap, same account-or-IP key.
-if (INSTANCE_TYPE === 'public') {
-  const discoverLimiter = rateLimit({
-    windowMs: 60000,
-    max: parseInt(process.env.DISCOVER_RATE_LIMIT_MAX_REQUESTS || '90'),
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req) => req.appAccountId || ipKeyGenerator(req.ip),
-    message: 'Too many Discover requests, please slow down.',
-  })
-  app.use('/api/discover', discoverLimiter)
+if (INSTANCE_TYPE === "public") {
+    const discoverLimiter = rateLimit({
+        keyGenerator: (req) => req.appAccountId || ipKeyGenerator(req.ip),
+        legacyHeaders: false,
+        max: Number.parseInt(process.env.DISCOVER_RATE_LIMIT_MAX_REQUESTS || "90", 10),
+        message: "Too many Discover requests, please slow down.",
+        standardHeaders: true,
+        windowMs: 60_000,
+    });
+    app.use("/api/discover", discoverLimiter);
 }
-app.use('/api/discover', discoverRouter({ prisma, getAccountId, decrypt }));
-app.use('/api/lists', listsRouter({ prisma, getAccountId, decrypt }));
-app.use('/api/federation', require('./routes/federation')({ prisma }));
-app.use('/api/health', healthRouter({ prisma, getAccountId, INSTANCE_TYPE }));
-app.use('/api/superadmin', require('./routes/superadmin')({ prisma, JWT_SECRET, isProdEnv, cookieName, parseCookies }));
-app.use('/api/poster', postersRouter({ prisma, getAccountId }));
+app.use("/api/discover", discoverRouter({ decrypt, getAccountId, prisma }));
+app.use("/api/lists", listsRouter({ decrypt, getAccountId, prisma }));
+app.use("/api/federation", require("./routes/federation")({ prisma }));
+app.use("/api/health", healthRouter({ getAccountId, INSTANCE_TYPE, prisma }));
+app.use(
+    "/api/superadmin",
+    require("./routes/superadmin")({ cookieName, isProdEnv, JWT_SECRET, parseCookies, prisma })
+);
+app.use("/api/poster", postersRouter({ getAccountId, prisma }));
 // Resize/cache proxy for plain external poster/backdrop URLs - see the
 // route's own header for how it relates to /api/poster above.
-app.use('/api/img', require('./routes/imageCache')({ prisma }));
-app.use('/api/qr', require('./routes/qr')());
+app.use("/api/img", require("./routes/imageCache")({ prisma }));
+app.use("/api/qr", require("./routes/qr")());
 // Anime metadata (AniList) - key-free and strictly additive; see the
 // route's own header for why anime needs a source beyond Cinemeta.
-app.use('/api/anime', require('./routes/anime')({ getAccountId }));
+app.use("/api/anime", require("./routes/anime")({ getAccountId }));
 // Follow a person or a show and be told when there's news - see
 // utils/followWatch.js. Muting is part of the contract, not an extra.
-app.use('/api/follows', require('./routes/follows')({ prisma, getAccountId }));
+app.use("/api/follows", require("./routes/follows")({ getAccountId, prisma }));
 // Live-update stream (SSE) - tells connected clients "refetch now" the
 // moment something changes, instead of waiting out their poll interval.
 // See utils/liveEvents.js for why it carries types only, never data.
-app.get('/api/events', (req, res) => require('./utils/liveEvents').handleEventsRequest(req, res, getAccountId));
+app.get("/api/events", (req, res) =>
+    require("./utils/liveEvents").handleEventsRequest(req, res, getAccountId)
+);
 // Read-only browse of the public Stremio addon directory - see the route's
 // own header for why this is proxied rather than fetched client-side.
-app.use('/api/addon-directory', require('./routes/addonDirectory')());
+app.use("/api/addon-directory", require("./routes/addonDirectory")());
 // External API (API key protected, account-scoped)
-app.use('/api/ext', externalApiRouter({
-  prisma,
-  getAccountId,
-  scopedWhere,
-  reloadDeps: { decrypt, encrypt, getDecryptedManifestUrl, filterManifestByResources, filterManifestByCatalogs, manifestHash },
-  syncGroupUsers: require('./routes/groups')({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, assignUserToGroup, getDecryptedManifestUrl, manifestUrlHmac, decrypt, createProvider }).syncGroupUsers
-}));
+app.use(
+    "/api/ext",
+    externalApiRouter({
+        getAccountId,
+        prisma,
+        reloadDeps: {
+            decrypt,
+            encrypt,
+            filterManifestByCatalogs,
+            filterManifestByResources,
+            getDecryptedManifestUrl,
+            manifestHash,
+        },
+        scopedWhere,
+        syncGroupUsers: require("./routes/groups")({
+            assignUserToGroup,
+            createProvider,
+            decrypt,
+            getAccountId,
+            getDecryptedManifestUrl,
+            INSTANCE_TYPE,
+            manifestUrlHmac,
+            prisma,
+            scopedWhere,
+        }).syncGroupUsers,
+    })
+);
 // Interactive docs for the /api/ext surface above (see server/utils/openapi.js
 // for why only that surface, not the whole app, gets a spec). Viewing the
 // docs needs no auth - same as API.md already being world-readable in the
@@ -548,33 +804,62 @@ app.use('/api/ext', externalApiRouter({
 // swagger-ui-express's own documented alternative for exactly this
 // mounted-at-a-subpath case: it serves the page directly at the exact GET
 // route with no redirect involved at all.
-const swaggerUi = require('swagger-ui-express');
-const openapiSpec = require('./utils/openapi');
-app.use('/api/docs', (req, res, next) => { res.removeHeader('Content-Security-Policy'); next(); });
-app.use('/api/docs', swaggerUi.serveFiles(openapiSpec, {}));
-app.get('/api/docs', (req, res) => {
-  res.send(swaggerUi.generateHTML(openapiSpec, { customSiteTitle: 'SlickSync API' }));
+const swaggerUi = require("swagger-ui-express");
+const openapiSpec = require("./utils/openapi");
+app.use("/api/docs", (_req, res, next) => {
+    res.removeHeader("Content-Security-Policy");
+    next();
 });
-app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assignUserToGroup }));
-app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }));
+app.use("/api/docs", swaggerUi.serveFiles(openapiSpec, {}));
+app.get("/api/docs", (_req, res) => {
+    res.send(swaggerUi.generateHTML(openapiSpec, { customSiteTitle: "SlickSync API" }));
+});
+app.use(
+    "/api/invitations",
+    invitationsRouter({ assignUserToGroup, decrypt, encrypt, getAccountId, INSTANCE_TYPE, prisma })
+);
+app.use(
+    "/invite",
+    invitationsRouter.createPublicRouter({
+        assignUserToGroup,
+        DEFAULT_ACCOUNT_ID,
+        decrypt,
+        encrypt,
+        INSTANCE_TYPE,
+        PRIVATE_AUTH_ENABLED,
+        prisma,
+    })
+);
 // Public library router (no auth required)
-const { getCachedLibrary, setCachedLibrary } = require('./utils/libraryCache');
-app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET, imageUpload }));
+const { getCachedLibrary, setCachedLibrary } = require("./utils/libraryCache");
+app.use(
+    "/api/public-library",
+    publicLibraryRouter({
+        DEFAULT_ACCOUNT_ID,
+        decrypt,
+        encrypt,
+        getCachedLibrary,
+        imageUpload,
+        JWT_SECRET,
+        prisma,
+        setCachedLibrary,
+    })
+);
 
 // Addon proxy router (no auth required - UUID serves as bearer token)
-app.use('/proxy', proxyRouter({ prisma, decrypt, getAccountId, getServerKey }));
+app.use("/proxy", proxyRouter({ decrypt, getAccountId, getServerKey, prisma }));
 
 // SlickTrax Addon - SlickSync serving the Stremio addon protocol itself
 // (per-user token in the URL is the credential; allowlisted like /proxy)
-app.use('/trax', require('./routes/traxAddon')({ prisma }));
+app.use("/trax", require("./routes/traxAddon")({ prisma }));
 
 // One-code instance migration - /bundle is token-gated and allowlisted (the
 // caller is the receiving server, sessionless); offer/receive live under
 // /api/settings with normal auth.
-app.use('/api/migration', require('./routes/migration')({ prisma, decrypt }));
+app.use("/api/migration", require("./routes/migration")({ decrypt, prisma }));
 
 // Stream proxy router (no auth required - handles encrypted stream URLs)
-app.use('/stream', streamProxyRouter({ getServerKey }).router);
+app.use("/stream", streamProxyRouter({ getServerKey }).router);
 
 // Error handling
 //
@@ -585,13 +870,13 @@ app.use('/stream', streamProxyRouter({ getServerKey }).router);
 // seeing - a database error spells out the query, the email in it and the
 // host it could not reach - so the caller gets a fixed line and the real
 // error stays in the server log.
-app.use((error, req, res, next) => {
-  const status = Number(error && (error.status || error.statusCode));
-  if (status >= 400 && status < 500) {
-    return res.status(status).json({ message: error.message || 'Bad request' });
-  }
-  console.error('Unhandled error:', error);
-  res.status(500).json({ message: 'Internal server error' });
+app.use((error, _req, res, _next) => {
+    const status = Number(error && (error.status || error.statusCode));
+    if (status >= 400 && status < 500) {
+        return res.status(status).json({ message: error.message || "Bad request" });
+    }
+    console.error("Unhandled error:", error);
+    res.status(500).json({ message: "Internal server error" });
 });
 
 // The listening server, captured so the shutdown below can close it.
@@ -607,12 +892,15 @@ let httpServer = null;
 // background job that failed is a background job that failed; it is not a
 // reason to drop everything else. A process that is genuinely broken still
 // gets caught by the container's own health check and restarted.
-process.on('unhandledRejection', (reason) => {
-  const detail = reason instanceof Error ? (reason.stack || reason.message) : reason;
-  console.error('[Unhandled rejection] a background task failed without handling its own error:', detail);
+process.on("unhandledRejection", (reason) => {
+    const detail = reason instanceof Error ? reason.stack || reason.message : reason;
+    console.error(
+        "[Unhandled rejection] a background task failed without handling its own error:",
+        detail
+    );
 });
-process.on('uncaughtException', (err) => {
-  console.error('[Uncaught exception]', err?.stack || err?.message || err);
+process.on("uncaughtException", (err) => {
+    console.error("[Uncaught exception]", err?.stack || err?.message || err);
 });
 
 // Shutdown: stop taking new work, let what is already in flight finish, and
@@ -629,496 +917,576 @@ process.on('uncaughtException', (err) => {
 const SHUTDOWN_GRACE_MS = 1500;
 let shuttingDown = false;
 const shutdown = async (signal) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`🛑 ${signal} received - finishing in-flight requests...`);
-  try {
-    if (httpServer) {
-      // Stop taking new connections, and let go of idle keep-alive sockets
-      // straight away so only real in-flight work is left.
-      httpServer.close();
-      if (typeof httpServer.closeIdleConnections === 'function') httpServer.closeIdleConnections();
-      await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS));
-      if (typeof httpServer.closeAllConnections === 'function') httpServer.closeAllConnections();
+    if (shuttingDown) {
+        return;
     }
-  } catch (e) {
-    console.warn('Shutdown could not close the server cleanly:', e?.message);
-  }
-  try { await prisma.$disconnect(); } catch { /* going away regardless */ }
-  process.exit(0);
+    shuttingDown = true;
+    console.log(`🛑 ${signal} received - finishing in-flight requests...`);
+    try {
+        if (httpServer) {
+            // Stop taking new connections, and let go of idle keep-alive sockets
+            // straight away so only real in-flight work is left.
+            httpServer.close();
+            if (typeof httpServer.closeIdleConnections === "function") {
+                httpServer.closeIdleConnections();
+            }
+            await new Promise((resolve) => setTimeout(resolve, SHUTDOWN_GRACE_MS));
+            if (typeof httpServer.closeAllConnections === "function") {
+                httpServer.closeAllConnections();
+            }
+        }
+    } catch (e) {
+        console.warn("Shutdown could not close the server cleanly:", e?.message);
+    }
+    try {
+        await prisma.$disconnect();
+    } catch {
+        /* going away regardless */
+    }
+    process.exit(0);
 };
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 // Initialize sync schedule on startup (works in all modes)
-const { reloadGroupAddons } = require('./routes/users');
+const { reloadGroupAddons } = require("./routes/users");
 
 // Create a mock request object for scheduler context
 const schedulerReq = {
-  appAccountId: INSTANCE_TYPE === 'public' ? undefined : DEFAULT_ACCOUNT_ID
+    appAccountId: INSTANCE_TYPE === "public" ? undefined : DEFAULT_ACCOUNT_ID,
 };
 
 async function bootstrap() {
-  if (INSTANCE_TYPE !== 'public') {
-    await ensureDefaultAccount(prisma)
-  }
-
-  // Defer heavy startup tasks to avoid blocking the main thread during boot
-  setTimeout(async () => {
-    // Import schedulers here to break circular dependencies
-    const { ensureBackupDir, readBackupFrequencyDays, scheduleBackups } = require('./utils/backup');
-    const { scheduleSyncs, readSyncFrequencyMinutes } = require('./utils/syncScheduler');
-    const { scheduleUserExpiration } = require('./utils/userExpiration');
-    const { scheduleActivityMonitor } = require('./utils/activityMonitor');
-
-    // Scheduled backups now run in BOTH modes. Public mode backs up every
-    // account individually (see backup.js's performBackupOnce) via the export
-    // builder attached to the public-auth router - previously private-only
-    // because the old self-fetch path had no way to name a tenant.
-    //
-    // Frequency source differs by mode: private reads the schedule.json the
-    // Settings UI writes (per-instance operator choice); public has no such
-    // UI (it's the multi-tenant host's decision, not any single tenant's), so
-    // it takes PUBLIC_BACKUP_FREQUENCY_DAYS from env and defaults to daily -
-    // set it to 0 to disable public backups entirely.
-    try {
-      ensureBackupDir()
-      const backupDays = INSTANCE_TYPE === 'public'
-        ? Number(process.env.PUBLIC_BACKUP_FREQUENCY_DAYS ?? 1)
-        : readBackupFrequencyDays()
-      scheduleBackups(backupDays, prisma, {
-        INSTANCE_TYPE,
-        buildConfigExportPayload: publicAuthRouterInstance.buildConfigExportPayload,
-      })
-    } catch (err) {
-      console.error('⚠️ Failed to initialize backup scheduler:', err)
+    if (INSTANCE_TYPE !== "public") {
+        await ensureDefaultAccount(prisma);
     }
 
-    try {
-      const fs = require('fs')
-      require('./utils/debugLogFile').appendCapped('/app/data/activity-monitor-debug.log', `[${new Date().toISOString()}] index.js:before_scheduleSyncs {}\n`)
-    } catch {}
-    scheduleSyncs(
-      readSyncFrequencyMinutes(),
-      prisma,
-      getAccountId,
-      scopedWhere,
-      decrypt,
-      reloadGroupAddons,
-      schedulerReq,
-      INSTANCE_TYPE
-    )
-    try {
-      const fs = require('fs')
-      require('./utils/debugLogFile').appendCapped('/app/data/activity-monitor-debug.log', `[${new Date().toISOString()}] index.js:after_scheduleSyncs {}\n`)
-    } catch {}
+    // Defer heavy startup tasks to avoid blocking the main thread during boot
+    setTimeout(async () => {
+        // Import schedulers here to break circular dependencies
+        const {
+            ensureBackupDir,
+            readBackupFrequencyDays,
+            scheduleBackups,
+        } = require("./utils/backup");
+        const { scheduleSyncs, readSyncFrequencyMinutes } = require("./utils/syncScheduler");
+        const { scheduleUserExpiration } = require("./utils/userExpiration");
+        const { scheduleActivityMonitor } = require("./utils/activityMonitor");
 
-    // Schedule user expiration cleanup (runs at midnight)
-    try {
-      scheduleUserExpiration(prisma, decrypt, StremioAPIClient, createProvider)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize user expiration scheduler:', err)
-    }
-
-    // Schedule activity monitor (checks for new watch activity every 5 minutes)
-    try {
-      const fs = require('fs')
-      require('./utils/debugLogFile').appendCapped('/app/data/activity-monitor-debug.log', `[${new Date().toISOString()}] index.js:about_to_call_scheduleActivityMonitor {}\n`)
-    } catch {}
-    try {
-      scheduleActivityMonitor(prisma, decrypt, getAccountId, INSTANCE_TYPE)
-    } catch (err) {
-      try {
-        const fs = require('fs')
-        require('./utils/debugLogFile').appendCapped('/app/data/activity-monitor-debug.log', `[${new Date().toISOString()}] index.js:scheduleActivityMonitor_threw ${JSON.stringify({ message: err.message, stack: err.stack })}\n`)
-      } catch {}
-      console.error('⚠️ Failed to initialize activity monitor:', err)
-    }
-
-    // Keep Discover's own catalogs warm. Six small requests on a timer, so
-    // opening Discover reads them out of memory instead of waiting on
-    // Cinemeta - see utils/discover.js.
-    try {
-      require('./utils/watchCopy/keepInStep').scheduleKeepInStep(prisma, { decrypt, encrypt })
-    } catch (err) {
-      console.error('Keep in step scheduler failed to start:', err?.message)
-    }
-    try {
-      require('./utils/discover').scheduleDiscoverWarm()
-      // Saved titles that are only an id get their real name (utils/titleNames).
-      try { require('./utils/titleNames').scheduleNameRepair(prisma) } catch (e) { console.warn('[titleNames] not scheduled:', e?.message) }
-    } catch (err) {
-      console.error('⚠️ Failed to initialize Discover pre-warm:', err)
-    }
-
-    // Schedule proxy stream monitor ("Now Playing" via AIOStreams proxy stats)
-    try {
-      const { scheduleProxyStreamMonitor } = require('./utils/proxyStreamMonitor')
-      scheduleProxyStreamMonitor(prisma, DEFAULT_ACCOUNT_ID, {
-        baseUrl: process.env.AIOSTREAMS_URL,
-        username: process.env.AIOSTREAMS_AUTH_USERNAME,
-        password: process.env.AIOSTREAMS_AUTH_PASSWORD,
-      })
-    } catch (err) {
-      console.error('⚠️ Failed to initialize proxy stream monitor:', err)
-    }
-
-    // Schedule vault monitor (active-checks + expiry notifications, every 6h)
-    try {
-      // Self-update verdict: performSelfUpdate leaves a marker on the data
-      // volume before the restart. Whichever process boots next - the new
-      // version, or the old one restored by the watchdog - reads it and
-      // says plainly what happened. Without this, an automatic rollback
-      // would be indistinguishable from the update never running.
-      try {
-        const fs = require('fs')
-        const path = require('path')
-        const marker = path.join(process.cwd(), 'data', 'pending-update-check.json')
-        if (fs.existsSync(marker)) {
-          let info = null
-          try { info = JSON.parse(fs.readFileSync(marker, 'utf8')) } catch { info = null }
-          fs.unlinkSync(marker)
-          const nowVersion = (() => { try { return require('../package.json')?.version || null } catch { return null } })()
-          const { createNotification } = require('./utils/notificationStore')
-          if (info && nowVersion && info.fromVersion && nowVersion !== info.fromVersion) {
-            await createNotification(prisma, DEFAULT_ACCOUNT_ID, {
-              type: 'task',
-              title: `Updated to ${nowVersion}`,
-              body: `Self-update from ${info.fromVersion} completed and the new version passed its health check.`,
-            }).catch(() => {})
-          } else if (info) {
-            await createNotification(prisma, DEFAULT_ACCOUNT_ID, {
-              type: 'task',
-              title: 'Update rolled back',
-              body: `The new version failed its health check, so the watchdog restored ${info.fromVersion || 'the previous version'}. This instance is running normally on the old image - check the release notes before retrying.`,
-            }).catch(() => {})
-          }
-        }
-      } catch (e) {
-        console.warn('Update-verdict check failed:', e?.message)
-      }
-
-      // Opt-in scheduled self-update (see utils/selfUpdate.js)
-      try {
-        const { scheduleAutoUpdate } = require('./utils/selfUpdate')
-        scheduleAutoUpdate(prisma, { INSTANCE_TYPE })
-      } catch (e) { console.warn('Auto-update scheduler failed to start:', e?.message) }
-
-      const { scheduleVaultMonitor } = require('./utils/vaultMonitor')
-      scheduleVaultMonitor({ prisma, decrypt, getAccountId })
-    } catch (err) {
-      console.error('⚠️ Failed to initialize vault monitor:', err)
-    }
-
-    // Schedule catalog auto-refresh (daily re-pull of imported catalogs
-    // that opted in to autoRefresh)
-    try {
-      const { scheduleCatalogAutoRefresh } = require('./utils/catalogAutoRefresh')
-      scheduleCatalogAutoRefresh(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize catalog auto-refresh:', err)
-    }
-
-    // Schedule content-rating enforcement (daily, only for catalogs with an
-    // active keptRatings policy - no-op query when nobody has one set)
-    try {
-      const { scheduleContentRatingEnforcement } = require('./utils/contentRatingEnforcement')
-      scheduleContentRatingEnforcement(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize content rating enforcement:', err)
-    }
-
-    // Schedule debrid auto-remove (daily, only for real_debrid/torbox Vault
-    // entries with autoRemoveEnabled set - no-op query when nobody has it on)
-    try {
-      const { scheduleDebridAutoRemove } = require('./utils/debridAutoRemove')
-      scheduleDebridAutoRemove(prisma, decrypt)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize debrid auto-remove:', err)
-    }
-
-    // Schedule SIMKL sync (pull + push, every 30m, only for users who've
-    // linked a SIMKL account - no-op query when nobody has)
-    try {
-      const { scheduleSimklSync } = require('./utils/simklSync')
-      scheduleSimklSync(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize SIMKL sync:', err)
-    }
-
-    // Schedule Automation's own time.daily trigger (every 1m, only for
-    // accounts with an enabled time.daily rule - no-op query otherwise)
-    try {
-      const { scheduleAutomationTimeTriggers } = require('./utils/automation/scheduler')
-      scheduleAutomationTimeTriggers(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize automation scheduler:', err)
-    }
-
-    // Daily screen-time limits and bedtimes (every minute, only for accounts that set one)
-    try {
-      require('./utils/screenTime').scheduleScreenTime(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize screen-time limits:', err)
-    }
-
-    // Profile pictures from people's own Jellyfin, AIOStreams and AIOMetadata servers
-    try {
-      require('./utils/serverAvatars').scheduleServerAvatars(prisma, require('./utils/encryption').decrypt)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize server profile pictures:', err)
-    }
-
-    // Schedule auto-generated themed catalogs (daily, only for accounts
-    // that opted in via Settings -> SlickTrax -> Auto-generated catalogs)
-    try {
-      const { scheduleAutoThemedCatalogs } = require('./utils/autoThemedCatalogs')
-      scheduleAutoThemedCatalogs(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize auto-themed catalogs:', err)
-    }
-
-    // Schedule DB maintenance (scheduled VACUUM + opt-in watch-history
-    // pruning, both off by default - operator-controlled via the
-    // Superadmin panel, private/SQLite mode only)
-    try {
-      const { scheduleDbMaintenance } = require('./utils/dbMaintenance')
-      scheduleDbMaintenance(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize DB maintenance scheduler:', err)
-    }
-
-    // Schedule the follow sweep (people's new releases + show renewals),
-    // twice a day - see utils/followWatch.js for why that cadence.
-    try {
-      const { scheduleFollowWatch } = require('./utils/followWatch')
-      const { resolveTmdbKeyForAccount } = require('./utils/listImport')
-      scheduleFollowWatch(prisma, { resolveTmdbKeyForAccount })
-    } catch (err) {
-      console.error('⚠️ Failed to initialize follow watch:', err)
-    }
-
-    // Schedule full-data backups (opt-in database snapshots - the only
-    // backup lane that carries watch history; see utils/dataBackup.js).
-    try {
-      const { scheduleDataBackups } = require('./utils/dataBackup')
-      scheduleDataBackups(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize data backup scheduler:', err)
-    }
-
-    // Schedule the Collections Guard (hourly snapshots of every Nuvio
-    // user's home-screen collections + external-overwrite alarms - see
-    // utils/collectionsGuard.js). Both instance types: collections belong
-    // to whoever's Nuvio account is connected, not to the instance.
-    try {
-      const { scheduleCollectionsGuard } = require('./utils/collectionsGuard')
-      scheduleCollectionsGuard(prisma, { createProvider, decrypt })
-    } catch (err) {
-      console.error('⚠️ Failed to initialize Collections Guard:', err)
-    }
-
-    // Schedule new-episode alerts (Cinemeta episode-list polling for shows
-    // with recent watch history, every 6h)
-    try {
-      const { scheduleEpisodeAlerts } = require('./utils/episodeAlerts')
-      scheduleEpisodeAlerts(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize episode alerts:', err)
-    }
-
-    // Schedule update-available notifications (every 6h - matches
-    // getVersionStatus's own GitHub-API cache TTL) - opt-in, off by default.
-    try {
-      const { scheduleUpdateCheckNotifier } = require('./utils/updateCheckNotifier')
-      scheduleUpdateCheckNotifier(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize update-check notifier:', err)
-    }
-
-    // Nudges an account whose Disaster Recovery Kit is stale/missing while
-    // its Vault holds credentials nothing else can restore - opt-in, off by
-    // default. See recoveryKitReminder.js for why this is a reminder rather
-    // than an automated off-site kit export.
-    try {
-      const { scheduleRecoveryKitReminder } = require('./utils/recoveryKitReminder')
-      scheduleRecoveryKitReminder(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize recovery-kit reminder:', err)
-    }
-
-    // Schedule notification digest sends (hourly check, actual send gated by
-    // each account's daily/weekly cadence) - opt-in, off by default.
-    try {
-      const { scheduleNotificationDigest } = require('./utils/notificationDigest')
-      scheduleNotificationDigest(prisma)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize notification digest:', err)
-    }
-
-    // Schedule vault backup export (decrypted JSON snapshot to data/backup/vault/,
-    // nightly by default — set VAULT_BACKUP_INTERVAL_HOURS to change)
-    try {
-      const { scheduleVaultBackups } = require('./utils/vaultBackup')
-      const intervalHours = parseInt(process.env.VAULT_BACKUP_INTERVAL_HOURS || '24', 10)
-      scheduleVaultBackups({ prisma, decrypt, intervalHours })
-    } catch (err) {
-      console.error('⚠️ Failed to initialize vault backup scheduler:', err)
-    }
-
-    // Drop Trash items past their retention window. Runs at boot and daily -
-    // cheap, and keeps deleted-item archives from accumulating forever.
-    try {
-      const { purgeExpiredTrash } = require('./utils/trash')
-      setTimeout(() => purgeExpiredTrash(prisma), 90 * 1000)
-      setInterval(() => purgeExpiredTrash(prisma), 24 * 60 * 60 * 1000)
-    } catch (err) {
-      console.error('⚠️ Failed to schedule trash purge:', err)
-    }
-
-    // Schedule metadata-provider key health checker (TMDb/OMDb/MDBList/RPDB) -
-    // same "catch it before a user notices broken posters" idea as the addon
-    // health checker below, aimed at the keys instead of the addons.
-    try {
-      const { startMetadataKeyHealthScheduler } = require('./utils/metadataKeyHealth')
-      startMetadataKeyHealthScheduler(prisma, schedulerReq.appAccountId)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize metadata key health checker:', err)
-    }
-
-    // Schedule addon health checker (checks if addon manifests are reachable)
-    try {
-      const { startHealthCheckScheduler } = require('./utils/addonHealthCheck')
-      startHealthCheckScheduler(prisma, schedulerReq.appAccountId)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize addon health checker:', err)
-    }
-
-    // Schedule monthly poster mosaic (checks every 6h whether the account
-    // has crossed into a new month and hasn't posted last month's recap yet)
-    try {
-      const { scheduleMosaicMonitor } = require('./utils/posterMosaic')
-      scheduleMosaicMonitor(prisma, schedulerReq.appAccountId)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize poster mosaic scheduler:', err)
-    }
-
-    // Schedule Sync Guardian (catches a synced user's addons reverting
-    // outside SlickSync - see utils/syncGuardian.js for the full mechanism)
-    try {
-      const { scheduleSyncGuardian } = require('./utils/syncGuardian')
-      scheduleSyncGuardian(prisma, {
-        getAccountId, decrypt, parseAddonIds, parseProtectedAddons,
-        getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient, createProvider,
-      }, schedulerReq.appAccountId)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize Sync Guardian:', err)
-    }
-
-    // Watch AIOStreams configurations for outside changes - see
-    // utils/aiostreamsConfig.js.
-    try {
-      require('./utils/aiostreamsConfig').scheduleConfigGuard(prisma, decrypt)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize the AIOStreams configuration guard:', err)
-    }
-
-    // Keep catalogs switched on for a Jellyfin server in step with its
-    // collections - see utils/jellyfinServerCollections.js.
-    try {
-      require('./utils/jellyfinServerCollections').scheduleServerCollections(prisma, decrypt)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize Jellyfin collections sync:', err)
-    }
-
-    // What people finish elsewhere, marked played on their real Jellyfin
-    // server - see utils/jellyfinMarkPlayed.js.
-    try {
-      require('./utils/jellyfinMarkPlayed').scheduleMarkPlayed(prisma, decrypt)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize Jellyfin played marks:', err)
-    }
-
-    // Jellyfin accounts made by invites follow their person's access - see
-    // utils/jellyfinInviteAccounts.js.
-    try {
-      require('./utils/jellyfinInviteAccounts').scheduleInviteAccounts(prisma, decrypt)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize invite-made Jellyfin accounts:', err)
-    }
-
-    // Schedule DB size sampling for the Tasks page's storage chart
-    // (private/SQLite-mode only - no-ops itself if DATABASE_URL isn't file:)
-    try {
-      const { scheduleDbSizeMonitor } = require('./utils/dbSizeMonitor')
-      scheduleDbSizeMonitor(prisma, schedulerReq.appAccountId || DEFAULT_ACCOUNT_ID)
-    } catch (err) {
-      console.error('⚠️ Failed to initialize DB size monitor:', err)
-    }
-
-    // Startup repair: reload addons with uninitialized resources/catalogs across all accounts
-    try {
-      const { reloadAddon } = require('./routes/addons')
-      const reloadDeps = { filterManifestByResources, filterManifestByCatalogs, encrypt, decrypt, getDecryptedManifestUrl, manifestHash, silent: true }
-
-      // Find all addons with empty resources AND empty catalogs that have an originalManifest
-      const uninitializedAddons = await prisma.addon.findMany({
-        where: {
-          isActive: true,
-          originalManifest: { not: null },
-          OR: [
-            { resources: '[]' },
-            { resources: null }
-          ]
-        },
-        select: { id: true, name: true, accountId: true, catalogs: true }
-      })
-
-      // Filter to only those where catalogs is also empty
-      const toRepair = uninitializedAddons.filter(a => {
-        if (!a.catalogs || a.catalogs === '[]') return true
+        // Scheduled backups now run in BOTH modes. Public mode backs up every
+        // account individually (see backup.js's performBackupOnce) via the export
+        // builder attached to the public-auth router - previously private-only
+        // because the old self-fetch path had no way to name a tenant.
+        //
+        // Frequency source differs by mode: private reads the schedule.json the
+        // Settings UI writes (per-instance operator choice); public has no such
+        // UI (it's the multi-tenant host's decision, not any single tenant's), so
+        // it takes PUBLIC_BACKUP_FREQUENCY_DAYS from env and defaults to daily -
+        // set it to 0 to disable public backups entirely.
         try {
-          const parsed = JSON.parse(a.catalogs)
-          return !Array.isArray(parsed) || parsed.length === 0
-        } catch { return true }
-      })
-
-      if (toRepair.length > 0) {
-        console.error(`🔧 Startup repair: found ${toRepair.length} addon(s) with uninitialized resources/catalogs, reloading...`)
-        let repaired = 0
-        let failed = 0
-        for (const addon of toRepair) {
-          try {
-            const mockReq = { appAccountId: addon.accountId }
-            await reloadAddon(prisma, () => addon.accountId, addon.id, mockReq, reloadDeps, true)
-            repaired++
-          } catch (err) {
-            failed++
-            console.error(`  ❌ Failed to repair ${addon.name}: ${err.message}`)
-          }
+            ensureBackupDir();
+            const backupDays =
+                INSTANCE_TYPE === "public"
+                    ? Number(process.env.PUBLIC_BACKUP_FREQUENCY_DAYS ?? 1)
+                    : readBackupFrequencyDays();
+            scheduleBackups(backupDays, prisma, {
+                buildConfigExportPayload: publicAuthRouterInstance.buildConfigExportPayload,
+                INSTANCE_TYPE,
+            });
+        } catch (err) {
+            console.error("⚠️ Failed to initialize backup scheduler:", err);
         }
-        console.error(`🔧 Startup repair complete: ${repaired} repaired, ${failed} failed`)
-      }
-    } catch (err) {
-      console.error('⚠️ Failed to run startup addon repair:', err)
-    }
-  }, 10000)
 
-  const storageLabel = process.env.PRISMA_PROVIDER === 'sqlite' ? 'SQLite with Prisma' : 'PostgreSQL with Prisma'
+        try {
+            const _fs = require("node:fs");
+            require("./utils/debugLogFile").appendCapped(
+                "/app/data/activity-monitor-debug.log",
+                `[${new Date().toISOString()}] index.js:before_scheduleSyncs {}\n`
+            );
+        } catch {}
+        scheduleSyncs(
+            readSyncFrequencyMinutes(),
+            prisma,
+            getAccountId,
+            scopedWhere,
+            decrypt,
+            reloadGroupAddons,
+            schedulerReq,
+            INSTANCE_TYPE
+        );
+        try {
+            const _fs = require("node:fs");
+            require("./utils/debugLogFile").appendCapped(
+                "/app/data/activity-monitor-debug.log",
+                `[${new Date().toISOString()}] index.js:after_scheduleSyncs {}\n`
+            );
+        } catch {}
 
-  httpServer = app.listen(PORT, '0.0.0.0', () => {
-    console.log('🚀 SlickSync (Database) running on port', PORT)
-    console.log('📊 Health check: http://127.0.0.1:' + PORT + '/health')
-    console.log('🔌 API endpoints: http://127.0.0.1:' + PORT + '/api/')
-    console.log('🎬 Stremio integration: ENABLED')
-    console.log(`💾 Storage: ${storageLabel}`)
-  })
+        // Schedule user expiration cleanup (runs at midnight)
+        try {
+            scheduleUserExpiration(prisma, decrypt, StremioAPIClient, createProvider);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize user expiration scheduler:", err);
+        }
+
+        // Schedule activity monitor (checks for new watch activity every 5 minutes)
+        try {
+            const _fs = require("node:fs");
+            require("./utils/debugLogFile").appendCapped(
+                "/app/data/activity-monitor-debug.log",
+                `[${new Date().toISOString()}] index.js:about_to_call_scheduleActivityMonitor {}\n`
+            );
+        } catch {}
+        try {
+            scheduleActivityMonitor(prisma, decrypt, getAccountId, INSTANCE_TYPE);
+        } catch (err) {
+            try {
+                const _fs = require("node:fs");
+                require("./utils/debugLogFile").appendCapped(
+                    "/app/data/activity-monitor-debug.log",
+                    `[${new Date().toISOString()}] index.js:scheduleActivityMonitor_threw ${JSON.stringify({ message: err.message, stack: err.stack })}\n`
+                );
+            } catch {}
+            console.error("⚠️ Failed to initialize activity monitor:", err);
+        }
+
+        // Keep Discover's own catalogs warm. Six small requests on a timer, so
+        // opening Discover reads them out of memory instead of waiting on
+        // Cinemeta - see utils/discover.js.
+        try {
+            require("./utils/watchCopy/keepInStep").scheduleKeepInStep(prisma, {
+                decrypt,
+                encrypt,
+            });
+        } catch (err) {
+            console.error("Keep in step scheduler failed to start:", err?.message);
+        }
+        try {
+            require("./utils/discover").scheduleDiscoverWarm();
+            // Saved titles that are only an id get their real name (utils/titleNames).
+            try {
+                require("./utils/titleNames").scheduleNameRepair(prisma);
+            } catch (e) {
+                console.warn("[titleNames] not scheduled:", e?.message);
+            }
+        } catch (err) {
+            console.error("⚠️ Failed to initialize Discover pre-warm:", err);
+        }
+
+        // Schedule proxy stream monitor ("Now Playing" via AIOStreams proxy stats)
+        try {
+            const { scheduleProxyStreamMonitor } = require("./utils/proxyStreamMonitor");
+            scheduleProxyStreamMonitor(prisma, DEFAULT_ACCOUNT_ID, {
+                baseUrl: process.env.AIOSTREAMS_URL,
+                password: process.env.AIOSTREAMS_AUTH_PASSWORD,
+                username: process.env.AIOSTREAMS_AUTH_USERNAME,
+            });
+        } catch (err) {
+            console.error("⚠️ Failed to initialize proxy stream monitor:", err);
+        }
+
+        // Schedule vault monitor (active-checks + expiry notifications, every 6h)
+        try {
+            // Self-update verdict: performSelfUpdate leaves a marker on the data
+            // volume before the restart. Whichever process boots next - the new
+            // version, or the old one restored by the watchdog - reads it and
+            // says plainly what happened. Without this, an automatic rollback
+            // would be indistinguishable from the update never running.
+            try {
+                const fs = require("node:fs");
+                const path = require("node:path");
+                const marker = path.join(process.cwd(), "data", "pending-update-check.json");
+                if (fs.existsSync(marker)) {
+                    let info = null;
+                    try {
+                        info = JSON.parse(fs.readFileSync(marker, "utf8"));
+                    } catch {
+                        info = null;
+                    }
+                    fs.unlinkSync(marker);
+                    const nowVersion = (() => {
+                        try {
+                            return require("../package.json")?.version || null;
+                        } catch {
+                            return null;
+                        }
+                    })();
+                    const { createNotification } = require("./utils/notificationStore");
+                    if (info && nowVersion && info.fromVersion && nowVersion !== info.fromVersion) {
+                        await createNotification(prisma, DEFAULT_ACCOUNT_ID, {
+                            body: `Self-update from ${info.fromVersion} completed and the new version passed its health check.`,
+                            title: `Updated to ${nowVersion}`,
+                            type: "task",
+                        }).catch(() => undefined);
+                    } else if (info) {
+                        await createNotification(prisma, DEFAULT_ACCOUNT_ID, {
+                            body: `The new version failed its health check, so the watchdog restored ${info.fromVersion || "the previous version"}. This instance is running normally on the old image - check the release notes before retrying.`,
+                            title: "Update rolled back",
+                            type: "task",
+                        }).catch(() => undefined);
+                    }
+                }
+            } catch (e) {
+                console.warn("Update-verdict check failed:", e?.message);
+            }
+
+            // Opt-in scheduled self-update (see utils/selfUpdate.js)
+            try {
+                const { scheduleAutoUpdate } = require("./utils/selfUpdate");
+                scheduleAutoUpdate(prisma, { INSTANCE_TYPE });
+            } catch (e) {
+                console.warn("Auto-update scheduler failed to start:", e?.message);
+            }
+
+            const { scheduleVaultMonitor } = require("./utils/vaultMonitor");
+            scheduleVaultMonitor({ decrypt, getAccountId, prisma });
+        } catch (err) {
+            console.error("⚠️ Failed to initialize vault monitor:", err);
+        }
+
+        // Schedule catalog auto-refresh (daily re-pull of imported catalogs
+        // that opted in to autoRefresh)
+        try {
+            const { scheduleCatalogAutoRefresh } = require("./utils/catalogAutoRefresh");
+            scheduleCatalogAutoRefresh(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize catalog auto-refresh:", err);
+        }
+
+        // Schedule content-rating enforcement (daily, only for catalogs with an
+        // active keptRatings policy - no-op query when nobody has one set)
+        try {
+            const {
+                scheduleContentRatingEnforcement,
+            } = require("./utils/contentRatingEnforcement");
+            scheduleContentRatingEnforcement(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize content rating enforcement:", err);
+        }
+
+        // Schedule debrid auto-remove (daily, only for real_debrid/torbox Vault
+        // entries with autoRemoveEnabled set - no-op query when nobody has it on)
+        try {
+            const { scheduleDebridAutoRemove } = require("./utils/debridAutoRemove");
+            scheduleDebridAutoRemove(prisma, decrypt);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize debrid auto-remove:", err);
+        }
+
+        // Schedule SIMKL sync (pull + push, every 30m, only for users who've
+        // linked a SIMKL account - no-op query when nobody has)
+        try {
+            const { scheduleSimklSync } = require("./utils/simklSync");
+            scheduleSimklSync(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize SIMKL sync:", err);
+        }
+
+        // Schedule Automation's own time.daily trigger (every 1m, only for
+        // accounts with an enabled time.daily rule - no-op query otherwise)
+        try {
+            const { scheduleAutomationTimeTriggers } = require("./utils/automation/scheduler");
+            scheduleAutomationTimeTriggers(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize automation scheduler:", err);
+        }
+
+        // Daily screen-time limits and bedtimes (every minute, only for accounts that set one)
+        try {
+            require("./utils/screenTime").scheduleScreenTime(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize screen-time limits:", err);
+        }
+
+        // Profile pictures from people's own Jellyfin, AIOStreams and AIOMetadata servers
+        try {
+            require("./utils/serverAvatars").scheduleServerAvatars(
+                prisma,
+                require("./utils/encryption").decrypt
+            );
+        } catch (err) {
+            console.error("⚠️ Failed to initialize server profile pictures:", err);
+        }
+
+        // Schedule auto-generated themed catalogs (daily, only for accounts
+        // that opted in via Settings -> SlickTrax -> Auto-generated catalogs)
+        try {
+            const { scheduleAutoThemedCatalogs } = require("./utils/autoThemedCatalogs");
+            scheduleAutoThemedCatalogs(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize auto-themed catalogs:", err);
+        }
+
+        // Schedule DB maintenance (scheduled VACUUM + opt-in watch-history
+        // pruning, both off by default - operator-controlled via the
+        // Superadmin panel, private/SQLite mode only)
+        try {
+            const { scheduleDbMaintenance } = require("./utils/dbMaintenance");
+            scheduleDbMaintenance(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize DB maintenance scheduler:", err);
+        }
+
+        // Schedule the follow sweep (people's new releases + show renewals),
+        // twice a day - see utils/followWatch.js for why that cadence.
+        try {
+            const { scheduleFollowWatch } = require("./utils/followWatch");
+            const { resolveTmdbKeyForAccount } = require("./utils/listImport");
+            scheduleFollowWatch(prisma, { resolveTmdbKeyForAccount });
+        } catch (err) {
+            console.error("⚠️ Failed to initialize follow watch:", err);
+        }
+
+        // Schedule full-data backups (opt-in database snapshots - the only
+        // backup lane that carries watch history; see utils/dataBackup.js).
+        try {
+            const { scheduleDataBackups } = require("./utils/dataBackup");
+            scheduleDataBackups(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize data backup scheduler:", err);
+        }
+
+        // Schedule the Collections Guard (hourly snapshots of every Nuvio
+        // user's home-screen collections + external-overwrite alarms - see
+        // utils/collectionsGuard.js). Both instance types: collections belong
+        // to whoever's Nuvio account is connected, not to the instance.
+        try {
+            const { scheduleCollectionsGuard } = require("./utils/collectionsGuard");
+            scheduleCollectionsGuard(prisma, { createProvider, decrypt });
+        } catch (err) {
+            console.error("⚠️ Failed to initialize Collections Guard:", err);
+        }
+
+        // Schedule new-episode alerts (Cinemeta episode-list polling for shows
+        // with recent watch history, every 6h)
+        try {
+            const { scheduleEpisodeAlerts } = require("./utils/episodeAlerts");
+            scheduleEpisodeAlerts(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize episode alerts:", err);
+        }
+
+        // Schedule update-available notifications (every 6h - matches
+        // getVersionStatus's own GitHub-API cache TTL) - opt-in, off by default.
+        try {
+            const { scheduleUpdateCheckNotifier } = require("./utils/updateCheckNotifier");
+            scheduleUpdateCheckNotifier(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize update-check notifier:", err);
+        }
+
+        // Nudges an account whose Disaster Recovery Kit is stale/missing while
+        // its Vault holds credentials nothing else can restore - opt-in, off by
+        // default. See recoveryKitReminder.js for why this is a reminder rather
+        // than an automated off-site kit export.
+        try {
+            const { scheduleRecoveryKitReminder } = require("./utils/recoveryKitReminder");
+            scheduleRecoveryKitReminder(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize recovery-kit reminder:", err);
+        }
+
+        // Schedule notification digest sends (hourly check, actual send gated by
+        // each account's daily/weekly cadence) - opt-in, off by default.
+        try {
+            const { scheduleNotificationDigest } = require("./utils/notificationDigest");
+            scheduleNotificationDigest(prisma);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize notification digest:", err);
+        }
+
+        // Schedule vault backup export (decrypted JSON snapshot to data/backup/vault/,
+        // nightly by default — set VAULT_BACKUP_INTERVAL_HOURS to change)
+        try {
+            const { scheduleVaultBackups } = require("./utils/vaultBackup");
+            const intervalHours = Number.parseInt(
+                process.env.VAULT_BACKUP_INTERVAL_HOURS || "24",
+                10
+            );
+            scheduleVaultBackups({ decrypt, intervalHours, prisma });
+        } catch (err) {
+            console.error("⚠️ Failed to initialize vault backup scheduler:", err);
+        }
+
+        // Drop Trash items past their retention window. Runs at boot and daily -
+        // cheap, and keeps deleted-item archives from accumulating forever.
+        try {
+            const { purgeExpiredTrash } = require("./utils/trash");
+            setTimeout(() => purgeExpiredTrash(prisma), 90 * 1000);
+            setInterval(() => purgeExpiredTrash(prisma), 24 * 60 * 60 * 1000);
+        } catch (err) {
+            console.error("⚠️ Failed to schedule trash purge:", err);
+        }
+
+        // Schedule metadata-provider key health checker (TMDb/OMDb/MDBList/RPDB) -
+        // same "catch it before a user notices broken posters" idea as the addon
+        // health checker below, aimed at the keys instead of the addons.
+        try {
+            const { startMetadataKeyHealthScheduler } = require("./utils/metadataKeyHealth");
+            startMetadataKeyHealthScheduler(prisma, schedulerReq.appAccountId);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize metadata key health checker:", err);
+        }
+
+        // Schedule addon health checker (checks if addon manifests are reachable)
+        try {
+            const { startHealthCheckScheduler } = require("./utils/addonHealthCheck");
+            startHealthCheckScheduler(prisma, schedulerReq.appAccountId);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize addon health checker:", err);
+        }
+
+        // Schedule monthly poster mosaic (checks every 6h whether the account
+        // has crossed into a new month and hasn't posted last month's recap yet)
+        try {
+            const { scheduleMosaicMonitor } = require("./utils/posterMosaic");
+            scheduleMosaicMonitor(prisma, schedulerReq.appAccountId);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize poster mosaic scheduler:", err);
+        }
+
+        // Schedule Sync Guardian (catches a synced user's addons reverting
+        // outside SlickSync - see utils/syncGuardian.js for the full mechanism)
+        try {
+            const { scheduleSyncGuardian } = require("./utils/syncGuardian");
+            scheduleSyncGuardian(
+                prisma,
+                {
+                    canonicalizeManifestUrl,
+                    createProvider,
+                    decrypt,
+                    getAccountId,
+                    getDecryptedManifestUrl,
+                    parseAddonIds,
+                    parseProtectedAddons,
+                    StremioAPIClient,
+                },
+                schedulerReq.appAccountId
+            );
+        } catch (err) {
+            console.error("⚠️ Failed to initialize Sync Guardian:", err);
+        }
+
+        // Watch AIOStreams configurations for outside changes - see
+        // utils/aiostreamsConfig.js.
+        try {
+            require("./utils/aiostreamsConfig").scheduleConfigGuard(prisma, decrypt);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize the AIOStreams configuration guard:", err);
+        }
+
+        // Keep catalogs switched on for a Jellyfin server in step with its
+        // collections - see utils/jellyfinServerCollections.js.
+        try {
+            require("./utils/jellyfinServerCollections").scheduleServerCollections(prisma, decrypt);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize Jellyfin collections sync:", err);
+        }
+
+        // What people finish elsewhere, marked played on their real Jellyfin
+        // server - see utils/jellyfinMarkPlayed.js.
+        try {
+            require("./utils/jellyfinMarkPlayed").scheduleMarkPlayed(prisma, decrypt);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize Jellyfin played marks:", err);
+        }
+
+        // Jellyfin accounts made by invites follow their person's access - see
+        // utils/jellyfinInviteAccounts.js.
+        try {
+            require("./utils/jellyfinInviteAccounts").scheduleInviteAccounts(prisma, decrypt);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize invite-made Jellyfin accounts:", err);
+        }
+
+        // Schedule DB size sampling for the Tasks page's storage chart
+        // (private/SQLite-mode only - no-ops itself if DATABASE_URL isn't file:)
+        try {
+            const { scheduleDbSizeMonitor } = require("./utils/dbSizeMonitor");
+            scheduleDbSizeMonitor(prisma, schedulerReq.appAccountId || DEFAULT_ACCOUNT_ID);
+        } catch (err) {
+            console.error("⚠️ Failed to initialize DB size monitor:", err);
+        }
+
+        // Startup repair: reload addons with uninitialized resources/catalogs across all accounts
+        try {
+            const { reloadAddon } = require("./routes/addons");
+            const reloadDeps = {
+                decrypt,
+                encrypt,
+                filterManifestByCatalogs,
+                filterManifestByResources,
+                getDecryptedManifestUrl,
+                manifestHash,
+                silent: true,
+            };
+
+            // Find all addons with empty resources AND empty catalogs that have an originalManifest
+            const uninitializedAddons = await prisma.addon.findMany({
+                select: { accountId: true, catalogs: true, id: true, name: true },
+                where: {
+                    isActive: true,
+                    OR: [{ resources: "[]" }, { resources: null }],
+                    originalManifest: { not: null },
+                },
+            });
+
+            // Filter to only those where catalogs is also empty
+            const toRepair = uninitializedAddons.filter((a) => {
+                if (!a.catalogs || a.catalogs === "[]") {
+                    return true;
+                }
+                try {
+                    const parsed = JSON.parse(a.catalogs);
+                    return !Array.isArray(parsed) || parsed.length === 0;
+                } catch {
+                    return true;
+                }
+            });
+
+            if (toRepair.length > 0) {
+                console.error(
+                    `🔧 Startup repair: found ${toRepair.length} addon(s) with uninitialized resources/catalogs, reloading...`
+                );
+                let repaired = 0;
+                let failed = 0;
+                for (const addon of toRepair) {
+                    try {
+                        const mockReq = { appAccountId: addon.accountId };
+                        await reloadAddon(
+                            prisma,
+                            () => addon.accountId,
+                            addon.id,
+                            mockReq,
+                            reloadDeps,
+                            true
+                        );
+                        repaired++;
+                    } catch (err) {
+                        failed++;
+                        console.error(`  ❌ Failed to repair ${addon.name}: ${err.message}`);
+                    }
+                }
+                console.error(`🔧 Startup repair complete: ${repaired} repaired, ${failed} failed`);
+            }
+        } catch (err) {
+            console.error("⚠️ Failed to run startup addon repair:", err);
+        }
+    }, 10_000);
+
+    const storageLabel =
+        process.env.PRISMA_PROVIDER === "sqlite" ? "SQLite with Prisma" : "PostgreSQL with Prisma";
+
+    httpServer = app.listen(PORT, "0.0.0.0", () => {
+        console.log("🚀 SlickSync (Database) running on port", PORT);
+        console.log(`📊 Health check: http://127.0.0.1:${PORT}/health`);
+        console.log(`🔌 API endpoints: http://127.0.0.1:${PORT}/api/`);
+        console.log("🎬 Stremio integration: ENABLED");
+        console.log(`💾 Storage: ${storageLabel}`);
+    });
 }
 
 bootstrap().catch((err) => {
-  console.error('❌ Failed to start SlickSync server:', err)
-  process.exit(1)
-})
-
-
-
+    console.error("❌ Failed to start SlickSync server:", err);
+    process.exit(1);
+});

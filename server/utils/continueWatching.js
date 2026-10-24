@@ -17,8 +17,8 @@
  * improvement over the IMDb-only fallback used before this was confirmed.
  */
 
-const { fetchMetadata } = require('./notify')
-const { buildStremioLinks, buildNuvioAppUrl } = require('./appLinks')
+const { fetchMetadata } = require("./notify");
+const { buildStremioLinks, buildNuvioAppUrl } = require("./appLinks");
 
 /**
  * Given the season/episode of the last-watched episode and the show's full
@@ -27,12 +27,18 @@ const { buildStremioLinks, buildNuvioAppUrl } = require('./appLinks')
  * on the next season).
  */
 function findNextEpisode(allEpisodes, lastSeason, lastEpisode) {
-  if (!Array.isArray(allEpisodes) || allEpisodes.length === 0) return null
+    if (!Array.isArray(allEpisodes) || allEpisodes.length === 0) {
+        return null;
+    }
 
-  const lastIndex = allEpisodes.findIndex((e) => e.season === lastSeason && e.episode === lastEpisode)
-  if (lastIndex === -1 || lastIndex === allEpisodes.length - 1) return null
+    const lastIndex = allEpisodes.findIndex(
+        (e) => e.season === lastSeason && e.episode === lastEpisode
+    );
+    if (lastIndex === -1 || lastIndex === allEpisodes.length - 1) {
+        return null;
+    }
 
-  return allEpisodes[lastIndex + 1]
+    return allEpisodes[lastIndex + 1];
 }
 
 // Minimum position (2 min in) and completion ceiling (92%) for a session to
@@ -45,8 +51,8 @@ function findNextEpisode(allEpisodes, lastSeason, lastEpisode) {
 // by the item's own runtime and safe to read at a point in time (see
 // docs/runtime-behavior.md on timeOffset vs overallTimeWatched; overallTimeWatched is
 // never used here).
-const RESUME_MIN_POSITION_MS = 2 * 60 * 1000
-const RESUME_MAX_RATIO = 0.92
+const RESUME_MIN_POSITION_MS = 2 * 60 * 1000;
+const RESUME_MAX_RATIO = 0.92;
 
 /**
  * Places an episode number that the show's episode list doesn't contain.
@@ -83,24 +89,34 @@ const RESUME_MAX_RATIO = 0.92
  * Anything else returns null and the show stays out of the row.
  */
 function placeAbsoluteEpisode(metadata, season, episode) {
-  const abs = Number(episode)
-  if (season !== 1 || !Number.isInteger(abs) || abs < 1) return null
+    const abs = Number(episode);
+    if (season !== 1 || !Number.isInteger(abs) || abs < 1) {
+        return null;
+    }
 
-  const genres = Array.isArray(metadata?.genres) ? metadata.genres : []
-  if (!genres.some((g) => String(g).toLowerCase() === 'animation')) return null
+    const genres = Array.isArray(metadata?.genres) ? metadata.genres : [];
+    if (!genres.some((g) => String(g).toLowerCase() === "animation")) {
+        return null;
+    }
 
-  const ordered = [...(metadata?.allEpisodes || [])]
-    .filter((e) => Number.isInteger(e?.season) && Number.isInteger(e?.episode) && e.season > 0)
-    .sort((a, b) => (a.season - b.season) || (a.episode - b.episode))
-  if (ordered.length === 0 || abs > ordered.length) return null
+    const ordered = [...(metadata?.allEpisodes || [])]
+        .filter((e) => Number.isInteger(e?.season) && Number.isInteger(e?.episode) && e.season > 0)
+        .sort((a, b) => a.season - b.season || a.episode - b.episode);
+    if (ordered.length === 0 || abs > ordered.length) {
+        return null;
+    }
 
-  const seasons = new Set(ordered.map((e) => e.season))
-  if (seasons.size < 2) return null
-  const firstSeasonCount = ordered.filter((e) => e.season === ordered[0].season).length
-  if (abs <= firstSeasonCount) return null
+    const seasons = new Set(ordered.map((e) => e.season));
+    if (seasons.size < 2) {
+        return null;
+    }
+    const firstSeasonCount = ordered.filter((e) => e.season === ordered[0].season).length;
+    if (abs <= firstSeasonCount) {
+        return null;
+    }
 
-  const placed = ordered[abs - 1]
-  return placed ? { season: placed.season, episode: placed.episode } : null
+    const placed = ordered[abs - 1];
+    return placed ? { episode: placed.episode, season: placed.season } : null;
 }
 
 /**
@@ -112,24 +128,26 @@ function placeAbsoluteEpisode(metadata, season, episode) {
  * per show, so its lastPosition belongs to whatever episode videoId says).
  */
 async function getResumeState(prisma, accountId, userId, itemId, videoId) {
-  let session = null
-  try {
-    session = await prisma.watchSession.findUnique({
-      where: { accountId_userId_itemId: { accountId, userId, itemId } },
-      select: { videoId: true, lastPosition: true, totalDuration: true }
-    })
-  } catch {}
+    let session = null;
+    try {
+        session = await prisma.watchSession.findUnique({
+            select: { lastPosition: true, totalDuration: true, videoId: true },
+            where: { accountId_userId_itemId: { accountId, itemId, userId } },
+        });
+    } catch {
+        // Unavailable optional records leave the current result in place.
+    }
 
-  if (!session || !session.lastPosition || !session.totalDuration) {
-    return { inProgress: false, progressPercent: null }
-  }
-  if (videoId && session.videoId !== videoId) {
-    return { inProgress: false, progressPercent: null }
-  }
+    if (!(session?.lastPosition && session.totalDuration)) {
+        return { inProgress: false, progressPercent: null };
+    }
+    if (videoId && session.videoId !== videoId) {
+        return { inProgress: false, progressPercent: null };
+    }
 
-  const ratio = session.lastPosition / session.totalDuration
-  const inProgress = session.lastPosition >= RESUME_MIN_POSITION_MS && ratio < RESUME_MAX_RATIO
-  return { inProgress, progressPercent: Math.round(ratio * 100) }
+    const ratio = session.lastPosition / session.totalDuration;
+    const inProgress = session.lastPosition >= RESUME_MIN_POSITION_MS && ratio < RESUME_MAX_RATIO;
+    return { inProgress, progressPercent: Math.round(ratio * 100) };
 }
 
 /**
@@ -144,270 +162,332 @@ async function getResumeState(prisma, accountId, userId, itemId, videoId) {
 // and dropped the moment anything that changes them happens - a stream
 // starting or stopping (via the live-events bus), a dismissal, an unbury,
 // a wipe - so the row is never stale in a way anyone could notice.
-const CW_MEMO_TTL_MS = 30 * 1000
-const cwMemo = new Map()
-const cwBuilding = new Map()
+const CW_MEMO_TTL_MS = 30 * 1000;
+const cwMemo = new Map();
+const cwBuilding = new Map();
 
 function invalidateContinueWatching(accountId) {
-  const prefix = `${accountId || 'default'}:`
-  for (const key of cwMemo.keys()) if (key.startsWith(prefix)) cwMemo.delete(key)
-  // A computation already under way read the old rows: not kept, not shared.
-  for (const key of cwBuilding.keys()) if (key.startsWith(prefix)) cwBuilding.delete(key)
+    const prefix = `${accountId || "default"}:`;
+    for (const key of cwMemo.keys()) {
+        if (key.startsWith(prefix)) {
+            cwMemo.delete(key);
+        }
+    }
+    // A computation already under way read the old rows: not kept, not shared.
+    for (const key of cwBuilding.keys()) {
+        if (key.startsWith(prefix)) {
+            cwBuilding.delete(key);
+        }
+    }
 }
 
 async function getContinueWatching(prisma, accountId, limit = 8, userId = null) {
-  const key = `${accountId || 'default'}:${limit}:${userId || 'household'}`
-  const hit = cwMemo.get(key)
-  if (hit && Date.now() - hit.at < CW_MEMO_TTL_MS) return hit.value
-  // Several screens opening at once share one computation.
-  if (cwBuilding.has(key)) return cwBuilding.get(key)
-  const promise = computeContinueWatching(prisma, accountId, limit, userId)
-    .then((value) => { if (cwBuilding.get(key) === promise) cwMemo.set(key, { at: Date.now(), value }); return value })
-    .finally(() => { if (cwBuilding.get(key) === promise) cwBuilding.delete(key) })
-  cwBuilding.set(key, promise)
-  return promise
+    const key = `${accountId || "default"}:${limit}:${userId || "household"}`;
+    const hit = cwMemo.get(key);
+    if (hit && Date.now() - hit.at < CW_MEMO_TTL_MS) {
+        return hit.value;
+    }
+    // Several screens opening at once share one computation.
+    if (cwBuilding.has(key)) {
+        return cwBuilding.get(key);
+    }
+    const promise = computeContinueWatching(prisma, accountId, limit, userId)
+        .then((value) => {
+            if (cwBuilding.get(key) === promise) {
+                cwMemo.set(key, { at: Date.now(), value });
+            }
+            return value;
+        })
+        .finally(() => {
+            if (cwBuilding.get(key) === promise) {
+                cwBuilding.delete(key);
+            }
+        });
+    cwBuilding.set(key, promise);
+    return promise;
 }
 
 async function computeContinueWatching(prisma, accountId, limit = 8, userId = null) {
-  // Filter before selecting candidates or applying limits, and keep personal
-  // results in their own cache entry so household traffic cannot replace them.
-  const accountIdValue = accountId || 'default'
-  const { resolveOmdbKeyForAccount } = require('./listImport')
-  const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountIdValue)
+    // Filter before selecting candidates or applying limits, and keep personal
+    // results in their own cache entry so household traffic cannot replace them.
+    const accountIdValue = accountId || "default";
+    const { resolveOmdbKeyForAccount } = require("./listImport");
+    const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountIdValue);
 
-  // Most recently watched episode per (userId, showId) - fetch a reasonable
-  // recent window and reduce in JS rather than fighting SQLite/Prisma
-  // groupBy for "latest row per group with full columns".
-  const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000) // 120 days
-  const rows = await prisma.episodeWatchHistory.findMany({
-    where: { accountId: accountIdValue, ...(userId ? { userId } : {}), watchedAt: { gte: since } },
-    orderBy: { watchedAt: 'desc' }
-  })
+    // Most recently watched episode per (userId, showId) - fetch a reasonable
+    // recent window and reduce in JS rather than fighting SQLite/Prisma
+    // groupBy for "latest row per group with full columns".
+    const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000); // 120 days
+    const rows = await prisma.episodeWatchHistory.findMany({
+        orderBy: { watchedAt: "desc" },
+        where: {
+            accountId: accountIdValue,
+            ...(userId ? { userId } : {}),
+            watchedAt: { gte: since },
+        },
+    });
 
-  const latestPerShow = new Map()
-  for (const row of rows) {
-    const key = `${row.userId}:${row.showId}`
-    if (!latestPerShow.has(key)) latestPerShow.set(key, row)
-  }
-
-  const users = await prisma.user.findMany({
-    where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
-    select: { id: true, username: true, providerType: true }
-  })
-  const userMap = new Map(users.map((u) => [u.id, u]))
-
-  const dismissed = await prisma.dismissedContinueWatching.findMany({
-    where: { accountId: accountIdValue, ...(userId ? { userId } : {}) },
-    select: { userId: true, showId: true }
-  })
-  const dismissedKeys = new Set(dismissed.map((d) => `${d.userId}:${d.showId}`))
-
-  const candidates = Array.from(latestPerShow.values())
-    .filter((row) => !dismissedKeys.has(`${row.userId}:${row.showId}`))
-    .sort((a, b) => b.watchedAt.getTime() - a.watchedAt.getTime())
-    .slice(0, limit * 2) // fetch extra since some won't have a computable next episode
-
-  // Each candidate needs two lookups, and neither depends on any other
-  // candidate: the show's metadata (a network call with a five-second
-  // deadline of its own) and where this person left off (a local read).
-  // Done one candidate at a time, a household with a dozen shows on the go
-  // paid those deadlines end to end - measured at 14 seconds on an instance
-  // with two years of history, where several shows no longer resolve and
-  // each one waited out its full timeout before the next even started.
-  // Together, the whole row costs one deadline rather than a dozen.
-  const prepared = await Promise.all(candidates.map(async (row) => {
-    const [metadata, resumeState] = await Promise.all([
-      fetchMetadata(row.showId, 'series', row.videoId, omdbApiKey).catch(() => null),
-      getResumeState(prisma, accountIdValue, row.userId, row.showId, row.videoId).catch(() => ({ inProgress: false })),
-    ])
-    return { row, metadata, resumeState }
-  }))
-
-  const results = []
-  for (const { row, metadata, resumeState } of prepared) {
-    if (results.length >= limit) break
-
-    const user = userMap.get(row.userId)
-    if (!user) continue
-
-    if (!metadata || !metadata.allEpisodes) continue
-
-    // If the last-watched episode itself is still partway through, resume
-    // THAT episode - jumping to the next one mid-episode was the reported
-    // bug this exists to fix. Only when it's finished (or there's no
-    // position data to judge by) does the card advance to the next episode.
-    // Everything below works from the watched episode as CINEMETA numbers
-    // it, which is not always how it was recorded - see
-    // placeAbsoluteEpisode.
-    let watchedSeason = row.season
-    let watchedEpisode = row.episode
-    const inList = metadata.allEpisodes.some((e) => e.season === watchedSeason && e.episode === watchedEpisode)
-    if (!inList) {
-      const placed = placeAbsoluteEpisode(metadata, watchedSeason, watchedEpisode)
-      if (placed) {
-        watchedSeason = placed.season
-        watchedEpisode = placed.episode
-      }
+    const latestPerShow = new Map();
+    for (const row of rows) {
+        const key = `${row.userId}:${row.showId}`;
+        if (!latestPerShow.has(key)) {
+            latestPerShow.set(key, row);
+        }
     }
 
-    let target
-    let isResume = false
-    if (resumeState.inProgress && watchedSeason != null && watchedEpisode != null) {
-      const current = metadata.allEpisodes.find((e) => e.season === watchedSeason && e.episode === watchedEpisode)
-      target = {
-        season: watchedSeason,
-        episode: watchedEpisode,
-        title: current?.title ?? null,
-        thumbnail: current?.thumbnail ?? null
-      }
-      isResume = true
-    } else {
-      const next = findNextEpisode(metadata.allEpisodes, watchedSeason, watchedEpisode)
-      if (!next) continue
-      target = {
-        season: next.season,
-        episode: next.episode,
-        title: next.title,
-        thumbnail: next.thumbnail
-      }
+    const users = await prisma.user.findMany({
+        select: { id: true, providerType: true, username: true },
+        where: { id: { in: [...new Set(rows.map((r) => r.userId))] } },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const dismissed = await prisma.dismissedContinueWatching.findMany({
+        select: { showId: true, userId: true },
+        where: { accountId: accountIdValue, ...(userId ? { userId } : {}) },
+    });
+    const dismissedKeys = new Set(dismissed.map((d) => `${d.userId}:${d.showId}`));
+
+    const candidates = Array.from(latestPerShow.values())
+        .filter((row) => !dismissedKeys.has(`${row.userId}:${row.showId}`))
+        .sort((a, b) => b.watchedAt.getTime() - a.watchedAt.getTime())
+        .slice(0, limit * 2); // fetch extra since some won't have a computable next episode
+
+    // Each candidate needs two lookups, and neither depends on any other
+    // candidate: the show's metadata (a network call with a five-second
+    // deadline of its own) and where this person left off (a local read).
+    // Done one candidate at a time, a household with a dozen shows on the go
+    // paid those deadlines end to end - measured at 14 seconds on an instance
+    // with two years of history, where several shows no longer resolve and
+    // each one waited out its full timeout before the next even started.
+    // Together, the whole row costs one deadline rather than a dozen.
+    const prepared = await Promise.all(
+        candidates.map(async (row) => {
+            const [metadata, resumeState] = await Promise.all([
+                fetchMetadata(row.showId, "series", row.videoId, omdbApiKey).catch(() => null),
+                getResumeState(prisma, accountIdValue, row.userId, row.showId, row.videoId).catch(
+                    () => ({ inProgress: false })
+                ),
+            ]);
+            return { metadata, resumeState, row };
+        })
+    );
+
+    const results = [];
+    for (const { row, metadata, resumeState } of prepared) {
+        if (results.length >= limit) {
+            break;
+        }
+
+        const user = userMap.get(row.userId);
+        if (!user) {
+            continue;
+        }
+
+        if (!metadata?.allEpisodes) {
+            continue;
+        }
+
+        // If the last-watched episode itself is still partway through, resume
+        // THAT episode - jumping to the next one mid-episode was the reported
+        // bug this exists to fix. Only when it's finished (or there's no
+        // position data to judge by) does the card advance to the next episode.
+        // Everything below works from the watched episode as CINEMETA numbers
+        // it, which is not always how it was recorded - see
+        // placeAbsoluteEpisode.
+        let watchedSeason = row.season;
+        let watchedEpisode = row.episode;
+        const inList = metadata.allEpisodes.some(
+            (e) => e.season === watchedSeason && e.episode === watchedEpisode
+        );
+        if (!inList) {
+            const placed = placeAbsoluteEpisode(metadata, watchedSeason, watchedEpisode);
+            if (placed) {
+                watchedSeason = placed.season;
+                watchedEpisode = placed.episode;
+            }
+        }
+
+        let target;
+        let isResume = false;
+        if (resumeState.inProgress && watchedSeason != null && watchedEpisode != null) {
+            const current = metadata.allEpisodes.find(
+                (e) => e.season === watchedSeason && e.episode === watchedEpisode
+            );
+            target = {
+                episode: watchedEpisode,
+                season: watchedSeason,
+                thumbnail: current?.thumbnail ?? null,
+                title: current?.title ?? null,
+            };
+            isResume = true;
+        } else {
+            const next = findNextEpisode(metadata.allEpisodes, watchedSeason, watchedEpisode);
+            if (!next) {
+                continue;
+            }
+            target = {
+                episode: next.episode,
+                season: next.season,
+                thumbnail: next.thumbnail,
+                title: next.title,
+            };
+        }
+
+        const entry = {
+            // Landscape backdrop - the card renders in a 16:9 frame, so this fills
+            // it cleanly. The portrait `poster` only gets used as a last resort,
+            // where it has to crop hard (the "zoomed in" look).
+            background: metadata.background || null,
+            contentType: "series",
+            imdbRating: metadata.imdbRating || null,
+            lastWatched: { episode: watchedEpisode, season: watchedSeason },
+            lastWatchedAt: row.watchedAt,
+            metacritic: metadata.metacritic || null,
+            // Field name kept for client compatibility - when resume=true this is
+            // the in-progress episode itself, not actually the "next" one.
+            nextEpisode: target,
+            poster: metadata.poster || row.poster,
+            progressPercent: isResume ? resumeState.progressPercent : null,
+            providerType: user.providerType,
+            resume: isResume,
+            rottenTomatoes: metadata.rottenTomatoes || null,
+            showId: row.showId,
+            showName: metadata.title || row.showName,
+            userId: user.id,
+            username: user.username,
+        };
+
+        if (metadata.imdb_id) {
+            // Both branches use a plain native <a href> on the client with no JS
+            // in the way (see ContinueWatchingCard in page.tsx) - a prior attempt
+            // at JS-driven fallback logic (intercept the click, set location.href
+            // programmatically, time a fallback) broke the Stremio link that
+            // already worked, because browsers handle a direct anchor click far
+            // more reliably than scripted navigation for custom URL schemes. That
+            // means neither link can "detect and fall back" if the app isn't
+            // installed - same known tradeoff Stremio's link already had, applied
+            // symmetrically now that Nuvio has a real scheme to offer too.
+            // For a resume entry the link targets the in-progress episode -
+            // Stremio itself owns the saved playback position, so opening that
+            // episode resumes from where they left off.
+            if (user.providerType === "stremio") {
+                const links = buildStremioLinks(
+                    metadata.imdb_id,
+                    "series",
+                    target.season,
+                    target.episode
+                );
+                entry.appUrl = links.appUrl;
+                entry.webUrl = links.webUrl;
+            } else if (user.providerType === "nuvio") {
+                entry.appUrl = buildNuvioAppUrl("series", metadata.imdb_id);
+                entry.webUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+            } else {
+                // Jellyfin apps have no shared link scheme to open a title with.
+                entry.webUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+            }
+        }
+
+        results.push(entry);
     }
 
-    const entry = {
-      userId: user.id,
-      username: user.username,
-      providerType: user.providerType,
-      contentType: 'series',
-      showId: row.showId,
-      showName: metadata.title || row.showName,
-      poster: metadata.poster || row.poster,
-      // Landscape backdrop - the card renders in a 16:9 frame, so this fills
-      // it cleanly. The portrait `poster` only gets used as a last resort,
-      // where it has to crop hard (the "zoomed in" look).
-      background: metadata.background || null,
-      lastWatched: { season: watchedSeason, episode: watchedEpisode },
-      // Field name kept for client compatibility - when resume=true this is
-      // the in-progress episode itself, not actually the "next" one.
-      nextEpisode: target,
-      resume: isResume,
-      progressPercent: isResume ? resumeState.progressPercent : null,
-      lastWatchedAt: row.watchedAt,
-      imdbRating: metadata.imdbRating || null,
-      rottenTomatoes: metadata.rottenTomatoes || null,
-      metacritic: metadata.metacritic || null
+    // In-progress MOVIES - previously absent entirely (only episodeWatchHistory
+    // was read, so a movie stopped halfway never appeared anywhere). A movie
+    // only qualifies while its WatchSession says it's partway through; finished
+    // movies have nothing to continue.
+    const movieRows = await prisma.movieWatchHistory.findMany({
+        orderBy: { watchedAt: "desc" },
+        where: {
+            accountId: accountIdValue,
+            ...(userId ? { userId } : {}),
+            watchedAt: { gte: since },
+        },
+    });
+    const latestPerMovie = new Map();
+    for (const row of movieRows) {
+        const key = `${row.userId}:${row.itemId}`;
+        if (!latestPerMovie.has(key)) {
+            latestPerMovie.set(key, row);
+        }
     }
 
-    if (metadata.imdb_id) {
-      // Both branches use a plain native <a href> on the client with no JS
-      // in the way (see ContinueWatchingCard in page.tsx) - a prior attempt
-      // at JS-driven fallback logic (intercept the click, set location.href
-      // programmatically, time a fallback) broke the Stremio link that
-      // already worked, because browsers handle a direct anchor click far
-      // more reliably than scripted navigation for custom URL schemes. That
-      // means neither link can "detect and fall back" if the app isn't
-      // installed - same known tradeoff Stremio's link already had, applied
-      // symmetrically now that Nuvio has a real scheme to offer too.
-      // For a resume entry the link targets the in-progress episode -
-      // Stremio itself owns the saved playback position, so opening that
-      // episode resumes from where they left off.
-      if (user.providerType === 'stremio') {
-        const links = buildStremioLinks(metadata.imdb_id, 'series', target.season, target.episode)
-        entry.appUrl = links.appUrl
-        entry.webUrl = links.webUrl
-      } else if (user.providerType === 'nuvio') {
-        entry.appUrl = buildNuvioAppUrl('series', metadata.imdb_id)
-        entry.webUrl = `https://www.imdb.com/title/${metadata.imdb_id}`
-      } else {
-        // Jellyfin apps have no shared link scheme to open a title with.
-        entry.webUrl = `https://www.imdb.com/title/${metadata.imdb_id}`
-      }
+    const movieUsers = await prisma.user.findMany({
+        select: { id: true, providerType: true, username: true },
+        where: { id: { in: [...new Set(movieRows.map((r) => r.userId))] } },
+    });
+    for (const u of movieUsers) {
+        userMap.set(u.id, u);
     }
 
-    results.push(entry)
-  }
+    // Same shape as the shows above: the cheap local check still decides which
+    // movies qualify, and only those pay for metadata - but both rounds happen
+    // together rather than one film at a time.
+    const movieCandidates = [...latestPerMovie.values()].filter(
+        (row) => !dismissedKeys.has(`${row.userId}:${row.itemId}`) && userMap.has(row.userId)
+    );
+    const movieResume = await Promise.all(
+        movieCandidates.map((row) =>
+            getResumeState(prisma, accountIdValue, row.userId, row.itemId, null).catch(() => ({
+                inProgress: false,
+            }))
+        )
+    );
+    const inProgressMovies = movieCandidates
+        .map((row, i) => ({ resumeState: movieResume[i], row }))
+        .filter((m) => m.resumeState.inProgress);
+    const movieMeta = await Promise.all(
+        inProgressMovies.map((m) =>
+            fetchMetadata(m.row.itemId, "movie", null, omdbApiKey).catch(() => null)
+        )
+    );
 
-  // In-progress MOVIES - previously absent entirely (only episodeWatchHistory
-  // was read, so a movie stopped halfway never appeared anywhere). A movie
-  // only qualifies while its WatchSession says it's partway through; finished
-  // movies have nothing to continue.
-  const movieRows = await prisma.movieWatchHistory.findMany({
-    where: { accountId: accountIdValue, ...(userId ? { userId } : {}), watchedAt: { gte: since } },
-    orderBy: { watchedAt: 'desc' }
-  })
-  const latestPerMovie = new Map()
-  for (const row of movieRows) {
-    const key = `${row.userId}:${row.itemId}`
-    if (!latestPerMovie.has(key)) latestPerMovie.set(key, row)
-  }
+    const movieEntries = [];
+    for (let mi = 0; mi < inProgressMovies.length; mi++) {
+        const { row, resumeState } = inProgressMovies[mi];
+        const metadata = movieMeta[mi];
+        const user = userMap.get(row.userId);
 
-  const movieUsers = await prisma.user.findMany({
-    where: { id: { in: [...new Set(movieRows.map((r) => r.userId))] } },
-    select: { id: true, username: true, providerType: true }
-  })
-  for (const u of movieUsers) userMap.set(u.id, u)
+        const entry = {
+            background: metadata?.background || null,
+            contentType: "movie",
+            imdbRating: metadata?.imdbRating || null,
+            lastWatched: null,
+            lastWatchedAt: row.watchedAt,
+            metacritic: metadata?.metacritic || null,
+            nextEpisode: null,
+            poster: metadata?.poster || row.poster,
+            progressPercent: resumeState.progressPercent,
+            providerType: user.providerType,
+            resume: true,
+            rottenTomatoes: metadata?.rottenTomatoes || null,
+            showId: row.itemId,
+            showName: metadata?.title || row.itemName,
+            userId: user.id,
+            username: user.username,
+        };
 
-  // Same shape as the shows above: the cheap local check still decides which
-  // movies qualify, and only those pay for metadata - but both rounds happen
-  // together rather than one film at a time.
-  const movieCandidates = [...latestPerMovie.values()].filter((row) =>
-    !dismissedKeys.has(`${row.userId}:${row.itemId}`) && userMap.has(row.userId)
-  )
-  const movieResume = await Promise.all(movieCandidates.map((row) =>
-    getResumeState(prisma, accountIdValue, row.userId, row.itemId, null).catch(() => ({ inProgress: false }))
-  ))
-  const inProgressMovies = movieCandidates
-    .map((row, i) => ({ row, resumeState: movieResume[i] }))
-    .filter((m) => m.resumeState.inProgress)
-  const movieMeta = await Promise.all(inProgressMovies.map((m) =>
-    fetchMetadata(m.row.itemId, 'movie', null, omdbApiKey).catch(() => null)
-  ))
+        const imdbId = metadata?.imdb_id || (row.itemId.startsWith("tt") ? row.itemId : null);
+        if (imdbId) {
+            if (user.providerType === "stremio") {
+                const links = buildStremioLinks(imdbId, "movie");
+                entry.appUrl = links.appUrl;
+                entry.webUrl = links.webUrl;
+            } else if (user.providerType === "nuvio") {
+                entry.appUrl = buildNuvioAppUrl("movie", imdbId);
+                entry.webUrl = `https://www.imdb.com/title/${imdbId}`;
+            } else {
+                entry.webUrl = `https://www.imdb.com/title/${imdbId}`;
+            }
+        }
 
-  const movieEntries = []
-  for (let mi = 0; mi < inProgressMovies.length; mi++) {
-    const { row, resumeState } = inProgressMovies[mi]
-    const metadata = movieMeta[mi]
-    const user = userMap.get(row.userId)
-
-    const entry = {
-      userId: user.id,
-      username: user.username,
-      providerType: user.providerType,
-      contentType: 'movie',
-      showId: row.itemId,
-      showName: metadata?.title || row.itemName,
-      poster: metadata?.poster || row.poster,
-      background: metadata?.background || null,
-      lastWatched: null,
-      nextEpisode: null,
-      resume: true,
-      progressPercent: resumeState.progressPercent,
-      lastWatchedAt: row.watchedAt,
-      imdbRating: metadata?.imdbRating || null,
-      rottenTomatoes: metadata?.rottenTomatoes || null,
-      metacritic: metadata?.metacritic || null
+        movieEntries.push(entry);
     }
 
-    const imdbId = metadata?.imdb_id || (row.itemId.startsWith('tt') ? row.itemId : null)
-    if (imdbId) {
-      if (user.providerType === 'stremio') {
-        const links = buildStremioLinks(imdbId, 'movie')
-        entry.appUrl = links.appUrl
-        entry.webUrl = links.webUrl
-      } else if (user.providerType === 'nuvio') {
-        entry.appUrl = buildNuvioAppUrl('movie', imdbId)
-        entry.webUrl = `https://www.imdb.com/title/${imdbId}`
-      } else {
-        entry.webUrl = `https://www.imdb.com/title/${imdbId}`
-      }
-    }
-
-    movieEntries.push(entry)
-  }
-
-  // Merge, most recently watched first, and re-cap - movies compete for the
-  // same row as shows rather than getting bolted onto the end.
-  return [...results, ...movieEntries]
-    .sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime())
-    .slice(0, limit)
+    // Merge, most recently watched first, and re-cap - movies compete for the
+    // same row as shows rather than getting bolted onto the end.
+    return [...results, ...movieEntries]
+        .sort((a, b) => new Date(b.lastWatchedAt).getTime() - new Date(a.lastWatchedAt).getTime())
+        .slice(0, limit);
 }
 
 /**
@@ -416,15 +496,14 @@ async function computeContinueWatching(prisma, accountId, limit = 8, userId = nu
  * device stays dismissed everywhere.
  */
 async function dismissContinueWatching(prisma, accountId, userId, showId) {
-  invalidateContinueWatching(accountId)
-  const accountIdValue = accountId || 'default'
-  await prisma.dismissedContinueWatching.upsert({
-    where: { accountId_userId_showId: { accountId: accountIdValue, userId, showId } },
-    create: { accountId: accountIdValue, userId, showId },
-    update: {}
-  })
+    invalidateContinueWatching(accountId);
+    const accountIdValue = accountId || "default";
+    await prisma.dismissedContinueWatching.upsert({
+        create: { accountId: accountIdValue, showId, userId },
+        update: {},
+        where: { accountId_userId_showId: { accountId: accountIdValue, showId, userId } },
+    });
 }
-
 
 // The inverse of getContinueWatching: shows someone genuinely started and
 // then stopped watching, long enough ago that they are not "in progress" in
@@ -441,74 +520,95 @@ async function dismissContinueWatching(prisma, accountId, userId, showId) {
 // both places, and a show buried here should equally never resurface in
 // Continue Watching if it somehow became recent again.
 // The default; each account sets its own in Settings (utils/watchSettings.js).
-const ABANDONED_AFTER_DAYS = 45
+const ABANDONED_AFTER_DAYS = 45;
 
 async function getAbandonedShows(prisma, accountId, limit = 20) {
-  const accountIdValue = accountId || 'default'
-  const { unfinishedAfterDays } = await require('./watchSettings').getWatchSettings(prisma, accountIdValue)
-  const cutoff = new Date(Date.now() - unfinishedAfterDays * 24 * 60 * 60 * 1000)
+    const accountIdValue = accountId || "default";
+    const { unfinishedAfterDays } = await require("./watchSettings").getWatchSettings(
+        prisma,
+        accountIdValue
+    );
+    const cutoff = new Date(Date.now() - unfinishedAfterDays * 24 * 60 * 60 * 1000);
 
-  // Every episode row for this account, newest first, so the first row seen
-  // per (user, show) is that pairing's most recent watch - same reduce-in-JS
-  // approach getContinueWatching uses and for the same reason.
-  const rows = await prisma.episodeWatchHistory.findMany({
-    where: { accountId: accountIdValue },
-    orderBy: { watchedAt: 'desc' },
-    select: {
-      userId: true, showId: true, showName: true, season: true, episode: true,
-      poster: true, watchedAt: true, completed: true,
-    },
-  })
+    // Every episode row for this account, newest first, so the first row seen
+    // per (user, show) is that pairing's most recent watch - same reduce-in-JS
+    // approach getContinueWatching uses and for the same reason.
+    const rows = await prisma.episodeWatchHistory.findMany({
+        orderBy: { watchedAt: "desc" },
+        select: {
+            completed: true,
+            episode: true,
+            poster: true,
+            season: true,
+            showId: true,
+            showName: true,
+            userId: true,
+            watchedAt: true,
+        },
+        where: { accountId: accountIdValue },
+    });
 
-  const latestPerShow = new Map()
-  const episodeCounts = new Map()
-  for (const row of rows) {
-    const key = `${row.userId}:${row.showId}`
-    episodeCounts.set(key, (episodeCounts.get(key) || 0) + 1)
-    if (!latestPerShow.has(key)) latestPerShow.set(key, row)
-  }
+    const latestPerShow = new Map();
+    const episodeCounts = new Map();
+    for (const row of rows) {
+        const key = `${row.userId}:${row.showId}`;
+        episodeCounts.set(key, (episodeCounts.get(key) || 0) + 1);
+        if (!latestPerShow.has(key)) {
+            latestPerShow.set(key, row);
+        }
+    }
 
-  const dismissed = await prisma.dismissedContinueWatching.findMany({
-    where: { accountId: accountIdValue },
-    select: { userId: true, showId: true },
-  })
-  const dismissedKeys = new Set(dismissed.map((d) => `${d.userId}:${d.showId}`))
+    const dismissed = await prisma.dismissedContinueWatching.findMany({
+        select: { showId: true, userId: true },
+        where: { accountId: accountIdValue },
+    });
+    const dismissedKeys = new Set(dismissed.map((d) => `${d.userId}:${d.showId}`));
 
-  const candidates = []
-  for (const [key, row] of latestPerShow) {
-    if (dismissedKeys.has(key)) continue
-    if (new Date(row.watchedAt) > cutoff) continue
-    // A show whose most recent watched episode is marked completed was
-    // finished, not abandoned - that is a different thing entirely and does
-    // not belong in a "you never finished these" list.
-    if (row.completed === true) continue
-    candidates.push({ key, row, episodesWatched: episodeCounts.get(key) || 1 })
-  }
+    const candidates = [];
+    for (const [key, row] of latestPerShow) {
+        if (dismissedKeys.has(key)) {
+            continue;
+        }
+        if (new Date(row.watchedAt) > cutoff) {
+            continue;
+        }
+        // A show whose most recent watched episode is marked completed was
+        // finished, not abandoned - that is a different thing entirely and does
+        // not belong in a "you never finished these" list.
+        if (row.completed === true) {
+            continue;
+        }
+        candidates.push({ episodesWatched: episodeCounts.get(key) || 1, key, row });
+    }
 
-  const users = await prisma.user.findMany({
-    where: { id: { in: [...new Set(candidates.map((c) => c.row.userId))] } },
-    select: { id: true, username: true, providerType: true },
-  })
-  const userMap = new Map(users.map((u) => [u.id, u]))
+    const users = await prisma.user.findMany({
+        select: { id: true, providerType: true, username: true },
+        where: { id: { in: [...new Set(candidates.map((c) => c.row.userId))] } },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
 
-  return candidates
-    // Longest-abandoned first: the ones most likely to be a genuine "no, I am
-    // never going back to this" and quickest to clear out.
-    .sort((a, b) => new Date(a.row.watchedAt) - new Date(b.row.watchedAt))
-    .slice(0, limit)
-    .map(({ row, episodesWatched }) => ({
-      userId: row.userId,
-      username: userMap.get(row.userId)?.username || 'Unknown',
-      providerType: userMap.get(row.userId)?.providerType || null,
-      showId: row.showId,
-      showName: row.showName,
-      poster: row.poster,
-      lastSeason: row.season,
-      lastEpisode: row.episode,
-      episodesWatched,
-      lastWatchedAt: row.watchedAt,
-      daysSince: Math.floor((Date.now() - new Date(row.watchedAt).getTime()) / (24 * 60 * 60 * 1000)),
-    }))
+    return (
+        candidates
+            // Longest-abandoned first: the ones most likely to be a genuine "no, I am
+            // never going back to this" and quickest to clear out.
+            .sort((a, b) => new Date(a.row.watchedAt) - new Date(b.row.watchedAt))
+            .slice(0, limit)
+            .map(({ row, episodesWatched }) => ({
+                daysSince: Math.floor(
+                    (Date.now() - new Date(row.watchedAt).getTime()) / (24 * 60 * 60 * 1000)
+                ),
+                episodesWatched,
+                lastEpisode: row.episode,
+                lastSeason: row.season,
+                lastWatchedAt: row.watchedAt,
+                poster: row.poster,
+                providerType: userMap.get(row.userId)?.providerType || null,
+                showId: row.showId,
+                showName: row.showName,
+                userId: row.userId,
+                username: userMap.get(row.userId)?.username || "Unknown",
+            }))
+    );
 }
 
 // The Graveyard proper: what burying actually produced. Burying reuses the
@@ -518,67 +618,87 @@ async function getAbandonedShows(prisma, accountId, limit = 20) {
 // say "done with this", and a graveyard that silently omitted half its
 // occupants would be the old vanishing problem all over again.
 async function getBuriedShows(prisma, accountId) {
-  const accountIdValue = accountId || 'default'
-  const dismissed = await prisma.dismissedContinueWatching.findMany({
-    // Tombstones (wiped shows) stay out of the graveyard - they exist only
-    // to keep Continue Watching from resurfacing what was erased.
-    where: { accountId: accountIdValue, wipedAt: null },
-    orderBy: { createdAt: 'desc' },
-  })
-  if (dismissed.length === 0) return []
-
-  // Enrich from watch history - the dismissal row itself stores only ids.
-  const rows = await prisma.episodeWatchHistory.findMany({
-    where: { accountId: accountIdValue, showId: { in: [...new Set(dismissed.map((d) => d.showId))] } },
-    orderBy: { watchedAt: 'desc' },
-    select: { userId: true, showId: true, showName: true, season: true, episode: true, poster: true, watchedAt: true },
-  })
-  const latest = new Map()
-  const counts = new Map()
-  for (const r of rows) {
-    const key = `${r.userId}:${r.showId}`
-    counts.set(key, (counts.get(key) || 0) + 1)
-    if (!latest.has(key)) latest.set(key, r)
-  }
-  const users = await prisma.user.findMany({
-    where: { id: { in: [...new Set(dismissed.map((d) => d.userId))] } },
-    select: { id: true, username: true },
-  })
-  const userMap = new Map(users.map((u) => [u.id, u.username]))
-
-  // Movie burials have no episode rows - name and poster come from the
-  // movie history instead (a buried movie used to list as its bare tt id).
-  const movieRows = await prisma.movieWatchHistory.findMany({
-    where: { accountId: accountIdValue, itemId: { in: [...new Set(dismissed.map((d) => d.showId))] } },
-    select: { userId: true, itemId: true, itemName: true, poster: true, watchedAt: true },
-  }).catch(() => [])
-  const movieByKey = new Map(movieRows.map((m) => [`${m.userId}:${m.itemId}`, m]))
-
-  return dismissed.map((d) => {
-    const hist = latest.get(`${d.userId}:${d.showId}`) || null
-    const movie = movieByKey.get(`${d.userId}:${d.showId}`) || null
-    return {
-      userId: d.userId,
-      username: userMap.get(d.userId) || 'Unknown',
-      showId: d.showId,
-      showName: hist?.showName || movie?.itemName || d.showId,
-      poster: hist?.poster || movie?.poster || null,
-      lastSeason: hist?.season ?? null,
-      lastEpisode: hist?.episode ?? null,
-      lastWatchedAt: hist?.watchedAt || movie?.watchedAt || null,
-      episodesWatched: counts.get(`${d.userId}:${d.showId}`) || 0,
-      buriedAt: d.createdAt,
+    const accountIdValue = accountId || "default";
+    const dismissed = await prisma.dismissedContinueWatching.findMany({
+        orderBy: { createdAt: "desc" },
+        // Tombstones (wiped shows) stay out of the graveyard - they exist only
+        // to keep Continue Watching from resurfacing what was erased.
+        where: { accountId: accountIdValue, wipedAt: null },
+    });
+    if (dismissed.length === 0) {
+        return [];
     }
-  })
+
+    // Enrich from watch history - the dismissal row itself stores only ids.
+    const rows = await prisma.episodeWatchHistory.findMany({
+        orderBy: { watchedAt: "desc" },
+        select: {
+            episode: true,
+            poster: true,
+            season: true,
+            showId: true,
+            showName: true,
+            userId: true,
+            watchedAt: true,
+        },
+        where: {
+            accountId: accountIdValue,
+            showId: { in: [...new Set(dismissed.map((d) => d.showId))] },
+        },
+    });
+    const latest = new Map();
+    const counts = new Map();
+    for (const r of rows) {
+        const key = `${r.userId}:${r.showId}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
+        if (!latest.has(key)) {
+            latest.set(key, r);
+        }
+    }
+    const users = await prisma.user.findMany({
+        select: { id: true, username: true },
+        where: { id: { in: [...new Set(dismissed.map((d) => d.userId))] } },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u.username]));
+
+    // Movie burials have no episode rows - name and poster come from the
+    // movie history instead (a buried movie used to list as its bare tt id).
+    const movieRows = await prisma.movieWatchHistory
+        .findMany({
+            select: { itemId: true, itemName: true, poster: true, userId: true, watchedAt: true },
+            where: {
+                accountId: accountIdValue,
+                itemId: { in: [...new Set(dismissed.map((d) => d.showId))] },
+            },
+        })
+        .catch(() => []);
+    const movieByKey = new Map(movieRows.map((m) => [`${m.userId}:${m.itemId}`, m]));
+
+    return dismissed.map((d) => {
+        const hist = latest.get(`${d.userId}:${d.showId}`) || null;
+        const movie = movieByKey.get(`${d.userId}:${d.showId}`) || null;
+        return {
+            buriedAt: d.createdAt,
+            episodesWatched: counts.get(`${d.userId}:${d.showId}`) || 0,
+            lastEpisode: hist?.episode ?? null,
+            lastSeason: hist?.season ?? null,
+            lastWatchedAt: hist?.watchedAt || movie?.watchedAt || null,
+            poster: hist?.poster || movie?.poster || null,
+            showId: d.showId,
+            showName: hist?.showName || movie?.itemName || d.showId,
+            userId: d.userId,
+            username: userMap.get(d.userId) || "Unknown",
+        };
+    });
 }
 
 /** Dig a show back up: the dismissal is removed, so it reappears in
  * Continue Watching (if recent) or the abandoned list (if not). */
 async function unburyShow(prisma, accountId, userId, showId) {
-  invalidateContinueWatching(accountId)
-  await prisma.dismissedContinueWatching.deleteMany({
-    where: { accountId: accountId || 'default', userId, showId },
-  })
+    invalidateContinueWatching(accountId);
+    await prisma.dismissedContinueWatching.deleteMany({
+        where: { accountId: accountId || "default", showId, userId },
+    });
 }
 
 /**
@@ -592,20 +712,34 @@ async function unburyShow(prisma, accountId, userId, showId) {
  * within minutes (confirmed live 2026-09-03, twice).
  */
 async function wipeBuriedShow(prisma, accountId, userId, showId) {
-  invalidateContinueWatching(accountId)
-  const accountIdValue = accountId || 'default'
-  const [episodes, movies] = await prisma.$transaction([
-    prisma.episodeWatchHistory.deleteMany({ where: { accountId: accountIdValue, userId, showId } }),
-    prisma.movieWatchHistory.deleteMany({ where: { accountId: accountIdValue, userId, itemId: showId } }),
-  ])
-  // Upsert, not update: this also repairs a title whose dismissal was
-  // deleted by the pre-tombstone wipe.
-  await prisma.dismissedContinueWatching.upsert({
-    where: { accountId_userId_showId: { accountId: accountIdValue, userId, showId } },
-    create: { accountId: accountIdValue, userId, showId, wipedAt: new Date() },
-    update: { wipedAt: new Date() },
-  })
-  return { episodesDeleted: episodes.count, moviesDeleted: movies.count }
+    invalidateContinueWatching(accountId);
+    const accountIdValue = accountId || "default";
+    const [episodes, movies] = await prisma.$transaction([
+        prisma.episodeWatchHistory.deleteMany({
+            where: { accountId: accountIdValue, showId, userId },
+        }),
+        prisma.movieWatchHistory.deleteMany({
+            where: { accountId: accountIdValue, itemId: showId, userId },
+        }),
+    ]);
+    // Upsert, not update: this also repairs a title whose dismissal was
+    // deleted by the pre-tombstone wipe.
+    await prisma.dismissedContinueWatching.upsert({
+        create: { accountId: accountIdValue, showId, userId, wipedAt: new Date() },
+        update: { wipedAt: new Date() },
+        where: { accountId_userId_showId: { accountId: accountIdValue, showId, userId } },
+    });
+    return { episodesDeleted: episodes.count, moviesDeleted: movies.count };
 }
 
-module.exports = { getContinueWatching, invalidateContinueWatching, dismissContinueWatching, getAbandonedShows, getBuriedShows, unburyShow, wipeBuriedShow, ABANDONED_AFTER_DAYS, placeAbsoluteEpisode }
+module.exports = {
+    ABANDONED_AFTER_DAYS,
+    dismissContinueWatching,
+    getAbandonedShows,
+    getBuriedShows,
+    getContinueWatching,
+    invalidateContinueWatching,
+    placeAbsoluteEpisode,
+    unburyShow,
+    wipeBuriedShow,
+};

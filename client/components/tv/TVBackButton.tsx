@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useIsTV } from '@/lib/hooks/useIsTV';
+import { useEffect } from "react";
+import { useIsTV } from "@/lib/hooks/useIsTV";
 
 // Android's hardware/remote back button has no equivalent on PC/mobile web,
 // so Capacitor's WebView owns handling it - and by default that means
@@ -19,30 +19,40 @@ import { useIsTV } from '@/lib/hooks/useIsTV';
 // be installed in the TV shell project for `Capacitor.Plugins.App` to exist
 // at all; see /tmp/slicksync-tv-app on the VPS.
 export function TVBackButton() {
-  const isTV = useIsTV();
+    const isTV = useIsTV();
 
-  useEffect(() => {
-    if (!isTV || typeof window === 'undefined') return;
-    const cap = (window as any).Capacitor;
-    const AppPlugin = cap?.Plugins?.App;
-    if (!AppPlugin?.addListener) return;
+    useEffect(() => {
+        if (!isTV || typeof window === "undefined") {
+            return;
+        }
+        const cap = (window as any).Capacitor;
+        const AppPlugin = cap?.Plugins?.App;
+        if (!AppPlugin?.addListener) {
+            return;
+        }
 
-    let handle: { remove: () => void } | null = null;
-    let cancelled = false;
+        let handle: { remove: () => void } | null = null;
+        let cancelled = false;
 
-    AppPlugin.addListener('backButton', ({ canGoBack }: { canGoBack: boolean }) => {
-      if (canGoBack) window.history.back();
-      else AppPlugin.exitApp();
-    }).then((h: { remove: () => void }) => {
-      if (cancelled) h.remove();
-      else handle = h;
-    });
+        AppPlugin.addListener("backButton", ({ canGoBack }: { canGoBack: boolean }) => {
+            if (canGoBack) {
+                window.history.back();
+            } else {
+                AppPlugin.exitApp();
+            }
+        }).then((h: { remove: () => void }) => {
+            if (cancelled) {
+                h.remove();
+            } else {
+                handle = h;
+            }
+        });
 
-    return () => {
-      cancelled = true;
-      handle?.remove();
-    };
-  }, [isTV]);
+        return () => {
+            cancelled = true;
+            handle?.remove();
+        };
+    }, [isTV]);
 
-  return null;
+    return null;
 }

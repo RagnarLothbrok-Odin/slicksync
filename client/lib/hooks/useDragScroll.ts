@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef } from "react";
 
 /**
  * Mouse grab-and-drag horizontal scrolling for an overflow-x row, so a
@@ -11,55 +11,78 @@ import { useCallback, useRef } from 'react';
  * Usage: const drag = useDragScroll(); <div ref={drag.ref} {...drag.handlers}>
  */
 export function useDragScroll() {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const downRef = useRef(false);
-  const startXRef = useRef(0);
-  const startScrollRef = useRef(0);
-  const capturedRef = useRef(false);
-  const justDraggedRef = useRef(false);
+    const ref = useRef<HTMLDivElement | null>(null);
+    const downRef = useRef(false);
+    const startXRef = useRef(0);
+    const startScrollRef = useRef(0);
+    const capturedRef = useRef(false);
+    const justDraggedRef = useRef(false);
 
-  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType !== 'mouse' || e.button !== 0 || !ref.current) return;
-    downRef.current = true;
-    capturedRef.current = false;
-    startXRef.current = e.clientX;
-    startScrollRef.current = ref.current.scrollLeft;
-  }, []);
+    const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (e.pointerType !== "mouse" || e.button !== 0 || !ref.current) {
+            return;
+        }
+        downRef.current = true;
+        capturedRef.current = false;
+        startXRef.current = e.clientX;
+        startScrollRef.current = ref.current.scrollLeft;
+    }, []);
 
-  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType !== 'mouse' || !downRef.current || !ref.current) return;
-    if (!e.buttons) { downRef.current = false; return; }
-    const dx = e.clientX - startXRef.current;
-    if (Math.abs(dx) > 5 && !capturedRef.current) {
-      try { ref.current.setPointerCapture(e.pointerId); } catch {}
-      capturedRef.current = true;
-    }
-    if (capturedRef.current) ref.current.scrollLeft = startScrollRef.current - dx;
-  }, []);
+    const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (e.pointerType !== "mouse" || !downRef.current || !ref.current) {
+            return;
+        }
+        if (!e.buttons) {
+            downRef.current = false;
+            return;
+        }
+        const dx = e.clientX - startXRef.current;
+        if (Math.abs(dx) > 5 && !capturedRef.current) {
+            try {
+                ref.current.setPointerCapture(e.pointerId);
+            } catch {}
+            capturedRef.current = true;
+        }
+        if (capturedRef.current) {
+            ref.current.scrollLeft = startScrollRef.current - dx;
+        }
+    }, []);
 
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    downRef.current = false;
-    if (capturedRef.current && ref.current) {
-      try { ref.current.releasePointerCapture(e.pointerId); } catch {}
-      capturedRef.current = false;
-      // The release after a drag must not also press whatever tab or card it
-      // ended over.
-      justDraggedRef.current = true;
-      setTimeout(() => { justDraggedRef.current = false; }, 0);
-    }
-  }, []);
+    const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        downRef.current = false;
+        if (capturedRef.current && ref.current) {
+            try {
+                ref.current.releasePointerCapture(e.pointerId);
+            } catch {}
+            capturedRef.current = false;
+            // The release after a drag must not also press whatever tab or card it
+            // ended over.
+            justDraggedRef.current = true;
+            setTimeout(() => {
+                justDraggedRef.current = false;
+            }, 0);
+        }
+    }, []);
 
-  const onClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!justDraggedRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
+    const onClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (!justDraggedRef.current) {
+            return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+    }, []);
 
-  return {
-    ref,
-    handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerLeave: onPointerUp, onClickCapture },
-    /** True while an actual drag is in progress - a child click handler can
-     *  check this to suppress the click that would otherwise fire on release. */
-    isDragging: () => capturedRef.current,
-  };
+    return {
+        handlers: {
+            onClickCapture,
+            onPointerDown,
+            onPointerLeave: onPointerUp,
+            onPointerMove,
+            onPointerUp,
+        },
+        /** True while an actual drag is in progress - a child click handler can
+         *  check this to suppress the click that would otherwise fire on release. */
+        isDragging: () => capturedRef.current,
+        ref,
+    };
 }

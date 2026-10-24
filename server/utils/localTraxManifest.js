@@ -22,41 +22,51 @@
 
 // The token is the addon's credential and is unique per user, so it
 // identifies the owner on its own - no account scoping needed.
-const TRAX_URL = /\/trax\/([A-Za-z0-9]{16,})(?:\/|$)/
+const TRAX_URL = /\/trax\/([A-Za-z0-9]{16,})(?:\/|$)/;
 // The same, as the start of an address's path.
-const TRAX_PATH = /^\/trax\/([A-Za-z0-9]{16,})(?:\/|$)/
+const TRAX_PATH = /^\/trax\/([A-Za-z0-9]{16,})(?:\/|$)/;
 
 async function localTraxManifest(prisma, transportUrl) {
-  if (!prisma || !transportUrl) return null
-  // A stream addon behind SlickSync's gate (streamGate.js): the manifest the
-  // gate would hand a device, found here rather than over the network.
-  const { parseGateUrl, resolveGate } = require('./streamGate')
-  const gated = parseGateUrl(transportUrl)
-  if (gated) {
-    try {
-      const found = await resolveGate(prisma, gated.token, gated.addonId)
-      if (!found) return null
-      if (found.manifest) return found.manifest
-      return await require('./nuvioHomeLayout').fetchManifest(found.manifestUrl)
-    } catch {
-      return null
+    if (!(prisma && transportUrl)) {
+        return null;
     }
-  }
-  const match = TRAX_URL.exec(String(transportUrl))
-  if (!match) return null
-  try {
-    const user = await prisma.user.findFirst({ where: { traxToken: match[1] } })
-    if (!user) return null
-    // Required lazily: traxAddon is a route module, and the route modules
-    // pull in utils. Requiring it at load time would close the circle.
-    const { buildTraxManifest, getListsForAccount } = require('../routes/traxAddon')
-    const lists = await getListsForAccount(prisma, user.accountId)
-    return buildTraxManifest(user, lists)
-  } catch {
-    // A trax URL we cannot resolve locally falls back to the network path,
-    // which is no worse than before this existed.
-    return null
-  }
+    // A stream addon behind SlickSync's gate (streamGate.js): the manifest the
+    // gate would hand a device, found here rather than over the network.
+    const { parseGateUrl, resolveGate } = require("./streamGate");
+    const gated = parseGateUrl(transportUrl);
+    if (gated) {
+        try {
+            const found = await resolveGate(prisma, gated.token, gated.addonId);
+            if (!found) {
+                return null;
+            }
+            if (found.manifest) {
+                return found.manifest;
+            }
+            return await require("./nuvioHomeLayout").fetchManifest(found.manifestUrl);
+        } catch {
+            return null;
+        }
+    }
+    const match = TRAX_URL.exec(String(transportUrl));
+    if (!match) {
+        return null;
+    }
+    try {
+        const user = await prisma.user.findFirst({ where: { traxToken: match[1] } });
+        if (!user) {
+            return null;
+        }
+        // Required lazily: traxAddon is a route module, and the route modules
+        // pull in utils. Requiring it at load time would close the circle.
+        const { buildTraxManifest, getListsForAccount } = require("../routes/traxAddon");
+        const lists = await getListsForAccount(prisma, user.accountId);
+        return buildTraxManifest(user, lists);
+    } catch {
+        // A trax URL we cannot resolve locally falls back to the network path,
+        // which is no worse than before this existed.
+        return null;
+    }
 }
 
 /**
@@ -72,22 +82,31 @@ async function localTraxManifest(prisma, transportUrl) {
  * fetched normally rather than being answered with our own data.
  */
 async function loopbackTraxUrl(prisma, rawUrl) {
-  if (!prisma || !rawUrl) return null
-  try {
-    const parsed = new URL(String(rawUrl))
-    // The token has to open the PATH, as the address is read once parsed
-    // (dot-segments collapsed). Matching it anywhere in the text would let any
-    // address that merely mentions /trax/<token> - in a query, or a path that
-    // climbs out of /trax/ - be sent to this process under that path.
-    const match = TRAX_PATH.exec(parsed.pathname)
-    if (!match) return null
-    const owner = await prisma.user.findFirst({ where: { traxToken: match[1] }, select: { id: true } })
-    if (!owner) return null
-    const port = process.env.PORT || 4000
-    return `http://127.0.0.1:${port}${parsed.pathname}${parsed.search || ''}`
-  } catch {
-    return null
-  }
+    if (!(prisma && rawUrl)) {
+        return null;
+    }
+    try {
+        const parsed = new URL(String(rawUrl));
+        // The token has to open the PATH, as the address is read once parsed
+        // (dot-segments collapsed). Matching it anywhere in the text would let any
+        // address that merely mentions /trax/<token> - in a query, or a path that
+        // climbs out of /trax/ - be sent to this process under that path.
+        const match = TRAX_PATH.exec(parsed.pathname);
+        if (!match) {
+            return null;
+        }
+        const owner = await prisma.user.findFirst({
+            select: { id: true },
+            where: { traxToken: match[1] },
+        });
+        if (!owner) {
+            return null;
+        }
+        const port = process.env.PORT || 4000;
+        return `http://127.0.0.1:${port}${parsed.pathname}${parsed.search || ""}`;
+    } catch {
+        return null;
+    }
 }
 
-module.exports = { localTraxManifest, loopbackTraxUrl }
+module.exports = { localTraxManifest, loopbackTraxUrl };

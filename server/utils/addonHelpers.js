@@ -8,30 +8,30 @@
  * @deprecated No longer used - addons are now cleared to empty array
  */
 function getLocalFilesAddon() {
-  return {
-    transportUrl: 'http://127.0.0.1:11470/local-addon/manifest.json',
-    transportName: '',
-    manifest: {
-      id: 'org.stremio.local',
-      version: '1.10.0',
-      description: 'Local add-on to find playable files: .torrent, .mp4, .mkv and .avi',
-      name: 'Local Files (without catalog support)',
-      resources: [
-        {
-          name: 'meta',
-          types: ['other'],
-          idPrefixes: ['local:', 'bt:']
+    return {
+        manifest: {
+            catalogs: [],
+            description: "Local add-on to find playable files: .torrent, .mp4, .mkv and .avi",
+            id: "org.stremio.local",
+            name: "Local Files (without catalog support)",
+            resources: [
+                {
+                    idPrefixes: ["local:", "bt:"],
+                    name: "meta",
+                    types: ["other"],
+                },
+                {
+                    idPrefixes: ["tt"],
+                    name: "stream",
+                    types: ["movie", "series"],
+                },
+            ],
+            types: ["movie", "series", "other"],
+            version: "1.10.0",
         },
-        {
-          name: 'stream',
-          types: ['movie', 'series'],
-          idPrefixes: ['tt']
-        }
-      ],
-      types: ['movie', 'series', 'other'],
-      catalogs: []
-    }
-  }
+        transportName: "",
+        transportUrl: "http://127.0.0.1:11470/local-addon/manifest.json",
+    };
 }
 
 /**
@@ -41,8 +41,8 @@ function getLocalFilesAddon() {
  * @returns {Promise<void>}
  */
 async function clearAddonsAndAddLocalFiles(apiClient) {
-  // Just set to empty array - no longer need Local Files workaround
-  await apiClient.request('addonCollectionSet', { addons: [] })
+    // Just set to empty array - no longer need Local Files workaround
+    await apiClient.request("addonCollectionSet", { addons: [] });
 }
 
 /**
@@ -51,11 +51,11 @@ async function clearAddonsAndAddLocalFiles(apiClient) {
  * @returns {Promise<void>}
  */
 async function clearAddons(apiClient) {
-  await apiClient.request('addonCollectionSet', { addons: [] })
+    await apiClient.request("addonCollectionSet", { addons: [] });
 }
 
 module.exports = {
-  getLocalFilesAddon,
-  clearAddonsAndAddLocalFiles,
-  clearAddons
-}
+    clearAddons,
+    clearAddonsAndAddLocalFiles,
+    getLocalFilesAddon,
+};

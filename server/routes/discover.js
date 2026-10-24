@@ -1,6 +1,6 @@
-const express = require('express');
-const { publicMessage } = require('../utils/publicError');
-const { fetchCatalog } = require('../utils/discover');
+const express = require("express");
+const { publicMessage } = require("../utils/publicError");
+const { fetchCatalog } = require("../utils/discover");
 
 // AI-sharpened "why this matches" text for For You's rows that already have
 // hasRealSignal (a genuine cross-item/cross-user affinity behind them, not
@@ -13,24 +13,34 @@ const { fetchCatalog } = require('../utils/discover');
 // or missing AI credential, the existing deterministic `reason` is left
 // exactly as it was (this only ever upgrades text, never blocks the response
 // or removes a row).
-const REASON_ENHANCE_MAX = 3
+const REASON_ENHANCE_MAX = 3;
 async function enhanceRealMatchReasons(prisma, accountId, rows) {
-  try {
-    const { resolveAiCredentials, callAiText } = require('../utils/nlCatalog')
-    const { decrypt } = require('../utils/encryption')
-    const creds = await resolveAiCredentials(prisma, accountId, decrypt)
-    if (!creds) return // no AI key configured - leave every row's deterministic reason as-is
+    try {
+        const { resolveAiCredentials, callAiText } = require("../utils/nlCatalog");
+        const { decrypt } = require("../utils/encryption");
+        const creds = await resolveAiCredentials(prisma, accountId, decrypt);
+        if (!creds) {
+            return; // no AI key configured - leave every row's deterministic reason as-is
+        }
 
-    const candidates = rows.filter((r) => r.hasRealSignal).slice(0, REASON_ENHANCE_MAX)
-    await Promise.allSettled(candidates.map(async (row) => {
-      const titleNames = row.items.slice(0, 3).map((it) => it.name).filter(Boolean).join(', ')
-      const prompt = `In one short punchy sentence (under 15 words, no quotes), explain to a household streaming user why they'd like this recommendation row, based on: "${row.reason}". The row includes titles like: ${titleNames || 'similar titles'}. Don't just restate the input - make it feel like a genuine insight.`
-      const text = await callAiText(prompt, creds, { maxTokens: 40, timeoutMs: 4000 })
-      if (text) row.reason = text
-    }))
-  } catch {
-    // Best-effort only - every row already has a real deterministic reason.
-  }
+        const candidates = rows.filter((r) => r.hasRealSignal).slice(0, REASON_ENHANCE_MAX);
+        await Promise.allSettled(
+            candidates.map(async (row) => {
+                const titleNames = row.items
+                    .slice(0, 3)
+                    .map((it) => it.name)
+                    .filter(Boolean)
+                    .join(", ");
+                const prompt = `In one short punchy sentence (under 15 words, no quotes), explain to a household streaming user why they'd like this recommendation row, based on: "${row.reason}". The row includes titles like: ${titleNames || "similar titles"}. Don't just restate the input - make it feel like a genuine insight.`;
+                const text = await callAiText(prompt, creds, { maxTokens: 40, timeoutMs: 4000 });
+                if (text) {
+                    row.reason = text;
+                }
+            })
+        );
+    } catch {
+        // Best-effort only - every row already has a real deterministic reason.
+    }
 }
 
 // Discover - browse/search Cinemeta's real catalogs and preview results
@@ -44,1253 +54,1810 @@ async function enhanceRealMatchReasons(prisma, accountId, rows) {
 // front gave up a minute later, so the page sat spinning instead of
 // saying it could not load. Ten seconds is well past a healthy response
 // and well short of anyone's patience.
-const OUTBOUND_TIMEOUT_MS = 10000
+const OUTBOUND_TIMEOUT_MS = 10_000;
 async function fetchOut(url, options = {}) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), OUTBOUND_TIMEOUT_MS)
-  try {
-    return await fetch(url, { ...options, signal: controller.signal })
-  } finally {
-    clearTimeout(timer)
-  }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OUTBOUND_TIMEOUT_MS);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // The posters a page is about to ask for, produced while its answer is on
 // the way - the first screenfuls of every list, page and search, not only
 // the default ones warmed on a timer (utils/discover.js).
 function warmShown(items) {
-  try { require('../utils/posterWarm').warmPosters((items || []).slice(0, 60), { urgent: true }) } catch { /* optimisation only */ }
+    try {
+        require("../utils/posterWarm").warmPosters((items || []).slice(0, 60), { urgent: true });
+    } catch {
+        /* optimisation only */
+    }
 }
 
 module.exports = ({ prisma, getAccountId, decrypt } = {}) => {
-  const router = express.Router();
+    const router = express.Router();
 
-  // The account's LumiereDB, when one is set and ready - '' otherwise.
-  const lumiereFor = (req) => require('../utils/lumiere').readyLumiere(prisma, (getAccountId && getAccountId(req)) || 'default').catch(() => '')
+    // The account's LumiereDB, when one is set and ready - '' otherwise.
+    const lumiereFor = (req) =>
+        require("../utils/lumiere")
+            .readyLumiere(prisma, getAccountId?.(req) || "default")
+            .catch(() => "");
 
-  // GET /api/discover/lumiere - whether Discover has LumiereDB to offer
-  // (Trending, IMDb's Popular, typo-proof search), and the credit line
-  // IMDb's terms ask for wherever their data is shown.
-  router.get('/lumiere', async (req, res) => {
-    const { ATTRIBUTION } = require('../utils/lumiere')
-    res.json({ ready: !!(await lumiereFor(req)), attribution: ATTRIBUTION })
-  })
+    // GET /api/discover/lumiere - whether Discover has LumiereDB to offer
+    // (Trending, IMDb's Popular, typo-proof search), and the credit line
+    // IMDb's terms ask for wherever their data is shown.
+    router.get("/lumiere", async (req, res) => {
+        const { ATTRIBUTION } = require("../utils/lumiere");
+        res.json({ attribution: ATTRIBUTION, ready: !!(await lumiereFor(req)) });
+    });
 
-  // GET /api/discover/browse?type=movie|series|both&catalog=top|trending|year|imdbRating&genre=X&skip=N
-  //   &decade=2020s..1980s|older &minRating=6|7|8 &length=short|mid|long  (utils/discoverFacets.js)
-  //   &paged=1 answers { items, nextSkip } instead of the bare array, so the
-  //   page knows where the next page starts - a filtered page reads ahead and
-  //   "Both" packs two positions into one number.
-  router.get('/browse', async (req, res) => {
-    try {
-      const { type = 'movie', catalog = 'top', genre, skip } = req.query
-      if (type !== 'movie' && type !== 'series' && type !== 'both') {
-        return res.status(400).json({ error: 'type must be movie, series or both' })
-      }
-      const { parseFacets, filteredPage, bothPage } = require('../utils/discoverFacets')
-      const facets = parseFacets(req.query)
-      const from = Math.max(0, Math.floor(Number(skip) || 0))
-      // The length filter reads Cinemeta's runtimes; LumiereDB's lists may not carry one.
-      const base = (catalog === 'top' || catalog === 'trending') && !facets?.length ? await lumiereFor(req) : ''
-      // One page of one type: { items, cursor }, the cursor where the next starts.
-      const pageOf = (oneType) => async (at) => {
-        // Popular and Trending come from IMDb's own numbers when there's a
-        // LumiereDB: Popular 500 deep, Trending 100, both leaving out titles
-        // few people have voted on. Paged here, as Cinemeta's are.
-        if (base) {
-          try {
-            const lumiere = require('../utils/lumiere')
-            const all = await lumiere.listIds(base, catalog === 'trending' ? 'trending' : 'popular', oneType, genre ? lumiere.genreSlug(genre) : '')
-            const page = all.slice(at, at + 100)
-            return { items: page, cursor: at + page.length }
-          } catch (e) {
-            console.warn('[Discover] LumiereDB list failed, using Cinemeta:', e?.message || e)
-          }
-        }
-        const items = await fetchCatalog(oneType, {
-          catalog: catalog === 'trending' ? 'top' : catalog,
-          genre: genre || undefined,
-          skip: at || undefined,
-        })
-        return { items, cursor: at + items.length }
-      }
-      const { items, cursor } = type === 'both'
-        ? await bothPage((oneType, at) => filteredPage(pageOf(oneType), at, facets), from)
-        : await filteredPage(pageOf(type), from, facets)
-      if (req.query.paged) res.json({ items, nextSkip: cursor })
-      else res.json(items)
-      warmShown(items)
-    } catch (error) {
-      console.error('Error fetching discover catalog:', error)
-      res.status(500).json({ error: 'Failed to fetch catalog' })
-    }
-  })
-
-  // GET /api/discover/search?type=movie|series|both&query=X (+ the filters above, &paged=1)
-  // Search only works against the "top" catalog - that's the only one
-  // Cinemeta's own manifest advertises search support for. A search is one
-  // answer, never paged: nextSkip is always null.
-  router.get('/search', async (req, res) => {
-    try {
-      const { type = 'movie', query, genre } = req.query
-      if (type !== 'movie' && type !== 'series' && type !== 'both') {
-        return res.status(400).json({ error: 'type must be movie, series or both' })
-      }
-      const send = (items) => (req.query.paged ? res.json({ items, nextSkip: null }) : res.json(items))
-      if (!query || !query.trim()) return send([])
-      const { parseFacets, matchesFacets, matchesGenre, interleave } = require('../utils/discoverFacets')
-      const facets = parseFacets(req.query)
-      const base = await lumiereFor(req)
-      const searchOne = async (oneType) => {
-        // LumiereDB reads what was meant: typos ("intersteller"), words run
-        // together ("spiderman"), a sequel number or a year on the end, a
-        // nickname ("lotr") and the title in another language. Cinemeta's
-        // search only matches what's typed.
-        if (base) {
-          try {
-            const found = await require('../utils/lumiere').searchTitles(base, oneType, query, { limit: 40 })
-            if (found.length > 0) return found
-          } catch (e) {
-            console.warn('[Discover] LumiereDB search failed, using Cinemeta:', e?.message || e)
-          }
-        }
-        return fetchCatalog(oneType, { catalog: 'top', search: query.trim() })
-      }
-      const items = type === 'both'
-        ? interleave(...(await Promise.all([searchOne('movie'), searchOne('series')])))
-        : await searchOne(type)
-      const shown = items.filter((i) => matchesGenre(i, genre) && matchesFacets(i, facets))
-      send(shown)
-      warmShown(shown)
-    } catch (error) {
-      console.error('Error searching discover catalog:', error)
-      res.status(500).json({ error: 'Failed to search catalog' })
-    }
-  })
-
-  // GET /api/discover/recommendations
-  // "Because you watched X" rows for Discover's For You tab, built from
-  // SlickTrax's actual watch-time signal rather than just "what did you
-  // play most recently." Algorithm:
-  //   1. Score every item the account has real WatchActivity for by its
-  //      SUMMED watchTimeSeconds over the lookback window, exponentially
-  //      decayed by age (a show binged 3 months ago should fade, not sit
-  //      permanently at the top; something you're mid-binge on right now
-  //      should dominate over a single movie watched once ages ago). Items
-  //      with real watch history but no WatchActivity coverage yet (older
-  //      data) get a small flat baseline instead of being invisible.
-  //   2. Watchlist adds are folded in too, at a fraction of a real watch's
-  //      weight — "I want to see this" is a real taste signal, just a
-  //      weaker one than time actually spent watching.
-  //   3. Fetch genres (cached) for the top-scored candidates, then sum each
-  //      candidate's score into every genre it carries — genre affinity
-  //      driven by weighted watch time, not by whichever 3 titles happen to
-  //      be most recent.
-  //   4. Take the top genres by aggregate score, one row each. Each row's
-  //      seed (for the "Because you watched X" label) is the highest-scored
-  //      candidate carrying that genre.
-  //   5. For each seed, fetch Cinemeta Top Rated in that genre (falling back
-  //      to Popular if too few survive filtering), excluding anything
-  //      already watched OR already on the watchlist — no point suggesting
-  //      what you've already decided to watch.
-  // Returns { rows: [{ reason, genre, seedId, seedType, items[] }] }.
-  router.get('/recommendations', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ rows: [] })
-      const accountId = getAccountId(req) || 'default'
-
-      // This page has no single logged-in "current user" of its own (it's
-      // the admin's account-wide view - see findAttributionForSeed's own
-      // comment), so "personal" vs "shared" recommendations both need an
-      // explicit pick from the caller rather than an implicit "me."
-      // personal + one userId = that person's own watch history only.
-      // shared + two userIds = combined watch signal from exactly those two,
-      // with the existing collaborative-boost/pairwise-attribution logic
-      // naturally scoped down to just them (nothing else changes - see
-      // scopedUserIds usage below). No mode/userId at all = the original
-      // household-wide behavior, unchanged, for any caller that doesn't
-      // send these params.
-      const mode = req.query.mode === 'shared' ? 'shared' : 'personal'
-      const userId = typeof req.query.userId === 'string' && req.query.userId ? req.query.userId : null
-      const userId2 = typeof req.query.userId2 === 'string' && req.query.userId2 ? req.query.userId2 : null
-      // Which type of row to build - matches Discover's own Movies/Series
-      // toggle. Filtered in BEFORE ranking/slicing to CANDIDATE_POOL below,
-      // not after - filtering after would starve the pool if the highest-
-      // scored items that poll happened to skew the other type.
-      const requestedType = req.query.type === 'series' ? 'series' : 'movie'
-      const scopedUserIds = mode === 'shared' && userId && userId2 && userId !== userId2
-        ? [userId, userId2]
-        : (mode === 'personal' && userId ? [userId] : null)
-      const scopedNamesById = new Map()
-      if (scopedUserIds) {
+    // GET /api/discover/browse?type=movie|series|both&catalog=top|trending|year|imdbRating&genre=X&skip=N
+    //   &decade=2020s..1980s|older &minRating=6|7|8 &length=short|mid|long  (utils/discoverFacets.js)
+    //   &paged=1 answers { items, nextSkip } instead of the bare array, so the
+    //   page knows where the next page starts - a filtered page reads ahead and
+    //   "Both" packs two positions into one number.
+    router.get("/browse", async (req, res) => {
         try {
-          const rows = await prisma.user.findMany({ where: { id: { in: scopedUserIds } }, select: { id: true, username: true, email: true } })
-          for (const u of rows) scopedNamesById.set(u.id, u.username || u.email || 'someone')
-        } catch {}
-      }
-
-      // Respect the SlickTrax opt-out — a disabled feature should never
-      // trigger the metadata + catalog fetches this endpoint does,
-      // regardless of what the client sends.
-      try {
-        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-        let cfg = acc?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object' && cfg.enableRecommendations === false) {
-          return res.json({ rows: [] })
-        }
-      } catch {}
-
-      const MAX_ROWS = 3
-      const ITEMS_PER_ROW = 12
-      const CANDIDATE_POOL = 40 // how many top-scored items get a genre lookup
-      const ACTIVITY_LOOKBACK_DAYS = 90
-      const HALF_LIFE_DAYS = 21 // score halves every 3 weeks of age
-      const BASELINE_SECONDS = 600 // flat weight for real watches with no WatchActivity coverage (pre-dates the table, or a same-poll edge case)
-      const WATCHLIST_WEIGHT_SECONDS = 900 // an intent signal, deliberately lighter than any real viewing
-
-      const lookbackDate = new Date(Date.now() - ACTIVITY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
-
-      // Overrides/watchlist/notInterested stay account-wide regardless of
-      // mode - neither model has a userId column (both deliberately
-      // household-wide, see their own schema comments), and "already
-      // watched/wishlisted/dismissed by anyone in the household" is still
-      // the right exclusion even for a personal or shared row.
-      const [movies, episodes, overrides, activity, watchlist, notInterested] = await Promise.all([
-        prisma.movieWatchHistory.findMany({
-          where: scopedUserIds ? { accountId, userId: { in: scopedUserIds } } : { accountId },
-          orderBy: { watchedAt: 'desc' },
-          take: 200,
-          distinct: ['itemId'],
-        }),
-        prisma.episodeWatchHistory.findMany({
-          where: scopedUserIds ? { accountId, userId: { in: scopedUserIds } } : { accountId },
-          orderBy: { watchedAt: 'desc' },
-          take: 200,
-          distinct: ['showId'],
-        }),
-        prisma.manualWatchOverride.findMany({
-          where: { accountId },
-          select: { itemId: true, watched: true },
-        }),
-        prisma.watchActivity.findMany({
-          where: scopedUserIds ? { accountId, userId: { in: scopedUserIds }, date: { gte: lookbackDate } } : { accountId, date: { gte: lookbackDate } },
-          select: { itemId: true, itemType: true, watchTimeSeconds: true, date: true },
-        }),
-        prisma.watchlistItem.findMany({ where: { accountId }, select: { itemId: true, itemType: true, name: true } }).catch(() => []),
-        prisma.notInterestedItem.findMany({ where: { accountId }, select: { itemId: true, itemType: true } }).catch(() => []),
-      ])
-
-      // SlickTrax reactions/ratings - see recommendationEngine.js's
-      // computeSignedAdjustments for how these turn into scoring below.
-      const { getAllReactions, getAllRatings } = require('../utils/titleFeedback')
-      const [reactions, ratings] = await Promise.all([
-        getAllReactions(prisma, accountId).catch(() => []),
-        getAllRatings(prisma, accountId).catch(() => []),
-      ])
-      // A disliked title (whether via reaction or a low rating) should never
-      // itself be suggested, same hard exclusion "not interested" already
-      // gets - a merely-similar title is still just downweighted below, not
-      // excluded outright.
-      const dislikedIds = new Set(reactions.filter((r) => r.reaction === 'sad').map((r) => r.itemId))
-
-      // Title/type for every candidate, from whichever source names it first.
-      const itemMeta = new Map()
-      for (const m of movies) itemMeta.set(m.itemId, { name: m.itemName, type: 'movie' })
-      for (const e of episodes) itemMeta.set(e.showId, { name: e.showName, type: 'series' })
-      for (const w of watchlist) if (!itemMeta.has(w.itemId)) itemMeta.set(w.itemId, { name: w.name, type: w.itemType })
-      // A liked/loved/rated title with no other watch signal (reacted to
-      // from Discover without having watched it here, e.g. a household
-      // member watched it elsewhere) still needs to be a real candidate for
-      // its positive weight below to have anywhere to attach.
-      for (const r of reactions) if (!itemMeta.has(r.itemId)) itemMeta.set(r.itemId, { name: r.itemName, type: r.itemType })
-      for (const r of ratings) if (!itemMeta.has(r.itemId)) itemMeta.set(r.itemId, { name: r.itemName, type: r.itemType })
-
-      if (itemMeta.size === 0) return res.json({ rows: [] })
-
-      // The "already watched" / "already on watchlist" sets powering the
-      // exclusion filter. Manual overrides set to true also count as
-      // watched; set to false REMOVES from the watched set (unwatched
-      // override wins over real history).
-      const watchedIds = new Set([
-        ...movies.map((m) => m.itemId),
-        ...episodes.map((e) => e.showId),
-      ])
-      for (const o of overrides) {
-        if (o.watched) watchedIds.add(o.itemId)
-        else watchedIds.delete(o.itemId)
-      }
-      const watchlistIds = new Set(watchlist.map((w) => w.itemId))
-      // SlickTrax "Not interested" feedback - excluded the same way watched/
-      // watchlisted items already are (never a seed, never a recommended
-      // item), plus notInterestedKeys below feeds computeNotInterestedPenalties
-      // to also downweight items merely SIMILAR to what was dismissed.
-      // dislikedIds folded in here (not a separate exclusion set) so every
-      // existing "already excluded" filter below picks it up automatically,
-      // same treatment as an explicit "not interested" mark.
-      const notInterestedIds = new Set([...notInterested.map((n) => n.itemId), ...dislikedIds])
-      const notInterestedKeys = notInterested.map((n) => `${n.itemType === 'series' ? 'series' : 'movie'}:${n.itemId}`)
-
-      // Real watch-time weight, decayed by age so recent viewing still
-      // matters more than ancient history without ignoring it outright.
-      const now = Date.now()
-      const scoreByItem = new Map()
-      for (const a of activity) {
-        const ageDays = (now - new Date(a.date).getTime()) / (24 * 60 * 60 * 1000)
-        const decay = Math.pow(0.5, Math.max(0, ageDays) / HALF_LIFE_DAYS)
-        scoreByItem.set(a.itemId, (scoreByItem.get(a.itemId) || 0) + a.watchTimeSeconds * decay)
-        if (!itemMeta.has(a.itemId)) itemMeta.set(a.itemId, { name: null, type: a.itemType })
-      }
-      for (const m of movies) if (!scoreByItem.has(m.itemId)) scoreByItem.set(m.itemId, BASELINE_SECONDS)
-      for (const e of episodes) if (!scoreByItem.has(e.showId)) scoreByItem.set(e.showId, BASELINE_SECONDS)
-      for (const w of watchlist) scoreByItem.set(w.itemId, (scoreByItem.get(w.itemId) || 0) + WATCHLIST_WEIGHT_SECONDS)
-
-      // Collaborative signal: a modest boost for titles OTHER household
-      // members also spent real time on, so the seed picked for a genre row
-      // reflects actual shared taste rather than just whichever single
-      // viewer's score happens to be highest. See recommendationEngine.js's
-      // own header for why this is a boost on top of genre/Cinemeta
-      // discovery rather than a full replacement.
-      //
-      // affinity/pairwiseOverlaps/usersById are hoisted out of this try
-      // block (not just local consts) because the row-building loop below
-      // reuses them to attribute a seed to a real pairwise match ("Sarah
-      // and Mike both loved X") instead of re-deriving the same vectors/
-      // affinity a second time.
-      let affinity = null
-      let pairwiseOverlaps = []
-      let usersById = new Map()
-      try {
-        const {
-          buildUserVectors, computeItemSimilarity, collaborativeBoost, computePairwiseOverlap,
-          computeNotInterestedPenalties, applyNotInterestedPenalty,
-          computeSignedAdjustments, reactionsToSignedEntries, ratingsToSignedEntries,
-        } = require('../utils/recommendationEngine')
-        const { vectors: allVectors, itemMeta: vectorItemMeta } = await buildUserVectors(prisma, accountId)
-        // Scoped down to just the requested user(s) - buildUserVectors has
-        // no userId filter of its own (it always reads the whole account),
-        // so this is where personal/shared mode actually take effect for
-        // the collaborative-boost/attribution layer. Personal mode leaves
-        // exactly one entry, which makes every `vectors.size > 1` check
-        // below naturally false - no separate "skip this for personal mode"
-        // branch needed, the existing household-mode gates already do it.
-        const vectors = scopedUserIds
-          ? new Map([...allVectors].filter(([uid]) => scopedUserIds.includes(uid)))
-          : allVectors
-        if (vectors.size > 0) {
-          affinity = computeItemSimilarity(vectors)
-          const COLLAB_BOOST_WEIGHT = 0.5
-          // Only meaningful with 2+ real vectors (a single person can't have
-          // cross-person affinity), but the not-interested penalty below
-          // still applies even for a single-user household, so affinity is
-          // still built either way - it'll just be empty for one user.
-          const penalties = computeNotInterestedPenalties(affinity, notInterestedKeys)
-          // Reactions/ratings, same neighbor-walk shape as the not-interested
-          // penalty above but signed (positive for a happy reaction/high
-          // rating, negative for sad/low ratings) - see
-          // recommendationEngine.js's computeSignedAdjustments for the full
-          // reasoning.
-          const reactionAdjustments = computeSignedAdjustments(affinity, reactionsToSignedEntries(reactions))
-          const ratingAdjustments = computeSignedAdjustments(affinity, ratingsToSignedEntries(ratings))
-          for (const [id, score] of scoreByItem) {
-            const meta = itemMeta.get(id)
-            if (!meta) continue
-            const key = `${meta.type === 'series' ? 'series' : 'movie'}:${id}`
-            let next = score
-            if (vectors.size > 1) {
-              const boost = collaborativeBoost(affinity, key)
-              if (boost > 0) next += boost * COLLAB_BOOST_WEIGHT
+            const { type = "movie", catalog = "top", genre, skip } = req.query;
+            if (type !== "movie" && type !== "series" && type !== "both") {
+                return res.status(400).json({ error: "type must be movie, series or both" });
             }
-            next = applyNotInterestedPenalty(next, penalties.get(key) || 0)
-            next += reactionAdjustments.get(key) || 0
-            next += ratingAdjustments.get(key) || 0
-            if (next !== score) scoreByItem.set(id, next)
-          }
-        }
-        if (vectors.size > 1) {
-          pairwiseOverlaps = computePairwiseOverlap(vectors, vectorItemMeta)
-          if (pairwiseOverlaps.length > 0) {
-            const userRows = await prisma.user.findMany({
-              where: { id: { in: [...vectors.keys()] } },
-              select: { id: true, username: true, email: true },
-            })
-            usersById = new Map(userRows.map((u) => [u.id, u.username || u.email || 'someone']))
-          }
-        }
-      } catch (e) {
-        console.warn('Collaborative boost/not-interested penalty/attribution skipped:', e?.message)
-      }
-
-      const ranked = [...scoreByItem.entries()]
-        .filter(([id]) => !notInterestedIds.has(id))
-        .map(([id, score]) => ({ id, score, ...(itemMeta.get(id) || { type: 'movie' }) }))
-        .filter((c) => c.type === requestedType)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, CANDIDATE_POOL)
-
-      if (ranked.length === 0) return res.json({ rows: [] })
-
-      // Pull genres for each ranked candidate in parallel (fetchMetadata is
-      // cached, so repeat calls for the same id are free) — also backfills
-      // the name for anything that only came from WatchActivity.
-      const { fetchMetadata } = require('../utils/notify')
-      const { resolveOmdbKey } = require('../utils/listImport')
-      const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-      const withGenres = await Promise.all(ranked.map(async (c) => {
-        try {
-          const meta = await fetchMetadata(c.id, c.type, null, omdbApiKey)
-          return { ...c, name: c.name || meta?.name || null, genres: Array.isArray(meta?.genres) ? meta.genres : [] }
-        } catch { return { ...c, genres: [] } }
-      }))
-
-      // Aggregate weighted score per genre across every candidate carrying it.
-      const genreScore = new Map()
-      for (const c of withGenres) {
-        for (const g of c.genres) genreScore.set(g, (genreScore.get(g) || 0) + c.score)
-      }
-      const topGenres = [...genreScore.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)
-
-      const rows = []
-      const usedSeedIds = new Set()
-      for (const genre of topGenres) {
-        if (rows.length >= MAX_ROWS) break
-        // Seed = the highest-scored candidate carrying this genre — the
-        // strongest real reason to attribute the row to.
-        const seed = withGenres
-          .filter((c) => c.genres.includes(genre) && c.name && !usedSeedIds.has(c.id))
-          .sort((a, b) => b.score - a.score)[0]
-        if (!seed) continue
-        usedSeedIds.add(seed.id)
-        // Top Rated in that genre, filtered to unwatched and not already on
-        // the watchlist. Fall back to Popular if too few survive filtering.
-        let items = await fetchCatalog(seed.type, { catalog: 'imdbRating', genre })
-        let filtered = items.filter((i) => !watchedIds.has(i.id) && !watchlistIds.has(i.id) && !notInterestedIds.has(i.id))
-        if (filtered.length < 4) {
-          const popular = await fetchCatalog(seed.type, { catalog: 'top', genre })
-          const seenIds = new Set(filtered.map((i) => i.id))
-          for (const p of popular) {
-            if (!watchedIds.has(p.id) && !watchlistIds.has(p.id) && !notInterestedIds.has(p.id) && !seenIds.has(p.id)) filtered.push(p)
-          }
-        }
-        filtered = filtered.slice(0, ITEMS_PER_ROW)
-        if (filtered.length === 0) continue
-
-        // Real household match behind this seed ("Sarah and Mike both loved
-        // X") beats the generic fallback whenever one exists - see
-        // findAttributionForSeed's own comment for why this isn't scoped to
-        // a single "current user" the way a personalized feed would be.
-        // Personal/shared mode (scopedUserIds set) name the actual person/
-        // pair explicitly instead - "you" doesn't fit when the admin picked
-        // a specific managed user (or two) rather than reading their own
-        // account-wide feed.
-        let reason = scopedUserIds && scopedUserIds.length === 1
-          ? `Because ${scopedNamesById.get(scopedUserIds[0]) || 'they'} watched ${seed.name}`
-          : scopedUserIds && scopedUserIds.length === 2
-            ? `Because ${scopedNamesById.get(scopedUserIds[0]) || 'they'} and ${scopedNamesById.get(scopedUserIds[1]) || 'they'} watched ${seed.name}`
-            : `Because you watched ${seed.name}`
-        // hasRealSignal - same definition /similar uses: does the item-item
-        // affinity map have any real neighbors for THIS specific seed, i.e.
-        // did actual cross-item viewing behavior (not just this seed's own
-        // decayed watch-time score) touch this row at all. Every row here
-        // already starts from something genuinely watched, so this isn't
-        // "watched vs not" - it's "confirmed by real behavioral overlap
-        // (this account's own rewatch patterns, or another household
-        // member's) vs riding on this one seed's score alone." A found
-        // pairwise attribution is strictly stronger evidence of the same
-        // thing, so it also counts.
-        const seedKey = `${seed.type === 'series' ? 'series' : 'movie'}:${seed.id}`
-        let hasRealSignal = !!(affinity && affinity.get(seedKey)?.size > 0)
-        if (affinity && pairwiseOverlaps.length > 0) {
-          try {
-            const { findAttributionForSeed } = require('../utils/recommendationEngine')
-            const attribution = findAttributionForSeed(seedKey, pairwiseOverlaps, affinity)
-            if (attribution) {
-              const nameA = usersById.get(attribution.userA) || 'someone'
-              const nameB = usersById.get(attribution.userB) || 'someone else'
-              reason = `${nameA} and ${nameB} both loved ${seed.name}`
-              hasRealSignal = true
-            }
-          } catch (e) {
-            console.warn('Attribution lookup skipped:', e?.message)
-          }
-        }
-
-        rows.push({
-          reason,
-          genre,
-          seedId: seed.id,
-          seedType: seed.type,
-          hasRealSignal,
-          items: filtered,
-        })
-      }
-
-      await enhanceRealMatchReasons(prisma, accountId, rows)
-      res.json({ rows })
-    } catch (error) {
-      console.error('Error building recommendations:', error)
-      res.status(500).json({ error: 'Failed to build recommendations' })
-    }
-  })
-
-  // GET /api/discover/similar?id=X&type=movie|series
-  // "More Like This" for the detail popup - ANY item, not just Discover's
-  // For You rows (that's /recommendations, which seeds off the household's
-  // own top-scored watch history; this seeds off whatever single item the
-  // popup happens to be open on, including titles nobody's watched yet).
-  //
-  // Real household affinity is used to WEIGHT which genre(s) to search,
-  // never to supply the displayed items directly - a first version did the
-  // latter and got it wrong: the item-item affinity map (computeItemSimilarity,
-  // same one /recommendations' collaborative boost reads) only has entries
-  // for titles someone has actually spent real time on, since that's the
-  // literal definition of "affinity neighbor" here - two titles the same
-  // person watched. Showing those directly meant "More Like This" was
-  // guaranteed to recommend already-watched content back whenever real
-  // signal existed, which is the opposite of the point. So: look at what
-  // genres the top real neighbors carry, bias the actual Cinemeta pull
-  // toward those genres (on top of the seed's own), then filter the result
-  // against the WHOLE household's watch history same as /recommendations
-  // does - every displayed item is guaranteed unwatched by anyone here.
-  router.get('/similar', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ items: [], hasRealSignal: false })
-      const accountId = getAccountId(req) || 'default'
-      const { id, type } = req.query
-      if (!id || (type !== 'movie' && type !== 'series')) {
-        return res.status(400).json({ error: 'id and type (movie|series) are required' })
-      }
-
-      // Same opt-out /recommendations respects - this reuses the identical
-      // engine, so a household that turned SlickTrax off shouldn't have it
-      // silently running here either.
-      try {
-        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-        let cfg = acc?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object' && cfg.enableRecommendations === false) {
-          return res.json({ items: [], hasRealSignal: false })
-        }
-      } catch {}
-
-      const MAX_ITEMS = 16
-      const MAX_GENRES_TRIED = 3
-      const SEED_GENRE_VOTES = 3 // the seed's own genre(s) anchor the ranking - neighbor genres supplement, don't override
-      const seedKey = `${type}:${id}`
-
-      const [movies, episodes, overrides, notInterested] = await Promise.all([
-        prisma.movieWatchHistory.findMany({ where: { accountId }, select: { itemId: true } }),
-        prisma.episodeWatchHistory.findMany({ where: { accountId }, select: { showId: true } }),
-        prisma.manualWatchOverride.findMany({ where: { accountId }, select: { itemId: true, watched: true } }),
-        prisma.notInterestedItem.findMany({ where: { accountId }, select: { itemId: true } }).catch(() => []),
-      ])
-      // Watched-status resolution matches /recommendations exactly - manual
-      // overrides set to true also count as watched; set to false REMOVES
-      // from the watched set (unwatched override wins over real history).
-      const watchedIds = new Set([...movies.map((m) => m.itemId), ...episodes.map((e) => e.showId)])
-      for (const o of overrides) {
-        if (o.watched) watchedIds.add(o.itemId)
-        else watchedIds.delete(o.itemId)
-      }
-      const notInterestedIds = new Set(notInterested.map((n) => n.itemId))
-      const excludeIds = new Set([id, ...watchedIds, ...notInterestedIds])
-
-      const { buildUserVectors, computeItemSimilarity } = require('../utils/recommendationEngine')
-      const { vectors } = await buildUserVectors(prisma, accountId)
-      const affinity = computeItemSimilarity(vectors)
-      const neighbors = affinity.get(seedKey)
-
-      const { fetchMetadata } = require('../utils/notify')
-      const { resolveOmdbKey } = require('../utils/listImport')
-      const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-      const genreVotes = new Map()
-      const seedMeta = await fetchMetadata(id, type, null, omdbApiKey).catch(() => null)
-      for (const g of (Array.isArray(seedMeta?.genres) ? seedMeta.genres : [])) {
-        genreVotes.set(g, (genreVotes.get(g) || 0) + SEED_GENRE_VOTES)
-      }
-
-      const hasRealSignal = !!(neighbors && neighbors.size > 0)
-      if (neighbors) {
-        // Top 5 real neighbors by affinity weight - just enough to bias the
-        // genre pick without turning this into 5 extra metadata calls' worth
-        // of latency for a popup that should feel instant.
-        const topNeighbors = [...neighbors.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
-        for (const [key] of topNeighbors) {
-          const neighborId = key.slice(key.indexOf(':') + 1)
-          const neighborType = key.startsWith('series:') ? 'series' : 'movie'
-          try {
-            const meta = await fetchMetadata(neighborId, neighborType, null, omdbApiKey)
-            for (const g of (Array.isArray(meta?.genres) ? meta.genres : [])) {
-              genreVotes.set(g, (genreVotes.get(g) || 0) + 1)
-            }
-          } catch {}
-        }
-      }
-
-      const topGenres = [...genreVotes.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g).slice(0, MAX_GENRES_TRIED)
-
-      const items = []
-      const seenIds = new Set([id])
-
-      // Real per-title similarity from TMDb's own /recommendations, tried
-      // first - genuinely different from (and usually better than) the
-      // genre-catalog fallback below, which only knows "same genre, sorted
-      // by rating" and has no concept of a specific title actually being
-      // similar to this one. Falls through to nothing (not an error) when
-      // no TMDb key is configured, or TMDb has no IMDb-resolvable results
-      // for an obscure title - the genre-based loop below still fills the
-      // rest either way, so this is additive, never a hard dependency.
-      try {
-        const tmdbKey = await resolveTmdbKey(req)
-        if (tmdbKey) {
-          const findRsp = await fetchOut(`https://api.themoviedb.org/3/find/${id}?api_key=${encodeURIComponent(tmdbKey)}&external_source=imdb_id`)
-          if (findRsp.ok) {
-            const findData = await findRsp.json()
-            const hit = type === 'movie' ? (findData.movie_results || [])[0] : (findData.tv_results || [])[0]
-            if (hit?.id) {
-              const tmdbType = type === 'movie' ? 'movie' : 'tv'
-              const recRsp = await fetchOut(`https://api.themoviedb.org/3/${tmdbType}/${hit.id}/recommendations?api_key=${encodeURIComponent(tmdbKey)}`)
-              if (recRsp.ok) {
-                const recData = await recRsp.json()
-                const candidates = (recData.results || []).slice(0, 10)
-                const resolved = await Promise.all(candidates.map(async (c) => {
-                  try {
-                    const extRsp = await fetchOut(`https://api.themoviedb.org/3/${tmdbType}/${c.id}/external_ids?api_key=${encodeURIComponent(tmdbKey)}`)
-                    if (!extRsp.ok) return null
-                    const extData = await extRsp.json()
-                    if (!extData.imdb_id) return null
-                    return {
-                      id: extData.imdb_id,
-                      type,
-                      name: c.title || c.name || 'Unknown',
-                      poster: c.poster_path ? `https://image.tmdb.org/t/p/w342${c.poster_path}` : null,
-                      releaseInfo: (c.release_date || c.first_air_date) ? (c.release_date || c.first_air_date).slice(0, 4) : null,
-                      imdbRating: c.vote_average ? c.vote_average.toFixed(1) : null,
-                      genres: [],
+            const { parseFacets, filteredPage, bothPage } = require("../utils/discoverFacets");
+            const facets = parseFacets(req.query);
+            const from = Math.max(0, Math.floor(Number(skip) || 0));
+            // The length filter reads Cinemeta's runtimes; LumiereDB's lists may not carry one.
+            const base =
+                (catalog === "top" || catalog === "trending") && !facets?.length
+                    ? await lumiereFor(req)
+                    : "";
+            // One page of one type: { items, cursor }, the cursor where the next starts.
+            const pageOf = (oneType) => async (at) => {
+                // Popular and Trending come from IMDb's own numbers when there's a
+                // LumiereDB: Popular 500 deep, Trending 100, both leaving out titles
+                // few people have voted on. Paged here, as Cinemeta's are.
+                if (base) {
+                    try {
+                        const lumiere = require("../utils/lumiere");
+                        const all = await lumiere.listIds(
+                            base,
+                            catalog === "trending" ? "trending" : "popular",
+                            oneType,
+                            genre ? lumiere.genreSlug(genre) : ""
+                        );
+                        const page = all.slice(at, at + 100);
+                        return { cursor: at + page.length, items: page };
+                    } catch (e) {
+                        console.warn(
+                            "[Discover] LumiereDB list failed, using Cinemeta:",
+                            e?.message || e
+                        );
                     }
-                  } catch {
-                    return null
-                  }
-                }))
-                for (const r of resolved) {
-                  if (items.length >= MAX_ITEMS) break
-                  if (!r || seenIds.has(r.id) || excludeIds.has(r.id)) continue
-                  seenIds.add(r.id)
-                  items.push(r)
                 }
-              }
+                const items = await fetchCatalog(oneType, {
+                    catalog: catalog === "trending" ? "top" : catalog,
+                    genre: genre || undefined,
+                    skip: at || undefined,
+                });
+                return { cursor: at + items.length, items };
+            };
+            const { items, cursor } =
+                type === "both"
+                    ? await bothPage(
+                          (oneType, at) => filteredPage(pageOf(oneType), at, facets),
+                          from
+                      )
+                    : await filteredPage(pageOf(type), from, facets);
+            if (req.query.paged) {
+                res.json({ items, nextSkip: cursor });
+            } else {
+                res.json(items);
             }
-          }
+            warmShown(items);
+        } catch (error) {
+            console.error("Error fetching discover catalog:", error);
+            res.status(500).json({ error: "Failed to fetch catalog" });
         }
-      } catch {}
+    });
 
-      for (const genre of topGenres) {
-        if (items.length >= MAX_ITEMS) break
-        let candidates = await fetchCatalog(type, { catalog: 'imdbRating', genre })
-        if (candidates.length === 0) candidates = await fetchCatalog(type, { catalog: 'top', genre })
-        for (const c of candidates) {
-          if (items.length >= MAX_ITEMS) break
-          if (seenIds.has(c.id) || excludeIds.has(c.id)) continue
-          seenIds.add(c.id)
-          items.push(c)
+    // GET /api/discover/search?type=movie|series|both&query=X (+ the filters above, &paged=1)
+    // Search only works against the "top" catalog - that's the only one
+    // Cinemeta's own manifest advertises search support for. A search is one
+    // answer, never paged: nextSkip is always null.
+    router.get("/search", async (req, res) => {
+        try {
+            const { type = "movie", query, genre } = req.query;
+            if (type !== "movie" && type !== "series" && type !== "both") {
+                return res.status(400).json({ error: "type must be movie, series or both" });
+            }
+            const send = (items) =>
+                req.query.paged ? res.json({ items, nextSkip: null }) : res.json(items);
+            if (!query?.trim()) {
+                return send([]);
+            }
+            const {
+                parseFacets,
+                matchesFacets,
+                matchesGenre,
+                interleave,
+            } = require("../utils/discoverFacets");
+            const facets = parseFacets(req.query);
+            const base = await lumiereFor(req);
+            const searchOne = async (oneType) => {
+                // LumiereDB reads what was meant: typos ("intersteller"), words run
+                // together ("spiderman"), a sequel number or a year on the end, a
+                // nickname ("lotr") and the title in another language. Cinemeta's
+                // search only matches what's typed.
+                if (base) {
+                    try {
+                        const found = await require("../utils/lumiere").searchTitles(
+                            base,
+                            oneType,
+                            query,
+                            { limit: 40 }
+                        );
+                        if (found.length > 0) {
+                            return found;
+                        }
+                    } catch (e) {
+                        console.warn(
+                            "[Discover] LumiereDB search failed, using Cinemeta:",
+                            e?.message || e
+                        );
+                    }
+                }
+                return fetchCatalog(oneType, { catalog: "top", search: query.trim() });
+            };
+            const items =
+                type === "both"
+                    ? interleave(...(await Promise.all([searchOne("movie"), searchOne("series")])))
+                    : await searchOne(type);
+            const shown = items.filter((i) => matchesGenre(i, genre) && matchesFacets(i, facets));
+            send(shown);
+            warmShown(shown);
+        } catch (error) {
+            console.error("Error searching discover catalog:", error);
+            res.status(500).json({ error: "Failed to search catalog" });
         }
-      }
+    });
 
-      res.json({ items, hasRealSignal })
-    } catch (error) {
-      console.error('Error building similar items:', error)
-      res.status(500).json({ error: 'Failed to build similar items' })
-    }
-  })
+    // GET /api/discover/recommendations
+    // "Because you watched X" rows for Discover's For You tab, built from
+    // SlickTrax's actual watch-time signal rather than just "what did you
+    // play most recently." Algorithm:
+    //   1. Score every item the account has real WatchActivity for by its
+    //      SUMMED watchTimeSeconds over the lookback window, exponentially
+    //      decayed by age (a show binged 3 months ago should fade, not sit
+    //      permanently at the top; something you're mid-binge on right now
+    //      should dominate over a single movie watched once ages ago). Items
+    //      with real watch history but no WatchActivity coverage yet (older
+    //      data) get a small flat baseline instead of being invisible.
+    //   2. Watchlist adds are folded in too, at a fraction of a real watch's
+    //      weight — "I want to see this" is a real taste signal, just a
+    //      weaker one than time actually spent watching.
+    //   3. Fetch genres (cached) for the top-scored candidates, then sum each
+    //      candidate's score into every genre it carries — genre affinity
+    //      driven by weighted watch time, not by whichever 3 titles happen to
+    //      be most recent.
+    //   4. Take the top genres by aggregate score, one row each. Each row's
+    //      seed (for the "Because you watched X" label) is the highest-scored
+    //      candidate carrying that genre.
+    //   5. For each seed, fetch Cinemeta Top Rated in that genre (falling back
+    //      to Popular if too few survive filtering), excluding anything
+    //      already watched OR already on the watchlist — no point suggesting
+    //      what you've already decided to watch.
+    // Returns { rows: [{ reason, genre, seedId, seedType, items[] }] }.
+    router.get("/recommendations", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ rows: [] });
+            }
+            const accountId = getAccountId(req) || "default";
 
-  // POST /api/discover/not-interested { itemId, itemType }
-  // SlickTrax feedback: excludes this item from future /recommendations
-  // (never a seed, never a recommended item) and downweights similar items
-  // via the household's own item-item affinity map. Household-wide, not
-  // per-user - see NotInterestedItem's schema comment.
-  router.post('/not-interested', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.status(503).json({ error: 'Not available' })
-      const accountId = getAccountId(req) || 'default'
-      const { itemId, itemType } = req.body || {}
-      if (!itemId || (itemType !== 'movie' && itemType !== 'series')) {
-        return res.status(400).json({ error: 'itemId and itemType (movie|series) are required' })
-      }
-      const { markNotInterested } = require('../utils/notInterested')
-      await markNotInterested(prisma, accountId, itemId, itemType)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error marking not interested:', error)
-      res.status(500).json({ error: 'Failed to save feedback' })
-    }
-  })
+            // This page has no single logged-in "current user" of its own (it's
+            // the admin's account-wide view - see findAttributionForSeed's own
+            // comment), so "personal" vs "shared" recommendations both need an
+            // explicit pick from the caller rather than an implicit "me."
+            // personal + one userId = that person's own watch history only.
+            // shared + two userIds = combined watch signal from exactly those two,
+            // with the existing collaborative-boost/pairwise-attribution logic
+            // naturally scoped down to just them (nothing else changes - see
+            // scopedUserIds usage below). No mode/userId at all = the original
+            // household-wide behavior, unchanged, for any caller that doesn't
+            // send these params.
+            const mode = req.query.mode === "shared" ? "shared" : "personal";
+            const userId =
+                typeof req.query.userId === "string" && req.query.userId ? req.query.userId : null;
+            const userId2 =
+                typeof req.query.userId2 === "string" && req.query.userId2
+                    ? req.query.userId2
+                    : null;
+            // Which type of row to build - matches Discover's own Movies/Series
+            // toggle. Filtered in BEFORE ranking/slicing to CANDIDATE_POOL below,
+            // not after - filtering after would starve the pool if the highest-
+            // scored items that poll happened to skew the other type.
+            const requestedType = req.query.type === "series" ? "series" : "movie";
+            const scopedUserIds =
+                mode === "shared" && userId && userId2 && userId !== userId2
+                    ? [userId, userId2]
+                    : mode === "personal" && userId
+                      ? [userId]
+                      : null;
+            const scopedNamesById = new Map();
+            if (scopedUserIds) {
+                try {
+                    const rows = await prisma.user.findMany({
+                        select: { email: true, id: true, username: true },
+                        where: { id: { in: scopedUserIds } },
+                    });
+                    for (const u of rows) {
+                        scopedNamesById.set(u.id, u.username || u.email || "someone");
+                    }
+                } catch {
+                    // Unavailable optional records leave the current result in place.
+                }
+            }
 
-  // POST /api/discover/react { itemId, itemType, reaction: 'happy'|'sad', itemName?, poster? }
-  // SlickTrax feedback: feeds /recommendations scoring - see
-  // recommendationEngine.js's computeSignedAdjustments. Setting a new
-  // reaction replaces any existing one on the same item (household-wide,
-  // one opinion per title - see TitleReaction's schema comment).
-  router.post('/react', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.status(503).json({ error: 'Not available' })
-      const accountId = getAccountId(req) || 'default'
-      const { itemId, itemType, reaction, itemName, poster } = req.body || {}
-      if (!itemId || (itemType !== 'movie' && itemType !== 'series')) {
-        return res.status(400).json({ error: 'itemId and itemType (movie|series) are required' })
-      }
-      const { setReaction } = require('../utils/titleFeedback')
-      const row = await setReaction(prisma, accountId, itemId, itemType, reaction, itemName, poster)
-      res.json(row)
-    } catch (error) {
-      console.error('Error setting reaction:', error)
-      res.status(400).json({ error: publicMessage(error, 'Failed to save reaction') })
-    }
-  })
+            // Respect the SlickTrax opt-out — a disabled feature should never
+            // trigger the metadata + catalog fetches this endpoint does,
+            // regardless of what the client sends.
+            try {
+                const acc = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                let cfg = acc?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object" && cfg.enableRecommendations === false) {
+                    return res.json({ rows: [] });
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
 
-  // DELETE /api/discover/react/:itemId
-  router.delete('/react/:itemId', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.status(503).json({ error: 'Not available' })
-      const accountId = getAccountId(req) || 'default'
-      const { clearReaction } = require('../utils/titleFeedback')
-      await clearReaction(prisma, accountId, req.params.itemId)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error clearing reaction:', error)
-      res.status(500).json({ error: 'Failed to clear reaction' })
-    }
-  })
+            const MAX_ROWS = 3;
+            const ITEMS_PER_ROW = 12;
+            const CANDIDATE_POOL = 40; // how many top-scored items get a genre lookup
+            const ACTIVITY_LOOKBACK_DAYS = 90;
+            const HALF_LIFE_DAYS = 21; // score halves every 3 weeks of age
+            const BASELINE_SECONDS = 600; // flat weight for real watches with no WatchActivity coverage (pre-dates the table, or a same-poll edge case)
+            const WATCHLIST_WEIGHT_SECONDS = 900; // an intent signal, deliberately lighter than any real viewing
 
-  // GET /api/discover/reactions?ids=tt1,tt2,... - batch lookup for poster-grid/modal UI state
-  router.get('/reactions', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ reactions: {} })
-      const accountId = getAccountId(req) || 'default'
-      const ids = typeof req.query.ids === 'string' ? req.query.ids.split(',').filter(Boolean) : undefined
-      const { getReactionsMap } = require('../utils/titleFeedback')
-      const reactions = await getReactionsMap(prisma, accountId, ids)
-      res.json({ reactions })
-    } catch (error) {
-      console.error('Error fetching reactions:', error)
-      res.status(500).json({ error: 'Failed to fetch reactions' })
-    }
-  })
+            const lookbackDate = new Date(
+                Date.now() - ACTIVITY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+            );
 
-  // POST /api/discover/rate { itemId, itemType, rating (1-10), season?, itemName?, poster? }
-  // season omitted = overall rating (the only kind movies use; series may
-  // carry this AND independent per-season ratings - see TitleRating's schema
-  // comment). Also feeds /recommendations scoring.
-  router.post('/rate', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.status(503).json({ error: 'Not available' })
-      const accountId = getAccountId(req) || 'default'
-      const { itemId, itemType, rating, season, itemName, poster } = req.body || {}
-      if (!itemId || (itemType !== 'movie' && itemType !== 'series')) {
-        return res.status(400).json({ error: 'itemId and itemType (movie|series) are required' })
-      }
-      const { setRating } = require('../utils/titleFeedback')
-      const row = await setRating(prisma, accountId, itemId, itemType, rating, season, itemName, poster)
-      res.json(row)
-    } catch (error) {
-      console.error('Error setting rating:', error)
-      res.status(400).json({ error: publicMessage(error, 'Failed to save rating') })
-    }
-  })
+            // Overrides/watchlist/notInterested stay account-wide regardless of
+            // mode - neither model has a userId column (both deliberately
+            // household-wide, see their own schema comments), and "already
+            // watched/wishlisted/dismissed by anyone in the household" is still
+            // the right exclusion even for a personal or shared row.
+            const [movies, episodes, overrides, activity, watchlist, notInterested] =
+                await Promise.all([
+                    prisma.movieWatchHistory.findMany({
+                        distinct: ["itemId"],
+                        orderBy: { watchedAt: "desc" },
+                        take: 200,
+                        where: scopedUserIds
+                            ? { accountId, userId: { in: scopedUserIds } }
+                            : { accountId },
+                    }),
+                    prisma.episodeWatchHistory.findMany({
+                        distinct: ["showId"],
+                        orderBy: { watchedAt: "desc" },
+                        take: 200,
+                        where: scopedUserIds
+                            ? { accountId, userId: { in: scopedUserIds } }
+                            : { accountId },
+                    }),
+                    prisma.manualWatchOverride.findMany({
+                        select: { itemId: true, watched: true },
+                        where: { accountId },
+                    }),
+                    prisma.watchActivity.findMany({
+                        select: {
+                            date: true,
+                            itemId: true,
+                            itemType: true,
+                            watchTimeSeconds: true,
+                        },
+                        where: scopedUserIds
+                            ? {
+                                  accountId,
+                                  date: { gte: lookbackDate },
+                                  userId: { in: scopedUserIds },
+                              }
+                            : { accountId, date: { gte: lookbackDate } },
+                    }),
+                    prisma.watchlistItem
+                        .findMany({
+                            select: { itemId: true, itemType: true, name: true },
+                            where: { accountId },
+                        })
+                        .catch(() => []),
+                    prisma.notInterestedItem
+                        .findMany({
+                            select: { itemId: true, itemType: true },
+                            where: { accountId },
+                        })
+                        .catch(() => []),
+                ]);
 
-  // DELETE /api/discover/rate/:itemId?season=N
-  router.delete('/rate/:itemId', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.status(503).json({ error: 'Not available' })
-      const accountId = getAccountId(req) || 'default'
-      const { clearRating } = require('../utils/titleFeedback')
-      const season = req.query.season !== undefined ? Number(req.query.season) : undefined
-      await clearRating(prisma, accountId, req.params.itemId, season)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error clearing rating:', error)
-      res.status(500).json({ error: 'Failed to clear rating' })
-    }
-  })
+            // SlickTrax reactions/ratings - see recommendationEngine.js's
+            // computeSignedAdjustments for how these turn into scoring below.
+            const { getAllReactions, getAllRatings } = require("../utils/titleFeedback");
+            const [reactions, ratings] = await Promise.all([
+                getAllReactions(prisma, accountId).catch(() => []),
+                getAllRatings(prisma, accountId).catch(() => []),
+            ]);
+            // A disliked title (whether via reaction or a low rating) should never
+            // itself be suggested, same hard exclusion "not interested" already
+            // gets - a merely-similar title is still just downweighted below, not
+            // excluded outright.
+            const dislikedIds = new Set(
+                reactions.filter((r) => r.reaction === "sad").map((r) => r.itemId)
+            );
 
-  // GET /api/discover/ratings/:itemId - { "0": overallRating, "1": season1Rating, ... }
-  router.get('/ratings/:itemId', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ ratings: {} })
-      const accountId = getAccountId(req) || 'default'
-      const { getRatingsForItem } = require('../utils/titleFeedback')
-      const ratings = await getRatingsForItem(prisma, accountId, req.params.itemId)
-      res.json({ ratings })
-    } catch (error) {
-      console.error('Error fetching ratings:', error)
-      res.status(500).json({ error: 'Failed to fetch ratings' })
-    }
-  })
+            // Title/type for every candidate, from whichever source names it first.
+            const itemMeta = new Map();
+            for (const m of movies) {
+                itemMeta.set(m.itemId, { name: m.itemName, type: "movie" });
+            }
+            for (const e of episodes) {
+                itemMeta.set(e.showId, { name: e.showName, type: "series" });
+            }
+            for (const w of watchlist) {
+                if (!itemMeta.has(w.itemId)) {
+                    itemMeta.set(w.itemId, { name: w.name, type: w.itemType });
+                }
+            }
+            // A liked/loved/rated title with no other watch signal (reacted to
+            // from Discover without having watched it here, e.g. a household
+            // member watched it elsewhere) still needs to be a real candidate for
+            // its positive weight below to have anywhere to attach.
+            for (const r of reactions) {
+                if (!itemMeta.has(r.itemId)) {
+                    itemMeta.set(r.itemId, { name: r.itemName, type: r.itemType });
+                }
+            }
+            for (const r of ratings) {
+                if (!itemMeta.has(r.itemId)) {
+                    itemMeta.set(r.itemId, { name: r.itemName, type: r.itemType });
+                }
+            }
 
-  // GET /api/discover/:id/seasons?type=series - distinct season numbers
-  // (excluding season 0/specials), for the rating UI's season picker. Not
-  // needed for movies - the client never calls this for itemType 'movie'.
-  router.get('/:id/seasons', async (req, res) => {
-    try {
-      if (req.query.type !== 'series') return res.json({ seasons: [] })
-      const { fetchMetadata } = require('../utils/notify')
-      const metadata = await fetchMetadata(req.params.id, 'series', null, null)
-      const seasons = [...new Set((metadata?.allEpisodes || [])
-        .map((e) => e.season)
-        .filter((s) => Number.isInteger(s) && s > 0))]
-        .sort((a, b) => a - b)
-      res.json({ seasons })
-    } catch (error) {
-      console.error('Error fetching season list:', error)
-      res.status(500).json({ error: 'Failed to fetch seasons' })
-    }
-  })
+            if (itemMeta.size === 0) {
+                return res.json({ rows: [] });
+            }
 
-  // GET /api/discover/taste-overlap
-  // "You and X" - real behavioral overlap between every pair of managed
-  // users on this account, from actual watch-time (MovieWatchHistory /
-  // EpisodeWatchHistory), not genre tags. Similarity is cosine similarity
-  // across each pair's full weighted watch vectors; "shared favorites" is
-  // capped per pair (top 5) by min(timeA, timeB) per title, so a title only
-  // one side actually spent real time on doesn't count as shared. See
-  // recommendationEngine.js for the actual math.
-  router.get('/taste-overlap', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ pairs: [] })
-      const accountId = getAccountId(req) || 'default'
+            // The "already watched" / "already on watchlist" sets powering the
+            // exclusion filter. Manual overrides set to true also count as
+            // watched; set to false REMOVES from the watched set (unwatched
+            // override wins over real history).
+            const watchedIds = new Set([
+                ...movies.map((m) => m.itemId),
+                ...episodes.map((e) => e.showId),
+            ]);
+            for (const o of overrides) {
+                if (o.watched) {
+                    watchedIds.add(o.itemId);
+                } else {
+                    watchedIds.delete(o.itemId);
+                }
+            }
+            const watchlistIds = new Set(watchlist.map((w) => w.itemId));
+            // SlickTrax "Not interested" feedback - excluded the same way watched/
+            // watchlisted items already are (never a seed, never a recommended
+            // item), plus notInterestedKeys below feeds computeNotInterestedPenalties
+            // to also downweight items merely SIMILAR to what was dismissed.
+            // dislikedIds folded in here (not a separate exclusion set) so every
+            // existing "already excluded" filter below picks it up automatically,
+            // same treatment as an explicit "not interested" mark.
+            const notInterestedIds = new Set([
+                ...notInterested.map((n) => n.itemId),
+                ...dislikedIds,
+            ]);
+            const notInterestedKeys = notInterested.map(
+                (n) => `${n.itemType === "series" ? "series" : "movie"}:${n.itemId}`
+            );
 
-      const { buildUserVectors, computePairwiseOverlap } = require('../utils/recommendationEngine')
-      const { vectors, itemMeta } = await buildUserVectors(prisma, accountId)
-      if (vectors.size < 2) return res.json({ pairs: [] })
+            // Real watch-time weight, decayed by age so recent viewing still
+            // matters more than ancient history without ignoring it outright.
+            const now = Date.now();
+            const scoreByItem = new Map();
+            for (const a of activity) {
+                const ageDays = (now - new Date(a.date).getTime()) / (24 * 60 * 60 * 1000);
+                const decay = 0.5 ** (Math.max(0, ageDays) / HALF_LIFE_DAYS);
+                scoreByItem.set(
+                    a.itemId,
+                    (scoreByItem.get(a.itemId) || 0) + a.watchTimeSeconds * decay
+                );
+                if (!itemMeta.has(a.itemId)) {
+                    itemMeta.set(a.itemId, { name: null, type: a.itemType });
+                }
+            }
+            for (const m of movies) {
+                if (!scoreByItem.has(m.itemId)) {
+                    scoreByItem.set(m.itemId, BASELINE_SECONDS);
+                }
+            }
+            for (const e of episodes) {
+                if (!scoreByItem.has(e.showId)) {
+                    scoreByItem.set(e.showId, BASELINE_SECONDS);
+                }
+            }
+            for (const w of watchlist) {
+                scoreByItem.set(
+                    w.itemId,
+                    (scoreByItem.get(w.itemId) || 0) + WATCHLIST_WEIGHT_SECONDS
+                );
+            }
 
-      const users = await prisma.user.findMany({
-        where: { id: { in: [...vectors.keys()] } },
-        select: { id: true, username: true, avatarUrl: true, useGravatar: true, colorIndex: true, email: true },
-      })
-      const userById = new Map(users.map((u) => [u.id, u]))
+            // Collaborative signal: a modest boost for titles OTHER household
+            // members also spent real time on, so the seed picked for a genre row
+            // reflects actual shared taste rather than just whichever single
+            // viewer's score happens to be highest. See recommendationEngine.js's
+            // own header for why this is a boost on top of genre/Cinemeta
+            // discovery rather than a full replacement.
+            //
+            // affinity/pairwiseOverlaps/usersById are hoisted out of this try
+            // block (not just local consts) because the row-building loop below
+            // reuses them to attribute a seed to a real pairwise match ("Sarah
+            // and Mike both loved X") instead of re-deriving the same vectors/
+            // affinity a second time.
+            let affinity = null;
+            let pairwiseOverlaps = [];
+            let usersById = new Map();
+            try {
+                const {
+                    buildUserVectors,
+                    computeItemSimilarity,
+                    collaborativeBoost,
+                    computePairwiseOverlap,
+                    computeNotInterestedPenalties,
+                    applyNotInterestedPenalty,
+                    computeSignedAdjustments,
+                    reactionsToSignedEntries,
+                    ratingsToSignedEntries,
+                } = require("../utils/recommendationEngine");
+                const { vectors: allVectors, itemMeta: vectorItemMeta } = await buildUserVectors(
+                    prisma,
+                    accountId
+                );
+                // Scoped down to just the requested user(s) - buildUserVectors has
+                // no userId filter of its own (it always reads the whole account),
+                // so this is where personal/shared mode actually take effect for
+                // the collaborative-boost/attribution layer. Personal mode leaves
+                // exactly one entry, which makes every `vectors.size > 1` check
+                // below naturally false - no separate "skip this for personal mode"
+                // branch needed, the existing household-mode gates already do it.
+                const vectors = scopedUserIds
+                    ? new Map([...allVectors].filter(([uid]) => scopedUserIds.includes(uid)))
+                    : allVectors;
+                if (vectors.size > 0) {
+                    affinity = computeItemSimilarity(vectors);
+                    const COLLAB_BOOST_WEIGHT = 0.5;
+                    // Only meaningful with 2+ real vectors (a single person can't have
+                    // cross-person affinity), but the not-interested penalty below
+                    // still applies even for a single-user household, so affinity is
+                    // still built either way - it'll just be empty for one user.
+                    const penalties = computeNotInterestedPenalties(affinity, notInterestedKeys);
+                    // Reactions/ratings, same neighbor-walk shape as the not-interested
+                    // penalty above but signed (positive for a happy reaction/high
+                    // rating, negative for sad/low ratings) - see
+                    // recommendationEngine.js's computeSignedAdjustments for the full
+                    // reasoning.
+                    const reactionAdjustments = computeSignedAdjustments(
+                        affinity,
+                        reactionsToSignedEntries(reactions)
+                    );
+                    const ratingAdjustments = computeSignedAdjustments(
+                        affinity,
+                        ratingsToSignedEntries(ratings)
+                    );
+                    for (const [id, score] of scoreByItem) {
+                        const meta = itemMeta.get(id);
+                        if (!meta) {
+                            continue;
+                        }
+                        const key = `${meta.type === "series" ? "series" : "movie"}:${id}`;
+                        let next = score;
+                        if (vectors.size > 1) {
+                            const boost = collaborativeBoost(affinity, key);
+                            if (boost > 0) {
+                                next += boost * COLLAB_BOOST_WEIGHT;
+                            }
+                        }
+                        next = applyNotInterestedPenalty(next, penalties.get(key) || 0);
+                        next += reactionAdjustments.get(key) || 0;
+                        next += ratingAdjustments.get(key) || 0;
+                        if (next !== score) {
+                            scoreByItem.set(id, next);
+                        }
+                    }
+                }
+                if (vectors.size > 1) {
+                    pairwiseOverlaps = computePairwiseOverlap(vectors, vectorItemMeta);
+                    if (pairwiseOverlaps.length > 0) {
+                        const userRows = await prisma.user.findMany({
+                            select: { email: true, id: true, username: true },
+                            where: { id: { in: [...vectors.keys()] } },
+                        });
+                        usersById = new Map(
+                            userRows.map((u) => [u.id, u.username || u.email || "someone"])
+                        );
+                    }
+                }
+            } catch (e) {
+                console.warn(
+                    "Collaborative boost/not-interested penalty/attribution skipped:",
+                    e?.message
+                );
+            }
 
-      const pairs = computePairwiseOverlap(vectors, itemMeta)
-        .filter((p) => userById.has(p.userA) && userById.has(p.userB) && p.sharedCount > 0)
-        .map((p) => ({
-          userA: userById.get(p.userA),
-          userB: userById.get(p.userB),
-          similarity: Math.round(p.similarity * 100),
-          sharedCount: p.sharedCount,
-          shared: p.shared,
-        }))
+            const ranked = [...scoreByItem.entries()]
+                .filter(([id]) => !notInterestedIds.has(id))
+                .map(([id, score]) => ({ id, score, ...(itemMeta.get(id) || { type: "movie" }) }))
+                .filter((c) => c.type === requestedType)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, CANDIDATE_POOL);
 
-      res.json({ pairs })
-    } catch (error) {
-      console.error('Error computing taste overlap:', error)
-      res.status(500).json({ error: 'Failed to compute taste overlap' })
-    }
-  })
+            if (ranked.length === 0) {
+                return res.json({ rows: [] });
+            }
 
-  // --- Cast/crew deep-dive (optional; requires a TMDb API key) -------------
-  // Cinemeta has no people database, so a person's filmography can only come
-  // from TMDb. The key is opt-in: per-account (Settings, sync.tmdbApiKey)
-  // takes precedence, else the TMDB_API_KEY env var. With neither, these
-  // endpoints return 503 and the frontend hides the feature entirely.
-  const TMDB_IMG = 'https://image.tmdb.org/t/p/w342'
-  // Delegates to the shared resolver rather than re-reading sync.tmdbApiKey
-  // by hand. The hand-rolled version got the account-then-env order right but
-  // knew nothing about backup keys, so a dead primary took this endpoint down
-  // even with a working spare configured - failover applied on the list-import
-  // path and silently nowhere else.
-  async function resolveTmdbKey(req) {
-    const { resolveKeyFromSettings } = require('../utils/listImport')
-    return resolveKeyFromSettings(prisma, getAccountId, req, 'tmdbApiKey', 'TMDB_API_KEY')
-  }
+            // Pull genres for each ranked candidate in parallel (fetchMetadata is
+            // cached, so repeat calls for the same id are free) — also backfills
+            // the name for anything that only came from WatchActivity.
+            const { fetchMetadata } = require("../utils/notify");
+            const { resolveOmdbKey } = require("../utils/listImport");
+            const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+            const withGenres = await Promise.all(
+                ranked.map(async (c) => {
+                    try {
+                        const meta = await fetchMetadata(c.id, c.type, null, omdbApiKey);
+                        return {
+                            ...c,
+                            genres: Array.isArray(meta?.genres) ? meta.genres : [],
+                            name: c.name || meta?.name || null,
+                        };
+                    } catch {
+                        return { ...c, genres: [] };
+                    }
+                })
+            );
 
-  // GET /api/discover/local-index - the household's OWN titles (watchlist +
-  // recently watched), id/name/type/poster only. Fetched once when Discover
-  // mounts so typing can match your own stuff with no round-trip at all,
-  // while the network search is still in flight.
-  //
-  // Bounded on purpose: a long-lived instance has thousands of history rows,
-  // and shipping all of them to make search feel fast would be its own kind
-  // of slow. Most-recent-first, capped, deduped by id.
-  router.get('/local-index', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const LIMIT = 400
-      const [watchlist, movies, episodes] = await Promise.all([
-        prisma.watchlistItem.findMany({ where: { accountId }, take: LIMIT, orderBy: { addedAt: 'desc' } }),
-        prisma.movieWatchHistory.findMany({
-          where: { accountId }, take: LIMIT, orderBy: { watchedAt: 'desc' },
-          select: { itemId: true, itemName: true, poster: true },
-        }),
-        prisma.episodeWatchHistory.findMany({
-          where: { accountId }, take: LIMIT, orderBy: { watchedAt: 'desc' },
-          select: { showId: true, showName: true, poster: true },
-        }),
-      ])
-      const byId = new Map()
-      const add = (id, name, type, poster) => {
-        if (!id || !name || byId.has(id)) return
-        byId.set(id, { id, name, type, poster: poster || null })
-      }
-      for (const w of watchlist) add(w.itemId, w.name, w.itemType === 'series' ? 'series' : 'movie', w.poster)
-      for (const m of movies) add(m.itemId, m.itemName, 'movie', m.poster)
-      for (const e of episodes) add(e.showId, e.showName, 'series', e.poster)
-      res.json({ items: [...byId.values()].slice(0, 800) })
-    } catch (e) {
-      // Instant matches are an accelerant - failing here just means search
-      // behaves exactly as it always did.
-      res.json({ items: [] })
-    }
-  })
+            // Aggregate weighted score per genre across every candidate carrying it.
+            const genreScore = new Map();
+            for (const c of withGenres) {
+                for (const g of c.genres) {
+                    genreScore.set(g, (genreScore.get(g) || 0) + c.score);
+                }
+            }
+            const topGenres = [...genreScore.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g);
 
-  // POST /api/discover/describe - tip-of-the-tongue search. The model only
-  // ever NAMES candidates; every name is then verified against TMDb, so a
-  // hallucinated title fails resolution and never reaches the user rather
-  // than being shown with invented metadata. See utils/describeSearch.js.
-  router.post('/describe', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { searchByDescription } = require('../utils/describeSearch')
-      const tmdbKey = await resolveTmdbKey(req)
-      const result = await searchByDescription(prisma, accountId, decrypt, req.body?.description, tmdbKey)
-      res.json(result)
-    } catch (e) {
-      res.status(400).json({ error: publicMessage(e, 'Could not search by description') })
-    }
-  })
+            const rows = [];
+            const usedSeedIds = new Set();
+            for (const genre of topGenres) {
+                if (rows.length >= MAX_ROWS) {
+                    break;
+                }
+                // Seed = the highest-scored candidate carrying this genre — the
+                // strongest real reason to attribute the row to.
+                const seed = withGenres
+                    .filter((c) => c.genres.includes(genre) && c.name && !usedSeedIds.has(c.id))
+                    .sort((a, b) => b.score - a.score)[0];
+                if (!seed) {
+                    continue;
+                }
+                usedSeedIds.add(seed.id);
+                // Top Rated in that genre, filtered to unwatched and not already on
+                // the watchlist. Fall back to Popular if too few survive filtering.
+                const items = await fetchCatalog(seed.type, { catalog: "imdbRating", genre });
+                let filtered = items.filter(
+                    (i) =>
+                        !(
+                            watchedIds.has(i.id) ||
+                            watchlistIds.has(i.id) ||
+                            notInterestedIds.has(i.id)
+                        )
+                );
+                if (filtered.length < 4) {
+                    const popular = await fetchCatalog(seed.type, { catalog: "top", genre });
+                    const seenIds = new Set(filtered.map((i) => i.id));
+                    for (const p of popular) {
+                        if (
+                            !(
+                                watchedIds.has(p.id) ||
+                                watchlistIds.has(p.id) ||
+                                notInterestedIds.has(p.id) ||
+                                seenIds.has(p.id)
+                            )
+                        ) {
+                            filtered.push(p);
+                        }
+                    }
+                }
+                filtered = filtered.slice(0, ITEMS_PER_ROW);
+                if (filtered.length === 0) {
+                    continue;
+                }
 
-  // A TMDb person with their credits, in one call, kept an hour. Their page
-  // in Discover and the cast panel both read it.
-  const tmdbPersonCache = new Map() // id -> { at, data }
-  const TMDB_PERSON_TTL = 60 * 60 * 1000
-  async function fetchTmdbPerson(key, personId) {
-    const id = String(personId).replace(/[^0-9]/g, '')
-    if (!id) return null
-    const hit = tmdbPersonCache.get(id)
-    if (hit && Date.now() - hit.at < TMDB_PERSON_TTL) return hit.data
-    const rsp = await fetchOut(`https://api.themoviedb.org/3/person/${id}?api_key=${encodeURIComponent(key)}&append_to_response=combined_credits`)
-    if (!rsp.ok) return null
-    const data = await rsp.json()
-    if (tmdbPersonCache.size > 500) tmdbPersonCache.delete(tmdbPersonCache.keys().next().value)
-    tmdbPersonCache.set(id, { at: Date.now(), data })
-    return data
-  }
+                // Real household match behind this seed ("Sarah and Mike both loved
+                // X") beats the generic fallback whenever one exists - see
+                // findAttributionForSeed's own comment for why this isn't scoped to
+                // a single "current user" the way a personalized feed would be.
+                // Personal/shared mode (scopedUserIds set) name the actual person/
+                // pair explicitly instead - "you" doesn't fit when the admin picked
+                // a specific managed user (or two) rather than reading their own
+                // account-wide feed.
+                let reason =
+                    scopedUserIds && scopedUserIds.length === 1
+                        ? `Because ${scopedNamesById.get(scopedUserIds[0]) || "they"} watched ${seed.name}`
+                        : scopedUserIds && scopedUserIds.length === 2
+                          ? `Because ${scopedNamesById.get(scopedUserIds[0]) || "they"} and ${scopedNamesById.get(scopedUserIds[1]) || "they"} watched ${seed.name}`
+                          : `Because you watched ${seed.name}`;
+                // hasRealSignal - same definition /similar uses: does the item-item
+                // affinity map have any real neighbors for THIS specific seed, i.e.
+                // did actual cross-item viewing behavior (not just this seed's own
+                // decayed watch-time score) touch this row at all. Every row here
+                // already starts from something genuinely watched, so this isn't
+                // "watched vs not" - it's "confirmed by real behavioral overlap
+                // (this account's own rewatch patterns, or another household
+                // member's) vs riding on this one seed's score alone." A found
+                // pairwise attribution is strictly stronger evidence of the same
+                // thing, so it also counts.
+                const seedKey = `${seed.type === "series" ? "series" : "movie"}:${seed.id}`;
+                let hasRealSignal = !!(affinity && affinity.get(seedKey)?.size > 0);
+                if (affinity && pairwiseOverlaps.length > 0) {
+                    try {
+                        const { findAttributionForSeed } = require("../utils/recommendationEngine");
+                        const attribution = findAttributionForSeed(
+                            seedKey,
+                            pairwiseOverlaps,
+                            affinity
+                        );
+                        if (attribution) {
+                            const nameA = usersById.get(attribution.userA) || "someone";
+                            const nameB = usersById.get(attribution.userB) || "someone else";
+                            reason = `${nameA} and ${nameB} both loved ${seed.name}`;
+                            hasRealSignal = true;
+                        }
+                    } catch (e) {
+                        console.warn("Attribution lookup skipped:", e?.message);
+                    }
+                }
 
-  // A person's credits as Discover shows them, newest first, each title once.
-  // `rank` is "Most popular": 1 is the title the most people rated on TMDb.
-  // No cap - TMDb's combined_credits is a person's whole filmography in one
-  // bounded answer, and an old .slice(0, 60) once hid most of Tom Cruise's
-  // early work.
-  function creditsOf(person, mediaType) {
-    const data = person?.combined_credits || {}
-    const seen = new Set()
-    const credits = [...(data.cast || []), ...(data.crew || [])]
-      .filter((c) => c && (mediaType ? c.media_type === mediaType : (c.media_type === 'movie' || c.media_type === 'tv')) && (c.poster_path || c.title || c.name))
-      .map((c) => {
-        const date = c.release_date || c.first_air_date || ''
-        return {
-          tmdbId: c.id,
-          mediaType: c.media_type, // 'movie' | 'tv'
-          title: c.title || c.name || 'Untitled',
-          year: date ? date.slice(0, 4) : null,
-          poster: c.poster_path ? `${TMDB_IMG}${c.poster_path}` : null,
-          role: c.character || c.job || null,
-          _sort: date || '0000',
-          _votes: c.vote_count || 0,
+                rows.push({
+                    genre,
+                    hasRealSignal,
+                    items: filtered,
+                    reason,
+                    seedId: seed.id,
+                    seedType: seed.type,
+                });
+            }
+
+            await enhanceRealMatchReasons(prisma, accountId, rows);
+            res.json({ rows });
+        } catch (error) {
+            console.error("Error building recommendations:", error);
+            res.status(500).json({ error: "Failed to build recommendations" });
         }
-      })
-      .filter((c) => { const k = `${c.mediaType}:${c.tmdbId}`; if (seen.has(k)) return false; seen.add(k); return true })
-    ;[...credits].sort((a, b) => b._votes - a._votes).forEach((c, i) => { c.rank = i + 1 })
-    credits.sort((a, b) => b._sort.localeCompare(a._sort))
-    for (const c of credits) { delete c._sort; delete c._votes }
-    return credits
-  }
+    });
 
-  const personCard = (person) => ({
-    id: person.id,
-    name: person.name || null,
-    profile: person.profile_path ? `${TMDB_IMG}${person.profile_path}` : null,
-    ...require('../utils/personFacts').personFacts(person),
-  })
+    // GET /api/discover/similar?id=X&type=movie|series
+    // "More Like This" for the detail popup - ANY item, not just Discover's
+    // For You rows (that's /recommendations, which seeds off the household's
+    // own top-scored watch history; this seeds off whatever single item the
+    // popup happens to be open on, including titles nobody's watched yet).
+    //
+    // Real household affinity is used to WEIGHT which genre(s) to search,
+    // never to supply the displayed items directly - a first version did the
+    // latter and got it wrong: the item-item affinity map (computeItemSimilarity,
+    // same one /recommendations' collaborative boost reads) only has entries
+    // for titles someone has actually spent real time on, since that's the
+    // literal definition of "affinity neighbor" here - two titles the same
+    // person watched. Showing those directly meant "More Like This" was
+    // guaranteed to recommend already-watched content back whenever real
+    // signal existed, which is the opposite of the point. So: look at what
+    // genres the top real neighbors carry, bias the actual Cinemeta pull
+    // toward those genres (on top of the seed's own), then filter the result
+    // against the WHOLE household's watch history same as /recommendations
+    // does - every displayed item is guaranteed unwatched by anyone here.
+    router.get("/similar", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ hasRealSignal: false, items: [] });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { id, type } = req.query;
+            if (!id || (type !== "movie" && type !== "series")) {
+                return res.status(400).json({ error: "id and type (movie|series) are required" });
+            }
 
-  // GET /api/discover/person/:id - a TMDb person and all their film/TV
-  // credits. tmdbId/mediaType are returned so the page can resolve an IMDb id
-  // on click (see /imdb-id below) and open the usual detail popup.
-  router.get('/person/:id', async (req, res) => {
-    try {
-      const key = await resolveTmdbKey(req)
-      if (!key) return res.status(503).json({ error: 'TMDb key not configured' })
-      const personId = String(req.params.id).replace(/[^0-9]/g, '')
-      if (!personId) return res.status(400).json({ error: 'Invalid person id' })
-      const person = await fetchTmdbPerson(key, personId)
-      if (!person) return res.status(502).json({ error: 'TMDb request failed' })
-      res.json({ person: personCard(person), credits: creditsOf(person, null) })
-    } catch (error) {
-      console.error('Error fetching person credits:', error)
-      res.status(500).json({ error: 'Failed to fetch person credits' })
-    }
-  })
+            // Same opt-out /recommendations respects - this reuses the identical
+            // engine, so a household that turned SlickTrax off shouldn't have it
+            // silently running here either.
+            try {
+                const acc = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                let cfg = acc?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object" && cfg.enableRecommendations === false) {
+                    return res.json({ hasRealSignal: false, items: [] });
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
 
-  // GET /api/discover/imdb-id?tmdbId=X&type=movie|tv - resolve a TMDb title to
-  // its IMDb id, so a person-credit click can open the existing detail modal
-  // (which is Cinemeta/tt-id based). One extra call, made only on click - the
-  // person endpoint stays a single TMDb request.
-  router.get('/imdb-id', async (req, res) => {
-    try {
-      const key = await resolveTmdbKey(req)
-      if (!key) return res.status(503).json({ error: 'TMDb key not configured' })
-      const tmdbId = String(req.query.tmdbId || '').replace(/[^0-9]/g, '')
-      const type = req.query.type === 'tv' ? 'tv' : 'movie'
-      if (!tmdbId) return res.status(400).json({ error: 'Invalid tmdbId' })
-      const rsp = await fetchOut(`https://api.themoviedb.org/3/${type}/${tmdbId}/external_ids?api_key=${encodeURIComponent(key)}`)
-      if (!rsp.ok) return res.status(502).json({ error: 'TMDb request failed' })
-      const data = await rsp.json()
-      res.json({ imdbId: data.imdb_id || null, type: type === 'tv' ? 'series' : 'movie' })
-    } catch (error) {
-      console.error('Error resolving imdb id:', error)
-      res.status(500).json({ error: 'Failed to resolve imdb id' })
-    }
-  })
+            const MAX_ITEMS = 16;
+            const MAX_GENRES_TRIED = 3;
+            const SEED_GENRE_VOTES = 3; // the seed's own genre(s) anchor the ranking - neighbor genres supplement, don't override
+            const seedKey = `${type}:${id}`;
 
-  // GET /api/discover/taste-profile
-  // A real per-user "taste profile" built entirely from first-party watch
-  // data (the same weighted vectors taste-overlap uses), NOT self-reported
-  // tags: total watch time, movie/series split, top titles by real time,
-  // top genres, and the household member they match most. This turns the old
-  // flat "Taste overlap" pair list into "here's YOU, and who you're closest
-  // to" - the overlap number becomes one field of a fuller profile instead of
-  // the whole thing. Genres are the one piece not in the vectors, so they're
-  // looked up (Cinemeta, cached) only for each user's top few titles - bounded
-  // so this stays a handful of cached calls, not a wall of them.
-  router.get('/taste-profile', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ profiles: [] })
-      const accountId = getAccountId(req) || 'default'
+            const [movies, episodes, overrides, notInterested] = await Promise.all([
+                prisma.movieWatchHistory.findMany({
+                    select: { itemId: true },
+                    where: { accountId },
+                }),
+                prisma.episodeWatchHistory.findMany({
+                    select: { showId: true },
+                    where: { accountId },
+                }),
+                prisma.manualWatchOverride.findMany({
+                    select: { itemId: true, watched: true },
+                    where: { accountId },
+                }),
+                prisma.notInterestedItem
+                    .findMany({ select: { itemId: true }, where: { accountId } })
+                    .catch(() => []),
+            ]);
+            // Watched-status resolution matches /recommendations exactly - manual
+            // overrides set to true also count as watched; set to false REMOVES
+            // from the watched set (unwatched override wins over real history).
+            const watchedIds = new Set([
+                ...movies.map((m) => m.itemId),
+                ...episodes.map((e) => e.showId),
+            ]);
+            for (const o of overrides) {
+                if (o.watched) {
+                    watchedIds.add(o.itemId);
+                } else {
+                    watchedIds.delete(o.itemId);
+                }
+            }
+            const notInterestedIds = new Set(notInterested.map((n) => n.itemId));
+            const excludeIds = new Set([id, ...watchedIds, ...notInterestedIds]);
 
-      const { buildUserVectors, computePairwiseOverlap } = require('../utils/recommendationEngine')
-      const { vectors, itemMeta } = await buildUserVectors(prisma, accountId)
-      if (vectors.size === 0) return res.json({ profiles: [] })
+            const {
+                buildUserVectors,
+                computeItemSimilarity,
+            } = require("../utils/recommendationEngine");
+            const { vectors } = await buildUserVectors(prisma, accountId);
+            const affinity = computeItemSimilarity(vectors);
+            const neighbors = affinity.get(seedKey);
 
-      const users = await prisma.user.findMany({
-        where: { id: { in: [...vectors.keys()] } },
-        select: { id: true, username: true, avatarUrl: true, useGravatar: true, colorIndex: true, email: true },
-      })
-      const userById = new Map(users.map((u) => [u.id, u]))
+            const { fetchMetadata } = require("../utils/notify");
+            const { resolveOmdbKey } = require("../utils/listImport");
+            const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+            const genreVotes = new Map();
+            const seedMeta = await fetchMetadata(id, type, null, omdbApiKey).catch(() => null);
+            for (const g of Array.isArray(seedMeta?.genres) ? seedMeta.genres : []) {
+                genreVotes.set(g, (genreVotes.get(g) || 0) + SEED_GENRE_VOTES);
+            }
 
-      // Strongest taste twin per user, from the same pairwise overlap math.
-      const twinByUser = new Map()
-      for (const p of computePairwiseOverlap(vectors, itemMeta)) {
-        if (p.sharedCount <= 0) continue
-        for (const [self, other] of [[p.userA, p.userB], [p.userB, p.userA]]) {
-          const prev = twinByUser.get(self)
-          if (!prev || p.similarity > prev.similarity) twinByUser.set(self, { userId: other, similarity: p.similarity })
+            const hasRealSignal = !!(neighbors && neighbors.size > 0);
+            if (neighbors) {
+                // Top 5 real neighbors by affinity weight - just enough to bias the
+                // genre pick without turning this into 5 extra metadata calls' worth
+                // of latency for a popup that should feel instant.
+                const topNeighbors = [...neighbors.entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 5);
+                for (const [key] of topNeighbors) {
+                    const neighborId = key.slice(key.indexOf(":") + 1);
+                    const neighborType = key.startsWith("series:") ? "series" : "movie";
+                    try {
+                        const meta = await fetchMetadata(
+                            neighborId,
+                            neighborType,
+                            null,
+                            omdbApiKey
+                        );
+                        for (const g of Array.isArray(meta?.genres) ? meta.genres : []) {
+                            genreVotes.set(g, (genreVotes.get(g) || 0) + 1);
+                        }
+                    } catch {}
+                }
+            }
+
+            const topGenres = [...genreVotes.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([g]) => g)
+                .slice(0, MAX_GENRES_TRIED);
+
+            const items = [];
+            const seenIds = new Set([id]);
+
+            // Real per-title similarity from TMDb's own /recommendations, tried
+            // first - genuinely different from (and usually better than) the
+            // genre-catalog fallback below, which only knows "same genre, sorted
+            // by rating" and has no concept of a specific title actually being
+            // similar to this one. Falls through to nothing (not an error) when
+            // no TMDb key is configured, or TMDb has no IMDb-resolvable results
+            // for an obscure title - the genre-based loop below still fills the
+            // rest either way, so this is additive, never a hard dependency.
+            try {
+                const tmdbKey = await resolveTmdbKey(req);
+                if (tmdbKey) {
+                    const findRsp = await fetchOut(
+                        `https://api.themoviedb.org/3/find/${id}?api_key=${encodeURIComponent(tmdbKey)}&external_source=imdb_id`
+                    );
+                    if (findRsp.ok) {
+                        const findData = await findRsp.json();
+                        const hit =
+                            type === "movie"
+                                ? (findData.movie_results || [])[0]
+                                : (findData.tv_results || [])[0];
+                        if (hit?.id) {
+                            const tmdbType = type === "movie" ? "movie" : "tv";
+                            const recRsp = await fetchOut(
+                                `https://api.themoviedb.org/3/${tmdbType}/${hit.id}/recommendations?api_key=${encodeURIComponent(tmdbKey)}`
+                            );
+                            if (recRsp.ok) {
+                                const recData = await recRsp.json();
+                                const candidates = (recData.results || []).slice(0, 10);
+                                const resolved = await Promise.all(
+                                    candidates.map(async (c) => {
+                                        try {
+                                            const extRsp = await fetchOut(
+                                                `https://api.themoviedb.org/3/${tmdbType}/${c.id}/external_ids?api_key=${encodeURIComponent(tmdbKey)}`
+                                            );
+                                            if (!extRsp.ok) {
+                                                return null;
+                                            }
+                                            const extData = await extRsp.json();
+                                            if (!extData.imdb_id) {
+                                                return null;
+                                            }
+                                            return {
+                                                genres: [],
+                                                id: extData.imdb_id,
+                                                imdbRating: c.vote_average
+                                                    ? c.vote_average.toFixed(1)
+                                                    : null,
+                                                name: c.title || c.name || "Unknown",
+                                                poster: c.poster_path
+                                                    ? `https://image.tmdb.org/t/p/w342${c.poster_path}`
+                                                    : null,
+                                                releaseInfo:
+                                                    c.release_date || c.first_air_date
+                                                        ? (
+                                                              c.release_date || c.first_air_date
+                                                          ).slice(0, 4)
+                                                        : null,
+                                                type,
+                                            };
+                                        } catch {
+                                            return null;
+                                        }
+                                    })
+                                );
+                                for (const r of resolved) {
+                                    if (items.length >= MAX_ITEMS) {
+                                        break;
+                                    }
+                                    if (!r || seenIds.has(r.id) || excludeIds.has(r.id)) {
+                                        continue;
+                                    }
+                                    seenIds.add(r.id);
+                                    items.push(r);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch {
+                // Optional remote data does not prevent the current operation from completing.
+            }
+
+            for (const genre of topGenres) {
+                if (items.length >= MAX_ITEMS) {
+                    break;
+                }
+                let candidates = await fetchCatalog(type, { catalog: "imdbRating", genre });
+                if (candidates.length === 0) {
+                    candidates = await fetchCatalog(type, { catalog: "top", genre });
+                }
+                for (const c of candidates) {
+                    if (items.length >= MAX_ITEMS) {
+                        break;
+                    }
+                    if (seenIds.has(c.id) || excludeIds.has(c.id)) {
+                        continue;
+                    }
+                    seenIds.add(c.id);
+                    items.push(c);
+                }
+            }
+
+            res.json({ hasRealSignal, items });
+        } catch (error) {
+            console.error("Error building similar items:", error);
+            res.status(500).json({ error: "Failed to build similar items" });
         }
-      }
+    });
 
-      const { fetchMetadata } = require('../utils/notify')
-      const { resolveOmdbKey } = require('../utils/listImport')
-      const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-      const TOP_TITLES = 5
-      const TOP_TITLES_FOR_GENRES = 6
-
-      const profiles = []
-      for (const [userId, vec] of vectors.entries()) {
-        if (!userById.has(userId)) continue
-        const entries = [...vec.entries()].sort((a, b) => b[1] - a[1])
-        const totalSeconds = entries.reduce((sum, [, s]) => sum + s, 0)
-        let movieCount = 0, seriesCount = 0
-        for (const [key] of entries) { if (key.startsWith('series:')) seriesCount++; else movieCount++ }
-
-        const topTitles = entries.slice(0, TOP_TITLES).map(([key, seconds]) => ({
-          key, seconds, ...(itemMeta.get(key) || { name: key, poster: null, type: key.startsWith('series:') ? 'series' : 'movie' }),
-        }))
-
-        // Genre votes from the user's top titles (bounded + cached).
-        const genreVotes = new Map()
-        for (const [key] of entries.slice(0, TOP_TITLES_FOR_GENRES)) {
-          const id = key.slice(key.indexOf(':') + 1)
-          const type = key.startsWith('series:') ? 'series' : 'movie'
-          try {
-            const meta = await fetchMetadata(id, type, null, omdbApiKey)
-            for (const g of (Array.isArray(meta?.genres) ? meta.genres : [])) genreVotes.set(g, (genreVotes.get(g) || 0) + 1)
-          } catch {}
+    // POST /api/discover/not-interested { itemId, itemType }
+    // SlickTrax feedback: excludes this item from future /recommendations
+    // (never a seed, never a recommended item) and downweights similar items
+    // via the household's own item-item affinity map. Household-wide, not
+    // per-user - see NotInterestedItem's schema comment.
+    router.post("/not-interested", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.status(503).json({ error: "Not available" });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { itemId, itemType } = req.body || {};
+            if (!itemId || (itemType !== "movie" && itemType !== "series")) {
+                return res
+                    .status(400)
+                    .json({ error: "itemId and itemType (movie|series) are required" });
+            }
+            const { markNotInterested } = require("../utils/notInterested");
+            await markNotInterested(prisma, accountId, itemId, itemType);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error marking not interested:", error);
+            res.status(500).json({ error: "Failed to save feedback" });
         }
-        const topGenres = [...genreVotes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([genre, count]) => ({ genre, count }))
+    });
 
-        const twin = twinByUser.get(userId)
-        profiles.push({
-          user: userById.get(userId),
-          totalSeconds,
-          titleCount: entries.length,
-          movieCount,
-          seriesCount,
-          topTitles,
-          topGenres,
-          tasteTwin: twin && userById.has(twin.userId)
-            ? { user: userById.get(twin.userId), similarity: Math.round(twin.similarity * 100) }
-            : null,
-        })
-      }
+    // POST /api/discover/react { itemId, itemType, reaction: 'happy'|'sad', itemName?, poster? }
+    // SlickTrax feedback: feeds /recommendations scoring - see
+    // recommendationEngine.js's computeSignedAdjustments. Setting a new
+    // reaction replaces any existing one on the same item (household-wide,
+    // one opinion per title - see TitleReaction's schema comment).
+    router.post("/react", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.status(503).json({ error: "Not available" });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { itemId, itemType, reaction, itemName, poster } = req.body || {};
+            if (!itemId || (itemType !== "movie" && itemType !== "series")) {
+                return res
+                    .status(400)
+                    .json({ error: "itemId and itemType (movie|series) are required" });
+            }
+            const { setReaction } = require("../utils/titleFeedback");
+            const row = await setReaction(
+                prisma,
+                accountId,
+                itemId,
+                itemType,
+                reaction,
+                itemName,
+                poster
+            );
+            res.json(row);
+        } catch (error) {
+            console.error("Error setting reaction:", error);
+            res.status(400).json({ error: publicMessage(error, "Failed to save reaction") });
+        }
+    });
 
-      // Most-active first, so the section leads with the household's heaviest viewer.
-      profiles.sort((a, b) => b.totalSeconds - a.totalSeconds)
-      res.json({ profiles })
-    } catch (error) {
-      console.error('Error computing taste profile:', error)
-      res.status(500).json({ error: 'Failed to compute taste profile' })
+    // DELETE /api/discover/react/:itemId
+    router.delete("/react/:itemId", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.status(503).json({ error: "Not available" });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { clearReaction } = require("../utils/titleFeedback");
+            await clearReaction(prisma, accountId, req.params.itemId);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error clearing reaction:", error);
+            res.status(500).json({ error: "Failed to clear reaction" });
+        }
+    });
+
+    // GET /api/discover/reactions?ids=tt1,tt2,... - batch lookup for poster-grid/modal UI state
+    router.get("/reactions", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ reactions: {} });
+            }
+            const accountId = getAccountId(req) || "default";
+            const ids =
+                typeof req.query.ids === "string"
+                    ? req.query.ids.split(",").filter(Boolean)
+                    : undefined;
+            const { getReactionsMap } = require("../utils/titleFeedback");
+            const reactions = await getReactionsMap(prisma, accountId, ids);
+            res.json({ reactions });
+        } catch (error) {
+            console.error("Error fetching reactions:", error);
+            res.status(500).json({ error: "Failed to fetch reactions" });
+        }
+    });
+
+    // POST /api/discover/rate { itemId, itemType, rating (1-10), season?, itemName?, poster? }
+    // season omitted = overall rating (the only kind movies use; series may
+    // carry this AND independent per-season ratings - see TitleRating's schema
+    // comment). Also feeds /recommendations scoring.
+    router.post("/rate", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.status(503).json({ error: "Not available" });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { itemId, itemType, rating, season, itemName, poster } = req.body || {};
+            if (!itemId || (itemType !== "movie" && itemType !== "series")) {
+                return res
+                    .status(400)
+                    .json({ error: "itemId and itemType (movie|series) are required" });
+            }
+            const { setRating } = require("../utils/titleFeedback");
+            const row = await setRating(
+                prisma,
+                accountId,
+                itemId,
+                itemType,
+                rating,
+                season,
+                itemName,
+                poster
+            );
+            res.json(row);
+        } catch (error) {
+            console.error("Error setting rating:", error);
+            res.status(400).json({ error: publicMessage(error, "Failed to save rating") });
+        }
+    });
+
+    // DELETE /api/discover/rate/:itemId?season=N
+    router.delete("/rate/:itemId", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.status(503).json({ error: "Not available" });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { clearRating } = require("../utils/titleFeedback");
+            const season = req.query.season === undefined ? undefined : Number(req.query.season);
+            await clearRating(prisma, accountId, req.params.itemId, season);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error clearing rating:", error);
+            res.status(500).json({ error: "Failed to clear rating" });
+        }
+    });
+
+    // GET /api/discover/ratings/:itemId - { "0": overallRating, "1": season1Rating, ... }
+    router.get("/ratings/:itemId", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ ratings: {} });
+            }
+            const accountId = getAccountId(req) || "default";
+            const { getRatingsForItem } = require("../utils/titleFeedback");
+            const ratings = await getRatingsForItem(prisma, accountId, req.params.itemId);
+            res.json({ ratings });
+        } catch (error) {
+            console.error("Error fetching ratings:", error);
+            res.status(500).json({ error: "Failed to fetch ratings" });
+        }
+    });
+
+    // GET /api/discover/:id/seasons?type=series - distinct season numbers
+    // (excluding season 0/specials), for the rating UI's season picker. Not
+    // needed for movies - the client never calls this for itemType 'movie'.
+    router.get("/:id/seasons", async (req, res) => {
+        try {
+            if (req.query.type !== "series") {
+                return res.json({ seasons: [] });
+            }
+            const { fetchMetadata } = require("../utils/notify");
+            const metadata = await fetchMetadata(req.params.id, "series", null, null);
+            const seasons = [
+                ...new Set(
+                    (metadata?.allEpisodes || [])
+                        .map((e) => e.season)
+                        .filter((s) => Number.isInteger(s) && s > 0)
+                ),
+            ].sort((a, b) => a - b);
+            res.json({ seasons });
+        } catch (error) {
+            console.error("Error fetching season list:", error);
+            res.status(500).json({ error: "Failed to fetch seasons" });
+        }
+    });
+
+    // GET /api/discover/taste-overlap
+    // "You and X" - real behavioral overlap between every pair of managed
+    // users on this account, from actual watch-time (MovieWatchHistory /
+    // EpisodeWatchHistory), not genre tags. Similarity is cosine similarity
+    // across each pair's full weighted watch vectors; "shared favorites" is
+    // capped per pair (top 5) by min(timeA, timeB) per title, so a title only
+    // one side actually spent real time on doesn't count as shared. See
+    // recommendationEngine.js for the actual math.
+    router.get("/taste-overlap", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ pairs: [] });
+            }
+            const accountId = getAccountId(req) || "default";
+
+            const {
+                buildUserVectors,
+                computePairwiseOverlap,
+            } = require("../utils/recommendationEngine");
+            const { vectors, itemMeta } = await buildUserVectors(prisma, accountId);
+            if (vectors.size < 2) {
+                return res.json({ pairs: [] });
+            }
+
+            const users = await prisma.user.findMany({
+                select: {
+                    avatarUrl: true,
+                    colorIndex: true,
+                    email: true,
+                    id: true,
+                    useGravatar: true,
+                    username: true,
+                },
+                where: { id: { in: [...vectors.keys()] } },
+            });
+            const userById = new Map(users.map((u) => [u.id, u]));
+
+            const pairs = computePairwiseOverlap(vectors, itemMeta)
+                .filter((p) => userById.has(p.userA) && userById.has(p.userB) && p.sharedCount > 0)
+                .map((p) => ({
+                    shared: p.shared,
+                    sharedCount: p.sharedCount,
+                    similarity: Math.round(p.similarity * 100),
+                    userA: userById.get(p.userA),
+                    userB: userById.get(p.userB),
+                }));
+
+            res.json({ pairs });
+        } catch (error) {
+            console.error("Error computing taste overlap:", error);
+            res.status(500).json({ error: "Failed to compute taste overlap" });
+        }
+    });
+
+    // --- Cast/crew deep-dive (optional; requires a TMDb API key) -------------
+    // Cinemeta has no people database, so a person's filmography can only come
+    // from TMDb. The key is opt-in: per-account (Settings, sync.tmdbApiKey)
+    // takes precedence, else the TMDB_API_KEY env var. With neither, these
+    // endpoints return 503 and the frontend hides the feature entirely.
+    const TMDB_IMG = "https://image.tmdb.org/t/p/w342";
+    // Delegates to the shared resolver rather than re-reading sync.tmdbApiKey
+    // by hand. The hand-rolled version got the account-then-env order right but
+    // knew nothing about backup keys, so a dead primary took this endpoint down
+    // even with a working spare configured - failover applied on the list-import
+    // path and silently nowhere else.
+    async function resolveTmdbKey(req) {
+        const { resolveKeyFromSettings } = require("../utils/listImport");
+        return resolveKeyFromSettings(prisma, getAccountId, req, "tmdbApiKey", "TMDB_API_KEY");
     }
-  })
 
-  // GET /api/discover/household-picks?type=movie|series
-  // "Nobody's seen it yet, but the house would probably love it." Something
-  // Trakt structurally can't do (it's single-user): titles NO household member
-  // has watched/watchlisted/dismissed, in the genres that appeal broadly
-  // across the household (shared by 2+ members where possible, not just one
-  // person's taste). Reuses buildUserVectors for per-user genre affinity and
-  // the same catalog fetch + household-wide exclusion the recommendations row
-  // uses - no new machinery.
-  router.get('/household-picks', async (req, res) => {
-    try {
-      if (!prisma || !getAccountId) return res.json({ items: [], genres: [], memberCount: 0 })
-      const accountId = getAccountId(req) || 'default'
-      const type = req.query.type === 'series' ? 'series' : 'movie'
-
-      // Respect the recommendations opt-out (same feature family).
-      try {
-        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-        let cfg = acc?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object' && cfg.enableRecommendations === false) return res.json({ items: [], genres: [], memberCount: 0 })
-      } catch {}
-
-      const { buildUserVectors } = require('../utils/recommendationEngine')
-      const { fetchMetadata } = require('../utils/notify')
-      const { resolveOmdbKey } = require('../utils/listImport')
-      const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-      const { vectors } = await buildUserVectors(prisma, accountId)
-      if (vectors.size === 0) return res.json({ items: [], genres: [], memberCount: 0 })
-
-      // Genre affinity per user (their top ~6 titles), then count DISTINCT
-      // users per genre so "broad household appeal" means multiple people, not
-      // one heavy viewer.
-      const TOP_TITLES_PER_USER = 6
-      const genreUsers = new Map() // genre -> Set<userId>
-      // Six titles per person, each a metadata lookup. One at a time that is
-      // six round trips per household member before this row can be built,
-      // and every one of them can wait out its own timeout. All of them go
-      // at once instead, six at a time.
-      const { mapLimit } = require('../utils/mapLimit')
-      const wanted = []
-      for (const [userId, vec] of vectors.entries()) {
-        const top = [...vec.entries()].sort((a, b) => b[1] - a[1]).slice(0, TOP_TITLES_PER_USER)
-        for (const [key] of top) {
-          wanted.push({ userId, id: key.slice(key.indexOf(':') + 1), t: key.startsWith('series:') ? 'series' : 'movie' })
+    // GET /api/discover/local-index - the household's OWN titles (watchlist +
+    // recently watched), id/name/type/poster only. Fetched once when Discover
+    // mounts so typing can match your own stuff with no round-trip at all,
+    // while the network search is still in flight.
+    //
+    // Bounded on purpose: a long-lived instance has thousands of history rows,
+    // and shipping all of them to make search feel fast would be its own kind
+    // of slow. Most-recent-first, capped, deduped by id.
+    router.get("/local-index", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const LIMIT = 400;
+            const [watchlist, movies, episodes] = await Promise.all([
+                prisma.watchlistItem.findMany({
+                    orderBy: { addedAt: "desc" },
+                    take: LIMIT,
+                    where: { accountId },
+                }),
+                prisma.movieWatchHistory.findMany({
+                    orderBy: { watchedAt: "desc" },
+                    select: { itemId: true, itemName: true, poster: true },
+                    take: LIMIT,
+                    where: { accountId },
+                }),
+                prisma.episodeWatchHistory.findMany({
+                    orderBy: { watchedAt: "desc" },
+                    select: { poster: true, showId: true, showName: true },
+                    take: LIMIT,
+                    where: { accountId },
+                }),
+            ]);
+            const byId = new Map();
+            const add = (id, name, type, poster) => {
+                if (!(id && name) || byId.has(id)) {
+                    return;
+                }
+                byId.set(id, { id, name, poster: poster || null, type });
+            };
+            for (const w of watchlist) {
+                add(w.itemId, w.name, w.itemType === "series" ? "series" : "movie", w.poster);
+            }
+            for (const m of movies) {
+                add(m.itemId, m.itemName, "movie", m.poster);
+            }
+            for (const e of episodes) {
+                add(e.showId, e.showName, "series", e.poster);
+            }
+            res.json({ items: [...byId.values()].slice(0, 800) });
+        } catch {
+            // Instant matches are an accelerant - failing here just means search
+            // behaves exactly as it always did.
+            res.json({ items: [] });
         }
-      }
-      const metas = await mapLimit(wanted, 6, (w) => fetchMetadata(w.id, w.t, null, omdbApiKey).catch(() => null))
-      wanted.forEach((w, i) => {
-        for (const g of (Array.isArray(metas[i]?.genres) ? metas[i].genres : [])) {
-          if (!genreUsers.has(g)) genreUsers.set(g, new Set())
-          genreUsers.get(g).add(w.userId)
+    });
+
+    // POST /api/discover/describe - tip-of-the-tongue search. The model only
+    // ever NAMES candidates; every name is then verified against TMDb, so a
+    // hallucinated title fails resolution and never reaches the user rather
+    // than being shown with invented metadata. See utils/describeSearch.js.
+    router.post("/describe", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { searchByDescription } = require("../utils/describeSearch");
+            const tmdbKey = await resolveTmdbKey(req);
+            const result = await searchByDescription(
+                prisma,
+                accountId,
+                decrypt,
+                req.body?.description,
+                tmdbKey
+            );
+            res.json(result);
+        } catch (e) {
+            res.status(400).json({ error: publicMessage(e, "Could not search by description") });
         }
-      })
-      if (genreUsers.size === 0) return res.json({ items: [], genres: [], memberCount: vectors.size })
+    });
 
-      // Prefer genres shared by 2+ members; if a single-user household (or no
-      // genre reaches 2), fall back to that household's strongest genres so
-      // the row still produces unwatched picks.
-      const ranked = [...genreUsers.entries()].sort((a, b) => b[1].size - a[1].size)
-      const shared = ranked.filter(([, s]) => s.size >= 2)
-      const chosen = (shared.length > 0 ? shared : ranked).slice(0, 4).map(([g]) => g)
-
-      // Household-wide exclusion: watched (history + manual overrides),
-      // watchlisted, or dismissed by ANYONE.
-      const [movies, episodes, overrides, watchlist, notInterested] = await Promise.all([
-        prisma.movieWatchHistory.findMany({ where: { accountId }, select: { itemId: true }, distinct: ['itemId'] }),
-        prisma.episodeWatchHistory.findMany({ where: { accountId }, select: { showId: true }, distinct: ['showId'] }),
-        prisma.manualWatchOverride.findMany({ where: { accountId }, select: { itemId: true, watched: true } }),
-        prisma.watchlistItem.findMany({ where: { accountId }, select: { itemId: true } }).catch(() => []),
-        prisma.notInterestedItem.findMany({ where: { accountId }, select: { itemId: true } }).catch(() => []),
-      ])
-      const excludeIds = new Set([...movies.map((m) => m.itemId), ...episodes.map((e) => e.showId), ...watchlist.map((w) => w.itemId), ...notInterested.map((n) => n.itemId)])
-      for (const o of overrides) { if (o.watched) excludeIds.add(o.itemId); else excludeIds.delete(o.itemId) }
-
-      const MAX_ITEMS = 12
-      const items = []
-      const seen = new Set()
-      for (const genre of chosen) {
-        if (items.length >= MAX_ITEMS) break
-        let candidates = await fetchCatalog(type, { catalog: 'imdbRating', genre })
-        if (candidates.length === 0) candidates = await fetchCatalog(type, { catalog: 'top', genre })
-        for (const c of candidates) {
-          if (items.length >= MAX_ITEMS) break
-          if (seen.has(c.id) || excludeIds.has(c.id)) continue
-          seen.add(c.id)
-          items.push(c)
+    // A TMDb person with their credits, in one call, kept an hour. Their page
+    // in Discover and the cast panel both read it.
+    const tmdbPersonCache = new Map(); // id -> { at, data }
+    const TMDB_PERSON_TTL = 60 * 60 * 1000;
+    async function fetchTmdbPerson(key, personId) {
+        const id = String(personId).replace(/[^0-9]/g, "");
+        if (!id) {
+            return null;
         }
-      }
-
-      res.json({ items, genres: chosen, memberCount: vectors.size, sharedAppeal: shared.length > 0 })
-    } catch (error) {
-      console.error('Error building household picks:', error)
-      res.status(500).json({ error: 'Failed to build household picks' })
+        const hit = tmdbPersonCache.get(id);
+        if (hit && Date.now() - hit.at < TMDB_PERSON_TTL) {
+            return hit.data;
+        }
+        const rsp = await fetchOut(
+            `https://api.themoviedb.org/3/person/${id}?api_key=${encodeURIComponent(key)}&append_to_response=combined_credits`
+        );
+        if (!rsp.ok) {
+            return null;
+        }
+        const data = await rsp.json();
+        if (tmdbPersonCache.size > 500) {
+            tmdbPersonCache.delete(tmdbPersonCache.keys().next().value);
+        }
+        tmdbPersonCache.set(id, { at: Date.now(), data });
+        return data;
     }
-  })
 
-  // GET /api/discover/search-person?query=X&type=movie|series[&personId=N]
-  // Discover's People: a name in, the best-matching person and what they've
-  // been in, of the type asked for, with the facts for their card. With
-  // personId (a cast member's "See everything they've been in") it is that
-  // person, not whoever a search for the name finds first.
-  router.get('/search-person', async (req, res) => {
-    try {
-      const key = await resolveTmdbKey(req)
-      let query = String(req.query.query || '').trim()
-      const wantTv = req.query.type === 'series'
-      const byId = key ? String(req.query.personId || '').replace(/[^0-9]/g, '') : ''
-      const known = byId ? await fetchTmdbPerson(key, byId) : null
-      if (known?.name) query = known.name
-      if (!query) return res.json({ person: null, results: [] })
-
-      // Without a TMDb key, LumiereDB answers: a full name, and the titles
-      // that person is best known for, in that order, with their IMDb ids.
-      if (!key) {
-        const base = await lumiereFor(req)
-        if (!base) return res.status(503).json({ error: 'TMDb key not configured' })
-        const found = await require('../utils/lumiere').searchPeople(base, wantTv ? 'series' : 'movie', query)
-        if (!found) return res.json({ person: null, results: [] })
-        return res.json({
-          person: { id: null, name: found.person.name, profile: null },
-          results: found.items.map((i, n) => ({
-            tmdbId: null,
-            imdbId: i.id,
-            mediaType: wantTv ? 'tv' : 'movie',
-            title: i.name,
-            year: i.year ? String(i.year) : null,
-            poster: i.poster,
-            role: i.roles?.length ? i.roles.join(', ') : null,
-            rank: n + 1,
-          })),
-          source: 'lumiere',
-        })
-      }
-
-      let person = known
-      if (!person) {
-        const sr = await fetchOut(`https://api.themoviedb.org/3/search/person?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}`)
-        if (!sr.ok) return res.status(502).json({ error: 'TMDb request failed' })
-        const sd = await sr.json()
-        // TMDb's own best guess, which it sorts by popularity.
-        const top = (sd.results || [])[0]
-        if (!top) return res.json({ person: null, results: [] })
-        person = await fetchTmdbPerson(key, top.id)
-        if (!person) return res.status(502).json({ error: 'TMDb request failed' })
-      }
-      res.json({ person: personCard(person), results: creditsOf(person, wantTv ? 'tv' : 'movie') })
-    } catch (error) {
-      console.error('Error searching person:', error)
-      res.status(500).json({ error: 'Failed to search person' })
+    // A person's credits as Discover shows them, newest first, each title once.
+    // `rank` is "Most popular": 1 is the title the most people rated on TMDb.
+    // No cap - TMDb's combined_credits is a person's whole filmography in one
+    // bounded answer, and an old .slice(0, 60) once hid most of Tom Cruise's
+    // early work.
+    function creditsOf(person, mediaType) {
+        const data = person?.combined_credits || {};
+        const seen = new Set();
+        const credits = [...(data.cast || []), ...(data.crew || [])]
+            .filter(
+                (c) =>
+                    c &&
+                    (mediaType
+                        ? c.media_type === mediaType
+                        : c.media_type === "movie" || c.media_type === "tv") &&
+                    (c.poster_path || c.title || c.name)
+            )
+            .map((c) => {
+                const date = c.release_date || c.first_air_date || "";
+                return {
+                    _sort: date || "0000",
+                    _votes: c.vote_count || 0,
+                    mediaType: c.media_type, // 'movie' | 'tv'
+                    poster: c.poster_path ? `${TMDB_IMG}${c.poster_path}` : null,
+                    role: c.character || c.job || null,
+                    title: c.title || c.name || "Untitled",
+                    tmdbId: c.id,
+                    year: date ? date.slice(0, 4) : null,
+                };
+            })
+            .filter((c) => {
+                const k = `${c.mediaType}:${c.tmdbId}`;
+                if (seen.has(k)) {
+                    return false;
+                }
+                seen.add(k);
+                return true;
+            });
+        [...credits]
+            .sort((a, b) => b._votes - a._votes)
+            .forEach((c, i) => {
+                c.rank = i + 1;
+            });
+        credits.sort((a, b) => b._sort.localeCompare(a._sort));
+        for (const c of credits) {
+            delete c._sort;
+            delete c._votes;
+        }
+        return credits;
     }
-  })
 
-  return router;
+    const personCard = (person) => ({
+        id: person.id,
+        name: person.name || null,
+        profile: person.profile_path ? `${TMDB_IMG}${person.profile_path}` : null,
+        ...require("../utils/personFacts").personFacts(person),
+    });
+
+    // GET /api/discover/person/:id - a TMDb person and all their film/TV
+    // credits. tmdbId/mediaType are returned so the page can resolve an IMDb id
+    // on click (see /imdb-id below) and open the usual detail popup.
+    router.get("/person/:id", async (req, res) => {
+        try {
+            const key = await resolveTmdbKey(req);
+            if (!key) {
+                return res.status(503).json({ error: "TMDb key not configured" });
+            }
+            const personId = String(req.params.id).replace(/[^0-9]/g, "");
+            if (!personId) {
+                return res.status(400).json({ error: "Invalid person id" });
+            }
+            const person = await fetchTmdbPerson(key, personId);
+            if (!person) {
+                return res.status(502).json({ error: "TMDb request failed" });
+            }
+            res.json({ credits: creditsOf(person, null), person: personCard(person) });
+        } catch (error) {
+            console.error("Error fetching person credits:", error);
+            res.status(500).json({ error: "Failed to fetch person credits" });
+        }
+    });
+
+    // GET /api/discover/imdb-id?tmdbId=X&type=movie|tv - resolve a TMDb title to
+    // its IMDb id, so a person-credit click can open the existing detail modal
+    // (which is Cinemeta/tt-id based). One extra call, made only on click - the
+    // person endpoint stays a single TMDb request.
+    router.get("/imdb-id", async (req, res) => {
+        try {
+            const key = await resolveTmdbKey(req);
+            if (!key) {
+                return res.status(503).json({ error: "TMDb key not configured" });
+            }
+            const tmdbId = String(req.query.tmdbId || "").replace(/[^0-9]/g, "");
+            const type = req.query.type === "tv" ? "tv" : "movie";
+            if (!tmdbId) {
+                return res.status(400).json({ error: "Invalid tmdbId" });
+            }
+            const rsp = await fetchOut(
+                `https://api.themoviedb.org/3/${type}/${tmdbId}/external_ids?api_key=${encodeURIComponent(key)}`
+            );
+            if (!rsp.ok) {
+                return res.status(502).json({ error: "TMDb request failed" });
+            }
+            const data = await rsp.json();
+            res.json({ imdbId: data.imdb_id || null, type: type === "tv" ? "series" : "movie" });
+        } catch (error) {
+            console.error("Error resolving imdb id:", error);
+            res.status(500).json({ error: "Failed to resolve imdb id" });
+        }
+    });
+
+    // GET /api/discover/taste-profile
+    // A real per-user "taste profile" built entirely from first-party watch
+    // data (the same weighted vectors taste-overlap uses), NOT self-reported
+    // tags: total watch time, movie/series split, top titles by real time,
+    // top genres, and the household member they match most. This turns the old
+    // flat "Taste overlap" pair list into "here's YOU, and who you're closest
+    // to" - the overlap number becomes one field of a fuller profile instead of
+    // the whole thing. Genres are the one piece not in the vectors, so they're
+    // looked up (Cinemeta, cached) only for each user's top few titles - bounded
+    // so this stays a handful of cached calls, not a wall of them.
+    router.get("/taste-profile", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ profiles: [] });
+            }
+            const accountId = getAccountId(req) || "default";
+
+            const {
+                buildUserVectors,
+                computePairwiseOverlap,
+            } = require("../utils/recommendationEngine");
+            const { vectors, itemMeta } = await buildUserVectors(prisma, accountId);
+            if (vectors.size === 0) {
+                return res.json({ profiles: [] });
+            }
+
+            const users = await prisma.user.findMany({
+                select: {
+                    avatarUrl: true,
+                    colorIndex: true,
+                    email: true,
+                    id: true,
+                    useGravatar: true,
+                    username: true,
+                },
+                where: { id: { in: [...vectors.keys()] } },
+            });
+            const userById = new Map(users.map((u) => [u.id, u]));
+
+            // Strongest taste twin per user, from the same pairwise overlap math.
+            const twinByUser = new Map();
+            for (const p of computePairwiseOverlap(vectors, itemMeta)) {
+                if (p.sharedCount <= 0) {
+                    continue;
+                }
+                for (const [self, other] of [
+                    [p.userA, p.userB],
+                    [p.userB, p.userA],
+                ]) {
+                    const prev = twinByUser.get(self);
+                    if (!prev || p.similarity > prev.similarity) {
+                        twinByUser.set(self, { similarity: p.similarity, userId: other });
+                    }
+                }
+            }
+
+            const { fetchMetadata } = require("../utils/notify");
+            const { resolveOmdbKey } = require("../utils/listImport");
+            const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+            const TOP_TITLES = 5;
+            const TOP_TITLES_FOR_GENRES = 6;
+
+            const profiles = [];
+            for (const [userId, vec] of vectors.entries()) {
+                if (!userById.has(userId)) {
+                    continue;
+                }
+                const entries = [...vec.entries()].sort((a, b) => b[1] - a[1]);
+                const totalSeconds = entries.reduce((sum, [, s]) => sum + s, 0);
+                let movieCount = 0,
+                    seriesCount = 0;
+                for (const [key] of entries) {
+                    if (key.startsWith("series:")) {
+                        seriesCount++;
+                    } else {
+                        movieCount++;
+                    }
+                }
+
+                const topTitles = entries.slice(0, TOP_TITLES).map(([key, seconds]) => ({
+                    key,
+                    seconds,
+                    ...(itemMeta.get(key) || {
+                        name: key,
+                        poster: null,
+                        type: key.startsWith("series:") ? "series" : "movie",
+                    }),
+                }));
+
+                // Genre votes from the user's top titles (bounded + cached).
+                const genreVotes = new Map();
+                for (const [key] of entries.slice(0, TOP_TITLES_FOR_GENRES)) {
+                    const id = key.slice(key.indexOf(":") + 1);
+                    const type = key.startsWith("series:") ? "series" : "movie";
+                    try {
+                        const meta = await fetchMetadata(id, type, null, omdbApiKey);
+                        for (const g of Array.isArray(meta?.genres) ? meta.genres : []) {
+                            genreVotes.set(g, (genreVotes.get(g) || 0) + 1);
+                        }
+                    } catch {}
+                }
+                const topGenres = [...genreVotes.entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 5)
+                    .map(([genre, count]) => ({ count, genre }));
+
+                const twin = twinByUser.get(userId);
+                profiles.push({
+                    movieCount,
+                    seriesCount,
+                    tasteTwin:
+                        twin && userById.has(twin.userId)
+                            ? {
+                                  similarity: Math.round(twin.similarity * 100),
+                                  user: userById.get(twin.userId),
+                              }
+                            : null,
+                    titleCount: entries.length,
+                    topGenres,
+                    topTitles,
+                    totalSeconds,
+                    user: userById.get(userId),
+                });
+            }
+
+            // Most-active first, so the section leads with the household's heaviest viewer.
+            profiles.sort((a, b) => b.totalSeconds - a.totalSeconds);
+            res.json({ profiles });
+        } catch (error) {
+            console.error("Error computing taste profile:", error);
+            res.status(500).json({ error: "Failed to compute taste profile" });
+        }
+    });
+
+    // GET /api/discover/household-picks?type=movie|series
+    // "Nobody's seen it yet, but the house would probably love it." Something
+    // Trakt structurally can't do (it's single-user): titles NO household member
+    // has watched/watchlisted/dismissed, in the genres that appeal broadly
+    // across the household (shared by 2+ members where possible, not just one
+    // person's taste). Reuses buildUserVectors for per-user genre affinity and
+    // the same catalog fetch + household-wide exclusion the recommendations row
+    // uses - no new machinery.
+    router.get("/household-picks", async (req, res) => {
+        try {
+            if (!(prisma && getAccountId)) {
+                return res.json({ genres: [], items: [], memberCount: 0 });
+            }
+            const accountId = getAccountId(req) || "default";
+            const type = req.query.type === "series" ? "series" : "movie";
+
+            // Respect the recommendations opt-out (same feature family).
+            try {
+                const acc = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                let cfg = acc?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object" && cfg.enableRecommendations === false) {
+                    return res.json({ genres: [], items: [], memberCount: 0 });
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
+
+            const { buildUserVectors } = require("../utils/recommendationEngine");
+            const { fetchMetadata } = require("../utils/notify");
+            const { resolveOmdbKey } = require("../utils/listImport");
+            const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+            const { vectors } = await buildUserVectors(prisma, accountId);
+            if (vectors.size === 0) {
+                return res.json({ genres: [], items: [], memberCount: 0 });
+            }
+
+            // Genre affinity per user (their top ~6 titles), then count DISTINCT
+            // users per genre so "broad household appeal" means multiple people, not
+            // one heavy viewer.
+            const TOP_TITLES_PER_USER = 6;
+            const genreUsers = new Map(); // genre -> Set<userId>
+            // Six titles per person, each a metadata lookup. One at a time that is
+            // six round trips per household member before this row can be built,
+            // and every one of them can wait out its own timeout. All of them go
+            // at once instead, six at a time.
+            const { mapLimit } = require("../utils/mapLimit");
+            const wanted = [];
+            for (const [userId, vec] of vectors.entries()) {
+                const top = [...vec.entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, TOP_TITLES_PER_USER);
+                for (const [key] of top) {
+                    wanted.push({
+                        id: key.slice(key.indexOf(":") + 1),
+                        t: key.startsWith("series:") ? "series" : "movie",
+                        userId,
+                    });
+                }
+            }
+            const metas = await mapLimit(wanted, 6, (w) =>
+                fetchMetadata(w.id, w.t, null, omdbApiKey).catch(() => null)
+            );
+            wanted.forEach((w, i) => {
+                for (const g of Array.isArray(metas[i]?.genres) ? metas[i].genres : []) {
+                    if (!genreUsers.has(g)) {
+                        genreUsers.set(g, new Set());
+                    }
+                    genreUsers.get(g).add(w.userId);
+                }
+            });
+            if (genreUsers.size === 0) {
+                return res.json({ genres: [], items: [], memberCount: vectors.size });
+            }
+
+            // Prefer genres shared by 2+ members; if a single-user household (or no
+            // genre reaches 2), fall back to that household's strongest genres so
+            // the row still produces unwatched picks.
+            const ranked = [...genreUsers.entries()].sort((a, b) => b[1].size - a[1].size);
+            const shared = ranked.filter(([, s]) => s.size >= 2);
+            const chosen = (shared.length > 0 ? shared : ranked).slice(0, 4).map(([g]) => g);
+
+            // Household-wide exclusion: watched (history + manual overrides),
+            // watchlisted, or dismissed by ANYONE.
+            const [movies, episodes, overrides, watchlist, notInterested] = await Promise.all([
+                prisma.movieWatchHistory.findMany({
+                    distinct: ["itemId"],
+                    select: { itemId: true },
+                    where: { accountId },
+                }),
+                prisma.episodeWatchHistory.findMany({
+                    distinct: ["showId"],
+                    select: { showId: true },
+                    where: { accountId },
+                }),
+                prisma.manualWatchOverride.findMany({
+                    select: { itemId: true, watched: true },
+                    where: { accountId },
+                }),
+                prisma.watchlistItem
+                    .findMany({ select: { itemId: true }, where: { accountId } })
+                    .catch(() => []),
+                prisma.notInterestedItem
+                    .findMany({ select: { itemId: true }, where: { accountId } })
+                    .catch(() => []),
+            ]);
+            const excludeIds = new Set([
+                ...movies.map((m) => m.itemId),
+                ...episodes.map((e) => e.showId),
+                ...watchlist.map((w) => w.itemId),
+                ...notInterested.map((n) => n.itemId),
+            ]);
+            for (const o of overrides) {
+                if (o.watched) {
+                    excludeIds.add(o.itemId);
+                } else {
+                    excludeIds.delete(o.itemId);
+                }
+            }
+
+            const MAX_ITEMS = 12;
+            const items = [];
+            const seen = new Set();
+            for (const genre of chosen) {
+                if (items.length >= MAX_ITEMS) {
+                    break;
+                }
+                let candidates = await fetchCatalog(type, { catalog: "imdbRating", genre });
+                if (candidates.length === 0) {
+                    candidates = await fetchCatalog(type, { catalog: "top", genre });
+                }
+                for (const c of candidates) {
+                    if (items.length >= MAX_ITEMS) {
+                        break;
+                    }
+                    if (seen.has(c.id) || excludeIds.has(c.id)) {
+                        continue;
+                    }
+                    seen.add(c.id);
+                    items.push(c);
+                }
+            }
+
+            res.json({
+                genres: chosen,
+                items,
+                memberCount: vectors.size,
+                sharedAppeal: shared.length > 0,
+            });
+        } catch (error) {
+            console.error("Error building household picks:", error);
+            res.status(500).json({ error: "Failed to build household picks" });
+        }
+    });
+
+    // GET /api/discover/search-person?query=X&type=movie|series[&personId=N]
+    // Discover's People: a name in, the best-matching person and what they've
+    // been in, of the type asked for, with the facts for their card. With
+    // personId (a cast member's "See everything they've been in") it is that
+    // person, not whoever a search for the name finds first.
+    router.get("/search-person", async (req, res) => {
+        try {
+            const key = await resolveTmdbKey(req);
+            let query = String(req.query.query || "").trim();
+            const wantTv = req.query.type === "series";
+            const byId = key ? String(req.query.personId || "").replace(/[^0-9]/g, "") : "";
+            const known = byId ? await fetchTmdbPerson(key, byId) : null;
+            if (known?.name) {
+                query = known.name;
+            }
+            if (!query) {
+                return res.json({ person: null, results: [] });
+            }
+
+            // Without a TMDb key, LumiereDB answers: a full name, and the titles
+            // that person is best known for, in that order, with their IMDb ids.
+            if (!key) {
+                const base = await lumiereFor(req);
+                if (!base) {
+                    return res.status(503).json({ error: "TMDb key not configured" });
+                }
+                const found = await require("../utils/lumiere").searchPeople(
+                    base,
+                    wantTv ? "series" : "movie",
+                    query
+                );
+                if (!found) {
+                    return res.json({ person: null, results: [] });
+                }
+                return res.json({
+                    person: { id: null, name: found.person.name, profile: null },
+                    results: found.items.map((i, n) => ({
+                        imdbId: i.id,
+                        mediaType: wantTv ? "tv" : "movie",
+                        poster: i.poster,
+                        rank: n + 1,
+                        role: i.roles?.length ? i.roles.join(", ") : null,
+                        title: i.name,
+                        tmdbId: null,
+                        year: i.year ? String(i.year) : null,
+                    })),
+                    source: "lumiere",
+                });
+            }
+
+            let person = known;
+            if (!person) {
+                const sr = await fetchOut(
+                    `https://api.themoviedb.org/3/search/person?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}`
+                );
+                if (!sr.ok) {
+                    return res.status(502).json({ error: "TMDb request failed" });
+                }
+                const sd = await sr.json();
+                // TMDb's own best guess, which it sorts by popularity.
+                const top = (sd.results || [])[0];
+                if (!top) {
+                    return res.json({ person: null, results: [] });
+                }
+                person = await fetchTmdbPerson(key, top.id);
+                if (!person) {
+                    return res.status(502).json({ error: "TMDb request failed" });
+                }
+            }
+            res.json({
+                person: personCard(person),
+                results: creditsOf(person, wantTv ? "tv" : "movie"),
+            });
+        } catch (error) {
+            console.error("Error searching person:", error);
+            res.status(500).json({ error: "Failed to search person" });
+        }
+    });
+
+    return router;
 };

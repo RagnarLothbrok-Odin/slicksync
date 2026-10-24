@@ -6,16 +6,18 @@
  * Validate email format
  */
 function isValidEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
 }
 
 /**
  * Validate password strength
  */
 function isValidPassword(password) {
-  if (typeof password !== 'string') return false;
-  return password.length >= 4;
+    if (typeof password !== "string") {
+        return false;
+    }
+    return password.length >= 4;
 }
 
 /**
@@ -28,119 +30,123 @@ function isValidPassword(password) {
  * exactly as it was typed (trimmed), so nothing already stored changes.
  */
 function sanitizeUrl(url) {
-  if (!url || typeof url !== 'string') return null;
+    if (!url || typeof url !== "string") {
+        return null;
+    }
 
-  let sanitized = String(url).trim();
+    let sanitized = String(url).trim();
 
-  // Remove leading @ symbols
-  sanitized = sanitized.replace(/^@+/, '');
+    // Remove leading @ symbols
+    sanitized = sanitized.replace(/^@+/, "");
 
-  // Convert stremio:// scheme to https://
-  if (sanitized.toLowerCase().startsWith('stremio://')) {
-    sanitized = sanitized.replace(/^stremio:\/\//i, 'https://');
-  }
+    // Convert stremio:// scheme to https://
+    if (sanitized.toLowerCase().startsWith("stremio://")) {
+        sanitized = sanitized.replace(/^stremio:\/\//i, "https://");
+    }
 
-  // Parsed rather than pattern-matched, so a form such as "https:/host/x"
-  // is judged the way fetch will read it.
-  try {
-    const { protocol } = new URL(sanitized);
-    if (protocol !== 'http:' && protocol !== 'https:') return null;
-  } catch {
-    return null;
-  }
+    // Parsed rather than pattern-matched, so a form such as "https:/host/x"
+    // is judged the way fetch will read it.
+    try {
+        const { protocol } = new URL(sanitized);
+        if (protocol !== "http:" && protocol !== "https:") {
+            return null;
+        }
+    } catch {
+        return null;
+    }
 
-  return sanitized;
+    return sanitized;
 }
 
 /**
  * Validate required fields in request body
  */
 function validateRequiredFields(body, requiredFields) {
-  const missing = [];
-  const invalid = [];
-  
-  for (const field of requiredFields) {
-    if (!body[field]) {
-      missing.push(field);
-    } else if (field === 'email' && !isValidEmail(body[field])) {
-      invalid.push(`${field} format is invalid`);
-    } else if (field === 'password' && !isValidPassword(body[field])) {
-      invalid.push(`${field} must be at least 4 characters`);
+    const missing = [];
+    const invalid = [];
+
+    for (const field of requiredFields) {
+        if (!body[field]) {
+            missing.push(field);
+        } else if (field === "email" && !isValidEmail(body[field])) {
+            invalid.push(`${field} format is invalid`);
+        } else if (field === "password" && !isValidPassword(body[field])) {
+            invalid.push(`${field} must be at least 4 characters`);
+        }
     }
-  }
-  
-  return { missing, invalid, isValid: missing.length === 0 && invalid.length === 0 };
+
+    return { invalid, isValid: missing.length === 0 && invalid.length === 0, missing };
 }
 
 /**
  * Validate Stremio credentials format
  */
 function validateStremioCredentials(email, password) {
-  const errors = [];
-  
-  if (!email) {
-    errors.push('Email is required');
-  } else if (!isValidEmail(email)) {
-    errors.push('Invalid email format');
-  }
-  
-  if (!password) {
-    errors.push('Password is required');
-  } else if (!isValidPassword(password)) {
-    errors.push('Password must be at least 4 characters');
-  }
-  
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
+    const errors = [];
+
+    if (!email) {
+        errors.push("Email is required");
+    } else if (!isValidEmail(email)) {
+        errors.push("Invalid email format");
+    }
+
+    if (!password) {
+        errors.push("Password is required");
+    } else if (!isValidPassword(password)) {
+        errors.push("Password must be at least 4 characters");
+    }
+
+    return {
+        errors,
+        isValid: errors.length === 0,
+    };
 }
 
 /**
  * Check if user has required permissions
  */
-function hasPermission(user, requiredPermission) {
-  // Add permission logic here based on your role system
-  // For now, just check if user exists and is active
-  return user && user.isActive !== false;
+function hasPermission(user, _requiredPermission) {
+    // Add permission logic here based on your role system
+    // For now, just check if user exists and is active
+    return user && user.isActive !== false;
 }
 
 /**
  * Validate account context for authenticated requests
  */
 function validateAccountContext(req, isPublicInstance) {
-  if (isPublicInstance && !req.appAccountId) {
-    return {
-      isValid: false,
-      error: 'Unauthorized - missing account context'
-    };
-  }
-  return { isValid: true };
+    if (isPublicInstance && !req.appAccountId) {
+        return {
+            error: "Unauthorized - missing account context",
+            isValid: false,
+        };
+    }
+    return { isValid: true };
 }
 
 /**
  * Common validation middleware factory
  */
 function createValidationMiddleware(validationFn) {
-  return (req, res, next) => {
-    const result = validationFn(req.body);
-    if (!result.isValid) {
-      return res.status(400).json({
-        message: 'Validation failed',
-        errors: result.errors || result.missing || result.invalid
-      });
-    }
-    next();
-  };
+    return (req, res, next) => {
+        const result = validationFn(req.body);
+        if (!result.isValid) {
+            return res.status(400).json({
+                errors: result.errors || result.missing || result.invalid,
+                message: "Validation failed",
+            });
+        }
+        next();
+    };
 }
 
 module.exports = {
-  isValidEmail,
-  isValidPassword,
-  sanitizeUrl,
-  validateRequiredFields,
-  validateStremioCredentials,
-  hasPermission,
-  validateAccountContext,
-  createValidationMiddleware
+    createValidationMiddleware,
+    hasPermission,
+    isValidEmail,
+    isValidPassword,
+    sanitizeUrl,
+    validateAccountContext,
+    validateRequiredFields,
+    validateStremioCredentials,
 };

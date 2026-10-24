@@ -16,7 +16,7 @@
 //     that no longer exists. It never edits a row's values, and it never
 //     removes anything that would lose watch history outright.
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Cross-provider duplicates: the same episode, at the exact same watchedAt,
@@ -28,105 +28,127 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * precision means one row was written from the other's data.
  */
 async function findCrossProviderDuplicates(prisma, accountId) {
-  const users = await prisma.user.findMany({
-    where: { accountId },
-    select: { id: true, username: true, providerType: true },
-  })
-  const userMap = new Map(users.map((u) => [u.id, u]))
-  const findings = []
+    const users = await prisma.user.findMany({
+        select: { id: true, providerType: true, username: true },
+        where: { accountId },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const findings = [];
 
-  for (const u of users) {
-    // A profileLabel is written by the provider sync, so a labelled row under
-    // a user whose provider doesn't use labels is the shape this bug made.
-    const labelled = await prisma.episodeWatchHistory.findMany({
-      where: { accountId, userId: u.id, profileLabel: { not: null } },
-      select: {
-        id: true, showId: true, showName: true, season: true, episode: true,
-        profileLabel: true, watchedAt: true, createdAt: true,
-      },
-    })
+    for (const u of users) {
+        // A profileLabel is written by the provider sync, so a labelled row under
+        // a user whose provider doesn't use labels is the shape this bug made.
+        const labelled = await prisma.episodeWatchHistory.findMany({
+            select: {
+                createdAt: true,
+                episode: true,
+                id: true,
+                profileLabel: true,
+                season: true,
+                showId: true,
+                showName: true,
+                watchedAt: true,
+            },
+            where: { accountId, profileLabel: { not: null }, userId: u.id },
+        });
 
-    for (const row of labelled) {
-      const origin = await prisma.episodeWatchHistory.findFirst({
-        where: {
-          accountId,
-          showId: row.showId,
-          season: row.season,
-          episode: row.episode,
-          watchedAt: row.watchedAt,
-          userId: { not: u.id },
-          createdAt: { lt: row.createdAt },
-        },
-        select: { id: true, userId: true, createdAt: true },
-      })
-      if (!origin) continue
-      const originUser = userMap.get(origin.userId)
-      // Same provider type means this is not the cross-provider bug - could
-      // be two genuine accounts on one service, so leave it alone.
-      if (!originUser || originUser.providerType === u.providerType) continue
+        for (const row of labelled) {
+            const origin = await prisma.episodeWatchHistory.findFirst({
+                select: { createdAt: true, id: true, userId: true },
+                where: {
+                    accountId,
+                    createdAt: { lt: row.createdAt },
+                    episode: row.episode,
+                    season: row.season,
+                    showId: row.showId,
+                    userId: { not: u.id },
+                    watchedAt: row.watchedAt,
+                },
+            });
+            if (!origin) {
+                continue;
+            }
+            const originUser = userMap.get(origin.userId);
+            // Same provider type means this is not the cross-provider bug - could
+            // be two genuine accounts on one service, so leave it alone.
+            if (!originUser || originUser.providerType === u.providerType) {
+                continue;
+            }
 
-      findings.push({
-        id: row.id,
-        kind: 'cross_provider_duplicate',
-        summary: `${row.showName} S${row.season}E${row.episode} copied onto ${u.username} (${u.providerType})`,
-        detail: `Identical to a row under ${originUser.username} (${originUser.providerType}) with the same watch time, created ${Math.max(1, Math.round((new Date(row.createdAt) - new Date(origin.createdAt)) / DAY_MS))} day(s) earlier.`,
-      })
+            findings.push({
+                detail: `Identical to a row under ${originUser.username} (${originUser.providerType}) with the same watch time, created ${Math.max(1, Math.round((new Date(row.createdAt) - new Date(origin.createdAt)) / DAY_MS))} day(s) earlier.`,
+                id: row.id,
+                kind: "cross_provider_duplicate",
+                summary: `${row.showName} S${row.season}E${row.episode} copied onto ${u.username} (${u.providerType})`,
+            });
+        }
     }
-  }
-  return findings
+    return findings;
 }
 
 /** Rows pointing at a user that no longer exists - invisible everywhere in
  * the UI, but still counted in totals. */
 async function findOrphanedRows(prisma, accountId) {
-  const userIds = new Set((await prisma.user.findMany({
-    where: { accountId }, select: { id: true },
-  })).map((u) => u.id))
+    const userIds = new Set(
+        (await prisma.user.findMany({ select: { id: true }, where: { accountId } })).map(
+            (u) => u.id
+        )
+    );
 
-  const findings = []
-  const [episodes, movies] = await Promise.all([
-    prisma.episodeWatchHistory.findMany({ where: { accountId }, select: { id: true, userId: true, showName: true, season: true, episode: true } }),
-    prisma.movieWatchHistory.findMany({ where: { accountId }, select: { id: true, userId: true, itemName: true } }),
-  ])
+    const findings = [];
+    const [episodes, movies] = await Promise.all([
+        prisma.episodeWatchHistory.findMany({
+            select: { episode: true, id: true, season: true, showName: true, userId: true },
+            where: { accountId },
+        }),
+        prisma.movieWatchHistory.findMany({
+            select: { id: true, itemName: true, userId: true },
+            where: { accountId },
+        }),
+    ]);
 
-  for (const r of episodes) {
-    if (userIds.has(r.userId)) continue
-    findings.push({
-      id: r.id,
-      kind: 'orphaned_episode',
-      summary: `${r.showName} S${r.season}E${r.episode}`,
-      detail: 'Belongs to a user that no longer exists, so it is counted in totals but shown nowhere.',
-    })
-  }
-  for (const r of movies) {
-    if (userIds.has(r.userId)) continue
-    findings.push({
-      id: r.id,
-      kind: 'orphaned_movie',
-      summary: r.itemName,
-      detail: 'Belongs to a user that no longer exists, so it is counted in totals but shown nowhere.',
-    })
-  }
-  return findings
+    for (const r of episodes) {
+        if (userIds.has(r.userId)) {
+            continue;
+        }
+        findings.push({
+            detail: "Belongs to a user that no longer exists, so it is counted in totals but shown nowhere.",
+            id: r.id,
+            kind: "orphaned_episode",
+            summary: `${r.showName} S${r.season}E${r.episode}`,
+        });
+    }
+    for (const r of movies) {
+        if (userIds.has(r.userId)) {
+            continue;
+        }
+        findings.push({
+            detail: "Belongs to a user that no longer exists, so it is counted in totals but shown nowhere.",
+            id: r.id,
+            kind: "orphaned_movie",
+            summary: r.itemName,
+        });
+    }
+    return findings;
 }
 
 /** Read-only. Returns everything found, grouped by kind. */
 async function scanHistory(prisma, accountId) {
-  const accountIdValue = accountId || 'default'
-  const [duplicates, orphans] = await Promise.all([
-    findCrossProviderDuplicates(prisma, accountIdValue),
-    findOrphanedRows(prisma, accountIdValue),
-  ])
-  const findings = [...duplicates, ...orphans]
-  return {
-    findings,
-    counts: {
-      cross_provider_duplicate: duplicates.length,
-      orphaned: orphans.length,
-      total: findings.length,
-    },
-    scannedAt: new Date().toISOString(),
-  }
+    const accountIdValue = accountId || "default";
+    const [duplicates, orphans] = await Promise.all([
+        findCrossProviderDuplicates(prisma, accountIdValue),
+        findOrphanedRows(prisma, accountIdValue),
+    ]);
+    const findings = [...duplicates, ...orphans];
+    return {
+        counts: {
+            cross_provider_duplicate: duplicates.length,
+            orphaned: orphans.length,
+            total: findings.length,
+        },
+        findings,
+        scannedAt: new Date().toISOString(),
+    };
 }
 
 /**
@@ -136,22 +158,36 @@ async function scanHistory(prisma, accountId) {
  * it was ever a finding.
  */
 async function repairHistory(prisma, accountId, kinds) {
-  const accountIdValue = accountId || 'default'
-  const allowed = new Set(Array.isArray(kinds) && kinds.length ? kinds : ['cross_provider_duplicate', 'orphaned_episode', 'orphaned_movie'])
-  const { findings } = await scanHistory(prisma, accountIdValue)
-  const target = findings.filter((f) => allowed.has(f.kind))
+    const accountIdValue = accountId || "default";
+    const allowed = new Set(
+        Array.isArray(kinds) && kinds.length
+            ? kinds
+            : ["cross_provider_duplicate", "orphaned_episode", "orphaned_movie"]
+    );
+    const { findings } = await scanHistory(prisma, accountIdValue);
+    const target = findings.filter((f) => allowed.has(f.kind));
 
-  const episodeIds = target.filter((f) => f.kind === 'cross_provider_duplicate' || f.kind === 'orphaned_episode').map((f) => f.id)
-  const movieIds = target.filter((f) => f.kind === 'orphaned_movie').map((f) => f.id)
+    const episodeIds = target
+        .filter((f) => f.kind === "cross_provider_duplicate" || f.kind === "orphaned_episode")
+        .map((f) => f.id);
+    const movieIds = target.filter((f) => f.kind === "orphaned_movie").map((f) => f.id);
 
-  let removed = 0
-  if (episodeIds.length) {
-    removed += (await prisma.episodeWatchHistory.deleteMany({ where: { accountId: accountIdValue, id: { in: episodeIds } } })).count
-  }
-  if (movieIds.length) {
-    removed += (await prisma.movieWatchHistory.deleteMany({ where: { accountId: accountIdValue, id: { in: movieIds } } })).count
-  }
-  return { removed, examined: findings.length }
+    let removed = 0;
+    if (episodeIds.length) {
+        removed += (
+            await prisma.episodeWatchHistory.deleteMany({
+                where: { accountId: accountIdValue, id: { in: episodeIds } },
+            })
+        ).count;
+    }
+    if (movieIds.length) {
+        removed += (
+            await prisma.movieWatchHistory.deleteMany({
+                where: { accountId: accountIdValue, id: { in: movieIds } },
+            })
+        ).count;
+    }
+    return { examined: findings.length, removed };
 }
 
-module.exports = { scanHistory, repairHistory }
+module.exports = { repairHistory, scanHistory };

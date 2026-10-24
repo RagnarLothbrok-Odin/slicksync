@@ -7,11 +7,15 @@
 // expects to read, with the year the stream carried kept alongside it. Rows
 // that never matched keep the parsed name; there is nothing better to show.
 function proxyDisplayTitle(row) {
-  if (!row) return null
-  const raw = row.displayName || row.filename || null
-  if (!row.metadataName) return raw
-  const year = (row.displayName || '').match(/\((\d{4})\)\s*$/)
-  return year ? `${row.metadataName} (${year[1]})` : row.metadataName
+    if (!row) {
+        return null;
+    }
+    const raw = row.displayName || row.filename || null;
+    if (!row.metadataName) {
+        return raw;
+    }
+    const year = (row.displayName || "").match(/\((\d{4})\)\s*$/);
+    return year ? `${row.metadataName} (${year[1]})` : row.metadataName;
 }
 
-module.exports = { proxyDisplayTitle }
+module.exports = { proxyDisplayTitle };

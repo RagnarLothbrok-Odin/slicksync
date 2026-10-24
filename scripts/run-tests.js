@@ -10,18 +10,25 @@
 // safety net: a test that is really broken fails both runs, so nothing is
 // hidden.
 
-const path = require('path')
-const { spawnSync } = require('child_process')
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
-const quietStdout = path.join(__dirname, 'console-to-stderr-for-tests.js')
+const quietStdout = path.join(
+    require("node:path").dirname(module.filename),
+    "console-to-stderr-for-tests.js"
+);
 
 function run() {
-  return spawnSync(process.execPath, ['--require', quietStdout, '--test', ...process.argv.slice(2)], { stdio: 'inherit' }).status
+    return spawnSync(
+        process.execPath,
+        ["--require", quietStdout, "--test", ...process.argv.slice(2)],
+        { stdio: "inherit" }
+    ).status;
 }
 
-let status = run()
+let status = run();
 if (status !== 0) {
-  console.error('\n[tests] The run failed - running once more to rule out a runner hiccup.\n')
-  status = run()
+    console.error("\n[tests] The run failed - running once more to rule out a runner hiccup.\n");
+    status = run();
 }
-process.exit(status === null ? 1 : status)
+process.exit(status === null ? 1 : status);

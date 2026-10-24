@@ -11,24 +11,34 @@
 // something inferred per-request. Client-side displays that DO have a
 // browser (the Activity feed's Today/Yesterday headers) already use the
 // viewer's local time natively and need no equivalent fix.
-const DEFAULT_TIMEZONE = process.env.ACCOUNT_TIMEZONE || 'America/Los_Angeles'
+const DEFAULT_TIMEZONE = process.env.ACCOUNT_TIMEZONE || "America/Los_Angeles";
 
-const formatterCache = new Map()
+const formatterCache = new Map();
 
 function formatterFor(timeZone) {
-  let formatter = formatterCache.get(timeZone)
-  if (!formatter) {
-    try {
-      formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
-    } catch {
-      // Invalid/unrecognized IANA zone name - fall back rather than throw,
-      // since this runs deep inside background pollers with no user to
-      // show a validation error to.
-      formatter = new Intl.DateTimeFormat('en-CA', { timeZone: DEFAULT_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
+    let formatter = formatterCache.get(timeZone);
+    if (!formatter) {
+        try {
+            formatter = new Intl.DateTimeFormat("en-CA", {
+                day: "2-digit",
+                month: "2-digit",
+                timeZone,
+                year: "numeric",
+            });
+        } catch {
+            // Invalid/unrecognized IANA zone name - fall back rather than throw,
+            // since this runs deep inside background pollers with no user to
+            // show a validation error to.
+            formatter = new Intl.DateTimeFormat("en-CA", {
+                day: "2-digit",
+                month: "2-digit",
+                timeZone: DEFAULT_TIMEZONE,
+                year: "numeric",
+            });
+        }
+        formatterCache.set(timeZone, formatter);
     }
-    formatterCache.set(timeZone, formatter)
-  }
-  return formatter
+    return formatter;
 }
 
 /**
@@ -40,15 +50,15 @@ function formatterFor(timeZone) {
  * @returns {string}
  */
 function getAccountDateString(date = new Date(), timeZone = DEFAULT_TIMEZONE) {
-  return formatterFor(timeZone).format(date)
+    return formatterFor(timeZone).format(date);
 }
 
 // Short-lived per-account cache so a poll cycle that touches many
 // users/items doesn't hit the DB for the same account's timezone setting
 // over and over - the setting changes rarely (an admin editing Settings),
 // so a little staleness here is fine.
-const timezoneCache = new Map() // accountId -> { value, expiresAt }
-const TIMEZONE_CACHE_MS = 60 * 1000
+const timezoneCache = new Map(); // accountId -> { value, expiresAt }
+const TIMEZONE_CACHE_MS = 60 * 1000;
 
 /**
  * Resolves the configured timezone for an account (AppAccount.sync.
@@ -58,40 +68,59 @@ const TIMEZONE_CACHE_MS = 60 * 1000
  * @returns {Promise<string>}
  */
 async function resolveAccountTimezone(prisma, accountId) {
-  const id = accountId || 'default'
-  const cached = timezoneCache.get(id)
-  if (cached && cached.expiresAt > Date.now()) return cached.value
-
-  let value = DEFAULT_TIMEZONE
-  try {
-    const account = await prisma.appAccount.findFirst({ where: { id }, select: { sync: true } })
-    let cfg = account?.sync
-    if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-    if (cfg && typeof cfg.accountTimezone === 'string' && cfg.accountTimezone.trim()) {
-      value = cfg.accountTimezone.trim()
+    const id = accountId || "default";
+    const cached = timezoneCache.get(id);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
     }
-  } catch {
-    // DB unavailable or malformed config - use the default rather than
-    // blocking whatever background job called this.
-  }
 
-  timezoneCache.set(id, { value, expiresAt: Date.now() + TIMEZONE_CACHE_MS })
-  return value
+    let value = DEFAULT_TIMEZONE;
+    try {
+        const account = await prisma.appAccount.findFirst({
+            select: { sync: true },
+            where: { id },
+        });
+        let cfg = account?.sync;
+        if (typeof cfg === "string") {
+            try {
+                cfg = JSON.parse(cfg);
+            } catch {
+                cfg = null;
+            }
+        }
+        if (cfg && typeof cfg.accountTimezone === "string" && cfg.accountTimezone.trim()) {
+            value = cfg.accountTimezone.trim();
+        }
+    } catch {
+        // DB unavailable or malformed config - use the default rather than
+        // blocking whatever background job called this.
+    }
+
+    timezoneCache.set(id, { expiresAt: Date.now() + TIMEZONE_CACHE_MS, value });
+    return value;
 }
 
-const monthFormatterCache = new Map()
+const monthFormatterCache = new Map();
 
 function monthFormatterFor(timeZone) {
-  let formatter = monthFormatterCache.get(timeZone)
-  if (!formatter) {
-    try {
-      formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit' })
-    } catch {
-      formatter = new Intl.DateTimeFormat('en-CA', { timeZone: DEFAULT_TIMEZONE, year: 'numeric', month: '2-digit' })
+    let formatter = monthFormatterCache.get(timeZone);
+    if (!formatter) {
+        try {
+            formatter = new Intl.DateTimeFormat("en-CA", {
+                month: "2-digit",
+                timeZone,
+                year: "numeric",
+            });
+        } catch {
+            formatter = new Intl.DateTimeFormat("en-CA", {
+                month: "2-digit",
+                timeZone: DEFAULT_TIMEZONE,
+                year: "numeric",
+            });
+        }
+        monthFormatterCache.set(timeZone, formatter);
     }
-    monthFormatterCache.set(timeZone, formatter)
-  }
-  return formatter
+    return formatter;
 }
 
 /**
@@ -106,23 +135,38 @@ function monthFormatterFor(timeZone) {
  * @returns {string}
  */
 function getAccountMonthString(date = new Date(), timeZone = DEFAULT_TIMEZONE) {
-  const parts = monthFormatterFor(timeZone).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc }, {})
-  return `${parts.year}-${parts.month}`
+    const parts = monthFormatterFor(timeZone)
+        .formatToParts(date)
+        .reduce((acc, p) => {
+            acc[p.type] = p.value;
+            return acc;
+        }, {});
+    return `${parts.year}-${parts.month}`;
 }
 
-const dayNumberFormatterCache = new Map()
+const dayNumberFormatterCache = new Map();
 
 function dayNumberFormatterFor(timeZone) {
-  let formatter = dayNumberFormatterCache.get(timeZone)
-  if (!formatter) {
-    try {
-      formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
-    } catch {
-      formatter = new Intl.DateTimeFormat('en-CA', { timeZone: DEFAULT_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
+    let formatter = dayNumberFormatterCache.get(timeZone);
+    if (!formatter) {
+        try {
+            formatter = new Intl.DateTimeFormat("en-CA", {
+                day: "2-digit",
+                month: "2-digit",
+                timeZone,
+                year: "numeric",
+            });
+        } catch {
+            formatter = new Intl.DateTimeFormat("en-CA", {
+                day: "2-digit",
+                month: "2-digit",
+                timeZone: DEFAULT_TIMEZONE,
+                year: "numeric",
+            });
+        }
+        dayNumberFormatterCache.set(timeZone, formatter);
     }
-    dayNumberFormatterCache.set(timeZone, formatter)
-  }
-  return formatter
+    return formatter;
 }
 
 /**
@@ -151,8 +195,13 @@ function dayNumberFormatterFor(timeZone) {
  * @returns {number}
  */
 function getAccountDayNumber(date = new Date(), timeZone = DEFAULT_TIMEZONE) {
-  const parts = dayNumberFormatterFor(timeZone).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc }, {})
-  return Number(`${parts.year}${parts.month}${parts.day}`)
+    const parts = dayNumberFormatterFor(timeZone)
+        .formatToParts(date)
+        .reduce((acc, p) => {
+            acc[p.type] = p.value;
+            return acc;
+        }, {});
+    return Number(`${parts.year}${parts.month}${parts.day}`);
 }
 
 /**
@@ -163,18 +212,30 @@ function getAccountDayNumber(date = new Date(), timeZone = DEFAULT_TIMEZONE) {
  * than "which side of midnight" for a monthly digest.
  */
 function zonedWallTimeToUtc(year, month, day, hour, minute, second, timeZone) {
-  const guess = Date.UTC(year, month - 1, day, hour, minute, second)
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone, hourCycle: 'h23',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
-  const parts = dtf.formatToParts(new Date(guess)).reduce((acc, p) => { acc[p.type] = p.value; return acc }, {})
-  const asIfUtc = Date.UTC(
-    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
-    parts.hour === '24' ? 0 : Number(parts.hour), Number(parts.minute), Number(parts.second)
-  )
-  return new Date(guess + (guess - asIfUtc))
+    const guess = Date.UTC(year, month - 1, day, hour, minute, second);
+    const dtf = new Intl.DateTimeFormat("en-US", {
+        day: "2-digit",
+        hour: "2-digit",
+        hourCycle: "h23",
+        minute: "2-digit",
+        month: "2-digit",
+        second: "2-digit",
+        timeZone,
+        year: "numeric",
+    });
+    const parts = dtf.formatToParts(new Date(guess)).reduce((acc, p) => {
+        acc[p.type] = p.value;
+        return acc;
+    }, {});
+    const asIfUtc = Date.UTC(
+        Number(parts.year),
+        Number(parts.month) - 1,
+        Number(parts.day),
+        parts.hour === "24" ? 0 : Number(parts.hour),
+        Number(parts.minute),
+        Number(parts.second)
+    );
+    return new Date(guess + (guess - asIfUtc));
 }
 
 /**
@@ -188,12 +249,12 @@ function zonedWallTimeToUtc(year, month, day, hour, minute, second, timeZone) {
  * @returns {{ start: Date, end: Date }}
  */
 function monthBoundsInTimezone(yearMonth, timeZone = DEFAULT_TIMEZONE) {
-  const [y, m] = yearMonth.split('-').map(Number)
-  const start = zonedWallTimeToUtc(y, m, 1, 0, 0, 0, timeZone)
-  const nextYear = m === 12 ? y + 1 : y
-  const nextMonth = m === 12 ? 1 : m + 1
-  const end = zonedWallTimeToUtc(nextYear, nextMonth, 1, 0, 0, 0, timeZone)
-  return { start, end }
+    const [y, m] = yearMonth.split("-").map(Number);
+    const start = zonedWallTimeToUtc(y, m, 1, 0, 0, 0, timeZone);
+    const nextYear = m === 12 ? y + 1 : y;
+    const nextMonth = m === 12 ? 1 : m + 1;
+    const end = zonedWallTimeToUtc(nextYear, nextMonth, 1, 0, 0, 0, timeZone);
+    return { end, start };
 }
 
 /**
@@ -203,10 +264,10 @@ function monthBoundsInTimezone(yearMonth, timeZone = DEFAULT_TIMEZONE) {
  * @returns {string}
  */
 function previousMonthString(yearMonth) {
-  const [y, m] = yearMonth.split('-').map(Number)
-  const prevYear = m === 1 ? y - 1 : y
-  const prevMonth = m === 1 ? 12 : m - 1
-  return `${prevYear}-${String(prevMonth).padStart(2, '0')}`
+    const [y, m] = yearMonth.split("-").map(Number);
+    const prevYear = m === 1 ? y - 1 : y;
+    const prevMonth = m === 1 ? 12 : m - 1;
+    return `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
 }
 
 /**
@@ -232,27 +293,37 @@ function previousMonthString(yearMonth) {
  * @returns {Date|null}
  */
 function createdAtFromCuid(id) {
-  if (typeof id !== 'string' || id.length !== 25 || id[0] !== 'c') return null
-  const block = id.slice(1, 9)
-  if (!/^[0-9a-z]{8}$/.test(block)) return null
-  const ms = parseInt(block, 36)
-  if (!Number.isFinite(ms)) return null
-  const date = new Date(ms)
-  if (Number.isNaN(date.getTime())) return null
-  // Sanity-bound it. A base36 block that happens to parse but lands in 1973
-  // or in the year 2300 means the id wasn't a cuid v1 after all.
-  const year = date.getUTCFullYear()
-  if (year < 2015 || year > 2100) return null
-  return date
+    if (typeof id !== "string" || id.length !== 25 || id[0] !== "c") {
+        return null;
+    }
+    const block = id.slice(1, 9);
+    if (!/^[0-9a-z]{8}$/.test(block)) {
+        return null;
+    }
+    const ms = Number.parseInt(block, 36);
+    if (!Number.isFinite(ms)) {
+        return null;
+    }
+    const date = new Date(ms);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+    // Sanity-bound it. A base36 block that happens to parse but lands in 1973
+    // or in the year 2300 means the id wasn't a cuid v1 after all.
+    const year = date.getUTCFullYear();
+    if (year < 2015 || year > 2100) {
+        return null;
+    }
+    return date;
 }
 
 module.exports = {
-  getAccountDateString,
-  resolveAccountTimezone,
-  DEFAULT_TIMEZONE,
-  getAccountMonthString,
-  getAccountDayNumber,
-  monthBoundsInTimezone,
-  previousMonthString,
-  createdAtFromCuid,
-}
+    createdAtFromCuid,
+    DEFAULT_TIMEZONE,
+    getAccountDateString,
+    getAccountDayNumber,
+    getAccountMonthString,
+    monthBoundsInTimezone,
+    previousMonthString,
+    resolveAccountTimezone,
+};

@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - My Addons',
+    title: "SlickSync - My Addons",
 };
 
-export default function UserAddonsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function UserAddonsLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

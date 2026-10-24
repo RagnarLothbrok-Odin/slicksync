@@ -15,21 +15,39 @@
 // G/PG/TV-Y just as much as a "keep only R" catalog needs R. "Not Rated" is
 // included on purpose: unrated content is sometimes MORE explicit than an
 // R, not less, so it needs to be a selectable value either way.
-const SELECTABLE_RATINGS = ['G', 'PG', 'PG-13', 'R', 'NC-17', 'TV-Y', 'TV-Y7', 'TV-G', 'TV-PG', 'TV-14', 'TV-MA', 'Not Rated', 'Unrated']
+const SELECTABLE_RATINGS = [
+    "G",
+    "PG",
+    "PG-13",
+    "R",
+    "NC-17",
+    "TV-Y",
+    "TV-Y7",
+    "TV-G",
+    "TV-PG",
+    "TV-14",
+    "TV-MA",
+    "Not Rated",
+    "Unrated",
+];
 
 function parseKeptRatings(raw) {
-  if (!raw) return []
-  try {
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.filter((r) => typeof r === 'string') : []
-  } catch {
-    return []
-  }
+    if (!raw) {
+        return [];
+    }
+    try {
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr.filter((r) => typeof r === "string") : [];
+    } catch {
+        return [];
+    }
 }
 
 function serializeKeptRatings(list) {
-  const cleaned = Array.isArray(list) ? list.filter((r) => typeof r === 'string' && r.trim()) : []
-  return cleaned.length ? JSON.stringify(cleaned) : null
+    const cleaned = Array.isArray(list)
+        ? list.filter((r) => typeof r === "string" && r.trim())
+        : [];
+    return cleaned.length ? JSON.stringify(cleaned) : null;
 }
 
 /**
@@ -40,9 +58,13 @@ function serializeKeptRatings(list) {
  * count as "doesn't match" and get wiped just because OMDb has no data for it.
  */
 function isKept(rated, keptRatings) {
-  if (!keptRatings || keptRatings.length === 0) return true // no policy = untouched
-  if (!rated) return true // unknown rating - never auto-removed, see comment above
-  return keptRatings.includes(rated)
+    if (!keptRatings || keptRatings.length === 0) {
+        return true; // no policy = untouched
+    }
+    if (!rated) {
+        return true; // unknown rating - never auto-removed, see comment above
+    }
+    return keptRatings.includes(rated);
 }
 
 /**
@@ -51,28 +73,37 @@ function isKept(rated, keptRatings) {
  * sweep below - that runs in the background with no request context.
  */
 async function computeContentRatingSplitForAccount(prisma, accountId, items, keptRatings) {
-  if (!keptRatings || keptRatings.length === 0 || items.length === 0) {
-    return { keep: items, remove: [], unknown: [] }
-  }
-  const { resolveOmdbKeyForAccount, mapLimit } = require('./listImport')
-  const { fetchOmdbRatings } = require('./omdb')
-  const apiKey = await resolveOmdbKeyForAccount(prisma, accountId)
-  if (!apiKey) return { keep: items, remove: [], unknown: items } // can't check without a key - leave everything alone rather than guess
+    if (!keptRatings || keptRatings.length === 0 || items.length === 0) {
+        return { keep: items, remove: [], unknown: [] };
+    }
+    const { resolveOmdbKeyForAccount, mapLimit } = require("./listImport");
+    const { fetchOmdbRatings } = require("./omdb");
+    const apiKey = await resolveOmdbKeyForAccount(prisma, accountId);
+    if (!apiKey) {
+        return { keep: items, remove: [], unknown: items }; // can't check without a key - leave everything alone rather than guess
+    }
 
-  const results = await mapLimit(items, 8, async (item) => {
-    if (!item.id || !item.id.startsWith('tt')) return { item, rated: null }
-    const ratings = await fetchOmdbRatings(item.id, apiKey).catch(() => null)
-    return { item, rated: ratings?.rated || null }
-  })
-  const keep = []
-  const remove = []
-  const unknown = []
-  for (const r of results) {
-    if (!r.rated) unknown.push(r.item)
-    if (isKept(r.rated, keptRatings)) keep.push(r.item)
-    else remove.push(r.item)
-  }
-  return { keep, remove, unknown }
+    const results = await mapLimit(items, 8, async (item) => {
+        if (!item.id?.startsWith("tt")) {
+            return { item, rated: null };
+        }
+        const ratings = await fetchOmdbRatings(item.id, apiKey).catch(() => null);
+        return { item, rated: ratings?.rated || null };
+    });
+    const keep = [];
+    const remove = [];
+    const unknown = [];
+    for (const r of results) {
+        if (!r.rated) {
+            unknown.push(r.item);
+        }
+        if (isKept(r.rated, keptRatings)) {
+            keep.push(r.item);
+        } else {
+            remove.push(r.item);
+        }
+    }
+    return { keep, remove, unknown };
 }
 
 /**
@@ -89,27 +120,40 @@ async function computeContentRatingSplitForAccount(prisma, accountId, items, kep
  * @returns {Promise<{removedCount: number}>}
  */
 async function reapplyContentRatingForAccount(prisma, accountId, list) {
-  const keptRatings = parseKeptRatings(list.keptRatings)
-  if (keptRatings.length === 0) return { removedCount: 0 }
+    const keptRatings = parseKeptRatings(list.keptRatings);
+    if (keptRatings.length === 0) {
+        return { removedCount: 0 };
+    }
 
-  const items = JSON.parse(list.itemsJson || '[]')
-  const { remove } = await computeContentRatingSplitForAccount(prisma, accountId, items, keptRatings)
-  if (remove.length === 0) return { removedCount: 0 }
+    const items = JSON.parse(list.itemsJson || "[]");
+    const { remove } = await computeContentRatingSplitForAccount(
+        prisma,
+        accountId,
+        items,
+        keptRatings
+    );
+    if (remove.length === 0) {
+        return { removedCount: 0 };
+    }
 
-  const removeIds = new Set(remove.map((r) => r.id))
-  const keptItems = items.filter((it) => !removeIds.has(it.id))
-  await prisma.customList.update({
-    where: { id: list.id },
-    data: {
-      itemsJson: JSON.stringify(keptItems),
-      lastRemovalSnapshot: list.itemsJson,
-      lastRemovalAt: new Date(),
-    },
-  })
-  return { removedCount: remove.length }
+    const removeIds = new Set(remove.map((r) => r.id));
+    const keptItems = items.filter((it) => !removeIds.has(it.id));
+    await prisma.customList.update({
+        data: {
+            itemsJson: JSON.stringify(keptItems),
+            lastRemovalAt: new Date(),
+            lastRemovalSnapshot: list.itemsJson,
+        },
+        where: { id: list.id },
+    });
+    return { removedCount: remove.length };
 }
 
 module.exports = {
-  SELECTABLE_RATINGS, parseKeptRatings, serializeKeptRatings, isKept,
-  computeContentRatingSplitForAccount, reapplyContentRatingForAccount,
-}
+    computeContentRatingSplitForAccount,
+    isKept,
+    parseKeptRatings,
+    reapplyContentRatingForAccount,
+    SELECTABLE_RATINGS,
+    serializeKeptRatings,
+};

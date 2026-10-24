@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - Register',
+    title: "SlickSync - Register",
 };
 
-export default function RegisterLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function RegisterLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

@@ -21,40 +21,50 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/reconcile-proxy-history.js
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/reconcile-proxy-history.js --apply
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 async function main() {
-  const apply = process.argv.includes('--apply')
-  const prisma = new PrismaClient()
-  try {
-    const proxyCards = await prisma.watchSession.findMany({
-      where: { requestCount: { not: null } },
-      select: { id: true, itemName: true, durationSeconds: true, requestCount: true, startTime: true },
-      orderBy: { startTime: 'desc' },
-    })
+    const apply = process.argv.includes("--apply");
+    const prisma = new PrismaClient();
+    try {
+        const proxyCards = await prisma.watchSession.findMany({
+            orderBy: { startTime: "desc" },
+            select: {
+                durationSeconds: true,
+                id: true,
+                itemName: true,
+                requestCount: true,
+                startTime: true,
+            },
+            where: { requestCount: { not: null } },
+        });
 
-    console.log(`Proxy-written History cards found: ${proxyCards.length}\n`)
-    for (const c of proxyCards) {
-      console.log(`  "${c.itemName}"  (${c.requestCount} reqs, ${c.durationSeconds}s)  ${c.startTime.toISOString()}`)
-    }
+        console.log(`Proxy-written History cards found: ${proxyCards.length}\n`);
+        for (const c of proxyCards) {
+            console.log(
+                `  "${c.itemName}"  (${c.requestCount} reqs, ${c.durationSeconds}s)  ${c.startTime.toISOString()}`
+            );
+        }
 
-    if (proxyCards.length === 0) {
-      console.log('Nothing to do.')
-      return
-    }
+        if (proxyCards.length === 0) {
+            console.log("Nothing to do.");
+            return;
+        }
 
-    if (apply) {
-      const r = await prisma.watchSession.deleteMany({ where: { id: { in: proxyCards.map((c) => c.id) } } })
-      console.log(`\nDeleted ${r.count} proxy-written card(s). Native history is untouched.`)
-    } else {
-      console.log('\nDry run only - re-run with --apply to delete these.')
+        if (apply) {
+            const r = await prisma.watchSession.deleteMany({
+                where: { id: { in: proxyCards.map((c) => c.id) } },
+            });
+            console.log(`\nDeleted ${r.count} proxy-written card(s). Native history is untouched.`);
+        } else {
+            console.log("\nDry run only - re-run with --apply to delete these.");
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-  } finally {
-    await prisma.$disconnect()
-  }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

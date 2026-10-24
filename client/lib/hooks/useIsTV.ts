@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
 // Detects whether the app is running inside a TV context - a third layout
 // mode alongside mobile/desktop, but auto-detected the same way those are
@@ -16,32 +16,48 @@ import { useEffect, useState } from 'react';
 //      in the TV's own browser already lands in TV mode with zero setup,
 //      before any native app exists at all.
 declare global {
-  interface Window {
-    __SLICKSYNC_TV__?: boolean;
-  }
+    interface Window {
+        __SLICKSYNC_TV__?: boolean;
+    }
 }
 
 const TV_UA_PATTERNS = [/\bAFT[A-Z]/i, /Android TV/i, /\bBRAVIA\b/i, /GoogleTV/i];
-const SESSION_KEY = 'slicksync-tv-mode';
+const SESSION_KEY = "slicksync-tv-mode";
 
 function detectTV(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (window.__SLICKSYNC_TV__ === true) return true;
+    if (typeof window === "undefined") {
+        return false;
+    }
+    if (window.__SLICKSYNC_TV__ === true) {
+        return true;
+    }
 
-  const fromQuery = new URLSearchParams(window.location.search).get('tv');
-  if (fromQuery === '1') {
-    try { sessionStorage.setItem(SESSION_KEY, '1'); } catch {}
-    return true;
-  }
-  if (fromQuery === '0') {
-    try { sessionStorage.removeItem(SESSION_KEY); } catch {}
-    return false;
-  }
-  try {
-    if (sessionStorage.getItem(SESSION_KEY) === '1') return true;
-  } catch {}
+    const fromQuery = new URLSearchParams(window.location.search).get("tv");
+    if (fromQuery === "1") {
+        try {
+            sessionStorage.setItem(SESSION_KEY, "1");
+        } catch {
+            // Browser storage can be unavailable in restricted browsing contexts.
+        }
+        return true;
+    }
+    if (fromQuery === "0") {
+        try {
+            sessionStorage.removeItem(SESSION_KEY);
+        } catch {
+            // Browser storage can be unavailable in restricted browsing contexts.
+        }
+        return false;
+    }
+    try {
+        if (sessionStorage.getItem(SESSION_KEY) === "1") {
+            return true;
+        }
+    } catch {
+        // Browser storage can be unavailable in restricted browsing contexts.
+    }
 
-  return TV_UA_PATTERNS.some((p) => p.test(navigator.userAgent));
+    return TV_UA_PATTERNS.some((p) => p.test(navigator.userAgent));
 }
 
 // The answer once any component has worked it out - it can't change while
@@ -56,11 +72,11 @@ let known: boolean | null = null;
 // its second render, and its TV-only focus hook with it - a hook appearing
 // between renders, which crashed every title opened in TV mode.
 export function useIsTV(): boolean {
-  const [isTV, setIsTV] = useState(() => known ?? false);
-  useEffect(() => {
-    known = detectTV();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading the browser once hydrated is the point
-    setIsTV(known);
-  }, []);
-  return isTV;
+    const [isTV, setIsTV] = useState(() => known ?? false);
+    useEffect(() => {
+        known = detectTV();
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reading the browser once hydrated is the point
+        setIsTV(known);
+    }, []);
+    return isTV;
 }

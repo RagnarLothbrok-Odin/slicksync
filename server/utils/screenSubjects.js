@@ -13,88 +13,142 @@
 // given a person of its own is that person instead - loading it by its
 // profile name then finds nothing.
 
-const NUVIO = /^np-(.+)-(\d+)$/
-const HOUSEHOLD = /^hh-([A-Za-z0-9_-]+)$/
+const NUVIO = /^np-(.+)-(\d+)$/;
+const HOUSEHOLD = /^hh-([A-Za-z0-9_-]+)$/;
 
-const PERSON_SELECT = { id: true, username: true, providerType: true, jellyfinServerKind: true, isActive: true }
+const PERSON_SELECT = {
+    id: true,
+    isActive: true,
+    jellyfinServerKind: true,
+    providerType: true,
+    username: true,
+};
 
-const nuvioProfileSubject = (nuvioUserId, index) => `np-${nuvioUserId}-${index}`
-const householdSubject = (profileId) => `hh-${profileId}`
-const isProfileSubject = (id) => NUVIO.test(String(id || '')) || HOUSEHOLD.test(String(id || ''))
+const nuvioProfileSubject = (nuvioUserId, index) => `np-${nuvioUserId}-${index}`;
+const householdSubject = (profileId) => `hh-${profileId}`;
+const isProfileSubject = (id) => NUVIO.test(String(id || "")) || HOUSEHOLD.test(String(id || ""));
 
 /** The Nuvio profile's name and whether it uses the main profile's addons, as last read from Nuvio. */
 function profileMeta(cfg, id) {
-  const m = cfg?.screenTimeProfiles?.[id]
-  return m && typeof m === 'object' ? m : {}
+    const m = cfg?.screenTimeProfiles?.[id];
+    return m && typeof m === "object" ? m : {};
 }
 
 async function loadNuvioProfile(prisma, accountId, id, cfg) {
-  const m = NUVIO.exec(id)
-  if (!m) return null
-  const nuvioUserId = m[1]
-  const index = Number(m[2])
-  const np = require('./nuvioProfiles')
-  const siblings = await np.loadSiblings(prisma, accountId, nuvioUserId)
-  if (!siblings.length || siblings.some((s) => np.profileOf(s) === index)) return null
-  const routes = await np.loadRoutes(prisma, accountId, nuvioUserId)
-  const ownerId = np.ownerOf(index, siblings, routes)
-  const owner = siblings.find((s) => s.id === (ownerId || siblings[0]?.id))
-  if (!owner) return null
-  const meta = profileMeta(cfg, id)
-  const name = typeof meta.name === 'string' && meta.name ? meta.name : null
-  return {
-    id,
-    username: name || `Profile ${index}`,
-    providerType: 'nuvio',
-    jellyfinServerKind: null,
-    isActive: owner.isActive !== false,
-    subject: { kind: 'nuvio-profile', nuvioUserId, index, ownerId: owner.id, ownerName: owner.username, name, tracked: !!ownerId, sharesPrimary: meta.sharesPrimary === true },
-  }
+    const m = NUVIO.exec(id);
+    if (!m) {
+        return null;
+    }
+    const nuvioUserId = m[1];
+    const index = Number(m[2]);
+    const np = require("./nuvioProfiles");
+    const siblings = await np.loadSiblings(prisma, accountId, nuvioUserId);
+    if (!siblings.length || siblings.some((s) => np.profileOf(s) === index)) {
+        return null;
+    }
+    const routes = await np.loadRoutes(prisma, accountId, nuvioUserId);
+    const ownerId = np.ownerOf(index, siblings, routes);
+    const owner = siblings.find((s) => s.id === (ownerId || siblings[0]?.id));
+    if (!owner) {
+        return null;
+    }
+    const meta = profileMeta(cfg, id);
+    const name = typeof meta.name === "string" && meta.name ? meta.name : null;
+    return {
+        id,
+        isActive: owner.isActive !== false,
+        jellyfinServerKind: null,
+        providerType: "nuvio",
+        subject: {
+            index,
+            kind: "nuvio-profile",
+            name,
+            nuvioUserId,
+            ownerId: owner.id,
+            ownerName: owner.username,
+            sharesPrimary: meta.sharesPrimary === true,
+            tracked: !!ownerId,
+        },
+        username: name || `Profile ${index}`,
+    };
 }
 
 async function loadHousehold(prisma, accountId, id) {
-  const m = HOUSEHOLD.exec(id)
-  if (!m) return null
-  const profile = await prisma.jellyfinProfile.findFirst({
-    where: { id: m[1], accountId },
-    select: { id: true, name: true, ownerUserId: true, jellyfinUserId: true, ownUserId: true, skip: true },
-  })
-  if (!profile || profile.ownUserId) return null
-  const owner = await prisma.user.findFirst({ where: { id: profile.ownerUserId, accountId }, select: PERSON_SELECT })
-  if (!owner) return null
-  return {
-    id,
-    username: profile.name,
-    providerType: owner.providerType,
-    jellyfinServerKind: owner.jellyfinServerKind,
-    isActive: owner.isActive !== false,
-    subject: { kind: 'household', profileId: profile.id, ownerId: owner.id, ownerName: owner.username, jellyfinUserId: profile.jellyfinUserId, name: profile.name, tracked: !profile.skip },
-  }
+    const m = HOUSEHOLD.exec(id);
+    if (!m) {
+        return null;
+    }
+    const profile = await prisma.jellyfinProfile.findFirst({
+        select: {
+            id: true,
+            jellyfinUserId: true,
+            name: true,
+            ownerUserId: true,
+            ownUserId: true,
+            skip: true,
+        },
+        where: { accountId, id: m[1] },
+    });
+    if (!profile || profile.ownUserId) {
+        return null;
+    }
+    const owner = await prisma.user.findFirst({
+        select: PERSON_SELECT,
+        where: { accountId, id: profile.ownerUserId },
+    });
+    if (!owner) {
+        return null;
+    }
+    return {
+        id,
+        isActive: owner.isActive !== false,
+        jellyfinServerKind: owner.jellyfinServerKind,
+        providerType: owner.providerType,
+        subject: {
+            jellyfinUserId: profile.jellyfinUserId,
+            kind: "household",
+            name: profile.name,
+            ownerId: owner.id,
+            ownerName: owner.username,
+            profileId: profile.id,
+            tracked: !profile.skip,
+        },
+        username: profile.name,
+    };
 }
 
 /** A person, or a merged profile or household user, by its id - or null. */
 async function loadSubject(prisma, accountId, id, cfg = null) {
-  const key = String(id || '')
-  if (NUVIO.test(key)) {
-    const settings = cfg || (await require('./screenTime').readSync(prisma, accountId)).cfg
-    return loadNuvioProfile(prisma, accountId, key, settings)
-  }
-  if (HOUSEHOLD.test(key)) return loadHousehold(prisma, accountId, key)
-  return prisma.user.findFirst({ where: { id: key, accountId }, select: PERSON_SELECT })
+    const key = String(id || "");
+    if (NUVIO.test(key)) {
+        const settings = cfg || (await require("./screenTime").readSync(prisma, accountId)).cfg;
+        return loadNuvioProfile(prisma, accountId, key, settings);
+    }
+    if (HOUSEHOLD.test(key)) {
+        return loadHousehold(prisma, accountId, key);
+    }
+    return prisma.user.findFirst({ select: PERSON_SELECT, where: { accountId, id: key } });
 }
 
 /** Many at once: people in one read, profiles one by one. A Map of id -> subject. */
 async function loadSubjects(prisma, accountId, ids, cfg) {
-  const out = new Map()
-  const people = ids.filter((id) => !isProfileSubject(id))
-  if (people.length) {
-    for (const p of await prisma.user.findMany({ where: { accountId, id: { in: people } }, select: PERSON_SELECT })) out.set(p.id, p)
-  }
-  for (const id of ids.filter(isProfileSubject)) {
-    const s = await loadSubject(prisma, accountId, id, cfg).catch(() => null)
-    if (s) out.set(id, s)
-  }
-  return out
+    const out = new Map();
+    const people = ids.filter((id) => !isProfileSubject(id));
+    if (people.length) {
+        for (const p of await prisma.user.findMany({
+            select: PERSON_SELECT,
+            where: { accountId, id: { in: people } },
+        })) {
+            out.set(p.id, p);
+        }
+    }
+    for (const id of ids.filter(isProfileSubject)) {
+        const s = await loadSubject(prisma, accountId, id, cfg).catch(() => null);
+        if (s) {
+            out.set(id, s);
+        }
+    }
+    return out;
 }
 
 /**
@@ -103,13 +157,15 @@ async function loadSubjects(prisma, accountId, ids, cfg) {
  * pause of the person leaves them alone.
  */
 async function ownLimitedSubjects(prisma, accountId, ownerId, cfg) {
-  const ids = Object.keys(cfg?.screenTime || {}).filter(isProfileSubject)
-  const out = []
-  for (const id of ids) {
-    const s = await loadSubject(prisma, accountId, id, cfg).catch(() => null)
-    if (s?.subject?.ownerId === ownerId) out.push(s)
-  }
-  return out
+    const ids = Object.keys(cfg?.screenTime || {}).filter(isProfileSubject);
+    const out = [];
+    for (const id of ids) {
+        const s = await loadSubject(prisma, accountId, id, cfg).catch(() => null);
+        if (s?.subject?.ownerId === ownerId) {
+            out.push(s);
+        }
+    }
+    return out;
 }
 
 /**
@@ -118,16 +174,38 @@ async function ownLimitedSubjects(prisma, accountId, ownerId, cfg) {
  * account's settings (cfg.screenTimeProfiles). Returns what was kept, or null.
  */
 async function refreshNuvioProfile(prisma, accountId, person) {
-  const owner = await prisma.user.findFirst({ where: { id: person.subject.ownerId, accountId } })
-  if (!owner) return null
-  const { encrypt, decrypt } = require('./encryption')
-  const provider = require('../providers').makeCreateProvider({ prisma, encrypt, getAccountId: () => accountId })(owner, { decrypt, req: { appAccountId: accountId } })
-  if (!provider?.getProfiles) return null
-  const profile = ((await provider.getProfiles()) || []).find((p) => Number(p.profile_index ?? p.profileIndex) === person.subject.index)
-  if (!profile) return null
-  const meta = { name: profile.name || null, sharesPrimary: profile.uses_primary_addons === true, at: new Date().toISOString() }
-  await require('./screenTime').patchEntry(prisma, accountId, 'screenTimeProfiles', person.id, meta)
-  return meta
+    const owner = await prisma.user.findFirst({ where: { accountId, id: person.subject.ownerId } });
+    if (!owner) {
+        return null;
+    }
+    const { encrypt, decrypt } = require("./encryption");
+    const provider = require("../providers").makeCreateProvider({
+        encrypt,
+        getAccountId: () => accountId,
+        prisma,
+    })(owner, { decrypt, req: { appAccountId: accountId } });
+    if (!provider?.getProfiles) {
+        return null;
+    }
+    const profile = ((await provider.getProfiles()) || []).find(
+        (p) => Number(p.profile_index ?? p.profileIndex) === person.subject.index
+    );
+    if (!profile) {
+        return null;
+    }
+    const meta = {
+        at: new Date().toISOString(),
+        name: profile.name || null,
+        sharesPrimary: profile.uses_primary_addons === true,
+    };
+    await require("./screenTime").patchEntry(
+        prisma,
+        accountId,
+        "screenTimeProfiles",
+        person.id,
+        meta
+    );
+    return meta;
 }
 
 /**
@@ -137,19 +215,30 @@ async function refreshNuvioProfile(prisma, accountId, person) {
  * main profile's addons. { person, cfg }, or person null when there is none.
  */
 async function loadSubjectFresh(prisma, accountId, id, { refresh = refreshNuvioProfile } = {}) {
-  const { readSync } = require('./screenTime')
-  let { cfg } = await readSync(prisma, accountId)
-  let person = await loadSubject(prisma, accountId, id, cfg)
-  if (person?.subject?.kind === 'nuvio-profile') {
-    const meta = cfg.screenTimeProfiles?.[id]
-    if (!meta?.at || Date.parse(meta.at) + 60 * 60 * 1000 < Date.now()) {
-      if (await refresh(prisma, accountId, person).catch(() => null)) {
-        cfg = (await readSync(prisma, accountId)).cfg
-        person = (await loadSubject(prisma, accountId, id, cfg)) || person
-      }
+    const { readSync } = require("./screenTime");
+    let { cfg } = await readSync(prisma, accountId);
+    let person = await loadSubject(prisma, accountId, id, cfg);
+    if (person?.subject?.kind === "nuvio-profile") {
+        const meta = cfg.screenTimeProfiles?.[id];
+        if (
+            (!meta?.at || Date.parse(meta.at) + 60 * 60 * 1000 < Date.now()) &&
+            (await refresh(prisma, accountId, person).catch(() => null))
+        ) {
+            cfg = (await readSync(prisma, accountId)).cfg;
+            person = (await loadSubject(prisma, accountId, id, cfg)) || person;
+        }
     }
-  }
-  return { person, cfg }
+    return { cfg, person };
 }
 
-module.exports = { nuvioProfileSubject, householdSubject, isProfileSubject, loadSubject, loadSubjectFresh, loadSubjects, ownLimitedSubjects, profileMeta, refreshNuvioProfile }
+module.exports = {
+    householdSubject,
+    isProfileSubject,
+    loadSubject,
+    loadSubjectFresh,
+    loadSubjects,
+    nuvioProfileSubject,
+    ownLimitedSubjects,
+    profileMeta,
+    refreshNuvioProfile,
+};

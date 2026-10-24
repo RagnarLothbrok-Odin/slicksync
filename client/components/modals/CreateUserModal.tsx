@@ -1,1358 +1,2071 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
-import { Button, SlickSyncLogo, PasswordToggleButton } from '@/components/ui';
-import { toast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
-import { useIsTV } from '@/lib/hooks/useIsTV';
-import JellyfinSignIn, { type JellyfinCredentials, type JellyfinServerInfo, type JellyfinSignInApi } from '@/components/jellyfin/JellyfinSignIn';
+import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import {
-  UsersIcon,
-  XMarkIcon,
-  ArrowPathIcon,
-  ClockIcon,
-  CheckIcon,
-  ClipboardIcon,
-} from '@heroicons/react/24/outline';
-import { copyToClipboard } from '@/lib/clipboard';
+    ArrowPathIcon,
+    CheckIcon,
+    ClipboardIcon,
+    ClockIcon,
+    UsersIcon,
+    XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import JellyfinSignIn, {
+    type JellyfinCredentials,
+    type JellyfinServerInfo,
+    type JellyfinSignInApi,
+} from "@/components/jellyfin/JellyfinSignIn";
+import { Button, PasswordToggleButton, SlickSyncLogo } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
+import { api } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
+import { useIsTV } from "@/lib/hooks/useIsTV";
 
 // Provider sign-in and reconnect share the same flow and account handlers.
 export function CreateUserModal({
-  isOpen,
-  onClose,
-  mode = 'create',
-  userId,
-  userName,
-  onReconnectSuccess,
-  providerType,
+    isOpen,
+    onClose,
+    mode = "create",
+    userId,
+    userName,
+    onReconnectSuccess,
+    providerType,
 }: {
-  isOpen: boolean;
-  onClose: () => void;
-  mode?: 'create' | 'reconnect';
-  userId?: string;
-  userName?: string;
-  onReconnectSuccess?: () => void;
-  /** The provider of the user being reconnected; a Jellyfin login reconnects through its own sign-in. */
-  providerType?: string;
+    isOpen: boolean;
+    onClose: () => void;
+    mode?: "create" | "reconnect";
+    userId?: string;
+    userName?: string;
+    onReconnectSuccess?: () => void;
+    /** The provider of the user being reconnected; a Jellyfin login reconnects through its own sign-in. */
+    providerType?: string;
 }) {
-  const isReconnect = mode === 'reconnect';
-  const isJellyfinReconnect = isReconnect && providerType === 'jellyfin';
-  // A Nuvio person signs in to Nuvio again - never offered Stremio's options.
-  const isNuvioReconnect = isReconnect && providerType === 'nuvio';
-  const isTV = useIsTV();
-  const reduceMotion = useReducedMotion();
-  const [step, setStep] = useState<'tabs' | 'oauth' | 'success' | 'nuvio-oauth'>('tabs');
-  const [provider, setProvider] = useState<'stremio' | 'nuvio' | 'jellyfin'>('stremio');
-  // Jellyfin: the name the person gets here (their server name if left
-  // empty), and the server last used, so a household can be added one
-  // person after another without retyping the address.
-  const [jellyfinDisplayName, setJellyfinDisplayName] = useState('');
-  const [jellyfinServer, setJellyfinServer] = useState<JellyfinServerInfo | null>(null);
-  const [jellyfinAdded, setJellyfinAdded] = useState<{ id: string; username: string; household: { name: string; status: string }[] }[]>([]);
-  const [jellyfinFormKey, setJellyfinFormKey] = useState(0);
-  const [authMethod, setAuthMethod] = useState<'credentials' | 'authKey' | 'oauth'>('oauth');
+    const isReconnect = mode === "reconnect";
+    const isJellyfinReconnect = isReconnect && providerType === "jellyfin";
+    // A Nuvio person signs in to Nuvio again - never offered Stremio's options.
+    const isNuvioReconnect = isReconnect && providerType === "nuvio";
+    const isTV = useIsTV();
+    const reduceMotion = useReducedMotion();
+    const [step, setStep] = useState<"tabs" | "oauth" | "success" | "nuvio-oauth">("tabs");
+    const [provider, setProvider] = useState<"stremio" | "nuvio" | "jellyfin">("stremio");
+    // Jellyfin: the name the person gets here (their server name if left
+    // empty), and the server last used, so a household can be added one
+    // person after another without retyping the address.
+    const [jellyfinDisplayName, setJellyfinDisplayName] = useState("");
+    const [jellyfinServer, setJellyfinServer] = useState<JellyfinServerInfo | null>(null);
+    const [jellyfinAdded, setJellyfinAdded] = useState<
+        { id: string; username: string; household: { name: string; status: string }[] }[]
+    >([]);
+    const [jellyfinFormKey, setJellyfinFormKey] = useState(0);
+    const [authMethod, setAuthMethod] = useState<"credentials" | "authKey" | "oauth">("oauth");
 
-  // Shared identity fields
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+    // Shared identity fields
+    const [username, setUsername] = useState("");
+    const [email, setEmail] = useState("");
 
-  // Auth key field
-  const [authKey, setAuthKey] = useState('');
-  const [password, setPassword] = useState('');
-  const [passwordVisible, setPasswordVisible] = useState(false);
-  const [authKeyVisible, setAuthKeyVisible] = useState(false);
+    // Auth key field
+    const [authKey, setAuthKey] = useState("");
+    const [password, setPassword] = useState("");
+    const [passwordVisible, setPasswordVisible] = useState(false);
+    const [authKeyVisible, setAuthKeyVisible] = useState(false);
 
-  // Credentials only - register new Stremio account
-  const [registerNew, setRegisterNew] = useState(false);
+    // Credentials only - register new Stremio account
+    const [registerNew, setRegisterNew] = useState(false);
 
-  // OAuth flow state
-  const [oauthCode, setOauthCode] = useState<string | null>(null);
-  const [oauthLink, setOauthLink] = useState<string | null>(null);
-  const [oauthExpiresAt, setOauthExpiresAt] = useState<string | null>(null);
-  const [oauthStatus, setOauthStatus] = useState<'idle' | 'connecting' | 'waiting' | 'completed' | 'error'>('idle');
-  const [oauthError, setOauthError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState<number>(0);
+    // OAuth flow state
+    const [_oauthCode, setOauthCode] = useState<string | null>(null);
+    const [oauthLink, setOauthLink] = useState<string | null>(null);
+    const [_oauthExpiresAt, setOauthExpiresAt] = useState<string | null>(null);
+    const [oauthStatus, setOauthStatus] = useState<
+        "idle" | "connecting" | "waiting" | "completed" | "error"
+    >("idle");
+    const [oauthError, setOauthError] = useState<string | null>(null);
+    const [countdown, setCountdown] = useState<number>(0);
 
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // --- Nuvio-specific state (kept separate from Stremio fields above) ---
-  const [nuvioAuthMethod, setNuvioAuthMethod] = useState<'credentials' | 'oauth'>('oauth');
-  const [nuvioEmail, setNuvioEmail] = useState('');
-  const [nuvioPassword, setNuvioPassword] = useState('');
-  const [nuvioPasswordVisible, setNuvioPasswordVisible] = useState(false);
-  const [nuvioOauthStatus, setNuvioOauthStatus] = useState<'idle' | 'connecting' | 'waiting' | 'completed' | 'error'>('idle');
-  const [nuvioOauthError, setNuvioOauthError] = useState<string | null>(null);
-  const [nuvioWebUrl, setNuvioWebUrl] = useState<string | null>(null);
-  const [nuvioCode, setNuvioCode] = useState<string | null>(null);
-  const [nuvioDeviceNonce, setNuvioDeviceNonce] = useState<string | null>(null);
-  const [nuvioAnonToken, setNuvioAnonToken] = useState<string | null>(null);
-  const [nuvioExpiresAt, setNuvioExpiresAt] = useState<string | null>(null);
-  const [nuvioCountdown, setNuvioCountdown] = useState<number>(0);
-  const nuvioPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nuvioCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // --- Nuvio-specific state (kept separate from Stremio fields above) ---
+    const [nuvioAuthMethod, setNuvioAuthMethod] = useState<"credentials" | "oauth">("oauth");
+    const [nuvioEmail, setNuvioEmail] = useState("");
+    const [nuvioPassword, setNuvioPassword] = useState("");
+    const [nuvioPasswordVisible, setNuvioPasswordVisible] = useState(false);
+    const [nuvioOauthStatus, setNuvioOauthStatus] = useState<
+        "idle" | "connecting" | "waiting" | "completed" | "error"
+    >("idle");
+    const [nuvioOauthError, setNuvioOauthError] = useState<string | null>(null);
+    const [nuvioWebUrl, setNuvioWebUrl] = useState<string | null>(null);
+    const [nuvioCode, setNuvioCode] = useState<string | null>(null);
+    const [_nuvioDeviceNonce, setNuvioDeviceNonce] = useState<string | null>(null);
+    const [_nuvioAnonToken, setNuvioAnonToken] = useState<string | null>(null);
+    const [_nuvioExpiresAt, setNuvioExpiresAt] = useState<string | null>(null);
+    const [nuvioCountdown, setNuvioCountdown] = useState<number>(0);
+    const nuvioPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const nuvioCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Reset state when modal closes
-  useEffect(() => {
-    if (!isOpen) {
-      setTimeout(() => {
-        setStep('tabs');
-        setProvider('stremio');
-        setAuthMethod('oauth');
-        setUsername('');
-        setEmail('');
-        setAuthKey('');
-        setPassword('');
-        setRegisterNew(false);
-        setOauthCode(null);
-        setOauthLink(null);
-        setOauthExpiresAt(null);
-        setOauthStatus('idle');
-        setOauthError(null);
-        setCountdown(0);
-        stopPolling();
-        if (countdownRef.current) clearInterval(countdownRef.current);
-        // Jellyfin reset
-        setJellyfinDisplayName('');
-        setJellyfinServer(null);
-        setJellyfinAdded([]);
-        // Nuvio reset
-        setNuvioAuthMethod('oauth');
-        setNuvioEmail('');
-        setNuvioPassword('');
-        setNuvioOauthStatus('idle');
-        setNuvioOauthError(null);
-        setNuvioWebUrl(null);
-        setNuvioCode(null);
-        setNuvioDeviceNonce(null);
-        setNuvioAnonToken(null);
-        setNuvioExpiresAt(null);
-        setNuvioCountdown(0);
-        if (nuvioPollRef.current) clearInterval(nuvioPollRef.current);
-        if (nuvioCountdownRef.current) clearInterval(nuvioCountdownRef.current);
-      }, 300);
-    }
-  }, [isOpen]);
-
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      if (nuvioPollRef.current) clearInterval(nuvioPollRef.current);
-      if (nuvioCountdownRef.current) clearInterval(nuvioCountdownRef.current);
-    };
-  }, []);
-
-  // Every way of adding someone ends here: a moment on the success step,
-  // then their page.
-  const finishAdding = (created: any) => {
-    setStep('success');
-    setTimeout(() => {
-      onClose();
-      if (created?.id) {
-        window.location.href = `/users/${created.id}`;
-      } else {
-        window.location.reload();
-      }
-    }, 800);
-  };
-
-  const stopPolling = () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-  };
-
-  const startCountdown = (expiresAt: string) => {
-    if (countdownRef.current) clearInterval(countdownRef.current);
-
-    const updateCountdown = () => {
-      const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
-      setCountdown(remaining);
-      if (remaining <= 0 && countdownRef.current) {
-        clearInterval(countdownRef.current);
-      }
-    };
-
-    updateCountdown();
-    countdownRef.current = setInterval(updateCountdown, 1000);
-  };
-
-  const startPolling = (code: string, expiresAt?: string | null) => {
-    stopPolling();
-    setOauthStatus('waiting');
-
-    const expiryTime = expiresAt ? new Date(expiresAt).getTime() : null;
-
-    pollIntervalRef.current = setInterval(async () => {
-      try {
-        if (expiryTime && Date.now() > expiryTime) {
-          stopPolling();
-          setOauthStatus('error');
-          setOauthError('Link expired. Please try again.');
-          return;
+    // Reset state when modal closes
+    useEffect(() => {
+        if (!isOpen) {
+            setTimeout(() => {
+                setStep("tabs");
+                setProvider("stremio");
+                setAuthMethod("oauth");
+                setUsername("");
+                setEmail("");
+                setAuthKey("");
+                setPassword("");
+                setRegisterNew(false);
+                setOauthCode(null);
+                setOauthLink(null);
+                setOauthExpiresAt(null);
+                setOauthStatus("idle");
+                setOauthError(null);
+                setCountdown(0);
+                stopPolling();
+                if (countdownRef.current) {
+                    clearInterval(countdownRef.current);
+                }
+                // Jellyfin reset
+                setJellyfinDisplayName("");
+                setJellyfinServer(null);
+                setJellyfinAdded([]);
+                // Nuvio reset
+                setNuvioAuthMethod("oauth");
+                setNuvioEmail("");
+                setNuvioPassword("");
+                setNuvioOauthStatus("idle");
+                setNuvioOauthError(null);
+                setNuvioWebUrl(null);
+                setNuvioCode(null);
+                setNuvioDeviceNonce(null);
+                setNuvioAnonToken(null);
+                setNuvioExpiresAt(null);
+                setNuvioCountdown(0);
+                if (nuvioPollRef.current) {
+                    clearInterval(nuvioPollRef.current);
+                }
+                if (nuvioCountdownRef.current) {
+                    clearInterval(nuvioCountdownRef.current);
+                }
+            }, 300);
         }
+    }, [isOpen]);
 
-        const result = await api.pollStremioOAuth(code);
-        if (!result.success || !result.authKey) return;
-
-        stopPolling();
-        setOauthStatus('completed');
-        setOauthError(null);
-
-        if (isReconnect && userId) {
-          // Auto-reconnect when OAuth completes
-          try {
-            await api.connectUserStremioWithAuthKey(userId, result.authKey);
-            toast.success('Reconnected successfully');
-            if (onReconnectSuccess) {
-              onReconnectSuccess();
+    // Clean up polling on unmount
+    useEffect(
+        () => () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
             }
-          } catch (err: any) {
-            console.error('Failed to reconnect:', err);
-            setOauthStatus('error');
-            setOauthError(err.message || 'Failed to reconnect');
-          }
-        } else {
-          // Added straight away: the server names them after their Stremio
-          // account (a number on the end if someone here has it already),
-          // and the name can be changed later on their page.
-          try {
-            finishAdding(await api.createUserWithStremio({ authKey: result.authKey, username: '', email: '' }));
-          } catch (err: any) {
-            setOauthStatus('error');
-            setOauthError(err.message || 'Could not add them');
-          }
-        }
-      } catch (err: any) {
-        console.error('Error while polling Stremio OAuth:', err);
-        stopPolling();
-        setOauthStatus('error');
-        setOauthError(err.message || 'Connection failed');
-      }
-    }, 2500);
-  };
+            if (countdownRef.current) {
+                clearInterval(countdownRef.current);
+            }
+            if (nuvioPollRef.current) {
+                clearInterval(nuvioPollRef.current);
+            }
+            if (nuvioCountdownRef.current) {
+                clearInterval(nuvioCountdownRef.current);
+            }
+        },
+        []
+    );
 
-  const handleStartOAuth = async () => {
-    setOauthStatus('connecting');
-    setOauthError(null);
-    // Open the tab synchronously, in the same tick as the click, before any
-    // await - Safari (especially iOS) only treats window.open as part of the
-    // original tap if there's no async gap first; once you await an API
-    // call before calling it, Safari silently opens/leaves a blank tab
-    // instead of navigating it. Point this pre-opened tab at the real link
-    // once the API call resolves instead of opening a fresh one then.
-    //
-    // Deliberately WITHOUT 'noopener' here: per spec, window.open() returns
-    // null whenever noopener is set, so passing it meant this always got a
-    // null reference - the blank tab opened and then nothing ever navigated
-    // it, and the post-await fallback below fired outside the user gesture
-    // where the browser blocks it. That is exactly the reported "first click
-    // opens a blank page with no URL, second click works". The opener is
-    // severed manually below instead, which keeps the reverse-tabnabbing
-    // protection noopener was there for.
-    const preOpenedTab = typeof window !== 'undefined' ? window.open('', '_blank') : null;
-    if (preOpenedTab) {
-      // Sever the back-reference while the tab is still blank/same-origin,
-      // before the external OAuth page loads into it.
-      try { preOpenedTab.opener = null; } catch { /* cross-origin guard */ }
-    }
-    try {
-      const data = await api.generateStremioOAuth();
-      if (!data?.code || !data?.link) throw new Error('Failed to generate link');
-
-      setOauthCode(data.code);
-      setOauthLink(data.link);
-      setOauthExpiresAt(data.expiresAt || null);
-
-      if (data.expiresAt) startCountdown(data.expiresAt);
-
-      if (preOpenedTab) {
-        preOpenedTab.location.href = data.link;
-      } else if (typeof window !== 'undefined') {
-        window.open(data.link, '_blank', 'noopener,noreferrer');
-      }
-
-      startPolling(data.code, data.expiresAt || null);
-    } catch (err: any) {
-      console.error('Failed to start Stremio OAuth:', err);
-      setOauthStatus('error');
-      setOauthError(err.message || 'Failed to connect');
-      preOpenedTab?.close();
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (isReconnect) {
-      // Reconnect mode - manual entry
-      if (!email || !password) {
-        toast.error('Email and password are required');
-        return;
-      }
-      setIsSubmitting(true);
-      try {
-        await api.connectUserStremio(userId!, {
-          email: email.trim(),
-          password: password,
-        });
-        toast.success('Reconnected successfully');
-        if (onReconnectSuccess) {
-          onReconnectSuccess();
-        }
-      } catch (err: any) {
-        toast.error(err.message || 'Failed to reconnect');
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
-    // Create mode. An empty name is fine: the server takes the account's own.
-    setIsSubmitting(true);
-    try {
-      let created: any;
-      if (authMethod === 'authKey') {
-        // Auth Key method
-        if (!authKey.trim()) {
-          toast.error('Auth key is required');
-          setIsSubmitting(false);
-          return;
-        }
-        created = await api.createUserWithStremio({
-          authKey: authKey.trim(),
-          username: username.trim(),
-          email: (email || '').trim(),
-        });
-      } else if (authMethod === 'credentials') {
-        // Credentials method (email/password)
-        if (!email.trim() || !password) {
-          toast.error('Email and password are required');
-          setIsSubmitting(false);
-          return;
-        }
-        created = await api.createUserWithCredentials({
-          email: email.trim(),
-          password: password,
-          username: username.trim(),
-          registerNew: registerNew,
-        });
-      }
-      finishAdding(created);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create user');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const formatCountdown = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  // --- Nuvio handlers ---
-
-  const stopNuvioPolling = () => {
-    if (nuvioPollRef.current) {
-      clearInterval(nuvioPollRef.current);
-      nuvioPollRef.current = null;
-    }
-  };
-
-  const startNuvioCountdown = (expiresAt: string) => {
-    if (nuvioCountdownRef.current) clearInterval(nuvioCountdownRef.current);
-    const update = () => {
-      const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
-      setNuvioCountdown(remaining);
-      if (remaining <= 0 && nuvioCountdownRef.current) {
-        clearInterval(nuvioCountdownRef.current);
-        nuvioCountdownRef.current = null;
-      }
+    // Every way of adding someone ends here: a moment on the success step,
+    // then their page.
+    const finishAdding = (created: any) => {
+        setStep("success");
+        setTimeout(() => {
+            onClose();
+            if (created?.id) {
+                window.location.href = `/users/${created.id}`;
+            } else {
+                window.location.reload();
+            }
+        }, 800);
     };
-    update();
-    nuvioCountdownRef.current = setInterval(update, 1000);
-  };
 
-  const handleStartNuvioOAuth = async () => {
-    setStep('nuvio-oauth');
-    setNuvioOauthStatus('connecting');
-    setNuvioOauthError(null);
-    try {
-      const result = await api.startNuvioOAuth();
-      setNuvioCode(result.code);
-      setNuvioWebUrl(result.webUrl);
-      setNuvioExpiresAt(result.expiresAt);
-      setNuvioDeviceNonce(result.deviceNonce);
-      setNuvioAnonToken(result.anonToken);
-      setNuvioOauthStatus('waiting');
-      startNuvioCountdown(result.expiresAt);
+    const stopPolling = () => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+        }
+    };
 
-      const intervalMs = Math.max(2, result.pollIntervalSeconds || 3) * 1000;
-      nuvioPollRef.current = setInterval(async () => {
+    const startCountdown = (expiresAt: string) => {
+        if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+        }
+
+        const updateCountdown = () => {
+            const remaining = Math.max(
+                0,
+                Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)
+            );
+            setCountdown(remaining);
+            if (remaining <= 0 && countdownRef.current) {
+                clearInterval(countdownRef.current);
+            }
+        };
+
+        updateCountdown();
+        countdownRef.current = setInterval(updateCountdown, 1000);
+    };
+
+    const startPolling = (code: string, expiresAt?: string | null) => {
+        stopPolling();
+        setOauthStatus("waiting");
+
+        const expiryTime = expiresAt ? new Date(expiresAt).getTime() : null;
+
+        pollIntervalRef.current = setInterval(async () => {
+            try {
+                if (expiryTime && Date.now() > expiryTime) {
+                    stopPolling();
+                    setOauthStatus("error");
+                    setOauthError("Link expired. Please try again.");
+                    return;
+                }
+
+                const result = await api.pollStremioOAuth(code);
+                if (!(result.success && result.authKey)) {
+                    return;
+                }
+
+                stopPolling();
+                setOauthStatus("completed");
+                setOauthError(null);
+
+                if (isReconnect && userId) {
+                    // Auto-reconnect when OAuth completes
+                    try {
+                        await api.connectUserStremioWithAuthKey(userId, result.authKey);
+                        toast.success("Reconnected successfully");
+                        if (onReconnectSuccess) {
+                            onReconnectSuccess();
+                        }
+                    } catch (err: any) {
+                        console.error("Failed to reconnect:", err);
+                        setOauthStatus("error");
+                        setOauthError(err.message || "Failed to reconnect");
+                    }
+                } else {
+                    // Added straight away: the server names them after their Stremio
+                    // account (a number on the end if someone here has it already),
+                    // and the name can be changed later on their page.
+                    try {
+                        finishAdding(
+                            await api.createUserWithStremio({
+                                authKey: result.authKey,
+                                email: "",
+                                username: "",
+                            })
+                        );
+                    } catch (err: any) {
+                        setOauthStatus("error");
+                        setOauthError(err.message || "Could not add them");
+                    }
+                }
+            } catch (err: any) {
+                console.error("Error while polling Stremio OAuth:", err);
+                stopPolling();
+                setOauthStatus("error");
+                setOauthError(err.message || "Connection failed");
+            }
+        }, 2500);
+    };
+
+    const handleStartOAuth = async () => {
+        setOauthStatus("connecting");
+        setOauthError(null);
+        // Open the tab synchronously, in the same tick as the click, before any
+        // await - Safari (especially iOS) only treats window.open as part of the
+        // original tap if there's no async gap first; once you await an API
+        // call before calling it, Safari silently opens/leaves a blank tab
+        // instead of navigating it. Point this pre-opened tab at the real link
+        // once the API call resolves instead of opening a fresh one then.
+        //
+        // Deliberately WITHOUT 'noopener' here: per spec, window.open() returns
+        // null whenever noopener is set, so passing it meant this always got a
+        // null reference - the blank tab opened and then nothing ever navigated
+        // it, and the post-await fallback below fired outside the user gesture
+        // where the browser blocks it. That is exactly the reported "first click
+        // opens a blank page with no URL, second click works". The opener is
+        // severed manually below instead, which keeps the reverse-tabnabbing
+        // protection noopener was there for.
+        const preOpenedTab = typeof window === "undefined" ? null : window.open("", "_blank");
+        if (preOpenedTab) {
+            // Sever the back-reference while the tab is still blank/same-origin,
+            // before the external OAuth page loads into it.
+            try {
+                preOpenedTab.opener = null;
+            } catch {
+                /* cross-origin guard */
+            }
+        }
         try {
-          const poll = await api.pollNuvioOAuth({
-            code: result.code,
-            deviceNonce: result.deviceNonce,
-            anonToken: result.anonToken,
-          });
-          // Status is opaque (passed through from Nuvio's own session state) —
-          // 'pending' means keep waiting; anything else, attempt the exchange.
-          if (poll.status === 'pending') return;
+            const data = await api.generateStremioOAuth();
+            if (!(data?.code && data?.link)) {
+                throw new Error("Failed to generate link");
+            }
 
-          stopNuvioPolling();
-          if (nuvioCountdownRef.current) clearInterval(nuvioCountdownRef.current);
+            setOauthCode(data.code);
+            setOauthLink(data.link);
+            setOauthExpiresAt(data.expiresAt || null);
 
-          const exchanged = await api.exchangeNuvioOAuth({
-            code: result.code,
-            deviceNonce: result.deviceNonce,
-            anonToken: result.anonToken,
-          });
-          setNuvioOauthStatus('completed');
-          if (isNuvioReconnect && userId) {
-            await api.reconnectUserNuvio(userId, { providerUserId: exchanged.user.id, refreshToken: exchanged.refreshToken, email: exchanged.user.email });
-            toast.success(`${userName || 'They'} is connected again`);
+            if (data.expiresAt) {
+                startCountdown(data.expiresAt);
+            }
+
+            if (preOpenedTab) {
+                preOpenedTab.location.href = data.link;
+            } else if (typeof window !== "undefined") {
+                window.open(data.link, "_blank", "noopener,noreferrer");
+            }
+
+            startPolling(data.code, data.expiresAt || null);
+        } catch (err: any) {
+            console.error("Failed to start Stremio OAuth:", err);
+            setOauthStatus("error");
+            setOauthError(err.message || "Failed to connect");
+            preOpenedTab?.close();
+        }
+    };
+
+    const handleSubmit = async () => {
+        if (isReconnect) {
+            // Reconnect mode - manual entry
+            if (!(email && password)) {
+                toast.error("Email and password are required");
+                return;
+            }
+            setIsSubmitting(true);
+            try {
+                await api.connectUserStremio(userId!, {
+                    email: email.trim(),
+                    password,
+                });
+                toast.success("Reconnected successfully");
+                if (onReconnectSuccess) {
+                    onReconnectSuccess();
+                }
+            } catch (err: any) {
+                toast.error(err.message || "Failed to reconnect");
+            } finally {
+                setIsSubmitting(false);
+            }
+            return;
+        }
+
+        // Create mode. An empty name is fine: the server takes the account's own.
+        setIsSubmitting(true);
+        try {
+            let created: any;
+            if (authMethod === "authKey") {
+                // Auth Key method
+                if (!authKey.trim()) {
+                    toast.error("Auth key is required");
+                    setIsSubmitting(false);
+                    return;
+                }
+                created = await api.createUserWithStremio({
+                    authKey: authKey.trim(),
+                    email: (email || "").trim(),
+                    username: username.trim(),
+                });
+            } else if (authMethod === "credentials") {
+                // Credentials method (email/password)
+                if (!(email.trim() && password)) {
+                    toast.error("Email and password are required");
+                    setIsSubmitting(false);
+                    return;
+                }
+                created = await api.createUserWithCredentials({
+                    email: email.trim(),
+                    password,
+                    registerNew,
+                    username: username.trim(),
+                });
+            }
+            finishAdding(created);
+        } catch (err: any) {
+            toast.error(err.message || "Failed to create user");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const formatCountdown = (seconds: number) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s.toString().padStart(2, "0")}`;
+    };
+
+    // --- Nuvio handlers ---
+
+    const stopNuvioPolling = () => {
+        if (nuvioPollRef.current) {
+            clearInterval(nuvioPollRef.current);
+            nuvioPollRef.current = null;
+        }
+    };
+
+    const startNuvioCountdown = (expiresAt: string) => {
+        if (nuvioCountdownRef.current) {
+            clearInterval(nuvioCountdownRef.current);
+        }
+        const update = () => {
+            const remaining = Math.max(
+                0,
+                Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)
+            );
+            setNuvioCountdown(remaining);
+            if (remaining <= 0 && nuvioCountdownRef.current) {
+                clearInterval(nuvioCountdownRef.current);
+                nuvioCountdownRef.current = null;
+            }
+        };
+        update();
+        nuvioCountdownRef.current = setInterval(update, 1000);
+    };
+
+    const handleStartNuvioOAuth = async () => {
+        setStep("nuvio-oauth");
+        setNuvioOauthStatus("connecting");
+        setNuvioOauthError(null);
+        try {
+            const result = await api.startNuvioOAuth();
+            setNuvioCode(result.code);
+            setNuvioWebUrl(result.webUrl);
+            setNuvioExpiresAt(result.expiresAt);
+            setNuvioDeviceNonce(result.deviceNonce);
+            setNuvioAnonToken(result.anonToken);
+            setNuvioOauthStatus("waiting");
+            startNuvioCountdown(result.expiresAt);
+
+            const intervalMs = Math.max(2, result.pollIntervalSeconds || 3) * 1000;
+            nuvioPollRef.current = setInterval(async () => {
+                try {
+                    const poll = await api.pollNuvioOAuth({
+                        anonToken: result.anonToken,
+                        code: result.code,
+                        deviceNonce: result.deviceNonce,
+                    });
+                    // Status is opaque (passed through from Nuvio's own session state) —
+                    // 'pending' means keep waiting; anything else, attempt the exchange.
+                    if (poll.status === "pending") {
+                        return;
+                    }
+
+                    stopNuvioPolling();
+                    if (nuvioCountdownRef.current) {
+                        clearInterval(nuvioCountdownRef.current);
+                    }
+
+                    const exchanged = await api.exchangeNuvioOAuth({
+                        anonToken: result.anonToken,
+                        code: result.code,
+                        deviceNonce: result.deviceNonce,
+                    });
+                    setNuvioOauthStatus("completed");
+                    if (isNuvioReconnect && userId) {
+                        await api.reconnectUserNuvio(userId, {
+                            email: exchanged.user.email,
+                            providerUserId: exchanged.user.id,
+                            refreshToken: exchanged.refreshToken,
+                        });
+                        toast.success(`${userName || "They"} is connected again`);
+                        onReconnectSuccess?.();
+                        return;
+                    }
+                    // Added straight away, named after the start of their email.
+                    finishAdding(
+                        await api.createUserWithNuvioOAuth({
+                            email: exchanged.user.email,
+                            providerUserId: exchanged.user.id,
+                            refreshToken: exchanged.refreshToken,
+                            username: "",
+                        })
+                    );
+                } catch (err: any) {
+                    stopNuvioPolling();
+                    if (nuvioCountdownRef.current) {
+                        clearInterval(nuvioCountdownRef.current);
+                    }
+                    setNuvioOauthStatus("error");
+                    setNuvioOauthError(err.message || "Nuvio approval failed or expired");
+                }
+            }, intervalMs);
+        } catch (err: any) {
+            setNuvioOauthStatus("error");
+            setNuvioOauthError(err.message || "Failed to start Nuvio login");
+        }
+    };
+
+    // Email and password; the approval-code sign-in adds them as soon as it is
+    // approved. An empty name is fine: the server takes the start of the email.
+    const handleNuvioSubmit = async () => {
+        if (!(nuvioEmail.trim() && nuvioPassword)) {
+            toast.error("Email and password are required");
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            finishAdding(
+                await api.createUserWithNuvioCredentials({
+                    email: nuvioEmail.trim(),
+                    password: nuvioPassword,
+                    username: username.trim(),
+                })
+            );
+        } catch (err: any) {
+            toast.error(err.message || "Failed to create Nuvio user");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // Reconnect by email and password: the same account (the server refuses another).
+    const handleNuvioReconnect = async () => {
+        if (!userId) {
+            return;
+        }
+        if (!(nuvioEmail.trim() && nuvioPassword)) {
+            toast.error("Email and password are required");
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            await api.reconnectUserNuvio(userId, {
+                email: nuvioEmail.trim(),
+                password: nuvioPassword,
+            });
+            toast.success(`${userName || "They"} is connected again`);
+            onReconnectSuccess?.();
+        } catch (err) {
+            toast.error((err as Error)?.message || "Could not reconnect them");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // --- Jellyfin handlers ---
+    const jellyfinApi: JellyfinSignInApi = {
+        probe: (serverUrl) => api.jellyfinProbe(serverUrl),
+        quickConnectStatus: (params) => api.jellyfinQuickConnectStatus(params),
+        startQuickConnect: (serverUrl) => api.jellyfinStartQuickConnect(serverUrl),
+    };
+
+    const handleJellyfinSubmit = async (credentials: JellyfinCredentials) => {
+        if (isJellyfinReconnect) {
+            await api.connectUserWithJellyfin({ ...credentials, userId });
+            toast.success(`${userName || "User"} is connected again`);
             onReconnectSuccess?.();
             return;
-          }
-          // Added straight away, named after the start of their email.
-          finishAdding(await api.createUserWithNuvioOAuth({
-            providerUserId: exchanged.user.id,
-            refreshToken: exchanged.refreshToken,
-            username: '',
-            email: exchanged.user.email,
-          }));
-        } catch (err: any) {
-          stopNuvioPolling();
-          if (nuvioCountdownRef.current) clearInterval(nuvioCountdownRef.current);
-          setNuvioOauthStatus('error');
-          setNuvioOauthError(err.message || 'Nuvio approval failed or expired');
         }
-      }, intervalMs);
-    } catch (err: any) {
-      setNuvioOauthStatus('error');
-      setNuvioOauthError(err.message || 'Failed to start Nuvio login');
-    }
-  };
+        const created = await api.connectUserWithJellyfin({
+            ...credentials,
+            ...(jellyfinDisplayName.trim() ? { username: jellyfinDisplayName.trim() } : {}),
+        });
+        toast.success(`${created?.username || "User"} added`);
+        setJellyfinAdded((list) => [
+            ...list,
+            {
+                household: created?.household || [],
+                id: (created as any)?.id,
+                username: (created as any)?.username,
+            },
+        ]);
+        setJellyfinDisplayName("");
+        // A fresh form on the same server, for the next person in the household.
+        setJellyfinFormKey((k) => k + 1);
+    };
 
-  // Email and password; the approval-code sign-in adds them as soon as it is
-  // approved. An empty name is fine: the server takes the start of the email.
-  const handleNuvioSubmit = async () => {
-    if (!nuvioEmail.trim() || !nuvioPassword) {
-      toast.error('Email and password are required');
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      finishAdding(await api.createUserWithNuvioCredentials({
-        email: nuvioEmail.trim(),
-        password: nuvioPassword,
-        username: username.trim(),
-      }));
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create Nuvio user');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Reconnect by email and password: the same account (the server refuses another).
-  const handleNuvioReconnect = async () => {
-    if (!userId) return;
-    if (!nuvioEmail.trim() || !nuvioPassword) {
-      toast.error('Email and password are required');
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      await api.reconnectUserNuvio(userId, { email: nuvioEmail.trim(), password: nuvioPassword });
-      toast.success(`${userName || 'They'} is connected again`);
-      onReconnectSuccess?.();
-    } catch (err) {
-      toast.error((err as Error)?.message || 'Could not reconnect them');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // --- Jellyfin handlers ---
-  const jellyfinApi: JellyfinSignInApi = {
-    probe: (serverUrl) => api.jellyfinProbe(serverUrl),
-    startQuickConnect: (serverUrl) => api.jellyfinStartQuickConnect(serverUrl),
-    quickConnectStatus: (params) => api.jellyfinQuickConnectStatus(params),
-  };
-
-  const handleJellyfinSubmit = async (credentials: JellyfinCredentials) => {
-    if (isJellyfinReconnect) {
-      await api.connectUserWithJellyfin({ ...credentials, userId });
-      toast.success(`${userName || 'User'} is connected again`);
-      onReconnectSuccess?.();
-      return;
-    }
-    const created = await api.connectUserWithJellyfin({
-      ...credentials,
-      ...(jellyfinDisplayName.trim() ? { username: jellyfinDisplayName.trim() } : {}),
-    });
-    toast.success(`${created?.username || 'User'} added`);
-    setJellyfinAdded((list) => [...list, { id: (created as any)?.id, username: (created as any)?.username, household: created?.household || [] }]);
-    setJellyfinDisplayName('');
-    // A fresh form on the same server, for the next person in the household.
-    setJellyfinFormKey((k) => k + 1);
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <Dialog open={isOpen} onClose={onClose} className="relative z-50">
-          {/* A simple scrim keeps attention on the connection flow. */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0"
-            style={{
-              background: 'rgba(0,0,0,0.55)'
-            }}
-          />
-
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <motion.div
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
-              transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
-              className="w-full" style={{ maxWidth: '512px' }}
-            >
-            <DialogPanel
-              className="interface-connect interface-modal relative w-full overflow-hidden flex flex-col max-h-[85dvh]"
-              style={{
-                background: 'var(--color-surface)',
-                borderRadius: '24px',
-                border: '1px solid var(--color-surface-border)',
-                boxShadow: '0 0 0 1px rgba(255,255,255,0.05), 0 40px 80px -20px rgba(0,0,0,0.5)',
-                maxWidth: '512px'
-              }}
-            >
-              <DialogTitle className="sr-only">{isReconnect ? 'Reconnect user' : 'Add user'}</DialogTitle>
-              <button type="button" onClick={onClose} aria-label="Close add user"
-                className="absolute right-3 top-3 z-20 w-11 h-11 rounded-full flex items-center justify-center text-muted hover:bg-surface-hover">
-                <XMarkIcon className="w-5 h-5" />
-              </button>
-
-              {/* Content */}
-              <div className="p-6 md:p-8 overflow-y-auto">
-                <AnimatePresence mode="wait">
-                  {/* Step: Select Method - 3 Tabs */}
-                  {step === 'tabs' && (
+    return (
+        <AnimatePresence>
+            {isOpen && (
+                <Dialog className="relative z-50" onClose={onClose} open={isOpen}>
+                    {/* A simple scrim keeps attention on the connection flow. */}
                     <motion.div
-                      key="tabs"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <div className="mb-6 pr-6">
-                        <motion.div
-                          initial={false}
-                          animate={{ scale: 1 }}
-                          transition={{ type: 'spring', delay: 0.1 }}
-                          className="w-11 h-11 mb-4 rounded-xl flex items-center justify-center"
-                          style={{
-                            background: 'var(--color-primary-muted)'
-                          }}
-                        >
-                          {isReconnect ? (
-                            <ArrowPathIcon className="w-5 h-5 text-primary" />
-                          ) : (
-                            <UsersIcon className="w-5 h-5 text-primary" />
-                          )}
-                        </motion.div>
-                        <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                          {isJellyfinReconnect ? 'Reconnect Server Sign-in' : isNuvioReconnect ? 'Reconnect Nuvio Account' : isReconnect ? 'Reconnect Stremio Account' : 'Add a user'}
-                        </h2>
-                        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                          {isJellyfinReconnect
-                            ? `Sign ${userName} in to their server again`
-                            : isNuvioReconnect
-                            ? `Sign ${userName} in to Nuvio again`
-                            : isReconnect
-                            ? `Choose how you'd like to reconnect ${userName}'s Stremio account`
-                            : "Choose how you'd like to add this user"}
-                        </p>
-                        {/* Without their password: signing in on their own page renews
-                            the sign-in SlickSync holds (server/routes/publicLibrary.js). */}
-                        {isReconnect && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const app = providerType === 'nuvio' ? 'nuvio' : providerType === 'jellyfin' ? 'jellyfin' : 'stremio';
-                              copyToClipboard(`${window.location.origin}/login?app=${app}`);
-                              toast.success(`Link copied - when ${userName} signs in there, they're reconnected`);
-                            }}
-                            className="mt-3 inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                          >
-                            <ClipboardIcon className="w-3.5 h-3.5" />
-                            Or copy a link for {userName} to sign in themselves
-                          </button>
-                        )}
-                      </div>
+                        animate={{ opacity: 1 }}
+                        className="fixed inset-0"
+                        exit={{ opacity: 0 }}
+                        initial={{ opacity: 0 }}
+                        style={{
+                            background: "rgba(0,0,0,0.55)",
+                        }}
+                    />
 
-                      {/* The selected tab's colour is a class, never an inline style:
+                    <div className="fixed inset-0 flex items-center justify-center p-4">
+                        <motion.div
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            className="w-full"
+                            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
+                            initial={
+                                reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }
+                            }
+                            style={{ maxWidth: "512px" }}
+                            transition={{ bounce: 0, duration: 0.3, type: "spring" }}
+                        >
+                            <DialogPanel
+                                className="interface-connect interface-modal relative flex max-h-[85dvh] w-full flex-col overflow-hidden"
+                                style={{
+                                    background: "var(--color-surface)",
+                                    border: "1px solid var(--color-surface-border)",
+                                    borderRadius: "24px",
+                                    boxShadow:
+                                        "0 0 0 1px rgba(255,255,255,0.05), 0 40px 80px -20px rgba(0,0,0,0.5)",
+                                    maxWidth: "512px",
+                                }}
+                            >
+                                <DialogTitle className="sr-only">
+                                    {isReconnect ? "Reconnect user" : "Add user"}
+                                </DialogTitle>
+                                <button
+                                    aria-label="Close add user"
+                                    className="absolute top-3 right-3 z-20 flex h-11 w-11 items-center justify-center rounded-full text-muted hover:bg-surface-hover"
+                                    onClick={onClose}
+                                    type="button"
+                                >
+                                    <XMarkIcon className="h-5 w-5" />
+                                </button>
+
+                                {/* Content */}
+                                <div className="overflow-y-auto p-6 md:p-8">
+                                    <AnimatePresence mode="wait">
+                                        {/* Step: Select Method - 3 Tabs */}
+                                        {step === "tabs" && (
+                                            <motion.div
+                                                animate={{ opacity: 1, x: 0 }}
+                                                exit={{ opacity: 0, x: 20 }}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                key="tabs"
+                                                transition={{ duration: 0.2 }}
+                                            >
+                                                <div className="mb-6 pr-6">
+                                                    <motion.div
+                                                        animate={{ scale: 1 }}
+                                                        className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl"
+                                                        initial={false}
+                                                        style={{
+                                                            background:
+                                                                "var(--color-primary-muted)",
+                                                        }}
+                                                        transition={{ delay: 0.1, type: "spring" }}
+                                                    >
+                                                        {isReconnect ? (
+                                                            <ArrowPathIcon className="h-5 w-5 text-primary" />
+                                                        ) : (
+                                                            <UsersIcon className="h-5 w-5 text-primary" />
+                                                        )}
+                                                    </motion.div>
+                                                    <h2
+                                                        className="mb-2 font-bold text-2xl"
+                                                        style={{ color: "var(--color-text)" }}
+                                                    >
+                                                        {isJellyfinReconnect
+                                                            ? "Reconnect Server Sign-in"
+                                                            : isNuvioReconnect
+                                                              ? "Reconnect Nuvio Account"
+                                                              : isReconnect
+                                                                ? "Reconnect Stremio Account"
+                                                                : "Add a user"}
+                                                    </h2>
+                                                    <p
+                                                        className="text-sm"
+                                                        style={{ color: "var(--color-text-muted)" }}
+                                                    >
+                                                        {isJellyfinReconnect
+                                                            ? `Sign ${userName} in to their server again`
+                                                            : isNuvioReconnect
+                                                              ? `Sign ${userName} in to Nuvio again`
+                                                              : isReconnect
+                                                                ? `Choose how you'd like to reconnect ${userName}'s Stremio account`
+                                                                : "Choose how you'd like to add this user"}
+                                                    </p>
+                                                    {/* Without their password: signing in on their own page renews
+                            the sign-in SlickSync holds (server/routes/publicLibrary.js). */}
+                                                    {isReconnect && (
+                                                        <button
+                                                            className="mt-3 inline-flex items-center gap-1.5 text-primary text-xs hover:underline"
+                                                            onClick={() => {
+                                                                const app =
+                                                                    providerType === "nuvio"
+                                                                        ? "nuvio"
+                                                                        : providerType ===
+                                                                            "jellyfin"
+                                                                          ? "jellyfin"
+                                                                          : "stremio";
+                                                                copyToClipboard(
+                                                                    `${window.location.origin}/login?app=${app}`
+                                                                );
+                                                                toast.success(
+                                                                    `Link copied - when ${userName} signs in there, they're reconnected`
+                                                                );
+                                                            }}
+                                                            type="button"
+                                                        >
+                                                            <ClipboardIcon className="h-3.5 w-3.5" />
+                                                            Or copy a link for {userName} to sign in
+                                                            themselves
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                {/* The selected tab's colour is a class, never an inline style:
                           a page-recolouring browser extension (Dark Reader and the
                           like) freezes inline backgrounds it has already rewritten,
                           which left every tab clicked lit up at once in Firefox. */}
-                      {!isReconnect && (
-                        <div className="flex gap-2 mb-5 p-1 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
-                          <button
-                            type="button"
-                            onClick={() => setProvider('stremio')}
-                            aria-pressed={provider === 'stremio'}
-                            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${provider === 'stremio' ? 'bg-primary text-white' : 'bg-transparent text-muted hover:text-default'}`}
-                          >
-                            Stremio
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProvider('nuvio')}
-                            aria-pressed={provider === 'nuvio'}
-                            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${provider === 'nuvio' ? 'bg-primary text-white' : 'bg-transparent text-muted hover:text-default'}`}
-                          >
-                            Nuvio
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProvider('jellyfin')}
-                            aria-pressed={provider === 'jellyfin'}
-                            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${provider === 'jellyfin' ? 'bg-primary text-white' : 'bg-transparent text-muted hover:text-default'}`}
-                          >
-                            Jellyfin | AIOStreams
-                          </button>
-                        </div>
-                      )}
+                                                {!isReconnect && (
+                                                    <div
+                                                        className="mb-5 flex gap-2 rounded-xl p-1"
+                                                        style={{
+                                                            background: "var(--color-bg-muted)",
+                                                        }}
+                                                    >
+                                                        <button
+                                                            aria-pressed={provider === "stremio"}
+                                                            className={`flex-1 rounded-lg py-2 font-semibold text-sm transition-colors ${provider === "stremio" ? "bg-primary text-white" : "bg-transparent text-muted hover:text-default"}`}
+                                                            onClick={() => setProvider("stremio")}
+                                                            type="button"
+                                                        >
+                                                            Stremio
+                                                        </button>
+                                                        <button
+                                                            aria-pressed={provider === "nuvio"}
+                                                            className={`flex-1 rounded-lg py-2 font-semibold text-sm transition-colors ${provider === "nuvio" ? "bg-primary text-white" : "bg-transparent text-muted hover:text-default"}`}
+                                                            onClick={() => setProvider("nuvio")}
+                                                            type="button"
+                                                        >
+                                                            Nuvio
+                                                        </button>
+                                                        <button
+                                                            aria-pressed={provider === "jellyfin"}
+                                                            className={`flex-1 rounded-lg py-2 font-semibold text-sm transition-colors ${provider === "jellyfin" ? "bg-primary text-white" : "bg-transparent text-muted hover:text-default"}`}
+                                                            onClick={() => setProvider("jellyfin")}
+                                                            type="button"
+                                                        >
+                                                            Jellyfin | AIOStreams
+                                                        </button>
+                                                    </div>
+                                                )}
 
-                      {(provider === 'jellyfin' || isJellyfinReconnect) && (
-                        <div className="space-y-4">
-                          {!isJellyfinReconnect && (
-                            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                              For anyone who watches through a Jellyfin app - a Jellyfin server, or the media server AIOStreams and AIOMetadata run for Infuse, Swiftfin, Findroid and their own apps.
-                            </p>
-                          )}
-                          {jellyfinAdded.length > 0 && (() => {
-                            const household = jellyfinAdded.flatMap((u) => u.household.map((h) => ({ ...h, owner: u.username })));
-                            const tracked = household.filter((h) => h.status === 'tracked').map((h) => h.name);
-                            const waiting = household.filter((h) => h.status === 'needs-pin' || h.status === 'needs-sign-in').map((h) => h.name);
-                            return (
-                              <div className="p-3 rounded-xl text-sm space-y-1" style={{ background: 'color-mix(in srgb, var(--color-secondary) 15%, transparent)', color: 'var(--color-text)' }}>
-                                <p>
-                                  Added {jellyfinAdded.map((u) => u.username).join(', ')}
-                                  {tracked.length > 0 ? `, with ${tracked.join(', ')} as ${tracked.length === 1 ? 'a profile' : 'profiles'}` : ''}.
-                                </p>
-                                {waiting.length > 0 && (
-                                  <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                                    {waiting.join(', ')} {waiting.length === 1 ? 'needs' : 'need'} a PIN or the password - finish {waiting.length === 1 ? 'it' : 'them'} from the household card on the Users page.
-                                  </p>
-                                )}
-                                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                                  Add someone else from {jellyfinServer?.serverName || 'this server'}, or close when you are done.
-                                </p>
-                              </div>
-                            );
-                          })()}
-                          {!isJellyfinReconnect && jellyfinServer && (
-                            <div>
-                              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>
-                                Name in SlickSync
-                              </label>
-                              <input
-                                type="text"
-                                value={jellyfinDisplayName}
-                                onChange={(e) => setJellyfinDisplayName(e.target.value)}
-                                placeholder="Their name on the server, if left empty"
-                                className="w-full px-4 py-3 rounded-xl text-sm"
-                                style={{ background: 'var(--color-bg)', border: '1px solid var(--color-surface-border)', color: 'var(--color-text)' }}
-                              />
-                            </div>
-                          )}
-                          <JellyfinSignIn
-                            key={jellyfinFormKey}
-                            api={jellyfinApi}
-                            onSubmit={handleJellyfinSubmit}
-                            submitLabel={isJellyfinReconnect ? 'Reconnect' : 'Add user'}
-                            initialServerUrl={jellyfinServer?.serverUrl || ''}
-                            onServerChange={(info) => { if (info) setJellyfinServer(info); }}
-                            compact
-                          />
-                          {jellyfinAdded.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onClose();
-                                const last = jellyfinAdded[jellyfinAdded.length - 1];
-                                if (jellyfinAdded.length === 1 && last?.id) window.location.href = `/users/${last.id}`;
-                                else window.location.reload();
-                              }}
-                              className="w-full py-3 text-sm font-medium rounded-xl"
-                              style={{ background: 'var(--color-bg-muted)', color: 'var(--color-text)' }}
-                            >
-                              Done
-                            </button>
-                          )}
-                        </div>
-                      )}
+                                                {(provider === "jellyfin" ||
+                                                    isJellyfinReconnect) && (
+                                                    <div className="space-y-4">
+                                                        {!isJellyfinReconnect && (
+                                                            <p
+                                                                className="text-sm"
+                                                                style={{
+                                                                    color: "var(--color-text-muted)",
+                                                                }}
+                                                            >
+                                                                For anyone who watches through a
+                                                                Jellyfin app - a Jellyfin server, or
+                                                                the media server AIOStreams and
+                                                                AIOMetadata run for Infuse,
+                                                                Swiftfin, Findroid and their own
+                                                                apps.
+                                                            </p>
+                                                        )}
+                                                        {jellyfinAdded.length > 0 &&
+                                                            (() => {
+                                                                const household =
+                                                                    jellyfinAdded.flatMap((u) =>
+                                                                        u.household.map((h) => ({
+                                                                            ...h,
+                                                                            owner: u.username,
+                                                                        }))
+                                                                    );
+                                                                const tracked = household
+                                                                    .filter(
+                                                                        (h) =>
+                                                                            h.status === "tracked"
+                                                                    )
+                                                                    .map((h) => h.name);
+                                                                const waiting = household
+                                                                    .filter(
+                                                                        (h) =>
+                                                                            h.status ===
+                                                                                "needs-pin" ||
+                                                                            h.status ===
+                                                                                "needs-sign-in"
+                                                                    )
+                                                                    .map((h) => h.name);
+                                                                return (
+                                                                    <div
+                                                                        className="space-y-1 rounded-xl p-3 text-sm"
+                                                                        style={{
+                                                                            background:
+                                                                                "color-mix(in srgb, var(--color-secondary) 15%, transparent)",
+                                                                            color: "var(--color-text)",
+                                                                        }}
+                                                                    >
+                                                                        <p>
+                                                                            Added{" "}
+                                                                            {jellyfinAdded
+                                                                                .map(
+                                                                                    (u) =>
+                                                                                        u.username
+                                                                                )
+                                                                                .join(", ")}
+                                                                            {tracked.length > 0
+                                                                                ? `, with ${tracked.join(", ")} as ${tracked.length === 1 ? "a profile" : "profiles"}`
+                                                                                : ""}
+                                                                            .
+                                                                        </p>
+                                                                        {waiting.length > 0 && (
+                                                                            <p
+                                                                                className="text-xs"
+                                                                                style={{
+                                                                                    color: "var(--color-text-muted)",
+                                                                                }}
+                                                                            >
+                                                                                {waiting.join(", ")}{" "}
+                                                                                {waiting.length ===
+                                                                                1
+                                                                                    ? "needs"
+                                                                                    : "need"}{" "}
+                                                                                a PIN or the
+                                                                                password - finish{" "}
+                                                                                {waiting.length ===
+                                                                                1
+                                                                                    ? "it"
+                                                                                    : "them"}{" "}
+                                                                                from the household
+                                                                                card on the Users
+                                                                                page.
+                                                                            </p>
+                                                                        )}
+                                                                        <p
+                                                                            className="text-xs"
+                                                                            style={{
+                                                                                color: "var(--color-text-muted)",
+                                                                            }}
+                                                                        >
+                                                                            Add someone else from{" "}
+                                                                            {jellyfinServer?.serverName ||
+                                                                                "this server"}
+                                                                            , or close when you are
+                                                                            done.
+                                                                        </p>
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        {!isJellyfinReconnect && jellyfinServer && (
+                                                            <div>
+                                                                <label
+                                                                    className="mb-2 block font-medium text-sm"
+                                                                    style={{
+                                                                        color: "var(--color-text)",
+                                                                    }}
+                                                                >
+                                                                    Name in SlickSync
+                                                                </label>
+                                                                <input
+                                                                    className="w-full rounded-xl px-4 py-3 text-sm"
+                                                                    onChange={(e) =>
+                                                                        setJellyfinDisplayName(
+                                                                            e.target.value
+                                                                        )
+                                                                    }
+                                                                    placeholder="Their name on the server, if left empty"
+                                                                    style={{
+                                                                        background:
+                                                                            "var(--color-bg)",
+                                                                        border: "1px solid var(--color-surface-border)",
+                                                                        color: "var(--color-text)",
+                                                                    }}
+                                                                    type="text"
+                                                                    value={jellyfinDisplayName}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        <JellyfinSignIn
+                                                            api={jellyfinApi}
+                                                            compact
+                                                            initialServerUrl={
+                                                                jellyfinServer?.serverUrl || ""
+                                                            }
+                                                            key={jellyfinFormKey}
+                                                            onServerChange={(info) => {
+                                                                if (info) {
+                                                                    setJellyfinServer(info);
+                                                                }
+                                                            }}
+                                                            onSubmit={handleJellyfinSubmit}
+                                                            submitLabel={
+                                                                isJellyfinReconnect
+                                                                    ? "Reconnect"
+                                                                    : "Add user"
+                                                            }
+                                                        />
+                                                        {jellyfinAdded.length > 0 && (
+                                                            <button
+                                                                className="w-full rounded-xl py-3 font-medium text-sm"
+                                                                onClick={() => {
+                                                                    onClose();
+                                                                    const last =
+                                                                        jellyfinAdded.at(-1);
+                                                                    if (
+                                                                        jellyfinAdded.length ===
+                                                                            1 &&
+                                                                        last?.id
+                                                                    ) {
+                                                                        window.location.href = `/users/${last.id}`;
+                                                                    } else {
+                                                                        window.location.reload();
+                                                                    }
+                                                                }}
+                                                                style={{
+                                                                    background:
+                                                                        "var(--color-bg-muted)",
+                                                                    color: "var(--color-text)",
+                                                                }}
+                                                                type="button"
+                                                            >
+                                                                Done
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
 
-                      {provider === 'stremio' && !isJellyfinReconnect && !isNuvioReconnect && (
-                      <>
-                      {/* 3 Tab Options */}
-                      <div className="space-y-3">
-                        {/* Credentials Option (Email/Password) */}
-                        <motion.button
-                          type="button"
-                          whileHover={{ scale: 1.02, y: -2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => setAuthMethod('credentials')}
-                          className={`w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden ${authMethod === 'credentials' ? 'auth-opt-on' : 'auth-opt-off'}`}
-                          style={{ opacity: authMethod === 'credentials' ? 1 : 0.85 }}
-                        >
-                          <div className="relative flex items-center gap-4">
-                            <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ao-icon"
-                            >
-                              <svg className="w-5 h-5 ao-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                              </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="font-semibold ao-title">
-                                Credentials
-                              </span>
-                              <p className="text-sm mt-0.5 ao-sub">
-                                Email and password
-                              </p>
-                            </div>
-                          </div>
-                        </motion.button>
+                                                {provider === "stremio" &&
+                                                    !isJellyfinReconnect &&
+                                                    !isNuvioReconnect && (
+                                                        <>
+                                                            {/* 3 Tab Options */}
+                                                            <div className="space-y-3">
+                                                                {/* Credentials Option (Email/Password) */}
+                                                                <motion.button
+                                                                    className={`group relative w-full overflow-hidden rounded-2xl p-4 text-left transition-all ${authMethod === "credentials" ? "auth-opt-on" : "auth-opt-off"}`}
+                                                                    onClick={() =>
+                                                                        setAuthMethod("credentials")
+                                                                    }
+                                                                    style={{
+                                                                        opacity:
+                                                                            authMethod ===
+                                                                            "credentials"
+                                                                                ? 1
+                                                                                : 0.85,
+                                                                    }}
+                                                                    type="button"
+                                                                    whileHover={{
+                                                                        scale: 1.02,
+                                                                        y: -2,
+                                                                    }}
+                                                                    whileTap={{ scale: 0.98 }}
+                                                                >
+                                                                    <div className="relative flex items-center gap-4">
+                                                                        <div className="ao-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                                                                            <svg
+                                                                                className="ao-glyph h-5 w-5"
+                                                                                fill="none"
+                                                                                stroke="currentColor"
+                                                                                strokeWidth="2"
+                                                                                viewBox="0 0 24 24"
+                                                                            >
+                                                                                <path
+                                                                                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+                                                                                    strokeLinecap="round"
+                                                                                    strokeLinejoin="round"
+                                                                                />
+                                                                            </svg>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <span className="ao-title font-semibold">
+                                                                                Credentials
+                                                                            </span>
+                                                                            <p className="ao-sub mt-0.5 text-sm">
+                                                                                Email and password
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                </motion.button>
 
-                        {/* Auth Key Option */}
-                        <motion.button
-                          type="button"
-                          whileHover={{ scale: 1.02, y: -2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => setAuthMethod('authKey')}
-                          className={`w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden ${authMethod === 'authKey' ? 'auth-opt-on' : 'auth-opt-off'}`}
-                          style={{ opacity: authMethod === 'authKey' ? 1 : 0.85 }}
-                        >
-                          <div className="relative flex items-center gap-4">
-                            <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ao-icon"
-                            >
-                              <svg className="w-5 h-5 ao-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                              </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="font-semibold ao-title">
-                                Auth Key
-                              </span>
-                              <p className="text-sm mt-0.5 ao-sub">
-                                Paste from Stremio settings
-                              </p>
-                            </div>
-                          </div>
-                        </motion.button>
+                                                                {/* Auth Key Option */}
+                                                                <motion.button
+                                                                    className={`group relative w-full overflow-hidden rounded-2xl p-4 text-left transition-all ${authMethod === "authKey" ? "auth-opt-on" : "auth-opt-off"}`}
+                                                                    onClick={() =>
+                                                                        setAuthMethod("authKey")
+                                                                    }
+                                                                    style={{
+                                                                        opacity:
+                                                                            authMethod === "authKey"
+                                                                                ? 1
+                                                                                : 0.85,
+                                                                    }}
+                                                                    type="button"
+                                                                    whileHover={{
+                                                                        scale: 1.02,
+                                                                        y: -2,
+                                                                    }}
+                                                                    whileTap={{ scale: 0.98 }}
+                                                                >
+                                                                    <div className="relative flex items-center gap-4">
+                                                                        <div className="ao-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                                                                            <svg
+                                                                                className="ao-glyph h-5 w-5"
+                                                                                fill="none"
+                                                                                stroke="currentColor"
+                                                                                strokeWidth="2"
+                                                                                viewBox="0 0 24 24"
+                                                                            >
+                                                                                <path
+                                                                                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                                                                                    strokeLinecap="round"
+                                                                                    strokeLinejoin="round"
+                                                                                />
+                                                                            </svg>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <span className="ao-title font-semibold">
+                                                                                Auth Key
+                                                                            </span>
+                                                                            <p className="ao-sub mt-0.5 text-sm">
+                                                                                Paste from Stremio
+                                                                                settings
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                </motion.button>
 
-                        {/* Stremio OAuth Option */}
-                        <motion.button
-                          type="button"
-                          whileHover={{ scale: 1.02, y: -2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => {
-                            setAuthMethod('oauth');
-                            setStep('oauth');
-                            handleStartOAuth();
-                          }}
-                          className={`w-full p-4 rounded-2xl text-left transition-all group relative overflow-hidden ${authMethod === 'oauth' ? 'auth-opt-on' : 'auth-opt-off'}`}
-                          style={{ opacity: authMethod === 'oauth' ? 1 : 0.85 }}
-                        >
-                          <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                            style={{
-                              background: 'linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 10%, transparent) 0%, transparent 50%)'
-                            }}
-                          />
-                          <div className="relative flex items-center gap-4">
-                            <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ao-icon-grad"
-                            >
-                              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                              </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold ao-title">
-                                  Stremio OAuth
-                                </span>
-                                <span
-                                  className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full ao-badge"
-                                >
-                                  Recommended
-                                </span>
-                              </div>
-                              <p className="text-sm mt-0.5 ao-sub">
-                                Securely link via OAuth
-                              </p>
-                            </div>
-                          </div>
-                        </motion.button>
-                      </div>
+                                                                {/* Stremio OAuth Option */}
+                                                                <motion.button
+                                                                    className={`group relative w-full overflow-hidden rounded-2xl p-4 text-left transition-all ${authMethod === "oauth" ? "auth-opt-on" : "auth-opt-off"}`}
+                                                                    onClick={() => {
+                                                                        setAuthMethod("oauth");
+                                                                        setStep("oauth");
+                                                                        handleStartOAuth();
+                                                                    }}
+                                                                    style={{
+                                                                        opacity:
+                                                                            authMethod === "oauth"
+                                                                                ? 1
+                                                                                : 0.85,
+                                                                    }}
+                                                                    type="button"
+                                                                    whileHover={{
+                                                                        scale: 1.02,
+                                                                        y: -2,
+                                                                    }}
+                                                                    whileTap={{ scale: 0.98 }}
+                                                                >
+                                                                    <div
+                                                                        className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100"
+                                                                        style={{
+                                                                            background:
+                                                                                "linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 10%, transparent) 0%, transparent 50%)",
+                                                                        }}
+                                                                    />
+                                                                    <div className="relative flex items-center gap-4">
+                                                                        <div className="ao-icon-grad flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                                                                            <svg
+                                                                                className="h-5 w-5 text-white"
+                                                                                fill="none"
+                                                                                stroke="currentColor"
+                                                                                strokeWidth="2"
+                                                                                viewBox="0 0 24 24"
+                                                                            >
+                                                                                <path
+                                                                                    d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                                                                                    strokeLinecap="round"
+                                                                                    strokeLinejoin="round"
+                                                                                />
+                                                                            </svg>
+                                                                        </div>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="ao-title font-semibold">
+                                                                                    Stremio OAuth
+                                                                                </span>
+                                                                                <span className="ao-badge rounded-full px-2 py-0.5 font-bold text-[10px] uppercase tracking-wider">
+                                                                                    Recommended
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="ao-sub mt-0.5 text-sm">
+                                                                                Securely link via
+                                                                                OAuth
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                </motion.button>
+                                                            </div>
 
-                      {/* Show form based on selected auth method (except OAuth which goes to separate step) */}
-                      {authMethod !== 'oauth' && (
-                        <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
-                          <div className="space-y-4">
-                            {!isReconnect && (
-                              <div>
-                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                  Name in SlickSync
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="The start of their email, if left empty"
-                                  value={username}
-                                  onChange={(e) => setUsername(e.target.value)}
-                                  className="w-full px-4 py-3 rounded-xl transition-all duration-200 focus:outline-none"
-                                  style={{
-                                    background: 'var(--color-surface-hover)',
-                                    border: '1px solid var(--color-surface-border)',
-                                    color: 'var(--color-text)'
-                                  }}
-                                />
-                              </div>
-                            )}
+                                                            {/* Show form based on selected auth method (except OAuth which goes to separate step) */}
+                                                            {authMethod !== "oauth" && (
+                                                                <div
+                                                                    className="mt-6 rounded-xl p-4"
+                                                                    style={{
+                                                                        background:
+                                                                            "var(--color-bg-muted)",
+                                                                    }}
+                                                                >
+                                                                    <div className="space-y-4">
+                                                                        {!isReconnect && (
+                                                                            <div>
+                                                                                <label
+                                                                                    className="mb-2 block font-medium text-sm"
+                                                                                    style={{
+                                                                                        color: "var(--color-text-muted)",
+                                                                                    }}
+                                                                                >
+                                                                                    Name in
+                                                                                    SlickSync
+                                                                                </label>
+                                                                                <input
+                                                                                    className="w-full rounded-xl px-4 py-3 transition-all duration-200 focus:outline-none"
+                                                                                    onChange={(e) =>
+                                                                                        setUsername(
+                                                                                            e.target
+                                                                                                .value
+                                                                                        )
+                                                                                    }
+                                                                                    placeholder="The start of their email, if left empty"
+                                                                                    style={{
+                                                                                        background:
+                                                                                            "var(--color-surface-hover)",
+                                                                                        border: "1px solid var(--color-surface-border)",
+                                                                                        color: "var(--color-text)",
+                                                                                    }}
+                                                                                    type="text"
+                                                                                    value={username}
+                                                                                />
+                                                                            </div>
+                                                                        )}
 
-                            {authMethod === 'credentials' && (
-                              <>
-                                <div>
-                                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                    Email <span style={{ color: 'var(--color-error)' }}>*</span>
-                                  </label>
-                                  <input
-                                    type="email"
-                                    placeholder={isReconnect ? "Enter Stremio email" : "Enter Stremio account email"}
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl transition-all duration-200 focus:outline-none"
-                                    style={{
-                                      background: 'var(--color-surface-hover)',
-                                      border: '1px solid var(--color-surface-border)',
-                                      color: 'var(--color-text)'
-                                    }}
-                                  />
-                                </div>
+                                                                        {authMethod ===
+                                                                            "credentials" && (
+                                                                            <>
+                                                                                <div>
+                                                                                    <label
+                                                                                        className="mb-2 block font-medium text-sm"
+                                                                                        style={{
+                                                                                            color: "var(--color-text-muted)",
+                                                                                        }}
+                                                                                    >
+                                                                                        Email{" "}
+                                                                                        <span
+                                                                                            style={{
+                                                                                                color: "var(--color-error)",
+                                                                                            }}
+                                                                                        >
+                                                                                            *
+                                                                                        </span>
+                                                                                    </label>
+                                                                                    <input
+                                                                                        className="w-full rounded-xl px-4 py-3 transition-all duration-200 focus:outline-none"
+                                                                                        onChange={(
+                                                                                            e
+                                                                                        ) =>
+                                                                                            setEmail(
+                                                                                                e
+                                                                                                    .target
+                                                                                                    .value
+                                                                                            )
+                                                                                        }
+                                                                                        placeholder={
+                                                                                            isReconnect
+                                                                                                ? "Enter Stremio email"
+                                                                                                : "Enter Stremio account email"
+                                                                                        }
+                                                                                        style={{
+                                                                                            background:
+                                                                                                "var(--color-surface-hover)",
+                                                                                            border: "1px solid var(--color-surface-border)",
+                                                                                            color: "var(--color-text)",
+                                                                                        }}
+                                                                                        type="email"
+                                                                                        value={
+                                                                                            email
+                                                                                        }
+                                                                                    />
+                                                                                </div>
 
-                                <div>
-                                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                    Password <span style={{ color: 'var(--color-error)' }}>*</span>
-                                  </label>
-                                  <div className="relative">
-                                    <input
-                                      type={passwordVisible ? 'text' : 'password'}
-                                      placeholder={isReconnect ? "Enter Stremio password" : "Enter password"}
-                                      value={password}
-                                      onChange={(e) => setPassword(e.target.value)}
-                                      className="w-full pl-4 pr-12 py-3 rounded-xl transition-all duration-200 focus:outline-none"
-                                      style={{
-                                        background: 'var(--color-surface-hover)',
-                                        border: '1px solid var(--color-surface-border)',
-                                        color: 'var(--color-text)'
-                                      }}
-                                    />
-                                    <PasswordToggleButton visible={passwordVisible} onToggle={() => setPasswordVisible((v) => !v)} />
-                                  </div>
-                                </div>
+                                                                                <div>
+                                                                                    <label
+                                                                                        className="mb-2 block font-medium text-sm"
+                                                                                        style={{
+                                                                                            color: "var(--color-text-muted)",
+                                                                                        }}
+                                                                                    >
+                                                                                        Password{" "}
+                                                                                        <span
+                                                                                            style={{
+                                                                                                color: "var(--color-error)",
+                                                                                            }}
+                                                                                        >
+                                                                                            *
+                                                                                        </span>
+                                                                                    </label>
+                                                                                    <div className="relative">
+                                                                                        <input
+                                                                                            className="w-full rounded-xl py-3 pr-12 pl-4 transition-all duration-200 focus:outline-none"
+                                                                                            onChange={(
+                                                                                                e
+                                                                                            ) =>
+                                                                                                setPassword(
+                                                                                                    e
+                                                                                                        .target
+                                                                                                        .value
+                                                                                                )
+                                                                                            }
+                                                                                            placeholder={
+                                                                                                isReconnect
+                                                                                                    ? "Enter Stremio password"
+                                                                                                    : "Enter password"
+                                                                                            }
+                                                                                            style={{
+                                                                                                background:
+                                                                                                    "var(--color-surface-hover)",
+                                                                                                border: "1px solid var(--color-surface-border)",
+                                                                                                color: "var(--color-text)",
+                                                                                            }}
+                                                                                            type={
+                                                                                                passwordVisible
+                                                                                                    ? "text"
+                                                                                                    : "password"
+                                                                                            }
+                                                                                            value={
+                                                                                                password
+                                                                                            }
+                                                                                        />
+                                                                                        <PasswordToggleButton
+                                                                                            onToggle={() =>
+                                                                                                setPasswordVisible(
+                                                                                                    (
+                                                                                                        v
+                                                                                                    ) =>
+                                                                                                        !v
+                                                                                                )
+                                                                                            }
+                                                                                            visible={
+                                                                                                passwordVisible
+                                                                                            }
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
 
-                                {!isReconnect && (
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      id="register-new"
-                                      type="checkbox"
-                                      checked={registerNew}
-                                      onChange={(e) => setRegisterNew(e.target.checked)}
-                                      className="w-4 h-4 rounded"
-                                    />
-                                    <label htmlFor="register-new" className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                                      Register new Stremio account
-                                    </label>
-                                  </div>
-                                )}
-                              </>
-                            )}
+                                                                                {!isReconnect && (
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <input
+                                                                                            checked={
+                                                                                                registerNew
+                                                                                            }
+                                                                                            className="h-4 w-4 rounded"
+                                                                                            id="register-new"
+                                                                                            onChange={(
+                                                                                                e
+                                                                                            ) =>
+                                                                                                setRegisterNew(
+                                                                                                    e
+                                                                                                        .target
+                                                                                                        .checked
+                                                                                                )
+                                                                                            }
+                                                                                            type="checkbox"
+                                                                                        />
+                                                                                        <label
+                                                                                            className="text-sm"
+                                                                                            htmlFor="register-new"
+                                                                                            style={{
+                                                                                                color: "var(--color-text-muted)",
+                                                                                            }}
+                                                                                        >
+                                                                                            Register
+                                                                                            new
+                                                                                            Stremio
+                                                                                            account
+                                                                                        </label>
+                                                                                    </div>
+                                                                                )}
+                                                                            </>
+                                                                        )}
 
-                            {authMethod === 'authKey' && (
-                              <div>
-                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                  Stremio Auth Key
-                                </label>
-                                <div className="relative">
-                                  <input
-                                    type={authKeyVisible ? 'text' : 'password'}
-                                    placeholder="Paste from Stremio settings"
-                                    value={authKey}
-                                    onChange={(e) => setAuthKey(e.target.value)}
-                                    className="w-full pl-4 pr-12 py-3 rounded-xl transition-all duration-200 focus:outline-none"
-                                    style={{
-                                      background: 'var(--color-surface-hover)',
-                                      border: '1px solid var(--color-surface-border)',
-                                      color: 'var(--color-text)'
-                                    }}
-                                  />
-                                  <PasswordToggleButton visible={authKeyVisible} onToggle={() => setAuthKeyVisible((v) => !v)} />
-                                </div>
-                                <p className="mt-2 text-xs" style={{ color: 'var(--color-text-subtle)' }}>
-                                  Find this in Stremio → Settings → Account
-                                </p>
-                              </div>
-                            )}
-                          </div>
+                                                                        {authMethod ===
+                                                                            "authKey" && (
+                                                                            <div>
+                                                                                <label
+                                                                                    className="mb-2 block font-medium text-sm"
+                                                                                    style={{
+                                                                                        color: "var(--color-text-muted)",
+                                                                                    }}
+                                                                                >
+                                                                                    Stremio Auth Key
+                                                                                </label>
+                                                                                <div className="relative">
+                                                                                    <input
+                                                                                        className="w-full rounded-xl py-3 pr-12 pl-4 transition-all duration-200 focus:outline-none"
+                                                                                        onChange={(
+                                                                                            e
+                                                                                        ) =>
+                                                                                            setAuthKey(
+                                                                                                e
+                                                                                                    .target
+                                                                                                    .value
+                                                                                            )
+                                                                                        }
+                                                                                        placeholder="Paste from Stremio settings"
+                                                                                        style={{
+                                                                                            background:
+                                                                                                "var(--color-surface-hover)",
+                                                                                            border: "1px solid var(--color-surface-border)",
+                                                                                            color: "var(--color-text)",
+                                                                                        }}
+                                                                                        type={
+                                                                                            authKeyVisible
+                                                                                                ? "text"
+                                                                                                : "password"
+                                                                                        }
+                                                                                        value={
+                                                                                            authKey
+                                                                                        }
+                                                                                    />
+                                                                                    <PasswordToggleButton
+                                                                                        onToggle={() =>
+                                                                                            setAuthKeyVisible(
+                                                                                                (
+                                                                                                    v
+                                                                                                ) =>
+                                                                                                    !v
+                                                                                            )
+                                                                                        }
+                                                                                        visible={
+                                                                                            authKeyVisible
+                                                                                        }
+                                                                                    />
+                                                                                </div>
+                                                                                <p
+                                                                                    className="mt-2 text-xs"
+                                                                                    style={{
+                                                                                        color: "var(--color-text-subtle)",
+                                                                                    }}
+                                                                                >
+                                                                                    Find this in
+                                                                                    Stremio →
+                                                                                    Settings →
+                                                                                    Account
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
 
-                          <div className="flex gap-3 mt-6">
-                            <button
-                              type="button"
-                              onClick={onClose}
-                              className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
-                              style={{
-                                background: 'var(--color-surface-hover)',
-                                color: 'var(--color-text)'
-                              }}
-                            >
-                              Cancel
-                            </button>
-                            <Button
-                              variant="primary"
-                              className="flex-1"
-                              onClick={handleSubmit}
-                              isLoading={isSubmitting}
-                            >
-                              {isReconnect ? 'Reconnect' : 'Add User'}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                      </>
-                      )}
+                                                                    <div className="mt-6 flex gap-3">
+                                                                        <button
+                                                                            className="flex-1 rounded-xl py-3 font-medium text-sm transition-colors"
+                                                                            onClick={onClose}
+                                                                            style={{
+                                                                                background:
+                                                                                    "var(--color-surface-hover)",
+                                                                                color: "var(--color-text)",
+                                                                            }}
+                                                                            type="button"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                        <Button
+                                                                            className="flex-1"
+                                                                            isLoading={isSubmitting}
+                                                                            onClick={handleSubmit}
+                                                                            variant="primary"
+                                                                        >
+                                                                            {isReconnect
+                                                                                ? "Reconnect"
+                                                                                : "Add User"}
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )}
 
-                      {(provider === 'nuvio' || isNuvioReconnect) && (
-                      <>
-                        <div className="space-y-3">
-                          {/* Nuvio Credentials Option */}
-                          <button
-                            type="button"
-                            onClick={() => setNuvioAuthMethod('credentials')}
-                            className={`w-full p-4 rounded-2xl text-left transition-all ${nuvioAuthMethod === 'credentials' ? 'auth-opt-on' : 'auth-opt-off'}`}
-                          >
-                            <span className="font-semibold ao-title">
-                              Credentials
-                            </span>
-                            <p className="text-sm mt-0.5 ao-sub">
-                              Email and password
-                            </p>
-                          </button>
+                                                {(provider === "nuvio" || isNuvioReconnect) && (
+                                                    <>
+                                                        <div className="space-y-3">
+                                                            {/* Nuvio Credentials Option */}
+                                                            <button
+                                                                className={`w-full rounded-2xl p-4 text-left transition-all ${nuvioAuthMethod === "credentials" ? "auth-opt-on" : "auth-opt-off"}`}
+                                                                onClick={() =>
+                                                                    setNuvioAuthMethod(
+                                                                        "credentials"
+                                                                    )
+                                                                }
+                                                                type="button"
+                                                            >
+                                                                <span className="ao-title font-semibold">
+                                                                    Credentials
+                                                                </span>
+                                                                <p className="ao-sub mt-0.5 text-sm">
+                                                                    Email and password
+                                                                </p>
+                                                            </button>
 
-                          {/* Nuvio OAuth Option */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNuvioAuthMethod('oauth');
-                              handleStartNuvioOAuth();
-                            }}
-                            className={`w-full p-4 rounded-2xl text-left transition-all ${nuvioAuthMethod === 'oauth' ? 'auth-opt-on' : 'auth-opt-off'}`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold ao-title">
-                                Nuvio OAuth
-                              </span>
-                              <span
-                                className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full ao-badge"
-                              >
-                                Recommended
-                              </span>
-                            </div>
-                            <p className="text-sm mt-0.5 ao-sub">
-                              Approve on your device — no password shared
-                            </p>
-                          </button>
-                        </div>
+                                                            {/* Nuvio OAuth Option */}
+                                                            <button
+                                                                className={`w-full rounded-2xl p-4 text-left transition-all ${nuvioAuthMethod === "oauth" ? "auth-opt-on" : "auth-opt-off"}`}
+                                                                onClick={() => {
+                                                                    setNuvioAuthMethod("oauth");
+                                                                    handleStartNuvioOAuth();
+                                                                }}
+                                                                type="button"
+                                                            >
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="ao-title font-semibold">
+                                                                        Nuvio OAuth
+                                                                    </span>
+                                                                    <span className="ao-badge rounded-full px-2 py-0.5 font-bold text-[10px] uppercase tracking-wider">
+                                                                        Recommended
+                                                                    </span>
+                                                                </div>
+                                                                <p className="ao-sub mt-0.5 text-sm">
+                                                                    Approve on your device — no
+                                                                    password shared
+                                                                </p>
+                                                            </button>
+                                                        </div>
 
-                        {nuvioAuthMethod === 'credentials' && (
-                          <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
-                            <div className="space-y-4">
-                              {!isNuvioReconnect && (
-                              <div>
-                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                  Name in SlickSync
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="The start of their email, if left empty"
-                                  value={username}
-                                  onChange={(e) => setUsername(e.target.value)}
-                                  className="w-full px-4 py-3 rounded-xl focus:outline-none"
-                                  style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-surface-border)', color: 'var(--color-text)' }}
-                                />
-                              </div>
-                              )}
-                              <div>
-                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                  Email <span style={{ color: 'var(--color-error)' }}>*</span>
-                                </label>
-                                <input
-                                  type="email"
-                                  placeholder="Enter Nuvio account email"
-                                  value={nuvioEmail}
-                                  onChange={(e) => setNuvioEmail(e.target.value)}
-                                  className="w-full px-4 py-3 rounded-xl focus:outline-none"
-                                  style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-surface-border)', color: 'var(--color-text)' }}
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                                  Password <span style={{ color: 'var(--color-error)' }}>*</span>
-                                </label>
-                                <div className="relative">
-                                  <input
-                                    type={nuvioPasswordVisible ? 'text' : 'password'}
-                                    placeholder="Enter password"
-                                    value={nuvioPassword}
-                                    onChange={(e) => setNuvioPassword(e.target.value)}
-                                    className="w-full pl-4 pr-12 py-3 rounded-xl focus:outline-none"
-                                    style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-surface-border)', color: 'var(--color-text)' }}
-                                  />
-                                  <PasswordToggleButton visible={nuvioPasswordVisible} onToggle={() => setNuvioPasswordVisible((v) => !v)} />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex gap-3 mt-6">
-                              <button
-                                type="button"
-                                onClick={onClose}
-                                className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
-                                style={{ background: 'var(--color-surface-hover)', color: 'var(--color-text)' }}
-                              >
-                                Cancel
-                              </button>
-                              <Button variant="primary" className="flex-1" onClick={isNuvioReconnect ? handleNuvioReconnect : handleNuvioSubmit} isLoading={isSubmitting}>
-                                {isNuvioReconnect ? 'Reconnect' : 'Add User'}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                      )}
-                    </motion.div>
-                  )}
+                                                        {nuvioAuthMethod === "credentials" && (
+                                                            <div
+                                                                className="mt-6 rounded-xl p-4"
+                                                                style={{
+                                                                    background:
+                                                                        "var(--color-bg-muted)",
+                                                                }}
+                                                            >
+                                                                <div className="space-y-4">
+                                                                    {!isNuvioReconnect && (
+                                                                        <div>
+                                                                            <label
+                                                                                className="mb-2 block font-medium text-sm"
+                                                                                style={{
+                                                                                    color: "var(--color-text-muted)",
+                                                                                }}
+                                                                            >
+                                                                                Name in SlickSync
+                                                                            </label>
+                                                                            <input
+                                                                                className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                                                                                onChange={(e) =>
+                                                                                    setUsername(
+                                                                                        e.target
+                                                                                            .value
+                                                                                    )
+                                                                                }
+                                                                                placeholder="The start of their email, if left empty"
+                                                                                style={{
+                                                                                    background:
+                                                                                        "var(--color-surface-hover)",
+                                                                                    border: "1px solid var(--color-surface-border)",
+                                                                                    color: "var(--color-text)",
+                                                                                }}
+                                                                                type="text"
+                                                                                value={username}
+                                                                            />
+                                                                        </div>
+                                                                    )}
+                                                                    <div>
+                                                                        <label
+                                                                            className="mb-2 block font-medium text-sm"
+                                                                            style={{
+                                                                                color: "var(--color-text-muted)",
+                                                                            }}
+                                                                        >
+                                                                            Email{" "}
+                                                                            <span
+                                                                                style={{
+                                                                                    color: "var(--color-error)",
+                                                                                }}
+                                                                            >
+                                                                                *
+                                                                            </span>
+                                                                        </label>
+                                                                        <input
+                                                                            className="w-full rounded-xl px-4 py-3 focus:outline-none"
+                                                                            onChange={(e) =>
+                                                                                setNuvioEmail(
+                                                                                    e.target.value
+                                                                                )
+                                                                            }
+                                                                            placeholder="Enter Nuvio account email"
+                                                                            style={{
+                                                                                background:
+                                                                                    "var(--color-surface-hover)",
+                                                                                border: "1px solid var(--color-surface-border)",
+                                                                                color: "var(--color-text)",
+                                                                            }}
+                                                                            type="email"
+                                                                            value={nuvioEmail}
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label
+                                                                            className="mb-2 block font-medium text-sm"
+                                                                            style={{
+                                                                                color: "var(--color-text-muted)",
+                                                                            }}
+                                                                        >
+                                                                            Password{" "}
+                                                                            <span
+                                                                                style={{
+                                                                                    color: "var(--color-error)",
+                                                                                }}
+                                                                            >
+                                                                                *
+                                                                            </span>
+                                                                        </label>
+                                                                        <div className="relative">
+                                                                            <input
+                                                                                className="w-full rounded-xl py-3 pr-12 pl-4 focus:outline-none"
+                                                                                onChange={(e) =>
+                                                                                    setNuvioPassword(
+                                                                                        e.target
+                                                                                            .value
+                                                                                    )
+                                                                                }
+                                                                                placeholder="Enter password"
+                                                                                style={{
+                                                                                    background:
+                                                                                        "var(--color-surface-hover)",
+                                                                                    border: "1px solid var(--color-surface-border)",
+                                                                                    color: "var(--color-text)",
+                                                                                }}
+                                                                                type={
+                                                                                    nuvioPasswordVisible
+                                                                                        ? "text"
+                                                                                        : "password"
+                                                                                }
+                                                                                value={
+                                                                                    nuvioPassword
+                                                                                }
+                                                                            />
+                                                                            <PasswordToggleButton
+                                                                                onToggle={() =>
+                                                                                    setNuvioPasswordVisible(
+                                                                                        (v) => !v
+                                                                                    )
+                                                                                }
+                                                                                visible={
+                                                                                    nuvioPasswordVisible
+                                                                                }
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="mt-6 flex gap-3">
+                                                                    <button
+                                                                        className="flex-1 rounded-xl py-3 font-medium text-sm transition-colors"
+                                                                        onClick={onClose}
+                                                                        style={{
+                                                                            background:
+                                                                                "var(--color-surface-hover)",
+                                                                            color: "var(--color-text)",
+                                                                        }}
+                                                                        type="button"
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                    <Button
+                                                                        className="flex-1"
+                                                                        isLoading={isSubmitting}
+                                                                        onClick={
+                                                                            isNuvioReconnect
+                                                                                ? handleNuvioReconnect
+                                                                                : handleNuvioSubmit
+                                                                        }
+                                                                        variant="primary"
+                                                                    >
+                                                                        {isNuvioReconnect
+                                                                            ? "Reconnect"
+                                                                            : "Add User"}
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </motion.div>
+                                        )}
 
-                  {/* Step: OAuth Flow */}
-                  {step === 'oauth' && (
-                    <motion.div
-                      key="oauth"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.2 }}
-                      className="text-center"
-                    >
-                      {/* Animated connection visual with SlickSync + Stremio logos */}
-                      <div className="relative h-40 flex items-center justify-center mb-6">
-                        {/* Left orb - SlickSync */}
-                        <motion.div
-                          animate={{
-                            x: oauthStatus === 'completed' ? 20 : 0,
-                            scale: oauthStatus === 'completed' ? 1.1 : 1
-                          }}
-                          transition={{ type: 'spring', damping: 20 }}
-                          className="w-16 h-16 rounded-2xl flex items-center justify-center z-10 overflow-hidden"
-                          style={{
-                            background: 'var(--color-primary-muted)'
-                          }}
-                        >
-                          <SlickSyncLogo className="w-10 h-10" />
-                        </motion.div>
+                                        {/* Step: OAuth Flow */}
+                                        {step === "oauth" && (
+                                            <motion.div
+                                                animate={{ opacity: 1, x: 0 }}
+                                                className="text-center"
+                                                exit={{ opacity: 0, x: -20 }}
+                                                initial={{ opacity: 0, x: 20 }}
+                                                key="oauth"
+                                                transition={{ duration: 0.2 }}
+                                            >
+                                                {/* Animated connection visual with SlickSync + Stremio logos */}
+                                                <div className="relative mb-6 flex h-40 items-center justify-center">
+                                                    {/* Left orb - SlickSync */}
+                                                    <motion.div
+                                                        animate={{
+                                                            scale:
+                                                                oauthStatus === "completed"
+                                                                    ? 1.1
+                                                                    : 1,
+                                                            x: oauthStatus === "completed" ? 20 : 0,
+                                                        }}
+                                                        className="z-10 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl"
+                                                        style={{
+                                                            background:
+                                                                "var(--color-primary-muted)",
+                                                        }}
+                                                        transition={{ damping: 20, type: "spring" }}
+                                                    >
+                                                        <SlickSyncLogo className="h-10 w-10" />
+                                                    </motion.div>
 
-                        {/* Connection line */}
-                        <div className="absolute left-1/2 -translate-x-1/2 w-24 h-0.5 overflow-hidden">
-                          <motion.div
-                            animate={{
-                              x: oauthStatus === 'waiting' ? ['0%', '100%'] : oauthStatus === 'completed' ? '0%' : '-100%',
-                              opacity: oauthStatus === 'completed' ? 1 : oauthStatus === 'error' ? 0.3 : 1
-                            }}
-                            transition={{
-                              x: oauthStatus === 'waiting' ? { duration: 1, repeat: Infinity, ease: 'linear' } : { duration: 0.3 },
-                            }}
-                            className={`h-full w-full ${oauthStatus === 'completed' ? 'oauth-bar-done' : oauthStatus === 'error' ? 'bg-error' : 'oauth-bar-wait'}`}
-                          />
-                        </div>
+                                                    {/* Connection line */}
+                                                    <div className="absolute left-1/2 h-0.5 w-24 -translate-x-1/2 overflow-hidden">
+                                                        <motion.div
+                                                            animate={{
+                                                                opacity:
+                                                                    oauthStatus === "completed"
+                                                                        ? 1
+                                                                        : oauthStatus === "error"
+                                                                          ? 0.3
+                                                                          : 1,
+                                                                x:
+                                                                    oauthStatus === "waiting"
+                                                                        ? ["0%", "100%"]
+                                                                        : oauthStatus ===
+                                                                            "completed"
+                                                                          ? "0%"
+                                                                          : "-100%",
+                                                            }}
+                                                            className={`h-full w-full ${oauthStatus === "completed" ? "oauth-bar-done" : oauthStatus === "error" ? "bg-error" : "oauth-bar-wait"}`}
+                                                            transition={{
+                                                                x:
+                                                                    oauthStatus === "waiting"
+                                                                        ? {
+                                                                              duration: 1,
+                                                                              ease: "linear",
+                                                                              repeat: Number.POSITIVE_INFINITY,
+                                                                          }
+                                                                        : { duration: 0.3 },
+                                                            }}
+                                                        />
+                                                    </div>
 
-                        {/* Right orb - Stremio */}
-                        <motion.div
-                          animate={{
-                            x: oauthStatus === 'completed' ? -20 : 0,
-                            scale: oauthStatus === 'completed' ? 1.1 : 1
-                          }}
-                          transition={{ type: 'spring', damping: 20 }}
-                          className="w-16 h-16 rounded-2xl flex items-center justify-center z-10 ml-16"
-                          style={{
-                            background: 'linear-gradient(135deg, #6C4ECF 0%, #8B5CF6 100%)',
-                            border: '1px solid color-mix(in srgb, #8B5CF6 50%, transparent)'
-                          }}
-                        >
-                          <img
-                            src="/stremio-logo.svg"
-                            alt="Stremio"
-                            className="w-10 h-10 object-contain"
-                          />
-                        </motion.div>
+                                                    {/* Right orb - Stremio */}
+                                                    <motion.div
+                                                        animate={{
+                                                            scale:
+                                                                oauthStatus === "completed"
+                                                                    ? 1.1
+                                                                    : 1,
+                                                            x:
+                                                                oauthStatus === "completed"
+                                                                    ? -20
+                                                                    : 0,
+                                                        }}
+                                                        className="z-10 ml-16 flex h-16 w-16 items-center justify-center rounded-2xl"
+                                                        style={{
+                                                            background:
+                                                                "linear-gradient(135deg, #6C4ECF 0%, #8B5CF6 100%)",
+                                                            border: "1px solid color-mix(in srgb, #8B5CF6 50%, transparent)",
+                                                        }}
+                                                        transition={{ damping: 20, type: "spring" }}
+                                                    >
+                                                        <img
+                                                            alt="Stremio"
+                                                            className="h-10 w-10 object-contain"
+                                                            src="/stremio-logo.svg"
+                                                        />
+                                                    </motion.div>
 
-                        {/* Success burst */}
-                        {oauthStatus === 'completed' && (
-                          <motion.div
-                            initial={{ scale: 0, opacity: 0 }}
-                            animate={{ scale: 1.5, opacity: 0 }}
-                            transition={{ duration: 0.6 }}
-                            className="absolute inset-0 flex items-center justify-center"
-                          >
-                            <div className="w-32 h-32 rounded-full" style={{ background: 'var(--color-primary)' }} />
-                          </motion.div>
-                        )}
-                      </div>
+                                                    {/* Success burst */}
+                                                    {oauthStatus === "completed" && (
+                                                        <motion.div
+                                                            animate={{ opacity: 0, scale: 1.5 }}
+                                                            className="absolute inset-0 flex items-center justify-center"
+                                                            initial={{ opacity: 0, scale: 0 }}
+                                                            transition={{ duration: 0.6 }}
+                                                        >
+                                                            <div
+                                                                className="h-32 w-32 rounded-full"
+                                                                style={{
+                                                                    background:
+                                                                        "var(--color-primary)",
+                                                                }}
+                                                            />
+                                                        </motion.div>
+                                                    )}
+                                                </div>
 
-                      {/* Status text */}
-                      <motion.div layout className="mb-6">
-                        <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                          {oauthStatus === 'connecting' && 'Connecting...'}
-                          {oauthStatus === 'waiting' && 'Waiting for Stremio'}
-                          {oauthStatus === 'completed' && (isReconnect ? 'Reconnected!' : 'Connected!')}
-                          {oauthStatus === 'error' && 'Connection Failed'}
-                        </h3>
-                        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                          {oauthStatus === 'connecting' && 'Opening Stremio...'}
-                          {oauthStatus === 'waiting' && 'Complete the authorization in the Stremio tab'}
-                          {oauthStatus === 'completed' && (isReconnect ? 'Stremio account reconnected successfully' : 'Adding them to SlickSync...')}
-                          {oauthStatus === 'error' && (oauthError || 'Please try again')}
-                        </p>
-                      </motion.div>
+                                                {/* Status text */}
+                                                <motion.div className="mb-6" layout>
+                                                    <h3
+                                                        className="mb-2 font-bold text-xl"
+                                                        style={{ color: "var(--color-text)" }}
+                                                    >
+                                                        {oauthStatus === "connecting" &&
+                                                            "Connecting..."}
+                                                        {oauthStatus === "waiting" &&
+                                                            "Waiting for Stremio"}
+                                                        {oauthStatus === "completed" &&
+                                                            (isReconnect
+                                                                ? "Reconnected!"
+                                                                : "Connected!")}
+                                                        {oauthStatus === "error" &&
+                                                            "Connection Failed"}
+                                                    </h3>
+                                                    <p
+                                                        className="text-sm"
+                                                        style={{ color: "var(--color-text-muted)" }}
+                                                    >
+                                                        {oauthStatus === "connecting" &&
+                                                            "Opening Stremio..."}
+                                                        {oauthStatus === "waiting" &&
+                                                            "Complete the authorization in the Stremio tab"}
+                                                        {oauthStatus === "completed" &&
+                                                            (isReconnect
+                                                                ? "Stremio account reconnected successfully"
+                                                                : "Adding them to SlickSync...")}
+                                                        {oauthStatus === "error" &&
+                                                            (oauthError || "Please try again")}
+                                                    </p>
+                                                </motion.div>
 
-                      {/* TV only: a phone camera fixes the worst part of this
+                                                {/* TV only: a phone camera fixes the worst part of this
                           flow - fighting a D-pad remote with window.open() in
                           a TV WebView browser, or copy/pasting a link with no
                           keyboard. Scans straight to the same oauthLink a
                           PC/mobile user would just click. */}
-                      {isTV && oauthLink && oauthStatus === 'waiting' && (
-                        <div className="mb-6 flex flex-col items-center gap-2">
-                          <div className="p-3 rounded-xl bg-white">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={`/api/qr?data=${encodeURIComponent(oauthLink)}`}
-                              alt="Scan with your phone to complete Stremio authorization"
-                              width={160}
-                              height={160}
-                            />
-                          </div>
-                          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                            Scan with your phone to continue
-                          </p>
-                        </div>
-                      )}
+                                                {isTV && oauthLink && oauthStatus === "waiting" && (
+                                                    <div className="mb-6 flex flex-col items-center gap-2">
+                                                        <div className="rounded-xl bg-white p-3">
+                                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                            <img
+                                                                alt="Scan with your phone to complete Stremio authorization"
+                                                                height={160}
+                                                                src={`/api/qr?data=${encodeURIComponent(oauthLink)}`}
+                                                                width={160}
+                                                            />
+                                                        </div>
+                                                        <p
+                                                            className="text-xs"
+                                                            style={{
+                                                                color: "var(--color-text-muted)",
+                                                            }}
+                                                        >
+                                                            Scan with your phone to continue
+                                                        </p>
+                                                    </div>
+                                                )}
 
-                      {/* Countdown timer */}
-                      {(oauthStatus === 'waiting' || oauthStatus === 'connecting') && countdown > 0 && (
-                        <div className="mb-6">
-                          <div
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm"
-                            style={{ background: 'var(--color-bg-muted)' }}
-                          >
-                            <ClockIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
-                            <span style={{ color: 'var(--color-text-muted)' }}>
-                              Link expires in <span className="font-mono font-medium" style={{ color: 'var(--color-text)' }}>{formatCountdown(countdown)}</span>
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                                                {/* Countdown timer */}
+                                                {(oauthStatus === "waiting" ||
+                                                    oauthStatus === "connecting") &&
+                                                    countdown > 0 && (
+                                                        <div className="mb-6">
+                                                            <div
+                                                                className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm"
+                                                                style={{
+                                                                    background:
+                                                                        "var(--color-bg-muted)",
+                                                                }}
+                                                            >
+                                                                <ClockIcon
+                                                                    className="h-4 w-4"
+                                                                    style={{
+                                                                        color: "var(--color-text-muted)",
+                                                                    }}
+                                                                />
+                                                                <span
+                                                                    style={{
+                                                                        color: "var(--color-text-muted)",
+                                                                    }}
+                                                                >
+                                                                    Link expires in{" "}
+                                                                    <span
+                                                                        className="font-medium font-mono"
+                                                                        style={{
+                                                                            color: "var(--color-text)",
+                                                                        }}
+                                                                    >
+                                                                        {formatCountdown(countdown)}
+                                                                    </span>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    )}
 
-                      {/* Actions */}
-                      <div className="flex gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setStep('tabs')}
-                          className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
-                          style={{
-                            background: 'var(--color-bg-muted)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          Back
-                        </button>
-                        {oauthStatus === 'error' && (
-                          <Button
-                            variant="primary"
-                            className="flex-1"
-                            onClick={handleStartOAuth}
-                          >
-                            Try Again
-                          </Button>
-                        )}
-                        {oauthLink && oauthStatus === 'waiting' && (
-                          <Button
-                            variant="secondary"
-                            className="flex-1"
-                            onClick={() => window.open(oauthLink, '_blank')}
-                          >
-                            Open Stremio Again
-                          </Button>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
+                                                {/* Actions */}
+                                                <div className="flex gap-3">
+                                                    <button
+                                                        className="flex-1 rounded-xl py-3 font-medium text-sm transition-colors"
+                                                        onClick={() => setStep("tabs")}
+                                                        style={{
+                                                            background: "var(--color-bg-muted)",
+                                                            color: "var(--color-text)",
+                                                        }}
+                                                        type="button"
+                                                    >
+                                                        Back
+                                                    </button>
+                                                    {oauthStatus === "error" && (
+                                                        <Button
+                                                            className="flex-1"
+                                                            onClick={handleStartOAuth}
+                                                            variant="primary"
+                                                        >
+                                                            Try Again
+                                                        </Button>
+                                                    )}
+                                                    {oauthLink && oauthStatus === "waiting" && (
+                                                        <Button
+                                                            className="flex-1"
+                                                            onClick={() =>
+                                                                window.open(oauthLink, "_blank")
+                                                            }
+                                                            variant="secondary"
+                                                        >
+                                                            Open Stremio Again
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
 
-                  {/* Step: Nuvio OAuth Flow */}
-                  {step === 'nuvio-oauth' && (
-                    <motion.div
-                      key="nuvio-oauth"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.2 }}
-                      className="text-center"
-                    >
-                      <div className="w-16 h-16 mx-auto mb-6 rounded-2xl flex items-center justify-center" style={{
-                        background: 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 70%, var(--color-secondary)) 100%)',
-                        boxShadow: '0 8px 32px -8px var(--color-primary)'
-                      }}>
-                        <SlickSyncLogo className="w-10 h-10" />
-                      </div>
+                                        {/* Step: Nuvio OAuth Flow */}
+                                        {step === "nuvio-oauth" && (
+                                            <motion.div
+                                                animate={{ opacity: 1, x: 0 }}
+                                                className="text-center"
+                                                exit={{ opacity: 0, x: -20 }}
+                                                initial={{ opacity: 0, x: 20 }}
+                                                key="nuvio-oauth"
+                                                transition={{ duration: 0.2 }}
+                                            >
+                                                <div
+                                                    className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
+                                                    style={{
+                                                        background:
+                                                            "linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 70%, var(--color-secondary)) 100%)",
+                                                        boxShadow:
+                                                            "0 8px 32px -8px var(--color-primary)",
+                                                    }}
+                                                >
+                                                    <SlickSyncLogo className="h-10 w-10" />
+                                                </div>
 
-                      <div className="mb-6">
-                        <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                          {nuvioOauthStatus === 'connecting' && 'Connecting...'}
-                          {nuvioOauthStatus === 'waiting' && 'Waiting for Nuvio'}
-                          {nuvioOauthStatus === 'completed' && 'Connected!'}
-                          {nuvioOauthStatus === 'error' && 'Connection Failed'}
-                        </h3>
-                        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                          {nuvioOauthStatus === 'connecting' && 'Starting Nuvio login...'}
-                          {nuvioOauthStatus === 'waiting' && 'Open the link below and approve this login on your device'}
-                          {nuvioOauthStatus === 'completed' && 'Adding them to SlickSync...'}
-                          {nuvioOauthStatus === 'error' && (nuvioOauthError || 'Please try again')}
-                        </p>
-                      </div>
+                                                <div className="mb-6">
+                                                    <h3
+                                                        className="mb-2 font-bold text-xl"
+                                                        style={{ color: "var(--color-text)" }}
+                                                    >
+                                                        {nuvioOauthStatus === "connecting" &&
+                                                            "Connecting..."}
+                                                        {nuvioOauthStatus === "waiting" &&
+                                                            "Waiting for Nuvio"}
+                                                        {nuvioOauthStatus === "completed" &&
+                                                            "Connected!"}
+                                                        {nuvioOauthStatus === "error" &&
+                                                            "Connection Failed"}
+                                                    </h3>
+                                                    <p
+                                                        className="text-sm"
+                                                        style={{ color: "var(--color-text-muted)" }}
+                                                    >
+                                                        {nuvioOauthStatus === "connecting" &&
+                                                            "Starting Nuvio login..."}
+                                                        {nuvioOauthStatus === "waiting" &&
+                                                            "Open the link below and approve this login on your device"}
+                                                        {nuvioOauthStatus === "completed" &&
+                                                            "Adding them to SlickSync..."}
+                                                        {nuvioOauthStatus === "error" &&
+                                                            (nuvioOauthError || "Please try again")}
+                                                    </p>
+                                                </div>
 
-                      {nuvioOauthStatus === 'waiting' && nuvioCode && (
-                        <div className="mb-6 p-4 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
-                          {/* TV only: scan straight to the approval page
+                                                {nuvioOauthStatus === "waiting" && nuvioCode && (
+                                                    <div
+                                                        className="mb-6 rounded-xl p-4"
+                                                        style={{
+                                                            background: "var(--color-bg-muted)",
+                                                        }}
+                                                    >
+                                                        {/* TV only: scan straight to the approval page
                               instead of typing this code somewhere else with
                               a D-pad remote. */}
-                          {isTV && nuvioWebUrl && (
-                            <div className="mb-4 flex flex-col items-center gap-2">
-                              <div className="p-3 rounded-xl bg-white">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={`/api/qr?data=${encodeURIComponent(nuvioWebUrl)}`}
-                                  alt="Scan with your phone to approve Nuvio"
-                                  width={160}
-                                  height={160}
-                                />
-                              </div>
-                              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                                Scan with your phone to continue
-                              </p>
-                            </div>
-                          )}
-                          <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>Approval code</p>
-                          <p className="text-2xl font-mono font-bold tracking-widest mb-4" style={{ color: 'var(--color-text)' }}>{nuvioCode}</p>
-                          {nuvioWebUrl && (
-                            <Button variant="secondary" className="w-full" onClick={() => window.open(nuvioWebUrl, '_blank')}>
-                              Open Nuvio Approval Page
-                            </Button>
-                          )}
-                        </div>
-                      )}
+                                                        {isTV && nuvioWebUrl && (
+                                                            <div className="mb-4 flex flex-col items-center gap-2">
+                                                                <div className="rounded-xl bg-white p-3">
+                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                    <img
+                                                                        alt="Scan with your phone to approve Nuvio"
+                                                                        height={160}
+                                                                        src={`/api/qr?data=${encodeURIComponent(nuvioWebUrl)}`}
+                                                                        width={160}
+                                                                    />
+                                                                </div>
+                                                                <p
+                                                                    className="text-xs"
+                                                                    style={{
+                                                                        color: "var(--color-text-muted)",
+                                                                    }}
+                                                                >
+                                                                    Scan with your phone to continue
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        <p
+                                                            className="mb-2 text-xs"
+                                                            style={{
+                                                                color: "var(--color-text-muted)",
+                                                            }}
+                                                        >
+                                                            Approval code
+                                                        </p>
+                                                        <p
+                                                            className="mb-4 font-bold font-mono text-2xl tracking-widest"
+                                                            style={{ color: "var(--color-text)" }}
+                                                        >
+                                                            {nuvioCode}
+                                                        </p>
+                                                        {nuvioWebUrl && (
+                                                            <Button
+                                                                className="w-full"
+                                                                onClick={() =>
+                                                                    window.open(
+                                                                        nuvioWebUrl,
+                                                                        "_blank"
+                                                                    )
+                                                                }
+                                                                variant="secondary"
+                                                            >
+                                                                Open Nuvio Approval Page
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                )}
 
-                      {(nuvioOauthStatus === 'waiting' || nuvioOauthStatus === 'connecting') && nuvioCountdown > 0 && (
-                        <div className="mb-6">
-                          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm" style={{ background: 'var(--color-bg-muted)' }}>
-                            <ClockIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
-                            <span style={{ color: 'var(--color-text-muted)' }}>
-                              Expires in <span className="font-mono font-medium" style={{ color: 'var(--color-text)' }}>{formatCountdown(nuvioCountdown)}</span>
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                                                {(nuvioOauthStatus === "waiting" ||
+                                                    nuvioOauthStatus === "connecting") &&
+                                                    nuvioCountdown > 0 && (
+                                                        <div className="mb-6">
+                                                            <div
+                                                                className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm"
+                                                                style={{
+                                                                    background:
+                                                                        "var(--color-bg-muted)",
+                                                                }}
+                                                            >
+                                                                <ClockIcon
+                                                                    className="h-4 w-4"
+                                                                    style={{
+                                                                        color: "var(--color-text-muted)",
+                                                                    }}
+                                                                />
+                                                                <span
+                                                                    style={{
+                                                                        color: "var(--color-text-muted)",
+                                                                    }}
+                                                                >
+                                                                    Expires in{" "}
+                                                                    <span
+                                                                        className="font-medium font-mono"
+                                                                        style={{
+                                                                            color: "var(--color-text)",
+                                                                        }}
+                                                                    >
+                                                                        {formatCountdown(
+                                                                            nuvioCountdown
+                                                                        )}
+                                                                    </span>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    )}
 
-                      <div className="flex gap-3">
-                        <button
-                          type="button"
-                          onClick={() => { stopNuvioPolling(); setStep('tabs'); }}
-                          className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
-                          style={{ background: 'var(--color-bg-muted)', color: 'var(--color-text)' }}
-                        >
-                          Back
-                        </button>
-                        {nuvioOauthStatus === 'error' && (
-                          <Button variant="primary" className="flex-1" onClick={handleStartNuvioOAuth}>
-                            Try Again
-                          </Button>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
+                                                <div className="flex gap-3">
+                                                    <button
+                                                        className="flex-1 rounded-xl py-3 font-medium text-sm transition-colors"
+                                                        onClick={() => {
+                                                            stopNuvioPolling();
+                                                            setStep("tabs");
+                                                        }}
+                                                        style={{
+                                                            background: "var(--color-bg-muted)",
+                                                            color: "var(--color-text)",
+                                                        }}
+                                                        type="button"
+                                                    >
+                                                        Back
+                                                    </button>
+                                                    {nuvioOauthStatus === "error" && (
+                                                        <Button
+                                                            className="flex-1"
+                                                            onClick={handleStartNuvioOAuth}
+                                                            variant="primary"
+                                                        >
+                                                            Try Again
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
 
-                  {/* Step: Success - only for create mode */}
-                  {!isReconnect && step === 'success' && (
-                    <motion.div
-                      key="success"
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ type: 'spring', damping: 20 }}
-                      className="text-center py-8"
-                    >
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: 'spring', delay: 0.1, damping: 10 }}
-                        className="w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center"
-                        style={{
-                          background: 'linear-gradient(135deg, var(--color-secondary) 0%, color-mix(in srgb, var(--color-secondary) 80%, var(--color-primary)) 100%)',
-                          boxShadow: '0 12px 40px -8px var(--color-secondary)'
-                        }}
-                      >
-                        <motion.div
-                          initial={{ pathLength: 0 }}
-                          animate={{ pathLength: 1 }}
-                          transition={{ duration: 0.4, delay: 0.3 }}
-                        >
-                          <CheckIcon className="w-10 h-10 text-white" />
+                                        {/* Step: Success - only for create mode */}
+                                        {!isReconnect && step === "success" && (
+                                            <motion.div
+                                                animate={{ opacity: 1, scale: 1 }}
+                                                className="py-8 text-center"
+                                                exit={{ opacity: 0 }}
+                                                initial={{ opacity: 0, scale: 0.9 }}
+                                                key="success"
+                                                transition={{ damping: 20, type: "spring" }}
+                                            >
+                                                <motion.div
+                                                    animate={{ scale: 1 }}
+                                                    className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full"
+                                                    initial={{ scale: 0 }}
+                                                    style={{
+                                                        background:
+                                                            "linear-gradient(135deg, var(--color-secondary) 0%, color-mix(in srgb, var(--color-secondary) 80%, var(--color-primary)) 100%)",
+                                                        boxShadow:
+                                                            "0 12px 40px -8px var(--color-secondary)",
+                                                    }}
+                                                    transition={{
+                                                        damping: 10,
+                                                        delay: 0.1,
+                                                        type: "spring",
+                                                    }}
+                                                >
+                                                    <motion.div
+                                                        animate={{ pathLength: 1 }}
+                                                        initial={{ pathLength: 0 }}
+                                                        transition={{ delay: 0.3, duration: 0.4 }}
+                                                    >
+                                                        <CheckIcon className="h-10 w-10 text-white" />
+                                                    </motion.div>
+                                                </motion.div>
+                                                <h3
+                                                    className="mb-2 font-bold text-2xl"
+                                                    style={{ color: "var(--color-text)" }}
+                                                >
+                                                    User Created!
+                                                </h3>
+                                                <p
+                                                    className="text-sm"
+                                                    style={{ color: "var(--color-text-muted)" }}
+                                                >
+                                                    {username} has been added successfully
+                                                </p>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            </DialogPanel>
                         </motion.div>
-                      </motion.div>
-                      <h3 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                        User Created!
-                      </h3>
-                      <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                        {username} has been added successfully
-                      </p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </DialogPanel>
-            </motion.div>
-          </div>
-        </Dialog>
-      )}
-    </AnimatePresence>
-  );
+                    </div>
+                </Dialog>
+            )}
+        </AnimatePresence>
+    );
 }

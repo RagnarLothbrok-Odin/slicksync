@@ -18,69 +18,99 @@
 // notifyPushForType, which checks the account's own flag and writes the
 // bell entry as well as sending push.
 
-const { notifyPushForType } = require('./pushNotifications')
+const { notifyPushForType } = require("./pushNotifications");
 
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
-const STALE_AFTER_DAYS = 60
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const STALE_AFTER_DAYS = 60;
 // Don't re-nag daily once it's already stale - one reminder per this
 // window is enough to be useful without becoming noise people mute.
-const RENOTIFY_GAP_DAYS = 14
+const RENOTIFY_GAP_DAYS = 14;
 
-let timer = null
+let timer = null;
 
 function daysSince(iso) {
-  if (!iso) return Infinity
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return Infinity
-  return (Date.now() - t) / 86400000
+    if (!iso) {
+        return Number.POSITIVE_INFINITY;
+    }
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) {
+        return Number.POSITIVE_INFINITY;
+    }
+    return (Date.now() - t) / 86_400_000;
 }
 
 async function runRecoveryKitCheck(prisma) {
-  try {
-    const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } })
-    for (const acc of accounts) {
-      let cfg = acc.sync
-      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-      if (!cfg || typeof cfg !== 'object') continue
-      if (cfg.notifyOnRecoveryKitStale !== true) continue
+    try {
+        const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } });
+        for (const acc of accounts) {
+            let cfg = acc.sync;
+            if (typeof cfg === "string") {
+                try {
+                    cfg = JSON.parse(cfg);
+                } catch {
+                    cfg = null;
+                }
+            }
+            if (!cfg || typeof cfg !== "object") {
+                continue;
+            }
+            if (cfg.notifyOnRecoveryKitStale !== true) {
+                continue;
+            }
 
-      const age = daysSince(cfg.lastRecoveryKitExportAt)
-      if (age < STALE_AFTER_DAYS) continue
-      if (daysSince(cfg.lastRecoveryKitReminderAt) < RENOTIFY_GAP_DAYS) continue
+            const age = daysSince(cfg.lastRecoveryKitExportAt);
+            if (age < STALE_AFTER_DAYS) {
+                continue;
+            }
+            if (daysSince(cfg.lastRecoveryKitReminderAt) < RENOTIFY_GAP_DAYS) {
+                continue;
+            }
 
-      // An account with nothing in the Vault has nothing this kit would
-      // rescue that a normal backup doesn't already cover - reminding them
-      // would be pure noise.
-      const vaultCount = await prisma.vaultEntry.count({ where: { accountId: acc.id } }).catch(() => 0)
-      if (vaultCount === 0) continue
+            // An account with nothing in the Vault has nothing this kit would
+            // rescue that a normal backup doesn't already cover - reminding them
+            // would be pure noise.
+            const vaultCount = await prisma.vaultEntry
+                .count({ where: { accountId: acc.id } })
+                .catch(() => 0);
+            if (vaultCount === 0) {
+                continue;
+            }
 
-      const never = age === Infinity
-      await notifyPushForType(prisma, acc.id, 'notifyOnRecoveryKitStale', {
-        title: never ? 'No Recovery Kit yet' : 'Recovery Kit is out of date',
-        body: never
-          ? `Your ${vaultCount} Vault credential${vaultCount === 1 ? '' : 's'} can't be restored if this server is lost. Export a Recovery Kit and keep it somewhere else.`
-          : `The last Recovery Kit is ${Math.floor(age)} days old, and the Vault has ${vaultCount} credential${vaultCount === 1 ? '' : 's'}. Export a fresh one so a restore isn't missing anything.`,
-        url: '/tasks',
-      })
+            const never = age === Number.POSITIVE_INFINITY;
+            await notifyPushForType(prisma, acc.id, "notifyOnRecoveryKitStale", {
+                body: never
+                    ? `Your ${vaultCount} Vault credential${vaultCount === 1 ? "" : "s"} can't be restored if this server is lost. Export a Recovery Kit and keep it somewhere else.`
+                    : `The last Recovery Kit is ${Math.floor(age)} days old, and the Vault has ${vaultCount} credential${vaultCount === 1 ? "" : "s"}. Export a fresh one so a restore isn't missing anything.`,
+                title: never ? "No Recovery Kit yet" : "Recovery Kit is out of date",
+                url: "/tasks",
+            });
 
-      // A fresh read, not the copy from before the push went out.
-      await require('./accountSync').setAccountSyncKeys(prisma, acc.id, { lastRecoveryKitReminderAt: new Date().toISOString() })
+            // A fresh read, not the copy from before the push went out.
+            await require("./accountSync").setAccountSyncKeys(prisma, acc.id, {
+                lastRecoveryKitReminderAt: new Date().toISOString(),
+            });
+        }
+    } catch (err) {
+        console.error("[RecoveryKitReminder] Run failed:", err?.message);
     }
-  } catch (err) {
-    console.error('[RecoveryKitReminder] Run failed:', err?.message)
-  }
 }
 
 function scheduleRecoveryKitReminder(prisma) {
-  if (timer) { clearInterval(timer); timer = null }
-  // Well past the other boot-time schedulers, same staggering pattern the
-  // rest of them use.
-  setTimeout(() => runRecoveryKitCheck(prisma), 180 * 1000)
-  timer = setInterval(() => runRecoveryKitCheck(prisma), CHECK_INTERVAL_MS)
+    if (timer) {
+        clearInterval(timer);
+        timer = null;
+    }
+    // Well past the other boot-time schedulers, same staggering pattern the
+    // rest of them use.
+    setTimeout(() => runRecoveryKitCheck(prisma), 180 * 1000);
+    timer = setInterval(() => runRecoveryKitCheck(prisma), CHECK_INTERVAL_MS);
 }
 
 function clearRecoveryKitReminder() {
-  if (timer) { clearInterval(timer); timer = null }
+    if (timer) {
+        clearInterval(timer);
+        timer = null;
+    }
 }
 
-module.exports = { scheduleRecoveryKitReminder, clearRecoveryKitReminder, runRecoveryKitCheck }
+module.exports = { clearRecoveryKitReminder, runRecoveryKitCheck, scheduleRecoveryKitReminder };

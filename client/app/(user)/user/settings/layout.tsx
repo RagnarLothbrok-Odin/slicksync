@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - My Settings',
+    title: "SlickSync - My Settings",
 };
 
-export default function UserSettingsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function UserSettingsLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

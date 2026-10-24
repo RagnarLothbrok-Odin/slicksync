@@ -22,23 +22,25 @@
  * WAL applies to the file. Postgres instances skip all of this.
  */
 async function applySqlitePragmas(prisma) {
-  const url = String(process.env.DATABASE_URL || '')
-  if (!url.startsWith('file:')) return null
-  const applied = {}
-  const run = async (statement, key) => {
-    try {
-      const rows = await prisma.$queryRawUnsafe(statement)
-      applied[key] = Array.isArray(rows) && rows[0] ? Object.values(rows[0])[0] : 'ok'
-    } catch (e) {
-      applied[key] = `error: ${e?.message || e}`
+    const url = String(process.env.DATABASE_URL || "");
+    if (!url.startsWith("file:")) {
+        return null;
     }
-  }
-  await run('PRAGMA journal_mode=WAL', 'journal_mode')
-  await run('PRAGMA synchronous=NORMAL', 'synchronous')
-  await run('PRAGMA busy_timeout=5000', 'busy_timeout')
-  await run('PRAGMA cache_size=-32000', 'cache_size')
-  await run('PRAGMA temp_store=MEMORY', 'temp_store')
-  return applied
+    const applied = {};
+    const run = async (statement, key) => {
+        try {
+            const rows = await prisma.$queryRawUnsafe(statement);
+            applied[key] = Array.isArray(rows) && rows[0] ? Object.values(rows[0])[0] : "ok";
+        } catch (e) {
+            applied[key] = `error: ${e?.message || e}`;
+        }
+    };
+    await run("PRAGMA journal_mode=WAL", "journal_mode");
+    await run("PRAGMA synchronous=NORMAL", "synchronous");
+    await run("PRAGMA busy_timeout=5000", "busy_timeout");
+    await run("PRAGMA cache_size=-32000", "cache_size");
+    await run("PRAGMA temp_store=MEMORY", "temp_store");
+    return applied;
 }
 
 /**
@@ -49,14 +51,18 @@ async function applySqlitePragmas(prisma) {
  * after boot (not on the startup path), then twice a day.
  */
 function scheduleSqliteOptimize(prisma) {
-  const url = String(process.env.DATABASE_URL || '')
-  if (!url.startsWith('file:')) return null
-  const optimize = (all) => prisma.$executeRawUnsafe(all ? 'PRAGMA optimize=0x10002' : 'PRAGMA optimize')
-    .catch((e) => console.warn('[SQLite] optimize failed:', e?.message))
-  setTimeout(() => optimize(true), 3 * 60 * 1000).unref?.()
-  const timer = setInterval(() => optimize(false), 12 * 60 * 60 * 1000)
-  timer.unref?.()
-  return timer
+    const url = String(process.env.DATABASE_URL || "");
+    if (!url.startsWith("file:")) {
+        return null;
+    }
+    const optimize = (all) =>
+        prisma
+            .$executeRawUnsafe(all ? "PRAGMA optimize=0x10002" : "PRAGMA optimize")
+            .catch((e) => console.warn("[SQLite] optimize failed:", e?.message));
+    setTimeout(() => optimize(true), 3 * 60 * 1000).unref?.();
+    const timer = setInterval(() => optimize(false), 12 * 60 * 60 * 1000);
+    timer.unref?.();
+    return timer;
 }
 
-module.exports = { applySqlitePragmas, scheduleSqliteOptimize }
+module.exports = { applySqlitePragmas, scheduleSqliteOptimize };

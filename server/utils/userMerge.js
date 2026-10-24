@@ -14,23 +14,25 @@
 // undo rides along with whichever row it landed on - there is no way to
 // tell "this delta happened before/after the merge" after the fact.
 
-const fs = require('fs')
-const path = require('path')
+const fs = require("node:fs");
+const path = require("node:path");
 
 // Merging moves a person's whole history row by row, and Prisma closes an
 // interactive transaction after five seconds by default - a person with a
 // year of history ran out of time, the transaction rolled back and the merge
 // failed every time. These get the room they need.
-const LONG_TRANSACTION = { timeout: 10 * 60 * 1000, maxWait: 30 * 1000 }
+const LONG_TRANSACTION = { maxWait: 30 * 1000, timeout: 10 * 60 * 1000 };
 // A long transaction that also changes group members: it holds the
 // household's membership queue (helpers/database.js) for its whole length,
 // so no other membership change reads the list before this one commits.
 function runMembershipTransaction(prisma, accountId, fn) {
-  return require('./helpers/database').withMembershipLock(accountId, () => runLongTransaction(prisma, fn))
+    return require("./helpers/database").withMembershipLock(accountId, () =>
+        runLongTransaction(prisma, fn)
+    );
 }
 
 function runLongTransaction(prisma, fn) {
-  return prisma.$transaction(fn, LONG_TRANSACTION)
+    return prisma.$transaction(fn, LONG_TRANSACTION);
 }
 
 /**
@@ -38,101 +40,148 @@ function runLongTransaction(prisma, fn) {
  * actually touched.
  */
 async function getMergePreview(prisma, survivorId, donorId) {
-  const [survivor, donor] = await Promise.all([
-    prisma.user.findUnique({ where: { id: survivorId }, select: { id: true, username: true, providerType: true, accountId: true } }),
-    prisma.user.findUnique({ where: { id: donorId }, select: { id: true, username: true, providerType: true, accountId: true } }),
-  ])
-  if (!survivor) throw new Error('Survivor user not found')
-  if (!donor) throw new Error('Donor user not found')
-  if (survivor.providerType === donor.providerType) {
-    throw new Error('Both accounts use the same provider - merge is for pairing two different providers')
-  }
-  // A Nuvio profile other than the main one shares its login with the main
-  // person. Absorbed into another provider's user it would lose which
-  // profile it is, and every sync would then write that user's addons into
-  // the main profile's list. Profiles are combined from Nuvio profiles on the Users page.
-  const donorProfile = await prisma.user.findUnique({ where: { id: donorId }, select: { nuvioProfileId: true } })
-  if (donor.providerType === 'nuvio' && Number(donorProfile?.nuvioProfileId || 1) > 1) {
-    throw new Error('This is one profile of a shared Nuvio account. Combine profiles from Nuvio profiles on the Users page instead')
-  }
+    const [survivor, donor] = await Promise.all([
+        prisma.user.findUnique({
+            select: { accountId: true, id: true, providerType: true, username: true },
+            where: { id: survivorId },
+        }),
+        prisma.user.findUnique({
+            select: { accountId: true, id: true, providerType: true, username: true },
+            where: { id: donorId },
+        }),
+    ]);
+    if (!survivor) {
+        throw new Error("Survivor user not found");
+    }
+    if (!donor) {
+        throw new Error("Donor user not found");
+    }
+    if (survivor.providerType === donor.providerType) {
+        throw new Error(
+            "Both accounts use the same provider - merge is for pairing two different providers"
+        );
+    }
+    // A Nuvio profile other than the main one shares its login with the main
+    // person. Absorbed into another provider's user it would lose which
+    // profile it is, and every sync would then write that user's addons into
+    // the main profile's list. Profiles are combined from Nuvio profiles on the Users page.
+    const donorProfile = await prisma.user.findUnique({
+        select: { nuvioProfileId: true },
+        where: { id: donorId },
+    });
+    if (donor.providerType === "nuvio" && Number(donorProfile?.nuvioProfileId || 1) > 1) {
+        throw new Error(
+            "This is one profile of a shared Nuvio account. Combine profiles from Nuvio profiles on the Users page instead"
+        );
+    }
 
-  const [movieCount, episodeCount, sessionCount, snapshotCount, survivorGroup, donorGroup] = await Promise.all([
-    prisma.movieWatchHistory.count({ where: { userId: donorId } }),
-    prisma.episodeWatchHistory.count({ where: { userId: donorId } }),
-    prisma.watchSession.count({ where: { userId: donorId } }),
-    prisma.watchSnapshot.count({ where: { userId: donorId } }),
-    prisma.group.findFirst({ where: { accountId: survivor.accountId, userIds: { contains: survivorId } }, select: { id: true, name: true } }),
-    prisma.group.findFirst({ where: { accountId: survivor.accountId, userIds: { contains: donorId } }, select: { id: true, name: true } }),
-  ])
+    const [movieCount, episodeCount, sessionCount, snapshotCount, survivorGroup, donorGroup] =
+        await Promise.all([
+            prisma.movieWatchHistory.count({ where: { userId: donorId } }),
+            prisma.episodeWatchHistory.count({ where: { userId: donorId } }),
+            prisma.watchSession.count({ where: { userId: donorId } }),
+            prisma.watchSnapshot.count({ where: { userId: donorId } }),
+            prisma.group.findFirst({
+                select: { id: true, name: true },
+                where: { accountId: survivor.accountId, userIds: { contains: survivorId } },
+            }),
+            prisma.group.findFirst({
+                select: { id: true, name: true },
+                where: { accountId: survivor.accountId, userIds: { contains: donorId } },
+            }),
+        ]);
 
-  return {
-    survivor: { id: survivor.id, username: survivor.username, providerType: survivor.providerType },
-    donor: { id: donor.id, username: donor.username, providerType: donor.providerType },
-    movieCount,
-    episodeCount,
-    sessionCount,
-    snapshotCount,
-    survivorGroupName: survivorGroup?.name || null,
-    donorGroupName: donorGroup?.name || null,
-    // The merge deliberately does NOT auto-add the survivor to the donor's
-    // group - that would silently change which addons the absorbed provider
-    // receives. Surfaced here so the admin can decide via normal group
-    // management afterward instead.
-    groupsDiffer: !!(donorGroup && (!survivorGroup || donorGroup.id !== survivorGroup.id)),
-  }
+    return {
+        donor: { id: donor.id, providerType: donor.providerType, username: donor.username },
+        donorGroupName: donorGroup?.name || null,
+        episodeCount,
+        // The merge deliberately does NOT auto-add the survivor to the donor's
+        // group - that would silently change which addons the absorbed provider
+        // receives. Surfaced here so the admin can decide via normal group
+        // management afterward instead.
+        groupsDiffer: !!(donorGroup && (!survivorGroup || donorGroup.id !== survivorGroup.id)),
+        movieCount,
+        sessionCount,
+        snapshotCount,
+        survivor: {
+            id: survivor.id,
+            providerType: survivor.providerType,
+            username: survivor.username,
+        },
+        survivorGroupName: survivorGroup?.name || null,
+    };
 }
 
 /**
  * Is there anything to undo for this survivor, and can it actually be
  * reversed (vs. a pre-undo-support merge with no archive on file)?
  */
-async function getUndoInfo(prisma, survivorId, { dataDir = path.join(process.cwd(), 'data') } = {}) {
-  const credential = await prisma.userProviderCredential.findFirst({ where: { userId: survivorId } })
-  if (!credential) return null
-  // The donor's User row is gone by the time this is called (that's the
-  // whole point of the merge) - its username only still exists in the
-  // archive file, never in a live `user` query.
-  const archiveFullPath = credential.mergeArchivePath
-    ? path.join(dataDir, 'backup', 'merges', credential.mergeArchivePath)
-    : null
-  let donor = null
-  if (archiveFullPath && fs.existsSync(archiveFullPath)) {
-    try {
-      donor = JSON.parse(fs.readFileSync(archiveFullPath, 'utf8')).donor || null
-    } catch { /* leave null - undoable still reflects the file existing */ }
-  }
-  return {
-    providerType: credential.providerType,
-    donorUsername: donor?.username || null,
-    donorEmail: donor?.email || null,
-    donorAvatarUrl: donor?.avatarUrl || null,
-    // The archive holds the donor's whole row, so its Gravatar choice is in there.
-    donorUseGravatar: donor?.useGravatar === true,
-    donorColorIndex: donor?.colorIndex ?? null,
-    undoable: !!(credential.donorId && archiveFullPath && fs.existsSync(archiveFullPath)),
-  }
+async function getUndoInfo(
+    prisma,
+    survivorId,
+    { dataDir = path.join(process.cwd(), "data") } = {}
+) {
+    const credential = await prisma.userProviderCredential.findFirst({
+        where: { userId: survivorId },
+    });
+    if (!credential) {
+        return null;
+    }
+    // The donor's User row is gone by the time this is called (that's the
+    // whole point of the merge) - its username only still exists in the
+    // archive file, never in a live `user` query.
+    const archiveFullPath = credential.mergeArchivePath
+        ? path.join(dataDir, "backup", "merges", credential.mergeArchivePath)
+        : null;
+    let donor = null;
+    if (archiveFullPath && fs.existsSync(archiveFullPath)) {
+        try {
+            donor = JSON.parse(fs.readFileSync(archiveFullPath, "utf8")).donor || null;
+        } catch {
+            /* leave null - undoable still reflects the file existing */
+        }
+    }
+    return {
+        donorAvatarUrl: donor?.avatarUrl || null,
+        donorColorIndex: donor?.colorIndex ?? null,
+        donorEmail: donor?.email || null,
+        // The archive holds the donor's whole row, so its Gravatar choice is in there.
+        donorUseGravatar: donor?.useGravatar === true,
+        donorUsername: donor?.username || null,
+        providerType: credential.providerType,
+        undoable: !!(credential.donorId && archiveFullPath && fs.existsSync(archiveFullPath)),
+    };
 }
 
 // What makes two rows "the same title" in each table that has a unique key.
 const NATURAL_KEY = {
-  movieWatchHistory: (r) => ({ accountId: r.accountId, userId: r.userId, itemId: r.itemId }),
-  episodeWatchHistory: (r) => ({ accountId: r.accountId, userId: r.userId, videoId: r.videoId }),
-  watchSnapshot: (r) => ({ accountId: r.accountId, userId: r.userId, itemId: r.itemId, date: r.date }),
-  watchSession: (r) => ({ accountId: r.accountId, userId: r.userId, itemId: r.itemId }),
-  dismissedContinueWatching: (r) => ({ accountId: r.accountId, userId: r.userId, showId: r.showId }),
-}
+    dismissedContinueWatching: (r) => ({
+        accountId: r.accountId,
+        showId: r.showId,
+        userId: r.userId,
+    }),
+    episodeWatchHistory: (r) => ({ accountId: r.accountId, userId: r.userId, videoId: r.videoId }),
+    movieWatchHistory: (r) => ({ accountId: r.accountId, itemId: r.itemId, userId: r.userId }),
+    watchSession: (r) => ({ accountId: r.accountId, itemId: r.itemId, userId: r.userId }),
+    watchSnapshot: (r) => ({
+        accountId: r.accountId,
+        date: r.date,
+        itemId: r.itemId,
+        userId: r.userId,
+    }),
+};
 
 // One consistent tie-break across every collision-prone table: keep
 // whichever row is more recent. WatchSession additionally prefers an
 // isActive row over a finished one (a live session is a stronger signal
 // than an old completed one, regardless of which started more recently).
 function pickSurvivorRow(existing, incoming, recencyField, { preferActive = false } = {}) {
-  if (preferActive && existing.isActive !== incoming.isActive) {
-    return existing.isActive ? existing : incoming
-  }
-  const existingTime = new Date(existing[recencyField]).getTime()
-  const incomingTime = new Date(incoming[recencyField]).getTime()
-  return incomingTime >= existingTime ? incoming : existing
+    if (preferActive && existing.isActive !== incoming.isActive) {
+        return existing.isActive ? existing : incoming;
+    }
+    const existingTime = new Date(existing[recencyField]).getTime();
+    const incomingTime = new Date(incoming[recencyField]).getTime();
+    return incomingTime >= existingTime ? incoming : existing;
 }
 
 // Re-points every donor row in a table to the survivor's userId, resolving
@@ -143,27 +192,36 @@ function pickSurvivorRow(existing, incoming, recencyField, { preferActive = fals
 // is recorded into `archive.overwrittenSurvivorRows` before it's deleted -
 // together these are exactly what undoMerge() needs to put both accounts
 // back the way they were.
-async function migrateTable(tx, modelName, survivorId, donorId, recencyField, findUniqueKey, { preferActive = false, archive }) {
-  const donorRows = await tx[modelName].findMany({ where: { userId: donorId } })
-  archive.donorRows[modelName] = donorRows
-  for (const row of donorRows) {
-    const existing = await tx[modelName].findFirst({ where: findUniqueKey(row) })
-    if (!existing) {
-      await tx[modelName].update({ where: { id: row.id }, data: { userId: survivorId } })
-      continue
+async function migrateTable(
+    tx,
+    modelName,
+    survivorId,
+    donorId,
+    recencyField,
+    findUniqueKey,
+    { preferActive = false, archive }
+) {
+    const donorRows = await tx[modelName].findMany({ where: { userId: donorId } });
+    archive.donorRows[modelName] = donorRows;
+    for (const row of donorRows) {
+        const existing = await tx[modelName].findFirst({ where: findUniqueKey(row) });
+        if (!existing) {
+            await tx[modelName].update({ data: { userId: survivorId }, where: { id: row.id } });
+            continue;
+        }
+        const winner = pickSurvivorRow(existing, row, recencyField, { preferActive });
+        if (winner.id === row.id) {
+            // The donor's row wins - archive + delete the survivor's existing one, then move the donor's row over.
+            archive.overwrittenSurvivorRows[modelName] =
+                archive.overwrittenSurvivorRows[modelName] || [];
+            archive.overwrittenSurvivorRows[modelName].push(existing);
+            await tx[modelName].delete({ where: { id: existing.id } });
+            await tx[modelName].update({ data: { userId: survivorId }, where: { id: row.id } });
+        } else {
+            // The survivor's existing row wins - just drop the donor's duplicate (already archived above).
+            await tx[modelName].delete({ where: { id: row.id } });
+        }
     }
-    const winner = pickSurvivorRow(existing, row, recencyField, { preferActive })
-    if (winner.id === row.id) {
-      // The donor's row wins - archive + delete the survivor's existing one, then move the donor's row over.
-      archive.overwrittenSurvivorRows[modelName] = archive.overwrittenSurvivorRows[modelName] || []
-      archive.overwrittenSurvivorRows[modelName].push(existing)
-      await tx[modelName].delete({ where: { id: existing.id } })
-      await tx[modelName].update({ where: { id: row.id }, data: { userId: survivorId } })
-    } else {
-      // The survivor's existing row wins - just drop the donor's duplicate (already archived above).
-      await tx[modelName].delete({ where: { id: row.id } })
-    }
-  }
 }
 
 /**
@@ -171,108 +229,167 @@ async function migrateTable(tx, modelName, survivorId, donorId, recencyField, fi
  * the API response. Throws (aborting the transaction) on any validation
  * failure - nothing partial is left behind either way.
  */
-async function mergeUsers(prisma, survivorId, donorId, { dataDir = path.join(process.cwd(), 'data') } = {}) {
-  const preview = await getMergePreview(prisma, survivorId, donorId)
-
-  const donorFull = await prisma.user.findUnique({ where: { id: donorId } })
-  if (!donorFull) throw new Error('Donor user not found')
-
-  const existingSecondary = await prisma.userProviderCredential.findUnique({
-    where: { userId_providerType: { userId: survivorId, providerType: donorFull.providerType } },
-  })
-  if (existingSecondary) throw new Error(`Survivor already has a ${donorFull.providerType} account absorbed`)
-
-  // Archive filename is decided up front so the UserProviderCredential row
-  // can point at it from the moment it's created, inside the same
-  // transaction - no second write needed to link them after the fact.
-  const archiveDir = path.join(dataDir, 'backup', 'merges')
-  fs.mkdirSync(archiveDir, { recursive: true })
-  const archiveFilename = `${donorId}-${Date.now()}.json`
-  const archivePath = path.join(archiveDir, archiveFilename)
-
-  // Filled in by migrateTable/the dismissed/activity passes below as they
-  // run, then written to disk once the transaction has actually committed -
-  // this IS the recovery data undoMerge() reads back, not just a debug log.
-  const archive = { donorRows: {}, overwrittenSurvivorRows: {}, donorGroupIds: [] }
-
-  await runMembershipTransaction(prisma, donorFull.accountId, async (tx) => {
-    // 1. Absorb the donor's credentials as a secondary provider on the survivor.
-    await tx.userProviderCredential.create({
-      data: {
-        userId: survivorId,
-        providerType: donorFull.providerType,
-        stremioAuthKey: donorFull.stremioAuthKey,
-        nuvioRefreshToken: donorFull.nuvioRefreshToken,
-        nuvioUserId: donorFull.nuvioUserId,
-        jellyfinServerUrl: donorFull.jellyfinServerUrl,
-        jellyfinServerId: donorFull.jellyfinServerId,
-        jellyfinServerKind: donorFull.jellyfinServerKind,
-        jellyfinUserId: donorFull.jellyfinUserId,
-        jellyfinUserName: donorFull.jellyfinUserName,
-        jellyfinToken: donorFull.jellyfinToken,
-        donorId,
-        mergeArchivePath: archiveFilename,
-      },
-    })
-
-    // 2. WatchActivity has no unique constraint - straight re-point, no collisions possible.
-    const donorActivityRows = await tx.watchActivity.findMany({ where: { userId: donorId } })
-    archive.donorRows.watchActivity = donorActivityRows
-    await tx.watchActivity.updateMany({ where: { userId: donorId }, data: { userId: survivorId } })
-
-    // 3. Collision-prone tables - one consistent "most recent wins" tie-break.
-    await migrateTable(tx, 'movieWatchHistory', survivorId, donorId, 'watchedAt', (row) => ({
-      userId: survivorId, accountId: row.accountId, itemId: row.itemId,
-    }), { archive })
-    await migrateTable(tx, 'episodeWatchHistory', survivorId, donorId, 'watchedAt', (row) => ({
-      userId: survivorId, accountId: row.accountId, videoId: row.videoId,
-    }), { archive })
-    await migrateTable(tx, 'watchSnapshot', survivorId, donorId, 'date', (row) => ({
-      userId: survivorId, accountId: row.accountId, itemId: row.itemId, date: row.date,
-    }), { archive })
-    await migrateTable(tx, 'watchSession', survivorId, donorId, 'startTime', (row) => ({
-      userId: survivorId, accountId: row.accountId, itemId: row.itemId,
-    }), { archive, preferActive: true })
-
-    // 4. DismissedContinueWatching - union semantics, not pick-one: the fact
-    // "this show is dismissed" survives either way, so on collision just
-    // drop the donor's duplicate rather than picking a "winner". Survivor's
-    // own row is never touched/deleted here, so nothing to archive for it.
-    const dismissedRows = await tx.dismissedContinueWatching.findMany({ where: { userId: donorId } })
-    archive.donorRows.dismissedContinueWatching = dismissedRows
-    for (const row of dismissedRows) {
-      const existing = await tx.dismissedContinueWatching.findFirst({
-        where: { userId: survivorId, accountId: row.accountId, showId: row.showId },
-      })
-      if (existing) {
-        await tx.dismissedContinueWatching.delete({ where: { id: row.id } })
-      } else {
-        await tx.dismissedContinueWatching.update({ where: { id: row.id }, data: { userId: survivorId } })
-      }
-    }
-
-    // 5. Remove the donor from whatever group it belonged to - deliberately
-    // NOT adding the survivor to that group too, see getMergePreview's
-    // groupsDiffer comment.
-    archive.donorGroupIds = await require('./helpers/database').dropFromAllGroups(tx, donorFull.accountId, donorId)
-
-    // 6. The donor row itself is retired - its full state is captured in
-    // `donor` below, written to the archive file right after this commits.
-    await tx.user.delete({ where: { id: donorId } })
-  })
-
-  // Written after the transaction commits (not before) since the archive
-  // now includes the actual collision outcomes decided during the
-  // transaction itself - there's no separate dry-run pass to keep in sync.
-  fs.writeFileSync(archivePath, JSON.stringify({
-    mergedAt: new Date().toISOString(),
+async function mergeUsers(
+    prisma,
     survivorId,
     donorId,
-    donor: donorFull,
-    ...archive,
-  }, null, 2))
+    { dataDir = path.join(process.cwd(), "data") } = {}
+) {
+    const preview = await getMergePreview(prisma, survivorId, donorId);
 
-  return { ...preview, archivePath }
+    const donorFull = await prisma.user.findUnique({ where: { id: donorId } });
+    if (!donorFull) {
+        throw new Error("Donor user not found");
+    }
+
+    const existingSecondary = await prisma.userProviderCredential.findUnique({
+        where: {
+            userId_providerType: { providerType: donorFull.providerType, userId: survivorId },
+        },
+    });
+    if (existingSecondary) {
+        throw new Error(`Survivor already has a ${donorFull.providerType} account absorbed`);
+    }
+
+    // Archive filename is decided up front so the UserProviderCredential row
+    // can point at it from the moment it's created, inside the same
+    // transaction - no second write needed to link them after the fact.
+    const archiveDir = path.join(dataDir, "backup", "merges");
+    fs.mkdirSync(archiveDir, { recursive: true });
+    const archiveFilename = `${donorId}-${Date.now()}.json`;
+    const archivePath = path.join(archiveDir, archiveFilename);
+
+    // Filled in by migrateTable/the dismissed/activity passes below as they
+    // run, then written to disk once the transaction has actually committed -
+    // this IS the recovery data undoMerge() reads back, not just a debug log.
+    const archive = { donorGroupIds: [], donorRows: {}, overwrittenSurvivorRows: {} };
+
+    await runMembershipTransaction(prisma, donorFull.accountId, async (tx) => {
+        // 1. Absorb the donor's credentials as a secondary provider on the survivor.
+        await tx.userProviderCredential.create({
+            data: {
+                donorId,
+                jellyfinServerId: donorFull.jellyfinServerId,
+                jellyfinServerKind: donorFull.jellyfinServerKind,
+                jellyfinServerUrl: donorFull.jellyfinServerUrl,
+                jellyfinToken: donorFull.jellyfinToken,
+                jellyfinUserId: donorFull.jellyfinUserId,
+                jellyfinUserName: donorFull.jellyfinUserName,
+                mergeArchivePath: archiveFilename,
+                nuvioRefreshToken: donorFull.nuvioRefreshToken,
+                nuvioUserId: donorFull.nuvioUserId,
+                providerType: donorFull.providerType,
+                stremioAuthKey: donorFull.stremioAuthKey,
+                userId: survivorId,
+            },
+        });
+
+        // 2. WatchActivity has no unique constraint - straight re-point, no collisions possible.
+        const donorActivityRows = await tx.watchActivity.findMany({ where: { userId: donorId } });
+        archive.donorRows.watchActivity = donorActivityRows;
+        await tx.watchActivity.updateMany({
+            data: { userId: survivorId },
+            where: { userId: donorId },
+        });
+
+        // 3. Collision-prone tables - one consistent "most recent wins" tie-break.
+        await migrateTable(
+            tx,
+            "movieWatchHistory",
+            survivorId,
+            donorId,
+            "watchedAt",
+            (row) => ({ accountId: row.accountId, itemId: row.itemId, userId: survivorId }),
+            { archive }
+        );
+        await migrateTable(
+            tx,
+            "episodeWatchHistory",
+            survivorId,
+            donorId,
+            "watchedAt",
+            (row) => ({ accountId: row.accountId, userId: survivorId, videoId: row.videoId }),
+            { archive }
+        );
+        await migrateTable(
+            tx,
+            "watchSnapshot",
+            survivorId,
+            donorId,
+            "date",
+            (row) => ({
+                accountId: row.accountId,
+                date: row.date,
+                itemId: row.itemId,
+                userId: survivorId,
+            }),
+            { archive }
+        );
+        await migrateTable(
+            tx,
+            "watchSession",
+            survivorId,
+            donorId,
+            "startTime",
+            (row) => ({ accountId: row.accountId, itemId: row.itemId, userId: survivorId }),
+            { archive, preferActive: true }
+        );
+
+        // 4. DismissedContinueWatching - union semantics, not pick-one: the fact
+        // "this show is dismissed" survives either way, so on collision just
+        // drop the donor's duplicate rather than picking a "winner". Survivor's
+        // own row is never touched/deleted here, so nothing to archive for it.
+        const dismissedRows = await tx.dismissedContinueWatching.findMany({
+            where: { userId: donorId },
+        });
+        archive.donorRows.dismissedContinueWatching = dismissedRows;
+        for (const row of dismissedRows) {
+            const existing = await tx.dismissedContinueWatching.findFirst({
+                where: { accountId: row.accountId, showId: row.showId, userId: survivorId },
+            });
+            if (existing) {
+                await tx.dismissedContinueWatching.delete({ where: { id: row.id } });
+            } else {
+                await tx.dismissedContinueWatching.update({
+                    data: { userId: survivorId },
+                    where: { id: row.id },
+                });
+            }
+        }
+
+        // 5. Remove the donor from whatever group it belonged to - deliberately
+        // NOT adding the survivor to that group too, see getMergePreview's
+        // groupsDiffer comment.
+        archive.donorGroupIds = await require("./helpers/database").dropFromAllGroups(
+            tx,
+            donorFull.accountId,
+            donorId
+        );
+
+        // 6. The donor row itself is retired - its full state is captured in
+        // `donor` below, written to the archive file right after this commits.
+        await tx.user.delete({ where: { id: donorId } });
+    });
+
+    // Written after the transaction commits (not before) since the archive
+    // now includes the actual collision outcomes decided during the
+    // transaction itself - there's no separate dry-run pass to keep in sync.
+    fs.writeFileSync(
+        archivePath,
+        JSON.stringify(
+            {
+                donor: donorFull,
+                donorId,
+                mergedAt: new Date().toISOString(),
+                survivorId,
+                ...archive,
+            },
+            null,
+            2
+        )
+    );
+
+    return { ...preview, archivePath };
 }
 
 /**
@@ -284,96 +401,153 @@ async function mergeUsers(prisma, survivorId, donorId, { dataDir = path.join(pro
  * Best-effort, not a perfect time-reversal - see the module comment at the
  * top of this file for what that means in practice.
  */
-async function undoMerge(prisma, survivorId, { dataDir = path.join(process.cwd(), 'data') } = {}) {
-  const credential = await prisma.userProviderCredential.findFirst({ where: { userId: survivorId } })
-  if (!credential) throw new Error('No merged account found on this user to undo')
-  if (!credential.donorId || !credential.mergeArchivePath) {
-    throw new Error('This merge predates undo support and has no archive to reverse it from')
-  }
+async function undoMerge(prisma, survivorId, { dataDir = path.join(process.cwd(), "data") } = {}) {
+    const credential = await prisma.userProviderCredential.findFirst({
+        where: { userId: survivorId },
+    });
+    if (!credential) {
+        throw new Error("No merged account found on this user to undo");
+    }
+    if (!(credential.donorId && credential.mergeArchivePath)) {
+        throw new Error("This merge predates undo support and has no archive to reverse it from");
+    }
 
-  const archiveFullPath = path.join(dataDir, 'backup', 'merges', credential.mergeArchivePath)
-  if (!fs.existsSync(archiveFullPath)) {
-    throw new Error('Merge archive file is missing on disk - cannot undo safely')
-  }
-  const archive = JSON.parse(fs.readFileSync(archiveFullPath, 'utf8'))
-  const { donorId, donor, donorRows = {}, overwrittenSurvivorRows = {}, donorGroupIds = [] } = archive
-  if (donorId !== credential.donorId) {
-    throw new Error('Archive file does not match this account\'s recorded merge - refusing to undo')
-  }
+    const archiveFullPath = path.join(dataDir, "backup", "merges", credential.mergeArchivePath);
+    if (!fs.existsSync(archiveFullPath)) {
+        throw new Error("Merge archive file is missing on disk - cannot undo safely");
+    }
+    const archive = JSON.parse(fs.readFileSync(archiveFullPath, "utf8"));
+    const {
+        donorId,
+        donor,
+        donorRows = {},
+        overwrittenSurvivorRows = {},
+        donorGroupIds = [],
+    } = archive;
+    if (donorId !== credential.donorId) {
+        throw new Error(
+            "Archive file does not match this account's recorded merge - refusing to undo"
+        );
+    }
 
-  const collidingUser = await prisma.user.findUnique({ where: { id: donorId } })
-  if (collidingUser) {
-    throw new Error('A user with the original donor id already exists - cannot undo safely')
-  }
+    const collidingUser = await prisma.user.findUnique({ where: { id: donorId } });
+    if (collidingUser) {
+        throw new Error("A user with the original donor id already exists - cannot undo safely");
+    }
 
-  await runMembershipTransaction(prisma, donor.accountId, async (tx) => {
-    // 1. Recreate the donor's own User row exactly as it was.
-    const { id: _donorId, ...donorFields } = donor
-    await tx.user.create({ data: { id: donorId, ...donorFields } })
+    await runMembershipTransaction(prisma, donor.accountId, async (tx) => {
+        // 1. Recreate the donor's own User row exactly as it was.
+        const { id: _donorId, ...donorFields } = donor;
+        await tx.user.create({ data: { id: donorId, ...donorFields } });
 
-    // 2. Every donor-owned row from the collision-prone tables + dismissed:
-    // still live under the survivor (it won its collision, or had none) ->
-    // point it back; hard-deleted (it lost a collision) -> recreate it.
-    const donorOwnedTables = ['movieWatchHistory', 'episodeWatchHistory', 'watchSnapshot', 'watchSession', 'dismissedContinueWatching']
-    //
-    // The donor's old id may already hold a row for the same title: while
-    // merged, the absorbed login is read under that id and keeps its own
-    // progress baselines there (activityMonitor.js). That row is the newer
-    // reading of the same login, so it stays and the archived copy goes.
-    // Checked first rather than caught: on Postgres a failed write inside a
-    // transaction aborts the whole transaction, caught or not.
-    for (const modelName of donorOwnedTables) {
-      for (const row of donorRows[modelName] || []) {
-        const stillLive = await tx[modelName].findUnique({ where: { id: row.id } })
-        const clash = await tx[modelName].findFirst({ where: { ...NATURAL_KEY[modelName]({ ...row, userId: donorId }), NOT: { id: row.id } } })
-        if (stillLive) {
-          if (clash) await tx[modelName].delete({ where: { id: row.id } })
-          else await tx[modelName].update({ where: { id: row.id }, data: { userId: donorId } })
-        } else if (!clash) {
-          const { id: rowId, ...rowFields } = row
-          await tx[modelName].create({ data: { id: rowId, ...rowFields, userId: donorId } })
+        // 2. Every donor-owned row from the collision-prone tables + dismissed:
+        // still live under the survivor (it won its collision, or had none) ->
+        // point it back; hard-deleted (it lost a collision) -> recreate it.
+        const donorOwnedTables = [
+            "movieWatchHistory",
+            "episodeWatchHistory",
+            "watchSnapshot",
+            "watchSession",
+            "dismissedContinueWatching",
+        ];
+        //
+        // The donor's old id may already hold a row for the same title: while
+        // merged, the absorbed login is read under that id and keeps its own
+        // progress baselines there (activityMonitor.js). That row is the newer
+        // reading of the same login, so it stays and the archived copy goes.
+        // Checked first rather than caught: on Postgres a failed write inside a
+        // transaction aborts the whole transaction, caught or not.
+        for (const modelName of donorOwnedTables) {
+            for (const row of donorRows[modelName] || []) {
+                const stillLive = await tx[modelName].findUnique({ where: { id: row.id } });
+                const clash = await tx[modelName].findFirst({
+                    where: {
+                        ...NATURAL_KEY[modelName]({ ...row, userId: donorId }),
+                        NOT: { id: row.id },
+                    },
+                });
+                if (stillLive) {
+                    if (clash) {
+                        await tx[modelName].delete({ where: { id: row.id } });
+                    } else {
+                        await tx[modelName].update({
+                            data: { userId: donorId },
+                            where: { id: row.id },
+                        });
+                    }
+                } else if (!clash) {
+                    const { id: rowId, ...rowFields } = row;
+                    await tx[modelName].create({
+                        data: { id: rowId, ...rowFields, userId: donorId },
+                    });
+                }
+            }
         }
-      }
+
+        // 3. Recreate any survivor row that was deleted as the losing side of a
+        // collision during the merge - it's fully gone from the live tables, so
+        // this is always a create, never an update - unless the survivor has
+        // since recorded the same title again, which then stays.
+        for (const modelName of Object.keys(overwrittenSurvivorRows)) {
+            for (const row of overwrittenSurvivorRows[modelName]) {
+                const stillLive = await tx[modelName].findUnique({ where: { id: row.id } });
+                if (stillLive) {
+                    continue;
+                }
+                if (
+                    NATURAL_KEY[modelName] &&
+                    (await tx[modelName].findFirst({ where: NATURAL_KEY[modelName](row) }))
+                ) {
+                    continue;
+                }
+                await tx[modelName].create({ data: row });
+            }
+        }
+
+        // 4. WatchActivity - no collisions ever happened here, straight point-back.
+        for (const row of donorRows.watchActivity || []) {
+            await tx.watchActivity.updateMany({ data: { userId: donorId }, where: { id: row.id } });
+        }
+
+        // 5. Re-add the donor to whichever group(s) it originally belonged to.
+        // One group per person: back into the first of them still there.
+        for (const groupId of donorGroupIds) {
+            if (
+                await require("./helpers/database").moveIntoGroup(
+                    tx,
+                    donor.accountId,
+                    donorId,
+                    groupId
+                )
+            ) {
+                break;
+            }
+        }
+
+        // 6. The survivor no longer has this provider absorbed.
+        await tx.userProviderCredential.delete({ where: { id: credential.id } });
+    });
+
+    // Mark the archive consumed so it can't accidentally be replayed against
+    // a second, unrelated merge that happens to reuse this same file later.
+    try {
+        fs.renameSync(archiveFullPath, `${archiveFullPath}.undone`);
+    } catch {
+        /* non-fatal - undo already committed */
     }
 
-    // 3. Recreate any survivor row that was deleted as the losing side of a
-    // collision during the merge - it's fully gone from the live tables, so
-    // this is always a create, never an update - unless the survivor has
-    // since recorded the same title again, which then stays.
-    for (const modelName of Object.keys(overwrittenSurvivorRows)) {
-      for (const row of overwrittenSurvivorRows[modelName]) {
-        const stillLive = await tx[modelName].findUnique({ where: { id: row.id } })
-        if (stillLive) continue
-        if (NATURAL_KEY[modelName] && await tx[modelName].findFirst({ where: NATURAL_KEY[modelName](row) })) continue
-        await tx[modelName].create({ data: row })
-      }
-    }
-
-    // 4. WatchActivity - no collisions ever happened here, straight point-back.
-    for (const row of donorRows.watchActivity || []) {
-      await tx.watchActivity.updateMany({ where: { id: row.id }, data: { userId: donorId } })
-    }
-
-    // 5. Re-add the donor to whichever group(s) it originally belonged to.
-    // One group per person: back into the first of them still there.
-    for (const groupId of donorGroupIds) {
-      if (await require('./helpers/database').moveIntoGroup(tx, donor.accountId, donorId, groupId)) break
-    }
-
-    // 6. The survivor no longer has this provider absorbed.
-    await tx.userProviderCredential.delete({ where: { id: credential.id } })
-  })
-
-  // Mark the archive consumed so it can't accidentally be replayed against
-  // a second, unrelated merge that happens to reuse this same file later.
-  try { fs.renameSync(archiveFullPath, `${archiveFullPath}.undone`) } catch { /* non-fatal - undo already committed */ }
-
-  return { donorId, donorUsername: donor.username, donorProviderType: donor.providerType }
+    return { donorId, donorProviderType: donor.providerType, donorUsername: donor.username };
 }
 
 module.exports = {
-  runMembershipTransaction,
-  getMergePreview, getUndoInfo, mergeUsers, undoMerge,
-  // Shared with nuvioProfiles.js, which merges profile people the same way.
-  pickSurvivorRow, migrateTable, runLongTransaction, NATURAL_KEY,
-}
+    getMergePreview,
+    getUndoInfo,
+    mergeUsers,
+    migrateTable,
+    NATURAL_KEY,
+    // Shared with nuvioProfiles.js, which merges profile people the same way.
+    pickSurvivorRow,
+    runLongTransaction,
+    runMembershipTransaction,
+    undoMerge,
+};

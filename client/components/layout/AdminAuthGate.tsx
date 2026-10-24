@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { useEffect, useLayoutEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { api } from '@/lib/api';
+import { motion } from "framer-motion";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { api } from "@/lib/api";
 
 interface AdminAuthGateProps {
-  children: React.ReactNode;
+    children: React.ReactNode;
 }
 
 // Blocks rendering the admin shell (Sidebar/Dashboard/etc.) until a session
@@ -34,63 +34,73 @@ interface AdminAuthGateProps {
 // any request answers 401 (the snapshot that marks "signed in last time" is
 // cleared then). A first-time visitor still waits for the check.
 export function AdminAuthGate({ children }: AdminAuthGateProps) {
-  const [status, setStatus] = useState<'checking' | 'ok' | 'unauthenticated'>('checking');
+    const [status, setStatus] = useState<"checking" | "ok" | "unauthenticated">("checking");
 
-  // Before the first paint after hydration (the server can't see this
-  // device's storage, so the server render always starts at 'checking').
-  useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one switch before first paint is the point: deferring it shows the spinner
-    if (api.wasSignedIn()) setStatus((s) => (s === 'checking' ? 'ok' : s));
-  }, []);
+    // Before the first paint after hydration (the server can't see this
+    // device's storage, so the server render always starts at 'checking').
+    useLayoutEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one switch before first paint is the point: deferring it shows the spinner
+        if (api.wasSignedIn()) {
+            setStatus((s) => (s === "checking" ? "ok" : s));
+        }
+    }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    api.getSession()
-      .then(() => {
-        if (!cancelled) setStatus('ok');
-      })
-      .catch((err: any) => {
-        if (cancelled) return;
-        // Only a real 401 means "not authenticated" (redirect already in
-        // flight via api.ts). Anything else - a network error, the server
-        // being briefly unreachable - fails open rather than stranding the
-        // user on a spinner forever over a transient issue unrelated to auth.
-        setStatus(err?.response?.status === 401 ? 'unauthenticated' : 'ok');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    useEffect(() => {
+        let cancelled = false;
+        api.getSession()
+            .then(() => {
+                if (!cancelled) {
+                    setStatus("ok");
+                }
+            })
+            .catch((err: any) => {
+                if (cancelled) {
+                    return;
+                }
+                // Only a real 401 means "not authenticated" (redirect already in
+                // flight via api.ts). Anything else - a network error, the server
+                // being briefly unreachable - fails open rather than stranding the
+                // user on a spinner forever over a transient issue unrelated to auth.
+                setStatus(err?.response?.status === 401 ? "unauthenticated" : "ok");
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
-  if (status !== 'ok') {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--color-bg)' }}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center gap-4"
-        >
-          <div className="relative w-12 h-12">
-            <motion.div
-              className="absolute inset-0 rounded-full"
-              style={{
-                border: '3px solid var(--color-surface-border)',
-                borderTopColor: 'var(--color-primary)',
-              }}
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-            />
-          </div>
-          <p style={{ color: 'var(--color-text-muted)' }} className="text-sm">
-            Verifying session...
-          </p>
-        </motion.div>
-      </div>
-    );
-  }
+    if (status !== "ok") {
+        return (
+            <div
+                className="flex min-h-screen items-center justify-center"
+                style={{ background: "var(--color-bg)" }}
+            >
+                <motion.div
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex flex-col items-center gap-4"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                >
+                    <div className="relative h-12 w-12">
+                        <motion.div
+                            animate={{ rotate: 360 }}
+                            className="absolute inset-0 rounded-full"
+                            style={{
+                                border: "3px solid var(--color-surface-border)",
+                                borderTopColor: "var(--color-primary)",
+                            }}
+                            transition={{
+                                duration: 1,
+                                ease: "linear",
+                                repeat: Number.POSITIVE_INFINITY,
+                            }}
+                        />
+                    </div>
+                    <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+                        Verifying session...
+                    </p>
+                </motion.div>
+            </div>
+        );
+    }
 
-  return <>{children}</>;
+    return <>{children}</>;
 }

@@ -22,68 +22,113 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/backfill-history-durations.js
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/backfill-history-durations.js --apply
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 async function main() {
-  const apply = process.argv.includes('--apply')
-  const prisma = new PrismaClient()
-  try {
-    let totalFixed = 0
+    const apply = process.argv.includes("--apply");
+    const prisma = new PrismaClient();
+    try {
+        let totalFixed = 0;
 
-    const movies = await prisma.movieWatchHistory.findMany({
-      where: { durationSeconds: null },
-      select: { id: true, accountId: true, userId: true, itemId: true, itemName: true, watchedAt: true }
-    })
-    console.log(`MovieWatchHistory rows with durationSeconds=null: ${movies.length}`)
-    for (const row of movies) {
-      const session = await prisma.watchSession.findUnique({
-        where: { accountId_userId_itemId: { accountId: row.accountId, userId: row.userId, itemId: row.itemId } },
-        select: { durationSeconds: true }
-      })
-      const seconds = session?.durationSeconds || 0
-      if (seconds <= 0) continue
+        const movies = await prisma.movieWatchHistory.findMany({
+            select: {
+                accountId: true,
+                id: true,
+                itemId: true,
+                itemName: true,
+                userId: true,
+                watchedAt: true,
+            },
+            where: { durationSeconds: null },
+        });
+        console.log(`MovieWatchHistory rows with durationSeconds=null: ${movies.length}`);
+        for (const row of movies) {
+            const session = await prisma.watchSession.findUnique({
+                select: { durationSeconds: true },
+                where: {
+                    accountId_userId_itemId: {
+                        accountId: row.accountId,
+                        itemId: row.itemId,
+                        userId: row.userId,
+                    },
+                },
+            });
+            const seconds = session?.durationSeconds || 0;
+            if (seconds <= 0) {
+                continue;
+            }
 
-      console.log(`  "${row.itemName}"  ${row.watchedAt.toISOString()}  null -> ${seconds}s`)
-      totalFixed++
-      if (apply) {
-        await prisma.movieWatchHistory.update({ where: { id: row.id }, data: { durationSeconds: seconds } })
-      }
+            console.log(`  "${row.itemName}"  ${row.watchedAt.toISOString()}  null -> ${seconds}s`);
+            totalFixed++;
+            if (apply) {
+                await prisma.movieWatchHistory.update({
+                    data: { durationSeconds: seconds },
+                    where: { id: row.id },
+                });
+            }
+        }
+
+        const episodes = await prisma.episodeWatchHistory.findMany({
+            select: {
+                accountId: true,
+                episode: true,
+                id: true,
+                season: true,
+                showId: true,
+                showName: true,
+                userId: true,
+                videoId: true,
+                watchedAt: true,
+            },
+            where: { durationSeconds: null },
+        });
+        console.log(`\nEpisodeWatchHistory rows with durationSeconds=null: ${episodes.length}`);
+        for (const row of episodes) {
+            const session = await prisma.watchSession.findUnique({
+                select: { durationSeconds: true, videoId: true },
+                where: {
+                    accountId_userId_itemId: {
+                        accountId: row.accountId,
+                        itemId: row.showId,
+                        userId: row.userId,
+                    },
+                },
+            });
+            if (session?.videoId !== row.videoId) {
+                continue;
+            }
+            const seconds = session.durationSeconds || 0;
+            if (seconds <= 0) {
+                continue;
+            }
+
+            console.log(
+                `  "${row.showName}" S${row.season}E${row.episode}  ${row.watchedAt.toISOString()}  null -> ${seconds}s`
+            );
+            totalFixed++;
+            if (apply) {
+                await prisma.episodeWatchHistory.update({
+                    data: { durationSeconds: seconds },
+                    where: { id: row.id },
+                });
+            }
+        }
+
+        if (totalFixed === 0) {
+            console.log("\nNothing to do.");
+        } else if (apply) {
+            console.log(`\nUpdated ${totalFixed} row(s).`);
+        } else {
+            console.log(
+                `\nDry run only - re-run with --apply to write these ${totalFixed} update(s).`
+            );
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-
-    const episodes = await prisma.episodeWatchHistory.findMany({
-      where: { durationSeconds: null },
-      select: { id: true, accountId: true, userId: true, showId: true, showName: true, videoId: true, season: true, episode: true, watchedAt: true }
-    })
-    console.log(`\nEpisodeWatchHistory rows with durationSeconds=null: ${episodes.length}`)
-    for (const row of episodes) {
-      const session = await prisma.watchSession.findUnique({
-        where: { accountId_userId_itemId: { accountId: row.accountId, userId: row.userId, itemId: row.showId } },
-        select: { videoId: true, durationSeconds: true }
-      })
-      if (session?.videoId !== row.videoId) continue
-      const seconds = session.durationSeconds || 0
-      if (seconds <= 0) continue
-
-      console.log(`  "${row.showName}" S${row.season}E${row.episode}  ${row.watchedAt.toISOString()}  null -> ${seconds}s`)
-      totalFixed++
-      if (apply) {
-        await prisma.episodeWatchHistory.update({ where: { id: row.id }, data: { durationSeconds: seconds } })
-      }
-    }
-
-    if (totalFixed === 0) {
-      console.log('\nNothing to do.')
-    } else if (apply) {
-      console.log(`\nUpdated ${totalFixed} row(s).`)
-    } else {
-      console.log(`\nDry run only - re-run with --apply to write these ${totalFixed} update(s).`)
-    }
-  } finally {
-    await prisma.$disconnect()
-  }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

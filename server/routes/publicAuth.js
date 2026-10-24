@@ -1,2893 +1,3895 @@
-const { createDefaultAvatar } = require('../utils/defaultAvatar')
-const express = require('express');
-const { SETTINGS_SECRET_FIELDS } = require('../utils/settingsSecrets')
-const bcrypt = require('bcryptjs');
-const multer = require('multer');
-const crypto = require('crypto');
-const { repairAddonsList } = require('../utils/repair');
-const { responseUtils, dbUtils } = require('../utils/routeUtils');
-const { validateStremioAuthKey } = require('../utils/stremio');
-const { encrypt } = require('../utils/encryption');
-const { safeEqual } = require('../utils/safeEqual');
-const { safeFetch, instancePolicy } = require('../utils/safeUrl');
-const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin, refreshNuvioToken, parseJwtPayload } = require('../providers/nuvioAuth');
+const { createDefaultAvatar } = require("../utils/defaultAvatar");
+const express = require("express");
+const { SETTINGS_SECRET_FIELDS } = require("../utils/settingsSecrets");
+const bcrypt = require("bcryptjs");
+const multer = require("multer");
+const crypto = require("node:crypto");
+const { repairAddonsList } = require("../utils/repair");
+const { responseUtils, dbUtils } = require("../utils/routeUtils");
+const { validateStremioAuthKey } = require("../utils/stremio");
+const { encrypt } = require("../utils/encryption");
+const { safeEqual } = require("../utils/safeEqual");
+const { safeFetch, instancePolicy } = require("../utils/safeUrl");
+const {
+    startNuvioTvLogin,
+    pollNuvioTvLogin,
+    exchangeNuvioTvLogin,
+    refreshNuvioToken,
+    parseJwtPayload,
+} = require("../providers/nuvioAuth");
 
 // Names the cookie that ties an SSO round trip to the browser that started it.
-const OIDC_STATE_COOKIE = 'sfm_oidc';
+const OIDC_STATE_COOKIE = "sfm_oidc";
 
-module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, PRIVATE_AUTH_USERNAME, PRIVATE_AUTH_PASSWORD, DEFAULT_ACCOUNT_ID, issueAccessToken, issueRefreshToken, cookieName, isProdEnv, encrypt, decrypt, getDecryptedManifestUrl, scopedWhere, getAccountDek, decryptWithFallback, manifestUrlHmac, manifestHash, filterManifestByResources, filterManifestByCatalogs, parseCookies, verifyAccountToken = require('../utils/auth').verifyAccountToken }) => {
-  console.log('PublicAuth router initialized, prisma available:', !!prisma);
-  const router = express.Router();
+module.exports = ({
+    prisma,
+    getAccountId,
+    INSTANCE_TYPE,
+    PRIVATE_AUTH_ENABLED,
+    PRIVATE_AUTH_USERNAME,
+    PRIVATE_AUTH_PASSWORD,
+    DEFAULT_ACCOUNT_ID,
+    issueAccessToken,
+    issueRefreshToken,
+    cookieName,
+    isProdEnv,
+    encrypt,
+    decrypt,
+    getDecryptedManifestUrl,
+    scopedWhere,
+    getAccountDek,
+    decryptWithFallback,
+    manifestUrlHmac,
+    manifestHash,
+    filterManifestByResources,
+    filterManifestByCatalogs,
+    parseCookies,
+    verifyAccountToken = require("../utils/auth").verifyAccountToken,
+}) => {
+    console.log("PublicAuth router initialized, prisma available:", !!prisma);
+    const router = express.Router();
 
-  // What a failed request tells the caller. The real error stays in the server
-  // log: a database or driver error carries query text and addresses, and
-  // these routes answer people who may not be signed in yet.
-  const GENERIC_FAILURE = 'Something went wrong - please try again';
+    // What a failed request tells the caller. The real error stays in the server
+    // log: a database or driver error carries query text and addresses, and
+    // these routes answer people who may not be signed in yet.
+    const GENERIC_FAILURE = "Something went wrong - please try again";
 
-  // Shared function to reset account data
-  // One reset for import and Reset alike - this used to be its own copy and
-  // drifted (it never cleared household profiles).
-  const resetAccountData = (accountId) => require('../utils/helpers/accountReset').resetAccountData(prisma, accountId);
+    // Shared function to reset account data
+    // One reset for import and Reset alike - this used to be its own copy and
+    // drifted (it never cleared household profiles).
+    const resetAccountData = (accountId) =>
+        require("../utils/helpers/accountReset").resetAccountData(prisma, accountId);
 
-  // Configure multer for file uploads
-  const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-      fileSize: 50 * 1024 * 1024, // 50MB limit
-    },
-  });
-
-  // Use shared repair helper
-  async function repairAddonsForAccount(addonsList, req) {
-    return await repairAddonsList({
-      prisma,
-      INSTANCE_TYPE,
-      getAccountDek,
-      getDecryptedManifestUrl,
-      filterManifestByResources,
-      filterManifestByCatalogs,
-      manifestHash,
-      encrypt
-    }, req, addonsList)
-  }
-
-  // Helper function to generate random CSRF token
-  function randomCsrfToken() {
-    return crypto.randomBytes(32).toString('hex');
-  }
-
-  // Shared tail of a successful login (real session, post any 2FA check) -
-  // used by /login, /private-login, and /verify-2fa, so the three don't
-  // each hand-roll the same cookie-setting block with a chance to drift.
-  function issueSessionCookies(res, accountId) {
-    const at = issueAccessToken(accountId);
-    const rt = issueRefreshToken(accountId);
-    const csrf = randomCsrfToken();
-    res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-    res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    return at;
-  }
-
-  // Checks a submitted TOTP or backup code against the account, consuming a
-  // backup code if that's what matched (each works once). Returns true/false.
-  async function verifyTwoFactorCode(account, code) {
-    const twoFactor = require('../utils/twoFactor');
-    if (!code || !account?.twoFactorSecret) return false;
-    const secret = twoFactor.decryptSecret(account.id, account.twoFactorSecret);
-    if (twoFactor.verifyTotp(secret, code)) return true;
-    if (!account.twoFactorBackupCodes) return false;
-    try {
-      const hashed = JSON.parse(account.twoFactorBackupCodes);
-      const remaining = await twoFactor.consumeBackupCode(hashed, code);
-      if (!remaining) return false;
-      await prisma.appAccount.update({ where: { id: account.id }, data: { twoFactorBackupCodes: JSON.stringify(remaining) } });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function generateUniqueAccountUuid() {
-    const tryGenerate = () => {
-      try {
-        return crypto.randomUUID()
-      } catch {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-          const r = Math.random() * 16 | 0
-          const v = c === 'x' ? r : (r & 0x3 | 0x8)
-          return v.toString(16)
-        })
-      }
-    }
-
-    for (let i = 0; i < 5; i += 1) {
-      const candidate = tryGenerate()
-      const exists = await prisma.appAccount.findUnique({ where: { uuid: candidate } })
-      if (!exists) return candidate
-    }
-
-    return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`
-  }
-
-  async function ensureUniqueUsername(baseUsername, accountId) {
-    const base = (String(baseUsername || '') || '')
-      .trim()
-      .replace(/[^a-zA-Z0-9._-]/g, '')
-      .toLowerCase() || 'stremio-user'
-    let candidate = base
-    let suffix = 1
-    while (true) {
-      const existing = await prisma.user.findFirst({
-        where: { accountId, username: candidate }
-      })
-      if (!existing) return candidate
-      candidate = `${base}${suffix}`
-      suffix += 1
-    }
-  }
-
-  // `reason` says why a check failed, because only two answers mean the
-  // account really isn't this person's any more: nobody here has the email
-  // ('no-user'), or Stremio answered for the stored key with a different
-  // email ('mismatch'). A stored key that is stale, can't be decrypted, or
-  // couldn't be checked because Stremio didn't answer ('unchecked') is not
-  // that - the person signing in has just proved the email with a fresh key.
-  async function validateUserStremioAuth(accountId, email, req) {
-    const user = await prisma.user.findFirst({
-      where: { accountId, email, providerType: 'stremio' }
-    })
-
-    if (!user) {
-      return { valid: false, user: null, reason: 'no-user' }
-    }
-
-    if (!user.stremioAuthKey) {
-      return { valid: false, user, reason: 'no-key' }
-    }
-
-    let storedEmail
-    try {
-      const storedAuthKey = decrypt(user.stremioAuthKey, req)
-      const storedAuthKeyInfo = await validateStremioAuthKey(storedAuthKey)
-      storedEmail = String(storedAuthKeyInfo?.user?.email || '').trim().toLowerCase()
-    } catch (error) {
-      return { valid: false, user, reason: 'unchecked' }
-    }
-    if (!storedEmail) return { valid: false, user, reason: 'unchecked' }
-    if (storedEmail !== email) return { valid: false, user, reason: 'mismatch' }
-    return { valid: true, user, reason: null }
-  }
-
-  // Unlinking an account at sign-in is only ever for a real change of owner.
-  const reallyUnlinked = (validation) => !validation.valid && (validation.reason === 'no-user' || validation.reason === 'mismatch')
-
-  // Same shape as validateUserStremioAuth, but re-validated via a live
-  // Nuvio/Supabase token refresh instead of a Stremio session check - Nuvio
-  // has no equivalent of Stremio's single long-lived authKey, so the stored
-  // credential is a refresh token and "is it still valid" means "does
-  // refreshing it still work".
-  async function validateUserNuvioAuth(accountId, email, req) {
-    // One Nuvio account can now be present once per profile, all sharing the
-    // same email. Signing in is about the account rather than any one
-    // profile, so this resolves to the primary - the user that was there
-    // before extra profiles could be added - and only falls back to whatever
-    // else exists if the primary is somehow gone.
-    const user = await prisma.user.findFirst({
-      where: { accountId, email, providerType: 'nuvio' },
-      orderBy: { nuvioProfileId: 'asc' }
-    })
-
-    if (!user) {
-      return { valid: false, user: null, reason: 'no-user' }
-    }
-
-    if (!user.nuvioRefreshToken) {
-      return { valid: false, user, reason: 'no-key' }
-    }
-
-    let storedEmail
-    try {
-      const storedRefreshToken = decrypt(user.nuvioRefreshToken, req)
-      const refreshed = await refreshNuvioToken(storedRefreshToken)
-      const payload = parseJwtPayload(refreshed.access_token)
-      storedEmail = String(payload?.email || '').trim().toLowerCase()
-    } catch (error) {
-      return { valid: false, user, reason: 'unchecked' }
-    }
-    if (!storedEmail) return { valid: false, user, reason: 'unchecked' }
-    if (storedEmail !== email) return { valid: false, user, reason: 'mismatch' }
-    return { valid: true, user, reason: null }
-  }
-
-  // Generate unique UUID endpoint
-  router.get('/generate-uuid', async (req, res) => {
-    try {
-      let uuid
-      try {
-        uuid = crypto.randomUUID()
-      } catch {
-        // Fallback for older Node.js versions
-        uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-          const r = Math.random() * 16 | 0
-          const v = c == 'x' ? r : (r & 0x3 | 0x8)
-          return v.toString(16)
-        })
-      }
-
-      res.json({
-        success: true,
-        uuid: uuid
-      })
-    } catch (error) {
-      console.error('Error generating UUID:', error)
-      res.status(500).json({
-        success: false,
-        message: 'Failed to generate UUID'
-      })
-    }
-  })
-
-  // Public auth endpoints
-  router.post('/register', async (req, res) => {
-    try {
-      const { uuid, password } = req.body || {};
-      if (!uuid || !password) {
-        return responseUtils.badRequest(res, 'uuid and password are required');
-      }
-      // Enforce RFC 4122 UUID format (any version, correct variant)
-      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (!uuidPattern.test(String(uuid))) {
-        return responseUtils.badRequest(res, 'Invalid UUID format');
-      }
-      if (String(password).length < 4) {
-        return responseUtils.badRequest(res, 'Password must be at least 4 characters');
-      }
-
-      // Soft cap on total registered accounts - unset/0 means unlimited.
-      // Exists so a public instance can be opened up gradually (start small,
-      // watch real memory/CPU for a week or two, raise it) instead of
-      // committing to a number on day one with no way to pump the brakes.
-      // Counts only enabled accounts - a disabled (retired/moderated) account
-      // shouldn't permanently occupy a cap slot forever; otherwise the only
-      // way to free room back up is superadmin manually deleting it, or in
-      // the worst case (cap hit, operator locked out some other way) wiping
-      // the whole database, which is exactly what this cap exists to avoid.
-      const maxAccounts = parseInt(process.env.MAX_PUBLIC_ACCOUNTS || '0', 10);
-      if (maxAccounts > 0) {
-        const currentCount = await prisma.appAccount.count({ where: { disabled: false } });
-        if (currentCount >= maxAccounts) {
-          return res.status(503).json({ message: 'Registration is temporarily full. Please try again later.' });
-        }
-      }
-
-      const existing = await prisma.appAccount.findUnique({ where: { uuid } });
-      if (existing) {
-        return res.status(409).json({ message: 'Account already exists' });
-      }
-
-      const passwordHash = await bcrypt.hash(password, 12);
-      const account = await prisma.appAccount.create({
-        data: { avatarUrl: createDefaultAvatar(), uuid, passwordHash },
-      });
-
-      // Operator-only registration alert - deliberately a separate,
-      // optional Discord webhook rather than the app's normal push/bell
-      // notifyPushForType path, since that's all account-scoped and
-      // Superadmin isn't tied to any account (see superadmin.js's own
-      // comment on why). Fire-and-forget: never blocks/fails registration
-      // itself, and carries only the fact a new account registered - no
-      // uuid, no data from inside the account (same privacy boundary as
-      // the rest of the Superadmin panel).
-      if (process.env.SUPERADMIN_NOTIFY_WEBHOOK_URL) {
-        const { postDiscord } = require('../utils/notify');
-        postDiscord(process.env.SUPERADMIN_NOTIFY_WEBHOOK_URL, '🆕 A new SlickSync account just registered.').catch(() => {});
-      }
-
-      // Set access/refresh and CSRF cookies
-      const at = issueAccessToken(account.id);
-      const rt = issueRefreshToken(account.id);
-      const csrf = randomCsrfToken();
-      res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-      res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      return res.status(201).json({
-        message: 'Registered successfully',
-        token: at,
-        account: { id: account.id, uuid: account.uuid, email: account.email || null },
-      });
-    } catch (error) {
-      console.error('Registration error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  });
-
-  router.post('/login', async (req, res) => {
-    try {
-      const { uuid, password } = req.body || {};
-      if (!uuid || !password) {
-        return responseUtils.badRequest(res, 'uuid and password are required');
-      }
-
-      const account = await prisma.appAccount.findUnique({ where: { uuid } });
-      if (!account || !account.passwordHash) {
-        // No passwordHash covers OIDC-only accounts (created via
-        // /oidc/callback with no password set) - same "Invalid credentials"
-        // response as a wrong uuid, not a 500 from bcrypt rejecting a null hash.
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      const isValid = await bcrypt.compare(password, account.passwordHash);
-      if (!isValid) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      // Disabled via the superadmin panel - block login without touching any
-      // of the account's data (reversible any time from that panel).
-      if (account.disabled) {
-        return res.status(403).json({ message: 'This account has been disabled' });
-      }
-
-      prisma.appAccount.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
-
-      // 2FA gate - password alone isn't enough for this account. Issue a
-      // one-shot pending challenge (see server/utils/twoFactor.js for why
-      // this is deliberately NOT a JWT) instead of real session cookies;
-      // the client completes the login via POST /verify-2fa.
-      if (account.twoFactorEnabled) {
-        const twoFactor = require('../utils/twoFactor');
-        const pendingToken = twoFactor.createPendingChallenge(account.id);
-        return res.json({ requiresTwoFactor: true, pendingToken });
-      }
-
-      const at = issueSessionCookies(res, account.id);
-      return res.json({
-        message: 'Login successful',
-        token: at,
-        account: { id: account.id, uuid: account.uuid, email: account.email || null },
-      });
-    } catch (error) {
-      console.error('Login error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  });
-
-  // Private instance username/password login
-  router.post('/private-login', async (req, res) => {
-    try {
-      if (!PRIVATE_AUTH_ENABLED) {
-        return res.status(400).json({ message: 'Private auth is not enabled' });
-      }
-
-      const { username, password } = req.body || {};
-      if (!username || !password) {
-        return responseUtils.badRequest(res, 'username and password are required');
-      }
-
-      // Compare with env vars (trim whitespace). Both are checked before
-      // either answer is used, so how long this takes never says whether the
-      // user name was the part that was right.
-      const trimmedUsername = (username || '').trim();
-      const trimmedPassword = (password || '').trim();
-      const usernameOk = safeEqual(trimmedUsername, PRIVATE_AUTH_USERNAME);
-      const passwordOk = safeEqual(trimmedPassword, PRIVATE_AUTH_PASSWORD);
-      if (!usernameOk || !passwordOk) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      // Use DEFAULT_ACCOUNT_ID for private instances
-      const accountId = DEFAULT_ACCOUNT_ID;
-
-      // 2FA gate - same pending-challenge design as /login above. The env-
-      // var credential check has no AppAccount row involved, but the
-      // resolved accountId still points at a real row that can carry a
-      // 2FA secret, so the check works the same way from here on.
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { twoFactorEnabled: true } });
-      if (account?.twoFactorEnabled) {
-        const twoFactor = require('../utils/twoFactor');
-        const pendingToken = twoFactor.createPendingChallenge(accountId);
-        return res.json({ requiresTwoFactor: true, pendingToken });
-      }
-
-      issueSessionCookies(res, accountId);
-
-      return res.json({
-        message: 'Login successful',
-        account: { id: accountId, uuid: null, email: null },
-      });
-    } catch (error) {
-      console.error('Private login error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  });
-
-  // POST /verify-2fa { pendingToken, code } - completes a login that was
-  // paused by the 2FA gate in /login or /private-login above. Consumes the
-  // pending token (one-shot) and, on a valid TOTP/backup code, issues the
-  // real session cookies exactly like a non-2FA login would have.
-  router.post('/verify-2fa', async (req, res) => {
-    try {
-      const { pendingToken, code } = req.body || {};
-      if (!pendingToken || !code) {
-        return responseUtils.badRequest(res, 'pendingToken and code are required');
-      }
-      const twoFactor = require('../utils/twoFactor');
-      const accountId = twoFactor.consumePendingChallenge(pendingToken);
-      if (!accountId) {
-        return res.status(401).json({ message: 'This login attempt has expired - sign in again' });
-      }
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
-      if (!account || account.disabled) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-      const ok = await verifyTwoFactorCode(account, code);
-      if (!ok) {
-        return res.status(400).json({ message: 'Incorrect code' });
-      }
-
-      prisma.appAccount.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
-      const at = issueSessionCookies(res, account.id);
-      return res.json({
-        message: 'Login successful',
-        token: at,
-        account: { id: account.id, uuid: account.uuid || null, email: account.email || null },
-      });
-    } catch (error) {
-      console.error('2FA verification error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  });
-
-  // --- Passkey sign-in (see utils/webauthn.js) --------------------------
-  //
-  // Lives here rather than in routes/passkeys.js because this is where
-  // session cookies are issued, and a login request by definition arrives
-  // with no session to authenticate it.
-  //
-  // Passkeys are discoverable, so no username is asked for: the browser
-  // offers whichever passkey belongs to this instance's hostname and the
-  // credential id that comes back identifies the account.
-
-  // POST /passkey/options - challenge for signing in.
-  router.post('/passkey/options', async (req, res) => {
-    try {
-      const { getLib, putChallenge, newChallengeId, rpFromRequest } = require('../utils/webauthn');
-      const rp = rpFromRequest(req);
-      if (!rp) return responseUtils.badRequest(res, 'Could not determine this instance address');
-
-      // Only advertise passkeys when some exist for this hostname - the
-      // login page uses an empty answer to keep its passkey button hidden
-      // rather than offering a prompt that can only fail.
-      const available = await prisma.passkey.count({ where: { rpId: rp.rpID } });
-      if (available === 0) return res.json({ available: false });
-
-      const { generateAuthenticationOptions } = await getLib();
-      const options = await generateAuthenticationOptions({
-        rpID: rp.rpID,
-        userVerification: 'preferred',
-      });
-      // Keyed by a random id the client hands back, since there is no
-      // account to key it by yet.
-      const challengeId = newChallengeId();
-      putChallenge(`auth:${challengeId}`, { challenge: options.challenge, rpID: rp.rpID, origin: rp.origin });
-      return res.json({ available: true, challengeId, options });
-    } catch (error) {
-      console.error('Passkey options error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  });
-
-  // POST /passkey/verify - complete a passkey sign-in.
-  router.post('/passkey/verify', async (req, res) => {
-    try {
-      const { getLib, takeChallenge } = require('../utils/webauthn');
-      const { challengeId, credential } = req.body || {};
-      if (!challengeId || !credential) return responseUtils.badRequest(res, 'challengeId and credential are required');
-
-      const pending = takeChallenge(`auth:${challengeId}`);
-      if (!pending) return res.status(401).json({ message: 'That sign-in attempt expired - try again' });
-
-      const stored = await prisma.passkey.findUnique({ where: { credentialId: credential.id } });
-      if (!stored) return res.status(401).json({ message: 'That passkey is not registered here' });
-
-      const { verifyAuthenticationResponse } = await getLib();
-      const verification = await verifyAuthenticationResponse({
-        response: credential,
-        expectedChallenge: pending.challenge,
-        expectedOrigin: pending.origin,
-        expectedRPID: pending.rpID,
-        credential: {
-          id: stored.credentialId,
-          publicKey: new Uint8Array(Buffer.from(stored.publicKey, 'base64url')),
-          counter: stored.counter,
-          transports: (() => { try { return JSON.parse(stored.transports || '[]') } catch { return [] } })(),
+    // Configure multer for file uploads
+    const upload = multer({
+        limits: {
+            fileSize: 50 * 1024 * 1024, // 50MB limit
         },
-        requireUserVerification: false,
-      });
-      if (!verification.verified) return res.status(401).json({ message: 'That passkey could not be verified' });
+        storage: multer.memoryStorage(),
+    });
 
-      // A counter that fails to advance on an authenticator that keeps one
-      // is the signature of a cloned credential. Authenticators that do not
-      // keep a counter report 0 forever, which is normal and not a signal.
-      const newCounter = Number(verification.authenticationInfo?.newCounter || 0);
-      if (stored.counter > 0 && newCounter > 0 && newCounter <= stored.counter) {
-        return res.status(401).json({ message: 'That passkey looks cloned and was refused' });
-      }
-
-      const accountId = stored.accountId || DEFAULT_ACCOUNT_ID;
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
-      if (account && account.disabled) return res.status(401).json({ message: 'This account has been disabled' });
-
-      // 2FA still applies unless the authenticator actually verified the
-      // person (PIN, fingerprint, face). A passkey that only proves
-      // possession is one factor, so it does not stand in for a second one;
-      // a user-verified passkey already is two.
-      const userVerified = verification.authenticationInfo?.userVerified === true;
-      if (account && account.twoFactorEnabled && !userVerified) {
-        const twoFactor = require('../utils/twoFactor');
-        const pendingToken = twoFactor.createPendingChallenge(accountId);
-        await prisma.passkey.update({ where: { id: stored.id }, data: { counter: newCounter, lastUsedAt: new Date() } }).catch(() => {});
-        return res.json({ requiresTwoFactor: true, pendingToken });
-      }
-
-      await prisma.passkey.update({ where: { id: stored.id }, data: { counter: newCounter, lastUsedAt: new Date() } }).catch(() => {});
-      if (account) {
-        prisma.appAccount.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
-      }
-      const at = issueSessionCookies(res, accountId);
-      return res.json({
-        message: 'Login successful',
-        token: at,
-        account: { id: accountId, uuid: (account && account.uuid) || null, email: (account && account.email) || null },
-      });
-    } catch (error) {
-      console.error('Passkey verify error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
+    // Use shared repair helper
+    async function repairAddonsForAccount(addonsList, req) {
+        return await repairAddonsList(
+            {
+                encrypt,
+                filterManifestByCatalogs,
+                filterManifestByResources,
+                getAccountDek,
+                getDecryptedManifestUrl,
+                INSTANCE_TYPE,
+                manifestHash,
+                prisma,
+            },
+            req,
+            addonsList
+        );
     }
-  });
 
-  // Finishes a login for an already-resolved account (created/matched by
-  // /oidc/callback below) - checks disabled + the same 2FA gate every other
-  // login path respects, then either issues a real session or hands back a
-  // pending-2FA redirect. Returns a path to send the browser to next.
-  async function completeOidcLogin(res, account) {
-    if (account.disabled) {
-      return '/login?oidcError=' + encodeURIComponent('This account has been disabled');
+    // Helper function to generate random CSRF token
+    function randomCsrfToken() {
+        return crypto.randomBytes(32).toString("hex");
     }
-    if (account.twoFactorEnabled) {
-      const twoFactor = require('../utils/twoFactor');
-      const pendingToken = twoFactor.createPendingChallenge(account.id);
-      return '/login?otp=' + encodeURIComponent(pendingToken);
-    }
-    prisma.appAccount.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
-    issueSessionCookies(res, account.id);
-    return '/';
-  }
 
-  // GET /oidc/config - lets the login page know whether to show the SSO
-  // button at all, without needing the env vars client-side.
-  router.get('/oidc/config', async (req, res) => {
-    const oidc = require('../utils/oidc');
-    return res.json({ configured: oidc.isConfigured(), displayName: oidc.displayName() });
-  });
-
-  // The cookie that ties an SSO round trip to the browser that started it.
-  // SameSite=Lax, not Strict: the browser comes back from the identity
-  // provider by a top-level redirect, which Strict would leave the cookie off.
-  // Path '/' because the __Host- prefix used in production requires it.
-  const oidcStateCookieOptions = (extra) => ({ httpOnly: true, secure: isProdEnv(), sameSite: 'lax', path: '/', ...extra });
-
-  // GET /oidc/start - real browser navigation (not fetch/JSON): redirects
-  // straight to the provider's own login page.
-  router.get('/oidc/start', async (req, res) => {
-    const oidc = require('../utils/oidc');
-    try {
-      if (!oidc.isConfigured()) return res.status(400).json({ message: 'OIDC is not configured' });
-      const { authorizationUrl, state } = await oidc.startAuthorization();
-      // The callback only accepts a return that carries this same value. Without
-      // it, anyone holding a finished (code, state) pair could send it to
-      // someone else's browser and sign them in to the sender's account.
-      res.cookie(cookieName(OIDC_STATE_COOKIE), state, oidcStateCookieOptions({ maxAge: oidc.PENDING_TTL_MS }));
-      return res.redirect(authorizationUrl);
-    } catch (error) {
-      console.error('OIDC start error:', error);
-      return res.redirect('/login?oidcError=' + encodeURIComponent(oidc.publicMessage(error, 'Failed to start SSO login')));
-    }
-  });
-
-  // GET /oidc/callback - where the provider redirects back to. Resolves or
-  // creates the AppAccount (public mode) / logs into DEFAULT_ACCOUNT_ID
-  // (private mode), then redirects into the app or back to /login with
-  // either an error or a pending-2FA token.
-  router.get('/oidc/callback', async (req, res) => {
-    const oidc = require('../utils/oidc');
-    try {
-      if (!oidc.isConfigured()) {
-        return res.redirect('/login?oidcError=' + encodeURIComponent('OIDC is not configured'));
-      }
-      const { code, state, error: providerError } = req.query || {};
-
-      // Did this browser start the sign-in? Where strangers sign in, only a
-      // return carrying the cookie set by /oidc/start, with the same state,
-      // did. A household's own install may be opened by more than one name
-      // (a LAN address and the public one), and the cookie only reaches the
-      // name the sign-in was started on, so there a return without it is let
-      // through - the pending state held here is still required - while one
-      // carrying a different cookie is still refused.
-      const bound = parseCookies ? parseCookies(req)[cookieName(OIDC_STATE_COOKIE)] : undefined;
-      const cookieBound = typeof bound === 'string' && bound !== '';
-      const sameBrowser = typeof state === 'string' && state !== '' && (cookieBound ? safeEqual(bound, state) : INSTANCE_TYPE !== 'public');
-      const clearStateCookie = () => res.cookie(cookieName(OIDC_STATE_COOKIE), '', oidcStateCookieOptions({ expires: new Date(0) }));
-
-      if (providerError) {
-        if (sameBrowser) clearStateCookie();
-        return res.redirect('/login?oidcError=' + encodeURIComponent(String(providerError)));
-      }
-      if (!sameBrowser) {
-        // Left as it is: a return that does not belong to this browser must
-        // not cancel a sign-in this browser really has under way.
-        return res.redirect('/login?oidcError=' + encodeURIComponent('This sign-in was not started in this browser - try again'));
-      }
-      clearStateCookie();
-
-      const { sub, email, name, emailVerified } = await oidc.handleCallback(code, state);
-      let account;
-
-      if (INSTANCE_TYPE !== 'public') {
-        // Private mode: one admin account. OIDC_ALLOWED_EMAILS (if set) is
-        // the only extra gate - otherwise any identity the provider itself
-        // authenticates may sign in, same trust boundary as SSO-gating this
-        // app via a reverse proxy.
-        if (!oidc.isEmailAllowedForPrivateMode(email)) {
-          return res.redirect('/login?oidcError=' + encodeURIComponent('This identity is not allowed to sign in'));
-        }
-        account = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } });
-        if (!account) {
-          return res.redirect('/login?oidcError=' + encodeURIComponent('Account not found'));
-        }
-        if (account.oidcSubject !== sub) {
-          account = await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: { oidcSubject: sub } });
-        }
-      } else {
-        account = await prisma.appAccount.findUnique({ where: { oidcSubject: sub } });
-        if (!account) {
-          // An address is only worth anything here when the provider says it
-          // has checked that this person owns it: otherwise whoever can get
-          // the provider to issue an unchecked claim for someone else's
-          // address could sign in to that person's account.
-          const byEmail = email ? await prisma.appAccount.findUnique({ where: { email } }) : null;
-          // Auto-link onto an existing account with a matching, verified
-          // email - no separate "link my account" UI to build for this. An
-          // account already tied to another identity is left as it is.
-          if (byEmail && emailVerified && !byEmail.oidcSubject) {
-            account = await prisma.appAccount.update({
-              where: { id: byEmail.id },
-              data: { oidcSubject: sub, linkedProvider: byEmail.linkedProvider || 'oidc' },
-            });
-          }
-          if (!account) {
-            // uuid: null, same as the stremio-login/nuvio-login account-
-            // creation paths above - it's only meaningful for the uuid+
-            // password /login flow, and this account has no password to go
-            // with it either way. Multiple accounts can share uuid: null
-            // (NULL isn't unique-constrained against itself).
-            //
-            // The email is kept only when it is verified and nobody else
-            // holds it - it is unique, and an unverified one could otherwise
-            // park someone else's address on a new account.
-            account = await prisma.appAccount.create({
-              data: {
-                avatarUrl: createDefaultAvatar(),
-                uuid: null,
-                email: email && emailVerified && !byEmail ? email : null,
-                displayName: name || null,
-                oidcSubject: sub,
-                linkedProvider: 'oidc',
-                sync: JSON.stringify({ enabled: false, frequency: '0' }),
-              },
-            });
-          }
-        }
-      }
-
-      const redirectTo = await completeOidcLogin(res, account);
-      return res.redirect(redirectTo);
-    } catch (error) {
-      // Whatever went wrong stays in the log; a database error must never end
-      // up in the address bar.
-      console.error('OIDC callback error:', error);
-      return res.redirect('/login?oidcError=' + encodeURIComponent(oidc.publicMessage(error, 'Sign-in failed')));
-    }
-  });
-
-  router.post('/stremio-login', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Stremio login is only available in public auth mode' })
-      }
-
-      const { authKey } = req.body || {}
-      if (!authKey || typeof authKey !== 'string' || !authKey.trim()) {
-        return responseUtils.badRequest(res, 'authKey is required')
-      }
-
-      let stremioInfo
-      try {
-        stremioInfo = await validateStremioAuthKey(authKey.trim())
-      } catch (err) {
-        const code = err?.code
-        const message = err?.message || 'Failed to validate Stremio auth key'
-        if (code === 1) {
-          return res.status(401).json({ message: 'Invalid or expired Stremio session' })
-        }
-        return res.status(400).json({ message })
-      }
-
-      const email = String(stremioInfo?.user?.email || '').trim().toLowerCase()
-      if (!email) {
-        return res.status(400).json({ message: 'Stremio account email not available' })
-      }
-
-      // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
-      // Only extract if user is actually logged in (has valid session)
-      let originalAccountId = req.appAccountId
-      if (!originalAccountId && INSTANCE_TYPE === 'public' && parseCookies) {
-        try {
-          const cookies = parseCookies(req)
-          const accessCookie = cookies[cookieName('sfm_at')] || cookies['sfm_at']
-          const refreshCookie = cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
-          const token = accessCookie || refreshCookie
-          if (token) {
-            // Either kind of session token: the refresh cookie stands in once
-            // the access cookie has expired. Other tokens signed with the same
-            // secret (superadmin, portal, pending 2FA) are not accounts.
-            const decoded = verifyAccountToken(token, ['access', 'refresh'])
-            if (decoded && decoded.accId) {
-              // Verify the account actually exists before setting originalAccountId
-              const accountExists = await prisma.appAccount.findUnique({ where: { id: decoded.accId } })
-              if (accountExists) {
-                originalAccountId = decoded.accId
-                req.appAccountId = originalAccountId
-              }
-            }
-          }
-        } catch (e) {
-          // If we can't extract account ID from cookies, user is not logged in - that's OK
-          // This is expected for normal login flow
-        }
-      }
-
-      let account
-      let isNewAccount = false
-
-      // FIRST CHECK: If user is logged in and trying to link, verify Stremio account is not already linked to another account
-      if (originalAccountId) {
-        // Verify current account exists - if it doesn't, treat as not logged in (normal login flow)
-        const currentAccount = await prisma.appAccount.findUnique({ where: { id: originalAccountId } })
-        if (!currentAccount) {
-          // Account doesn't exist - treat as not logged in, proceed with normal login flow
-          originalAccountId = undefined
-        } else {
-          // Account exists - user is logged in, check if Stremio account is already linked elsewhere
-          const existingAccountWithEmail = await prisma.appAccount.findUnique({ where: { email } })
-          if (existingAccountWithEmail && existingAccountWithEmail.id !== originalAccountId) {
-            return res.status(409).json({
-              message: 'This Stremio account is already linked to another SlickSync account',
-              error: 'EMAIL_ALREADY_LINKED'
-            })
-          }
-
-          // Check for legacy account with this email (uuid format: stremio:${email})
-          const legacyUuid = `stremio:${email}`
-          const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
-          if (legacyAccount && legacyAccount.id !== originalAccountId) {
-            return res.status(409).json({
-              message: 'This Stremio account is already linked to another SlickSync account',
-              error: 'EMAIL_ALREADY_LINKED'
-            })
-          }
-
-          // If current account already has an email, it must match
-          if (currentAccount.email && currentAccount.email !== email) {
-            return res.status(409).json({
-              message: 'Your account is already linked to a different Stremio account',
-              error: 'ACCOUNT_ALREADY_LINKED'
-            })
-          }
-
-          const validation = await validateUserStremioAuth(currentAccount.id, email, req)
-
-          if (!validation.user) {
-            return res.status(400).json({
-              message: 'No user found with this email address. Please create a user with this email first before linking your Stremio account.',
-              error: 'NO_USER_WITH_EMAIL'
-            })
-          }
-
-          if (!validation.user.stremioAuthKey) {
-            return res.status(400).json({
-              message: 'User exists but has no Stremio authentication. Please connect the user to Stremio first before linking the account.',
-              error: 'USER_NO_STREMIO_AUTH'
-            })
-          }
-
-          if (!validation.valid && validation.reason === 'mismatch') {
-            const errorMsg = validation.user.stremioAuthKey
-              ? 'A user with this email already exists in your account, but their Stremio authentication does not match. Please contact support.'
-              : 'User exists but the stored Stremio authentication is invalid or expired. Please reconnect the user to Stremio first.'
-            const errorCode = validation.user.stremioAuthKey
-              ? 'STORED_AUTHKEY_EMAIL_MISMATCH'
-              : 'INVALID_STORED_AUTHKEY'
-            return res.status(validation.user.stremioAuthKey ? 409 : 400).json({
-              message: errorMsg,
-              error: errorCode
-            })
-          }
-
-          if (currentAccount.email == null) {
-            account = await prisma.appAccount.update({
-              where: { id: currentAccount.id },
-              data: { email, linkedProvider: 'stremio' }
-            })
-          } else {
-            account = currentAccount
-          }
-          req.appAccountId = account.id
-
-          const encryptedAuthKey = encrypt(authKey.trim(), req)
-          await prisma.user.update({
-            where: { id: validation.user.id },
-            data: { stremioAuthKey: encryptedAuthKey, isActive: true }
-          })
-
-          const at = issueAccessToken(account.id)
-          const rt = issueRefreshToken(account.id)
-          const csrf = randomCsrfToken()
-          res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-          res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 })
-          res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-
-          return res.json({
-            message: 'Account already linked',
-            token: at,
-            account: { id: account.id, uuid: account.uuid, email: account.email || null }
-          })
-        }
-      }
-
-      // Normal login flow (user not logged in, or account from cookie doesn't exist)
-      if (!account) {
-        // Not logged in - normal login flow (find or create account with email)
-
-        account = await prisma.appAccount.findUnique({ where: { email } })
-
-        if (account) {
-          const validation = await validateUserStremioAuth(account.id, email, req)
-          if (reallyUnlinked(validation)) {
-            await prisma.appAccount.update({
-              where: { id: account.id },
-              data: { email: null, linkedProvider: null }
-            })
-            account = null
-          }
-        }
-
-        if (!account) {
-          const legacyUuid = `stremio:${email}`
-          const legacyAccount = await prisma.appAccount.findUnique({ where: { uuid: legacyUuid } })
-          if (legacyAccount) {
-            const validation = await validateUserStremioAuth(legacyAccount.id, email, req)
-            if (reallyUnlinked(validation)) {
-              const newUuid = await generateUniqueAccountUuid()
-              await prisma.appAccount.update({
-                where: { id: legacyAccount.id },
-                data: { uuid: newUuid, email: null, linkedProvider: null }
-              })
-              account = null
-            } else {
-              const newUuid = await generateUniqueAccountUuid()
-              account = await prisma.appAccount.update({
-                where: { id: legacyAccount.id },
-                data: { uuid: newUuid, email, linkedProvider: 'stremio' }
-              })
-            }
-          }
-        }
-
-        // Create new account if none found or all were unlinked
-        if (!account) {
-          account = await prisma.appAccount.create({
-            data: {
-              avatarUrl: createDefaultAvatar(),
-              uuid: null,
-              email,
-              passwordHash: null,
-              linkedProvider: 'stremio'
-            }
-          })
-          isNewAccount = true
-        } else if (account.email == null) {
-          // Account exists but email was unlinked - set it now
-          account = await prisma.appAccount.update({
-            where: { id: account.id },
-            data: { email, linkedProvider: 'stremio' }
-          })
-        }
-
-        req.appAccountId = account.id
-      }
-
-      const encryptedAuthKey = encrypt(authKey.trim(), req)
-
-      // Ensure email uniqueness across all accounts
-      const { ensureEmailUniqueness } = require('../utils/helpers/database')
-      await ensureEmailUniqueness(prisma, email, account.id)
-
-      let user = null
-      // The person whose Stremio account this is - never just the household's
-      // oldest person, whose own sign-in would be overwritten with this one.
-      const existingUser = await prisma.user.findFirst({
-        where: { accountId: account.id, email, providerType: 'stremio' },
-        orderBy: { id: 'asc' }
-      })
-
-      if (isNewAccount) {
-        const baseUsername = stremioInfo?.user?.username || stremioInfo?.user?.name || (email.split('@')[0] || 'stremio-user')
-        const username = await ensureUniqueUsername(baseUsername, account.id)
-        const createdUser = await prisma.user.create({
-          data: {
-            avatarUrl: createDefaultAvatar(),
-            accountId: account.id,
-            email,
-            username,
-            isActive: true,
-            stremioAuthKey: encryptedAuthKey
-          }
-        })
-        user = { id: createdUser.id, email: createdUser.email, username: createdUser.username }
-      } else if (existingUser) {
-        await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { stremioAuthKey: encryptedAuthKey, isActive: true }
-        })
-      }
-
-      const at = issueAccessToken(account.id);
-      const rt = issueRefreshToken(account.id);
-      const csrf = randomCsrfToken();
-      res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-      res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-
-      return res.json({
-        message: 'Login successful',
-        token: at,
-        account: { id: account.id, uuid: account.uuid, email: account.email || null },
-        ...(user ? { user } : {})
-      })
-    } catch (error) {
-      console.error('Stremio login error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  })
-
-  // --- Nuvio admin login ---
-  //
-  // Mirrors the Stremio admin login above (same account find/create/link
-  // logic, same cookie issuance), but Nuvio has no single long-lived authKey
-  // a client can hand over directly - logging in needs its own start/poll/
-  // exchange device-code round trip first. /nuvio-login does that exchange
-  // itself and reads the resulting identity straight out of Nuvio's own
-  // response, so unlike Stremio's flow there's no client-supplied email or
-  // user ID to validate - the exchange succeeding IS the proof of identity.
-
-  const nuvioAdminOAuthSessions = new Map() // ip -> pending count
-  const NUVIO_ADMIN_OAUTH_CAP = 3
-  const NUVIO_ADMIN_OAUTH_TTL_MS = 5 * 60 * 1000
-
-  router.post('/nuvio-start-oauth', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Nuvio login is only available in public auth mode' })
-      }
-
-      // Same anonymous-Supabase-signup spam cap as the authenticated
-      // /api/nuvio/start-oauth flow (server/routes/nuvio.js) - this route
-      // exists specifically so it's reachable BEFORE login, so it needs its
-      // own cap rather than relying on that route's.
-      const ip = req.ip
-      const current = nuvioAdminOAuthSessions.get(ip) || 0
-      if (current >= NUVIO_ADMIN_OAUTH_CAP) {
-        return res.status(429).json({ message: 'Too many pending Nuvio login attempts. Please wait and try again.' })
-      }
-
-      const result = await startNuvioTvLogin()
-      nuvioAdminOAuthSessions.set(ip, current + 1)
-      setTimeout(() => {
-        const c = nuvioAdminOAuthSessions.get(ip) || 0
-        if (c <= 1) nuvioAdminOAuthSessions.delete(ip)
-        else nuvioAdminOAuthSessions.set(ip, c - 1)
-      }, NUVIO_ADMIN_OAUTH_TTL_MS)
-
-      res.json(result)
-    } catch (error) {
-      console.error('Nuvio admin start-oauth error:', error?.message)
-      res.status(500).json({ message: 'Failed to start Nuvio login' })
-    }
-  })
-
-  router.post('/nuvio-poll-oauth', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Nuvio login is only available in public auth mode' })
-      }
-
-      const { code, deviceNonce, anonToken } = req.body || {}
-      if (!code || !deviceNonce || !anonToken) {
-        return responseUtils.badRequest(res, 'code, deviceNonce, and anonToken are required')
-      }
-
-      const result = await pollNuvioTvLogin(code, deviceNonce, anonToken)
-      res.json(result)
-    } catch (error) {
-      console.error('Nuvio admin poll-oauth error:', error?.message)
-      res.status(500).json({ message: 'Failed to poll Nuvio login' })
-    }
-  })
-
-  router.post('/nuvio-login', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Nuvio login is only available in public auth mode' })
-      }
-
-      const { code, deviceNonce, anonToken } = req.body || {}
-      if (!code || !deviceNonce || !anonToken) {
-        return responseUtils.badRequest(res, 'code, deviceNonce, and anonToken are required')
-      }
-
-      let exchanged
-      try {
-        exchanged = await exchangeNuvioTvLogin(code, deviceNonce, anonToken)
-      } catch (err) {
-        return res.status(401).json({ message: err?.message || 'Nuvio approval failed or expired' })
-      }
-
-      const nuvioUserId = exchanged?.user?.id
-      const refreshToken = exchanged?.refreshToken
-      const email = String(exchanged?.user?.email || '').trim().toLowerCase()
-      if (!nuvioUserId || !refreshToken || !email) {
-        return res.status(400).json({ message: 'Nuvio account email not available' })
-      }
-
-      // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
-      let originalAccountId = req.appAccountId
-      if (!originalAccountId && parseCookies) {
-        try {
-          const cookies = parseCookies(req)
-          const accessCookie = cookies[cookieName('sfm_at')] || cookies['sfm_at']
-          const refreshCookie = cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
-          const token = accessCookie || refreshCookie
-          if (token) {
-            const decoded = verifyAccountToken(token, ['access', 'refresh'])
-            if (decoded && decoded.accId) {
-              const accountExists = await prisma.appAccount.findUnique({ where: { id: decoded.accId } })
-              if (accountExists) {
-                originalAccountId = decoded.accId
-                req.appAccountId = originalAccountId
-              }
-            }
-          }
-        } catch (e) {
-          // Can't extract account ID from cookies - not logged in, that's OK
-        }
-      }
-
-      let account
-      let isNewAccount = false
-
-      // If logged in and linking, verify this Nuvio account isn't already linked elsewhere
-      if (originalAccountId) {
-        const currentAccount = await prisma.appAccount.findUnique({ where: { id: originalAccountId } })
-        if (!currentAccount) {
-          originalAccountId = undefined
-        } else {
-          const existingAccountWithEmail = await prisma.appAccount.findUnique({ where: { email } })
-          if (existingAccountWithEmail && existingAccountWithEmail.id !== originalAccountId) {
-            return res.status(409).json({
-              message: 'This Nuvio account is already linked to another SlickSync account',
-              error: 'EMAIL_ALREADY_LINKED'
-            })
-          }
-
-          if (currentAccount.email && currentAccount.email !== email) {
-            return res.status(409).json({
-              message: 'Your account is already linked to a different Nuvio account',
-              error: 'ACCOUNT_ALREADY_LINKED'
-            })
-          }
-
-          const validation = await validateUserNuvioAuth(currentAccount.id, email, req)
-
-          if (!validation.user) {
-            return res.status(400).json({
-              message: 'No user found with this email address. Please create a user with this email first before linking your Nuvio account.',
-              error: 'NO_USER_WITH_EMAIL'
-            })
-          }
-
-          if (!validation.user.nuvioRefreshToken) {
-            return res.status(400).json({
-              message: 'User exists but has no Nuvio authentication. Please connect the user to Nuvio first before linking the account.',
-              error: 'USER_NO_NUVIO_AUTH'
-            })
-          }
-
-          if (!validation.valid) {
-            return res.status(409).json({
-              message: 'A user with this email already exists in your account, but their Nuvio authentication does not match. Please contact support.',
-              error: 'STORED_AUTHKEY_EMAIL_MISMATCH'
-            })
-          }
-
-          if (currentAccount.email == null) {
-            account = await prisma.appAccount.update({
-              where: { id: currentAccount.id },
-              data: { email, linkedProvider: 'nuvio' }
-            })
-          } else {
-            account = currentAccount
-          }
-          req.appAccountId = account.id
-
-          const encryptedRefreshToken = encrypt(refreshToken, req)
-          await prisma.user.update({
-            where: { id: validation.user.id },
-            data: { nuvioRefreshToken: encryptedRefreshToken, nuvioUserId, isActive: true }
-          })
-
-          const at = issueAccessToken(account.id)
-          const rt = issueRefreshToken(account.id)
-          const csrf = randomCsrfToken()
-          res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-          res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 })
-          res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-
-          return res.json({
-            message: 'Account already linked',
-            token: at,
-            account: { id: account.id, uuid: account.uuid, email: account.email || null }
-          })
-        }
-      }
-
-      // Normal login flow (not logged in, or stale cookie account no longer exists)
-      if (!account) {
-        account = await prisma.appAccount.findUnique({ where: { email } })
-
-        if (account) {
-          const validation = await validateUserNuvioAuth(account.id, email, req)
-          if (reallyUnlinked(validation)) {
-            await prisma.appAccount.update({
-              where: { id: account.id },
-              data: { email: null, linkedProvider: null }
-            })
-            account = null
-          }
-        }
-
-        if (!account) {
-          account = await prisma.appAccount.create({
-            data: {
-              avatarUrl: createDefaultAvatar(),
-              uuid: null,
-              email,
-              passwordHash: null,
-              linkedProvider: 'nuvio'
-            }
-          })
-          isNewAccount = true
-        } else if (account.email == null) {
-          account = await prisma.appAccount.update({
-            where: { id: account.id },
-            data: { email, linkedProvider: 'nuvio' }
-          })
-        }
-
-        req.appAccountId = account.id
-      }
-
-      const encryptedRefreshToken = encrypt(refreshToken, req)
-
-      const { ensureEmailUniqueness } = require('../utils/helpers/database')
-      await ensureEmailUniqueness(prisma, email, account.id)
-
-      let user = null
-      // The Nuvio account that signed in (its main profile) - never just the
-      // household's oldest person.
-      const existingUser = await prisma.user.findFirst({
-        where: { accountId: account.id, email, providerType: 'nuvio' },
-        orderBy: { nuvioProfileId: 'asc' }
-      })
-
-      if (isNewAccount) {
-        const baseUsername = email.split('@')[0] || 'nuvio-user'
-        const username = await ensureUniqueUsername(baseUsername, account.id)
-        const createdUser = await prisma.user.create({
-          data: {
-            avatarUrl: createDefaultAvatar(),
-            accountId: account.id,
-            email,
-            username,
-            isActive: true,
-            providerType: 'nuvio',
-            nuvioRefreshToken: encryptedRefreshToken,
-            nuvioUserId
-          }
-        })
-        user = { id: createdUser.id, email: createdUser.email, username: createdUser.username }
-      } else if (existingUser) {
-        await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { nuvioRefreshToken: encryptedRefreshToken, nuvioUserId, isActive: true }
-        })
-      }
-
-      const at = issueAccessToken(account.id);
-      const rt = issueRefreshToken(account.id);
-      const csrf = randomCsrfToken();
-      res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-      res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 });
-
-      return res.json({
-        message: 'Login successful',
-        token: at,
-        account: { id: account.id, uuid: account.uuid, email: account.email || null },
-        ...(user ? { user } : {})
-      })
-    } catch (error) {
-      console.error('Nuvio login error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
-    }
-  })
-
-  // --- Sign in with a Jellyfin-compatible server (public instances) ---
-  //
-  // The same shape as the Nuvio sign-in above. A server user has no email, so
-  // the account is keyed by the identity SlickSync stores for that user
-  // (their id on the server plus the server's host - see
-  // providers/jellyfinAuth.js identityEmail). On a public instance the
-  // address must be a public one; jellyfinAuth refuses private networks.
-
-  // POST /jellyfin-probe, /jellyfin-quick-connect, /jellyfin-quick-connect-status
-  require('../utils/jellyfinConnect').mountSignInSteps(router, 'jellyfin-')
-
-  router.post('/jellyfin-login', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Server sign-in is only available in public auth mode' })
-      }
-      const { signInFromBody, jellyfinFields, rememberSignIn } = require('../utils/jellyfinConnect')
-      const { identityEmail } = require('../providers/jellyfinAuth')
-      let signedIn
-      try {
-        signedIn = await signInFromBody(req.body)
-      } catch (err) {
-        const status = err?.status === 401 ? 401 : 400
-        return res.status(status).json({ message: err?.message || 'Could not sign in to the server', ...(err?.pinNeeded ? { pinNeeded: true } : {}) })
-      }
-      const { probe, login } = signedIn
-      // Signing in retired the token anyone else holding this server user had,
-      // so they take the new one now, whatever the checks below decide.
-      await rememberSignIn(prisma, encrypt, probe, login)
-      const email = identityEmail(probe.serverUrl, login.userId)
-
-      // Signed in already: link this server login to the current account,
-      // which must already have a person with this login.
-      let currentAccountId = req.appAccountId
-      if (!currentAccountId && parseCookies) {
-        try {
-          const cookies = parseCookies(req)
-          const token = cookies[cookieName('sfm_at')] || cookies['sfm_at'] || cookies[cookieName('sfm_rt')] || cookies['sfm_rt']
-          if (token) {
-            const decoded = verifyAccountToken(token, ['access', 'refresh'])
-            if (decoded?.accId && await prisma.appAccount.findUnique({ where: { id: decoded.accId } })) currentAccountId = decoded.accId
-          }
-        } catch { /* not signed in */ }
-      }
-
-      let account = await prisma.appAccount.findUnique({ where: { email } })
-      let isNewAccount = false
-      if (currentAccountId) {
-        if (account && account.id !== currentAccountId) {
-          return res.status(409).json({ message: 'This server login is already linked to another SlickSync account', error: 'EMAIL_ALREADY_LINKED' })
-        }
-        const current = await prisma.appAccount.findUnique({ where: { id: currentAccountId } })
-        if (current.email && current.email !== email) {
-          return res.status(409).json({ message: 'Your account is already linked to a different login', error: 'ACCOUNT_ALREADY_LINKED' })
-        }
-        const person = await prisma.user.findFirst({ where: { accountId: current.id, providerType: 'jellyfin', jellyfinUserId: login.userId } })
-        if (!person) {
-          return res.status(400).json({ message: 'Add this server user as a person first, then link the login.', error: 'NO_USER_WITH_EMAIL' })
-        }
-        account = current.email ? current : await prisma.appAccount.update({ where: { id: current.id }, data: { email, linkedProvider: 'jellyfin' } })
-      } else if (!account) {
-        account = await prisma.appAccount.create({ data: { avatarUrl: createDefaultAvatar(), uuid: null, email, passwordHash: null, linkedProvider: 'jellyfin' } })
-        isNewAccount = true
-      }
-      req.appAccountId = account.id
-
-      const fields = jellyfinFields(probe, login, encrypt, req)
-      let user = null
-      const existing = await prisma.user.findFirst({ where: { accountId: account.id, providerType: 'jellyfin', jellyfinUserId: login.userId } })
-      if (existing) {
-        await prisma.user.update({ where: { id: existing.id }, data: { ...fields, isActive: true } })
-      } else if (isNewAccount) {
-        const username = await ensureUniqueUsername(login.userName || 'jellyfin-user', account.id)
-        const created = await prisma.user.create({
-          data: { avatarUrl: createDefaultAvatar(), accountId: account.id, email, username, isActive: true, ...fields }
-        })
-        user = { id: created.id, email: created.email, username: created.username }
-      }
-
-      const at = issueAccessToken(account.id)
-      const rt = issueRefreshToken(account.id)
-      const csrf = randomCsrfToken()
-      res.cookie(cookieName('sfm_at'), at, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-      res.cookie(cookieName('sfm_rt'), rt, { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 })
-      res.cookie(cookieName('sfm_csrf'), csrf, { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', maxAge: 30 * 24 * 60 * 60 * 1000 })
-      return res.json({
-        message: 'Login successful',
-        token: at,
-        account: { id: account.id, uuid: account.uuid, email: account.email || null },
-        ...(user ? { user } : {})
-      })
-    } catch (error) {
-      console.error('Jellyfin login error:', error?.message)
-      return responseUtils.internalError(res, 'Could not sign in')
-    }
-  })
-
-  // Unlink Stremio account from current account (keep UUID only)
-  router.post('/unlink-stremio', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Unlinking is only available in public auth mode' })
-      }
-
-      const accountId = req.appAccountId
-      if (!accountId) {
-        return res.status(401).json({ message: 'Authentication required' })
-      }
-
-      const { password } = req.body || {}
-
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId } })
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' })
-      }
-
-      if (!account.email) {
-        return res.status(400).json({ message: 'Account is not linked to a Stremio account' })
-      }
-
-      if (!account.uuid || !account.passwordHash) {
-        return res.status(400).json({
-          message: 'Cannot keep UUID-only — this account has no UUID/password set. Use "Add UUID & Password" first.',
-          error: 'NO_CREDENTIALS'
-        })
-      }
-
-      // Require password confirmation to prove user knows their credentials
-      if (!password) {
-        return res.status(400).json({ message: 'Password is required to confirm unlink', error: 'PASSWORD_REQUIRED' })
-      }
-
-      const passwordValid = await bcrypt.compare(password, account.passwordHash)
-      if (!passwordValid) {
-        return res.status(401).json({ message: 'Incorrect password', error: 'INVALID_PASSWORD' })
-      }
-
-      await prisma.appAccount.update({
-        where: { id: accountId },
-        data: { email: null, linkedProvider: null }
-      })
-
-      return res.json({ message: 'Stremio account unlinked successfully. You can now log in with your UUID and password.', uuid: account.uuid })
-    } catch (error) {
-      console.error('Unlink Stremio error:', error)
-      return responseUtils.internalError(res, GENERIC_FAILURE)
-    }
-  })
-
-  // Unlink UUID from current account (keep Stremio only)
-  router.post('/unlink-uuid', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Unlinking is only available in public auth mode' })
-      }
-
-      const accountId = req.appAccountId
-      if (!accountId) {
-        return res.status(401).json({ message: 'Authentication required' })
-      }
-
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId } })
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' })
-      }
-
-      if (!account.email) {
-        return res.status(400).json({
-          message: 'Cannot remove UUID — this account has no Stremio linked. You would be locked out.',
-          error: 'NO_STREMIO'
-        })
-      }
-
-      if (!account.uuid) {
-        return res.status(400).json({ message: 'Account already has no UUID', error: 'ALREADY_NO_UUID' })
-      }
-
-      await prisma.appAccount.update({
-        where: { id: accountId },
-        data: { uuid: null, passwordHash: null }
-      })
-
-      return res.json({ message: 'UUID and password removed. You can now log in with Stremio only.' })
-    } catch (error) {
-      console.error('Unlink UUID error:', error)
-      return responseUtils.internalError(res, GENERIC_FAILURE)
-    }
-  })
-
-  // Set credentials (add or change UUID + password)
-  router.post('/set-credentials', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(400).json({ message: 'Setting credentials is only available in public auth mode' })
-      }
-
-      const accountId = req.appAccountId
-      if (!accountId) {
-        return res.status(401).json({ message: 'Authentication required' })
-      }
-
-      const { password } = req.body || {}
-      if (!password || typeof password !== 'string' || password.trim().length < 4) {
-        return res.status(400).json({ message: 'Password must be at least 4 characters', error: 'WEAK_PASSWORD' })
-      }
-
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId } })
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' })
-      }
-
-      const passwordHash = await bcrypt.hash(password.trim(), 12)
-
-      if (account.uuid) {
-        // Account already has a UUID — just update the password
-        await prisma.appAccount.update({
-          where: { id: accountId },
-          data: { passwordHash }
-        })
-        return res.json({ message: 'Password updated successfully.', uuid: account.uuid })
-      } else {
-        // Generate a new UUID
-        const newUuid = await generateUniqueAccountUuid()
-        await prisma.appAccount.update({
-          where: { id: accountId },
-          data: { uuid: newUuid, passwordHash }
-        })
-        return res.json({ message: 'UUID and password set successfully.', uuid: newUuid })
-      }
-    } catch (error) {
-      console.error('Set credentials error:', error)
-      return responseUtils.internalError(res, GENERIC_FAILURE)
-    }
-  })
-
-  // Session info endpoint
-  router.get('/me', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public' && !PRIVATE_AUTH_ENABLED) {
-        return res.json({ account: null, message: 'Auth disabled' });
-      }
-
-      if (!req.appAccountId) {
-        return res.status(401).json({ message: 'Not authenticated' });
-      }
-
-      // For private auth, return a simple account object
-      if (PRIVATE_AUTH_ENABLED && INSTANCE_TYPE !== 'public') {
-        return res.json({
-          account: {
-            id: req.appAccountId,
-            uuid: null,
-            email: null
-          }
+    // Shared tail of a successful login (real session, post any 2FA check) -
+    // used by /login, /private-login, and /verify-2fa, so the three don't
+    // each hand-roll the same cookie-setting block with a chance to drift.
+    function issueSessionCookies(res, accountId) {
+        const at = issueAccessToken(accountId);
+        const rt = issueRefreshToken(accountId);
+        const csrf = randomCsrfToken();
+        res.cookie(cookieName("sfm_at"), at, {
+            httpOnly: true,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/",
+            sameSite: isProdEnv() ? "strict" : "lax",
+            secure: isProdEnv(),
         });
-      }
-
-      const account = await prisma.appAccount.findUnique({
-        where: { id: req.appAccountId },
-        select: { id: true, uuid: true, email: true }
-      });
-
-      if (!account) {
-        return responseUtils.notFound(res, 'Account');
-      }
-
-      res.json({ account });
-    } catch (error) {
-      console.error('Session error:', error);
-      return responseUtils.internalError(res, GENERIC_FAILURE);
+        res.cookie(cookieName("sfm_rt"), rt, {
+            httpOnly: true,
+            maxAge: 365 * 24 * 60 * 60 * 1000,
+            path: "/",
+            sameSite: isProdEnv() ? "strict" : "lax",
+            secure: isProdEnv(),
+        });
+        res.cookie(cookieName("sfm_csrf"), csrf, {
+            httpOnly: false,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/",
+            sameSite: isProdEnv() ? "strict" : "lax",
+            secure: isProdEnv(),
+        });
+        return at;
     }
-  });
 
-  router.post('/logout', (req, res) => {
-    const opts = { httpOnly: true, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', expires: new Date(0) };
-    res.cookie(cookieName('sfm_at'), '', opts);
-    res.cookie(cookieName('sfm_rt'), '', opts);
-    res.cookie(cookieName('sfm_csrf'), '', { httpOnly: false, secure: isProdEnv(), sameSite: isProdEnv() ? 'strict' : 'lax', path: '/', expires: new Date(0) });
-    return res.json({ message: 'Logged out' });
-  });
-
-  // Export all data for one account (config export). Extracted from the
-  // route below so the scheduled backup system (server/utils/backup.js) can
-  // call this directly with a synthetic { appAccountId } object instead of
-  // going through a real HTTP request - it previously self-called this same
-  // route over plain fetch() with no auth context at all, which would have
-  // hit the 401 guard below for every account except by accident in private
-  // mode (where whereScope ignores appAccountId entirely). That's the actual
-  // reason scheduled backups only ever worked for the single private-mode
-  // account: there was no way for an unauthenticated internal call to name
-  // which tenant to export. Calling this function directly with a real
-  // accountId sidesteps that entirely - no HTTP hop, no auth token needed,
-  // same account-scoping logic either way.
-  // includeSecrets: opt-in, per export. Off by default - a plain config
-  // backup is unencrypted JSON, and people share those while troubleshooting
-  // without thinking about what is inside. But defaulting to safe is not the
-  // same as deciding for the operator: someone keeping backups on their own
-  // encrypted storage has a legitimate reason to want a restore that does not
-  // require also finding a Disaster Recovery Kit passphrase.
-  async function buildConfigExportPayload(req, { includeSecrets = false } = {}) {
-      const whereScope = INSTANCE_TYPE === 'public' ? { accountId: req.appAccountId } : {}
-      if (INSTANCE_TYPE === 'public' && !req.appAccountId) { const e = new Error('Unauthorized'); e.status = 401; throw e }
-      // Ensure request-scoped DEK is available for decryption in public mode
-      try {
-        if (INSTANCE_TYPE === 'public' && !req.accountDek && typeof getAccountDek === 'function') {
-          let dek = getAccountDek(req.appAccountId)
-          if (!dek) {
-            const acct = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { uuid: true } })
-            if (acct?.uuid) {
-              dek = getAccountDek(acct.uuid)
-            }
-          }
-          if (dek) req.accountDek = dek
+    // Checks a submitted TOTP or backup code against the account, consuming a
+    // backup code if that's what matched (each works once). Returns true/false.
+    async function verifyTwoFactorCode(account, code) {
+        const twoFactor = require("../utils/twoFactor");
+        if (!(code && account?.twoFactorSecret)) {
+            return false;
         }
-      } catch { }
-      const [users, groups, addons, accountRec] = await Promise.all([
-        prisma.user.findMany({ where: whereScope }),
-        prisma.group.findMany({
-          where: whereScope,
-          include: {
-            addons: { include: { addon: true } }
-          }
-        }),
-        prisma.addon.findMany({ where: whereScope, include: { groupAddons: true } }),
-        // Was public-mode only - private-mode config exports/backups never
-        // captured Settings at all as a result (timezone, notification
-        // toggles, safe/unsafe mode, etc. all silently reverted to defaults
-        // on any restore). Now fetched in both modes; the actual secrets
-        // inside (webhookUrl, rpdbApiKey, tmdbApiKey, mdblistApiKey) are
-        // stripped out below before this ever reaches the payload - they
-        // route through the passphrase-encrypted Disaster Recovery Kit
-        // instead, same treatment Vault already gets.
-        prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
-      ])
-      // Build addon id -> name map for user excludedAddons name resolution
-      const addonIdToName = new Map(addons.map(a => [a.id, a.name]))
-
-      // AIOStreams / AIOMetadata household profiles, per person. They hang off
-      // a person's id, which an import replaces, so each person also carries
-      // an opaque reference (`jellyfinHousehold.ref`) the import maps to the
-      // new id - which is also what re-keys per-person and per-profile
-      // collections in the account settings (sync.aioCollections).
-      const profileRows = await prisma.jellyfinProfile.findMany({ where: whereScope }).catch(() => [])
-      const usernameById = new Map(users.map(u => [u.id, u.username]))
-      const householdOf = (user) => {
-        const profiles = profileRows.filter(p => p.ownerUserId === user.id).map(p => {
-          let token = null
-          if (p.token) {
-            try { token = decrypt(p.token, req) } catch (e) { console.warn(`Failed to decrypt a household sign-in for ${user.id}:`, e.message) }
-          }
-          return {
-            ref: p.id,
-            jellyfinUserId: p.jellyfinUserId,
-            name: p.name,
-            loginName: p.loginName,
-            token,
-            needsPin: p.needsPin,
-            skip: p.skip,
-            ownUsername: p.ownUserId ? (usernameById.get(p.ownUserId) || null) : null,
-          }
-        })
-        return { ref: user.id, profiles }
-      }
-
-      // Decrypt stremioAuthKey AND nuvioRefreshToken for each user before
-      // exporting. nuvioRefreshToken previously rode along un-decrypted via
-      // the {...user} spread below - export never decrypted it, and
-      // config-import never re-encrypted it either, so it only "worked" by
-      // accident when the encryption key hadn't changed between export and
-      // import. A real disaster-recovery restore (new server, new key -
-      // exactly what the Disaster Recovery Kit exists for) would silently
-      // fail to decrypt it, breaking every Nuvio user's connection. Now
-      // handled identically to stremioAuthKey.
-      const decryptedUsers = users.map(user => {
-        const decryptedUser = { ...user }
-        if (user.stremioAuthKey) {
-          try {
-            decryptedUser.stremioAuthKey = decrypt(user.stremioAuthKey, req)
-          } catch (e) {
-            console.warn(`Failed to decrypt auth key for user ${user.id}:`, e.message)
-            decryptedUser.stremioAuthKey = null
-          }
+        const secret = twoFactor.decryptSecret(account.id, account.twoFactorSecret);
+        if (twoFactor.verifyTotp(secret, code)) {
+            return true;
         }
-        if (user.nuvioRefreshToken) {
-          try {
-            decryptedUser.nuvioRefreshToken = decrypt(user.nuvioRefreshToken, req)
-          } catch (e) {
-            console.warn(`Failed to decrypt Nuvio refresh token for user ${user.id}:`, e.message)
-            decryptedUser.nuvioRefreshToken = null
-          }
-        }
-        if (user.aioConfigPassword) {
-          try {
-            decryptedUser.aioConfigPassword = decrypt(user.aioConfigPassword, req)
-          } catch (e) {
-            decryptedUser.aioConfigPassword = null
-          }
-        }
-        // A Jellyfin server sign-in, for the same reason as the two above.
-        if (user.jellyfinToken) {
-          try {
-            decryptedUser.jellyfinToken = decrypt(user.jellyfinToken, req)
-          } catch (e) {
-            console.warn(`Failed to decrypt Jellyfin token for user ${user.id}:`, e.message)
-            decryptedUser.jellyfinToken = null
-          }
-        }
-        // Simkl's sign-in too: it used to ride along still encrypted, which
-        // only worked when the import landed under the same key.
-        if (user.simklAccessToken) {
-          try {
-            decryptedUser.simklAccessToken = decrypt(user.simklAccessToken, req)
-          } catch (e) {
-            console.warn(`Failed to decrypt Simkl token for user ${user.id}:`, e.message)
-            decryptedUser.simklAccessToken = null
-          }
-        }
-        if (user.providerType === 'jellyfin') decryptedUser.jellyfinHousehold = householdOf(user)
-        // Normalize excludedAddons to addon NAMES for export (keep JSON string format for compatibility)
-        try {
-          const parsedExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : []
-          if (Array.isArray(parsedExcluded)) {
-            const names = parsedExcluded
-              .map(id => addonIdToName.get(id))
-              .filter(Boolean)
-            decryptedUser.excludedAddons = JSON.stringify(names)
-          }
-        } catch { }
-        // Ensure protectedAddons remains a JSON string of names
-        try {
-          if (Array.isArray(user.protectedAddons)) {
-            decryptedUser.protectedAddons = JSON.stringify(user.protectedAddons)
-          } else if (typeof user.protectedAddons !== 'string' && user.protectedAddons) {
-            decryptedUser.protectedAddons = JSON.stringify([])
-          }
-        } catch { }
-        // Omit internal fields. `ref` is the person's id, kept so an import
-        // back into this instance can give them the same id again - their
-        // watch history, sessions and stats are all filed under it.
-        decryptedUser.ref = user.id
-        delete decryptedUser.id
-        delete decryptedUser.accountId
-        // Omit stremioAddons from export (not needed in exported config)
-        delete decryptedUser.stremioAddons
-        return decryptedUser
-      })
-
-      // Build addons with originalManifest and simplified resources/catalogs
-      const exportedAddons = await Promise.all(addons.map(async (addon) => {
-        // Get the original manifest (full, unfiltered)
-        let originalManifest = null
-        if (addon.originalManifest) {
-          try {
-            originalManifest = JSON.parse(decrypt(addon.originalManifest, req))
-          } catch (e) {
-            console.warn(`Failed to decrypt originalManifest for ${addon.name}:`, e.message)
-          }
-        }
-
-        // Fallback: if no originalManifest, try to get from current manifest
-        if (!originalManifest && addon.manifest) {
-          try {
-            originalManifest = JSON.parse(decrypt(addon.manifest, req))
-          } catch (e) {
-            console.warn(`Failed to decrypt manifest for ${addon.name}:`, e.message)
-          }
-        }
-
-        // Last resort: fetch from URL if available
-        if (!originalManifest) {
-          const transportUrl = getDecryptedManifestUrl(addon, req)
-          if (transportUrl) {
-            try {
-              const rsp = await safeFetch(transportUrl, {}, instancePolicy())
-              if (rsp.ok) {
-                originalManifest = await rsp.json()
-                console.log(`Fetched originalManifest for config export: ${originalManifest?.name}`)
-              }
-            } catch (err) {
-              console.warn(`Failed to fetch manifest for ${transportUrl}:`, err?.message)
-            }
-          }
-        }
-
-        // Create fallback manifest if nothing else works
-        if (!originalManifest) {
-          originalManifest = {
-            id: addon.name || 'unknown.addon',
-            name: addon.name || 'Unknown',
-            version: addon.version || null,
-            description: addon.description || null,
-            logo: addon.iconUrl || null,
-            resources: [],
-            catalogs: [],
-            types: []
-          }
-        }
-
-        // Get current resource and catalog selections (already in simplified format)
-        const currentResources = (() => {
-          try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] }
-        })()
-
-        const currentCatalogs = (() => {
-          try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] }
-        })()
-
-        // cleanedGroupAddons is only calculated for reference if needed but not exported in main payload
-        const cleanedGroupAddons = (addon.groupAddons || []).map(ga => ({
-          name: addon.name,
-          isEnabled: ga.isEnabled
-          // omit groupId, addonId and settings
-        }))
-
-        return {
-          name: addon.name,
-          description: addon.description,
-          manifestUrl: getDecryptedManifestUrl(addon, req),
-          originalManifest, // Full manifest with all available resources
-          resources: currentResources, // Simplified resource names: ["stream", "catalog"]
-          catalogs: currentCatalogs,   // Simplified catalog (type,id) pairs: [{"type":"movie","id":"123"}]
-          stremioAddonId: addon.stremioAddonId || (originalManifest && originalManifest.id) || null,
-          version: addon.version,
-          isActive: addon.isActive,
-          iconUrl: addon.iconUrl,
-          // drop internal ids and relations from export
-        }
-      }))
-
-      // Build quick userId->username map for groups export
-      const userIdToUsername = new Map(users.map(u => [u.id, u.username]))
-
-      // Clean groups: export addons as ordered list of { name, isEnabled }
-      const cleanedGroups = await Promise.all(groups.map(async g => {
-        // Use getGroupAddons to get addons in correct order
-        const { getGroupAddons } = require('../utils/helpers')
-        const orderedAddons = await getGroupAddons(prisma, g.id, req)
-        // Build name->isEnabled map from group include as fallback
-        const enabledByName = new Map()
-        for (const ga of (g.addons || [])) {
-          const ref = ga && ga.addon ? ga.addon : null
-          if (ref && ref.name) enabledByName.set(ref.name, ga.isEnabled !== false)
-        }
-        const addonsOrdered = orderedAddons.map(a => ({
-          name: a.name,
-          isEnabled: (typeof a.isEnabled === 'boolean') ? a.isEnabled : (enabledByName.has(a.name) ? enabledByName.get(a.name) : true)
-        }))
-
-        const usersArr = (() => {
-          try {
-            const ids = g.userIds ? JSON.parse(g.userIds) : []
-            return ids.map(id => userIdToUsername.get(id)).filter(Boolean)
-          } catch { return [] }
-        })()
-
-        return {
-          name: g.name,
-          description: g.description,
-          isActive: g.isActive,
-          colorIndex: g.colorIndex,
-          users: usersArr,
-          addons: addonsOrdered
-        }
-      }))
-
-      // Normalize account sync for export
-      let accountSync = null
-      try {
-        const rawSync = accountRec?.sync
-        if (rawSync != null) {
-          if (typeof rawSync === 'string') {
-            try { accountSync = JSON.parse(rawSync) } catch { accountSync = { frequency: '0' } }
-          } else if (typeof rawSync === 'object') {
-            accountSync = rawSync
-          }
-        }
-      } catch { }
-
-      // Ensure useCustomFields is included in export (default to true if not present)
-      // Migrate old useCustomNames to useCustomFields if present
-      if (accountSync && typeof accountSync === 'object') {
-        if (typeof accountSync.useCustomFields !== 'boolean') {
-          if (typeof accountSync.useCustomNames === 'boolean') {
-            accountSync.useCustomFields = accountSync.useCustomNames
-            delete accountSync.useCustomNames
-          } else {
-            accountSync.useCustomFields = true
-          }
-        }
-      } else if (accountSync === null) {
-        // If no sync config exists, create a minimal one with useCustomFields
-        accountSync = { useCustomFields: true }
-      }
-
-      // Real live secrets, not preferences. Stripped unless the caller
-      // explicitly asked for them, because a plain export is unencrypted and
-      // easy to share by accident. They are always in the Disaster Recovery
-      // Kit regardless (disasterRecoveryKit.js), passphrase-encrypted like
-      // Vault secrets - so leaving them out here never means losing them.
-      if (accountSync && typeof accountSync === 'object' && !includeSecrets) {
-        for (const f of SETTINGS_SECRET_FIELDS) delete accountSync[f]
-      }
-
-      const payload = { users: decryptedUsers, groups: cleanedGroups, addons: exportedAddons, sync: accountSync }
-      return payload
-  }
-
-  // Export all data for the logged-in account (config export) - thin HTTP
-  // wrapper around buildConfigExportPayload above.
-  router.get('/config-export', async (req, res) => {
-    try {
-      // ?includeSecrets=1 (or {includeSecrets:true}) opts this one export
-      // into carrying live keys - see buildConfigExportPayload.
-      const wantSecrets = req.query?.includeSecrets === '1' || req.query?.includeSecrets === 'true' || req.body?.includeSecrets === true
-      const payload = await buildConfigExportPayload(req, { includeSecrets: wantSecrets })
-      res.setHeader('Content-Disposition', 'attachment; filename="slicksync-export.json"')
-      return res.json(payload)
-    } catch (e) {
-      if (e?.status === 401) return res.status(401).json({ error: 'Unauthorized' })
-      console.error('Export failed:', e)
-      return res.status(500).json({ error: 'Export failed' })
-    }
-  });
-
-  // Export only addons for the logged-in account
-  router.get('/addon-export', async (req, res) => {
-    try {
-      const whereScope = INSTANCE_TYPE === 'public' ? { accountId: req.appAccountId } : {}
-      if (INSTANCE_TYPE === 'public' && !req.appAccountId) return res.status(401).json({ error: 'Unauthorized' })
-      const addons = await prisma.addon.findMany({ where: whereScope })
-
-      // Build addon objects with originalManifest and current selections
-      const exported = await Promise.all(
-        addons.map(async (addon) => {
-          const transportUrl = getDecryptedManifestUrl(addon, req)
-
-          // Get the original manifest (full, unfiltered)
-          let originalManifest = null
-          if (addon.originalManifest) {
-            try {
-              originalManifest = JSON.parse(decrypt(addon.originalManifest, req))
-            } catch (e) {
-              console.warn(`Failed to decrypt originalManifest for ${addon.name}:`, e.message)
-            }
-          }
-
-          // Fallback: if no originalManifest, try to get from current manifest
-          if (!originalManifest && addon.manifest) {
-            try {
-              originalManifest = JSON.parse(decrypt(addon.manifest, req))
-            } catch (e) {
-              console.warn(`Failed to decrypt manifest for ${addon.name}:`, e.message)
-            }
-          }
-
-          // Last resort: fetch from URL if available
-          if (!originalManifest && transportUrl) {
-            try {
-              const rsp = await safeFetch(transportUrl, {}, instancePolicy())
-              if (rsp.ok) {
-                originalManifest = await rsp.json()
-                console.log(`Fetched originalManifest for export: ${originalManifest?.name}`)
-              }
-            } catch (err) {
-              console.warn(`Failed to fetch manifest for ${transportUrl}:`, err?.message)
-            }
-          }
-
-          // Create fallback manifest if nothing else works
-          if (!originalManifest) {
-            originalManifest = {
-              id: addon.name || 'unknown.addon',
-              version: addon.version || null,
-              name: addon.name || '',
-              description: addon.description || null,
-              logo: addon.iconUrl || null,
-              background: null,
-              types: [],
-              resources: (() => { try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] } })(),
-              idPrefixes: null,
-              catalogs: [],
-              addonCatalogs: [],
-              behaviorHints: { configurable: false, configurationRequired: false },
-            }
-          }
-
-          // Get current resource and catalog selections (already in simplified format)
-          const currentResources = (() => {
-            try { return addon.resources ? JSON.parse(addon.resources) : [] } catch { return [] }
-          })()
-
-          const currentCatalogs = (() => {
-            try { return addon.catalogs ? JSON.parse(addon.catalogs) : [] } catch { return [] }
-          })()
-
-          return {
-            name: addon.name || '',
-            manifestUrl: transportUrl,
-            originalManifest, // Full manifest with all available resources
-            resources: currentResources, // Simplified resource names: ["stream", "catalog"]
-            catalogs: currentCatalogs,   // Simplified catalog (type,id) pairs: [{"type":"movie","id":"123"}]
-            stremioAddonId: addon.stremioAddonId || (originalManifest && originalManifest.id) || null,
-            flags: { protected: false },
-          }
-        })
-      )
-
-      res.setHeader('Content-Disposition', 'attachment; filename="slicksync-addon-export.json"')
-      return res.json(exported)
-    } catch (e) {
-      console.error('Export addons failed:', e)
-      return res.status(500).json({ error: 'Export addons failed' })
-    }
-  });
-
-  // Import full configuration with an account-scoped reset first (canonical path)
-  router.post('/config-import', upload.single('file'), async (req, res) => {
-    try {
-      console.log('Config import started');
-      if (INSTANCE_TYPE === 'public' && !req.appAccountId) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      let jsonData;
-      if (req.file) {
-        // Handle file upload
-        console.log('Processing uploaded file');
-        jsonData = JSON.parse(req.file.buffer.toString('utf8'));
-      } else if (req.body.jsonData) {
-        // Handle JSON string in body
-        console.log('Processing JSON data from body');
-        jsonData = JSON.parse(req.body.jsonData);
-      } else {
-        return responseUtils.badRequest(res, 'No file or jsonData provided');
-      }
-
-      // Encrypted off-site backup (.enc envelope from backupTargets'
-      // optional passphrase): decrypt to the real export before anything
-      // else looks at it. Without a passphrase this is a distinct error the
-      // client recognizes and prompts for, not a generic parse failure.
-      if (jsonData && jsonData.slicksyncEncryptedBackup) {
-        const passphrase = String(req.body?.passphrase || '');
-        if (!passphrase) {
-          return res.status(400).json({ message: 'This backup is encrypted - its passphrase is required to import it', code: 'PASSPHRASE_REQUIRED' });
+        if (!account.twoFactorBackupCodes) {
+            return false;
         }
         try {
-          const { scryptKey, aesGcmDecrypt } = require('../utils/encryption');
-          const key = await scryptKey(passphrase, jsonData.salt);
-          jsonData = JSON.parse(aesGcmDecrypt(key, jsonData.payload));
-        } catch {
-          return res.status(400).json({ message: 'Wrong passphrase for this encrypted backup' });
-        }
-      }
-
-      // Handle both wrapped and direct config formats
-      let configData = jsonData.data || jsonData;
-      console.log('Config data structure:', Object.keys(configData));
-
-      // Competitor/legacy tolerance: this importer descends from Syncio's
-      // export format, and other Syncio-family managers rename a field here
-      // and there. Alias the common variants BEFORE validating, so their
-      // files drop straight in instead of failing on a synonym.
-      if (configData && typeof configData === 'object') {
-        for (const arrKey of ['users', 'groups', 'addons']) {
-          if (Array.isArray(configData[arrKey])) {
-            configData[arrKey] = configData[arrKey].map((item) => {
-              if (!item || typeof item !== 'object') return item;
-              const mapped = { ...item };
-              if (!mapped.manifestUrl && typeof mapped.url === 'string') mapped.manifestUrl = mapped.url;
-              if (!mapped.name && typeof mapped.title === 'string') mapped.name = mapped.title;
-              if (arrKey === 'users' && !mapped.username && typeof mapped.name === 'string') mapped.username = mapped.name;
-              return mapped;
+            const hashed = JSON.parse(account.twoFactorBackupCodes);
+            const remaining = await twoFactor.consumeBackupCode(hashed, code);
+            if (!remaining) {
+                return false;
+            }
+            await prisma.appAccount.update({
+                data: { twoFactorBackupCodes: JSON.stringify(remaining) },
+                where: { id: account.id },
             });
-          }
+            return true;
+        } catch {
+            return false;
         }
-      }
+    }
 
-      if (!configData || (!configData.users && !configData.addons)) {
-        // Same playbook as the Trakt importer: an unrecognised file should
-        // say what it actually looked like - top-level key names, never
-        // values - so adding support for a new manager's format is a
-        // one-message fix instead of a guessing game.
-        const shape = configData && typeof configData === 'object'
-          ? `an object with keys: ${Object.keys(configData).slice(0, 12).join(', ')}`
-          : typeof configData;
-        return responseUtils.badRequest(res, `Not a recognised config export - expected "users" and/or "addons" arrays (Syncio-family format). This file is ${shape}.`);
-      }
-
-      const { users, groups, addons, sync: importedSync } = configData;
-      const accountId = req.appAccountId || 'default';
-
-      // Who is here right now, by name - so a file exported before people
-      // carried a `ref` can still hand each one back their own id below.
-      const idByUsernameBeforeImport = new Map(
-        (await prisma.user.findMany({ where: { accountId }, select: { id: true, username: true } }).catch(() => []))
-          .filter((u) => u.username).map((u) => [u.username, u.id])
-      );
-
-      // Reset existing data for this account using shared function
-      await resetAccountData(accountId);
-
-      // Apply account sync settings if provided
-      try {
-        if (importedSync && (typeof importedSync === 'object' || typeof importedSync === 'string')) {
-          const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-          let parsedSync = importedSync
-          if (typeof importedSync === 'string') {
-            try { parsedSync = JSON.parse(importedSync) } catch { parsedSync = { enabled: true, frequency: '0' } }
-          }
-
-          // Ensure useCustomFields is included (default to true if not present for backward compatibility)
-          // Migrate old useCustomNames to useCustomFields if present
-          if (typeof parsedSync === 'object' && parsedSync !== null) {
-            if (typeof parsedSync.useCustomFields !== 'boolean') {
-              if (typeof parsedSync.useCustomNames === 'boolean') {
-                parsedSync.useCustomFields = parsedSync.useCustomNames
-                delete parsedSync.useCustomNames
-              } else {
-                parsedSync.useCustomFields = true
-              }
-            }
-          }
-
-          // Merge onto whatever's already there rather than replacing it
-          // outright - the config export deliberately strips real secrets
-          // (webhookUrl, rpdbApiKey, tmdbApiKey, mdblistApiKey; see
-          // buildConfigExportPayload) so they never end up in a plain
-          // backup file. A naive overwrite here would silently wipe those
-          // secrets off the account on every restore, since the imported
-          // payload never has them to begin with. The Disaster Recovery Kit
-          // restores them separately, after this import, from its own
-          // passphrase-encrypted bundle - see disasterRecoveryKit.js.
-          let existingSync = acct?.sync
-          if (typeof existingSync === 'string') {
-            try { existingSync = JSON.parse(existingSync) } catch { existingSync = null }
-          }
-          const mergedSync = { ...(existingSync && typeof existingSync === 'object' ? existingSync : {}), ...parsedSync }
-
-          let valueToStore = mergedSync
-          if (typeof acct?.sync === 'string') {
-            // DB expects string (SQLite)
-            valueToStore = JSON.stringify(mergedSync)
-          } else {
-            // DB expects JSON (Postgres)
-            valueToStore = mergedSync
-          }
-          await prisma.appAccount.update({ where: { id: accountId }, data: { sync: valueToStore } })
-        }
-      } catch (e) {
-        console.warn('Failed to apply imported sync settings:', e?.message)
-      }
-
-      // Import in correct order: groups → addons → users
-
-      // 1. Import groups first (always new IDs, defer userIds mapping)
-      const importedGroups = [];
-      if (groups && Array.isArray(groups)) {
-        for (const groupData of groups) {
-          const { id: _exportGroupId, addons, userIds: _legacyUserIds, users, ...groupFields } = groupData;
-          const group = await prisma.group.create({
-            data: {
-              ...groupFields,
-              accountId,
-              // do not include userIds yet; we will remap after users are created
-            }
-          });
-          const groupWithAddons = {
-            ...group,
-            addons: Array.isArray(addons) ? addons : [],
-            users: Array.isArray(users) ? users : [] // Expect usernames only
-          };
-          console.log(`🔍 Storing group "${groupWithAddons.name}" with addons:`, groupWithAddons.addons);
-          importedGroups.push(groupWithAddons);
-        }
-      }
-
-      // 2. Import addons
-      const importedAddons = [];
-      console.log(`Starting addon import, found ${addons ? addons.length : 0} addons`);
-      if (addons && Array.isArray(addons)) {
-        // Use the same logic as the addon-import endpoint
-        for (const addonData of addons) {
-          try {
-            // Get URL from manifestUrl (preferred) or legacy transportUrl
-            const transportUrl = addonData.manifestUrl || addonData.transportUrl;
-
-            // Validate required fields
-            if (!transportUrl) {
-              console.warn('Skipping addon with missing URL:', addonData);
-              continue;
-            }
-
-            // Use the new approach: prefer originalManifest from export, fallback to fetching
-            let originalManifestObj = addonData.originalManifest || null
-
-            // If no originalManifest in export, try to fetch from URL
-            if (!originalManifestObj) {
-              try {
-                const resp = await safeFetch(transportUrl, {}, instancePolicy())
-                if (resp.ok) {
-                  originalManifestObj = await resp.json()
-                  console.log(`Fetched originalManifest for config import: ${originalManifestObj?.name}`)
-                }
-              } catch (e) {
-                console.warn(`Failed to fetch manifest for ${transportUrl}:`, e.message)
-              }
-            }
-
-            // Create fallback manifest if nothing else works
-            if (!originalManifestObj) {
-              originalManifestObj = {
-                id: addonData.name || 'unknown.addon',
-                name: addonData.name || 'Unknown',
-                version: addonData.version || null,
-                description: addonData.description || null,
-                logo: addonData.iconUrl || null,
-                resources: [],
-                catalogs: [],
-                types: []
-              }
-            }
-
-            const transportName = addonData.name || addonData.transportName || originalManifestObj.name || 'Unknown';
-
-            // Check if addon already exists BY NAME ONLY
-            let existingAddon = await prisma.addon.findFirst({
-              where: {
-                accountId: getAccountId(req),
-                name: transportName
-              }
-            })
-
-            // Get selected resources and catalogs from export data
-            // If export data is empty, derive from originalManifest (select all)
-            const selectedResources = (() => {
-              const resources = Array.isArray(addonData.resources) ? addonData.resources : []
-              // Ensure we only store resource names, not full objects
-              const parsed = resources.map(r => {
-                if (typeof r === 'string') return r
-                if (r && typeof r === 'object' && r.name) return r.name
-                return null
-              }).filter(Boolean)
-              // Fallback: if empty, derive all resources from manifest
-              if (parsed.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.resources)) {
-                return originalManifestObj.resources.map(r => typeof r === 'string' ? r : (r && (r.name || r.type))).filter(Boolean)
-              }
-              return parsed
-            })()
-
-            const selectedCatalogs = (() => {
-              const cats = Array.isArray(addonData.catalogs) ? addonData.catalogs : []
-              // Fallback: if empty, derive all catalogs from manifest
-              if (cats.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.catalogs)) {
-                return originalManifestObj.catalogs.filter(c => c && c.type && c.id).map(c => ({
-                  type: c.type,
-                  id: c.id,
-                  search: c.extra ? c.extra.some(e => e.name === 'search') : false
-                }))
-              }
-              return cats
-            })()
-
-            console.log(`Importing ${transportName} with resources:`, selectedResources, 'catalogs:', selectedCatalogs)
-
-            // Apply filtering to create the filtered manifest (same logic as AddonDetailModal)
-            let filteredManifest = originalManifestObj
-            if (selectedResources.length > 0) {
-              filteredManifest = filterManifestByResources(originalManifestObj, selectedResources)
-              console.log(`Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after resource filtering`)
-            }
-            if (selectedCatalogs.length > 0 && filteredManifest) {
-              filteredManifest = filterManifestByCatalogs(filteredManifest, selectedCatalogs)
-              console.log(`Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after catalog filtering`)
-            }
-
-            // Convert selected catalogs to simplified (type, id, search) format for storage
-            const simplifiedCatalogs = (() => {
-              try {
-                // If selectedCatalogs are already simplified (from export), use them directly
-                if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'object' && selectedCatalogs[0].type && selectedCatalogs[0].id) {
-                  return selectedCatalogs.map(c => ({
-                    type: c.type,
-                    id: c.id,
-                    search: c.search !== undefined ? c.search : false
-                  }))
-                }
-                // If they're just IDs, try to match them with originalManifest catalogs
-                if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'string') {
-                  const originalCatalogs = Array.isArray(originalManifestObj?.catalogs) ? originalManifestObj.catalogs : []
-                  const processedCatalogs = []
-
-                  for (const id of selectedCatalogs) {
-                    const catalog = originalCatalogs.find(c => c.id === id)
-                    if (!catalog) continue
-
-                    // Check if catalog has search functionality
-                    const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
-                    const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
-                    const isEmbeddedSearch = hasSearch && hasOtherExtras
-                    const isStandaloneSearch = hasSearch && !hasOtherExtras
-
-                    if (isStandaloneSearch) {
-                      // Standalone search catalog: add with original ID (no suffix)
-                      processedCatalogs.push({
-                        type: catalog.type,
-                        id: catalog.id
-                      })
-                    } else if (isEmbeddedSearch) {
-                      // Embedded search catalog: add both original and search versions
-                      processedCatalogs.push({
-                        type: catalog.type,
-                        id: catalog.id
-                      })
-                      processedCatalogs.push({
-                        type: catalog.type,
-                        id: `${catalog.id}-embed-search`
-                      })
-                    } else {
-                      // Regular catalog: add as-is
-                      processedCatalogs.push({
-                        type: catalog.type,
-                        id: catalog.id
-                      })
-                    }
-                  }
-
-                  return processedCatalogs
-                }
-                return []
-              } catch { return [] }
-            })()
-
-            // If addon exists by name, update it, else create
-            if (existingAddon) {
-              const updated = await prisma.addon.update({
-                where: { id: existingAddon.id },
-                data: {
-                  description: addonData.description || existingAddon.description || '',
-                  version: originalManifestObj.version || existingAddon.version || null,
-                  iconUrl: addonData.iconUrl || originalManifestObj.logo || existingAddon.iconUrl || null,
-                  stremioAddonId: originalManifestObj.id || existingAddon.stremioAddonId || null,
-                  isActive: addonData.isActive !== false,
-                  manifestUrl: encrypt(transportUrl, req),
-                  manifestUrlHash: manifestUrlHmac(req, transportUrl),
-                  originalManifest: encrypt(JSON.stringify(originalManifestObj), req),
-                  manifest: encrypt(JSON.stringify(filteredManifest), req),
-                  manifestHash: manifestHash(filteredManifest),
-                  resources: JSON.stringify(selectedResources),
-                  catalogs: JSON.stringify(simplifiedCatalogs)
-                }
-              })
-              console.log(`Successfully updated existing addon: ${transportName}`)
-              importedAddons.push(updated)
-            } else {
-              const newAddon = await prisma.addon.create({
-                data: {
-                  accountId: getAccountId(req),
-                  name: transportName,
-                  description: originalManifestObj.description || '',
-                  version: originalManifestObj.version || null,
-                  iconUrl: originalManifestObj.logo || null,
-                  stremioAddonId: originalManifestObj.id || null,
-                  isActive: true,
-                  manifestUrl: encrypt(transportUrl, req),
-                  manifestUrlHash: manifestUrlHmac(req, transportUrl),
-                  originalManifest: encrypt(JSON.stringify(originalManifestObj), req),
-                  manifest: encrypt(JSON.stringify(filteredManifest), req),
-                  manifestHash: manifestHash(filteredManifest),
-                  resources: JSON.stringify(selectedResources),
-                  catalogs: JSON.stringify(simplifiedCatalogs)
-                }
-              });
-              console.log(`Successfully imported addon: ${transportName}`);
-              importedAddons.push(newAddon);
-            }
-
-          } catch (addonError) {
-            console.error(`Failed to import addon ${addonData.name}:`, addonError);
-            // Continue with next addon instead of failing entire import
-            console.log(`Skipping addon ${addonData.name} due to error`);
-          }
-        }
-      }
-
-      // 3. Import users and build export->new map.
-      //
-      // Watch history, sessions, stats and the rest are filed under a
-      // person's id with no link back to the person row, so a reset + new
-      // ids left every one of them orphaned: Activity went empty and
-      // everyone showed 0m. A person now gets their original id back
-      // whenever it is free - from the export's `ref`, or, for an older
-      // file, from whoever had that username here before the import - and
-      // everything filed under it reattaches as is. Never an id whose
-      // history belongs to another account.
-      const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-      const reusableUserId = async (candidate) => {
-        if (typeof candidate !== 'string' || !SAFE_ID.test(candidate)) return null;
-        const taken = await prisma.user.findUnique({ where: { id: candidate }, select: { id: true } }).catch(() => true);
-        if (taken) return null;
-        for (const model of ['watchActivity', 'movieWatchHistory', 'episodeWatchHistory', 'watchSession']) {
-          const elsewhere = await prisma[model]?.findFirst({ where: { userId: candidate, NOT: { accountId } }, select: { userId: true } }).catch(() => null);
-          if (elsewhere) return null;
-        }
-        return candidate;
-      };
-      const importedUsers = [];
-      const importedHouseholds = [];
-      const exportUserIdToNewId = new Map();
-      let keptIds = 0;
-      if (users && Array.isArray(users)) {
-        // Build addon lookup maps for normalization
-        const nameToAddonId = new Map();
-        const stremioIdToAddonId = new Map();
-        for (const a of importedAddons) {
-          if (a?.name && a?.id) nameToAddonId.set(a.name, a.id)
-          if (a?.stremioAddonId && a?.id) stremioIdToAddonId.set(a.stremioAddonId, a.id)
-        }
-
-        // On an instance serving strangers a file can claim any server
-        // address and user id, and a person row holding another household's
-        // would be handed that household's next sign-in. So a Jellyfin
-        // identity from the file is kept only once the server vouches for
-        // its token; anyone else reconnects. A household's own install has
-        // no strangers to keep apart and imports as it always did.
-        const jellyfinProofs = INSTANCE_TYPE === 'public'
-          ? await require('../utils/jellyfinConnect').proveImportedSignIns(users)
-          : null;
-
-        for (const userData of users) {
-          const provenUrl = jellyfinProofs ? (jellyfinProofs.personUrl.get(userData) || null) : null;
-          const { id: _exportUserId, ref: exportRef, stremioAuthKey, nuvioRefreshToken, jellyfinToken, aioConfigPassword, simklAccessToken, jellyfinHousehold, protectedAddons, excludedAddons, ...userFields } = userData;
-
-          // Parse protectedAddons and excludedAddons if they're JSON strings
-          const parsedProtectedAddons = (() => {
+    async function generateUniqueAccountUuid() {
+        const tryGenerate = () => {
             try {
-              if (typeof protectedAddons === 'string') {
-                return JSON.parse(protectedAddons);
-              }
-              return Array.isArray(protectedAddons) ? protectedAddons : [];
+                return crypto.randomUUID();
             } catch {
-              return [];
+                return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+                    const r = (Math.random() * 16) | 0;
+                    const v = c === "x" ? r : (r & 0x3) | 0x8;
+                    return v.toString(16);
+                });
             }
-          })();
+        };
 
-          const parsedExcludedAddons = (() => {
-            try {
-              if (typeof excludedAddons === 'string') {
-                return JSON.parse(excludedAddons);
-              }
-              return Array.isArray(excludedAddons) ? excludedAddons : [];
-            } catch {
-              return [];
+        for (let i = 0; i < 5; i += 1) {
+            const candidate = tryGenerate();
+            const exists = await prisma.appAccount.findUnique({ where: { uuid: candidate } });
+            if (!exists) {
+                return candidate;
             }
-          })();
-
-          // Normalize protectedAddons to plaintext addon names present in DB
-          const normalizedProtectedNames = parsedProtectedAddons
-            .map(x => (typeof x === 'string' ? x : null))
-            .filter(Boolean)
-            .filter(name => nameToAddonId.has(name));
-
-          // Normalize excludedAddons to current DB addon IDs
-          const normalizedExcludedIds = []
-          for (const raw of parsedExcludedAddons) {
-            const val = typeof raw === 'string' ? raw : null
-            if (!val) continue
-            // If looks like an existing DB id, keep as-is (we don't know format, but try fast path by lookup)
-            let resolvedId = null
-            if (nameToAddonId.has(val)) {
-              resolvedId = nameToAddonId.get(val)
-            } else if (stremioIdToAddonId.has(val)) {
-              resolvedId = stremioIdToAddonId.get(val)
-            } else {
-              // Try DB lookup by name within account scope
-              try {
-                const byName = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: val }, select: { id: true } })
-                if (byName?.id) resolvedId = byName.id
-              } catch { }
-              // As a last resort, if val corresponds to an addon id in DB, accept it
-              if (!resolvedId) {
-                try {
-                  const byId = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), id: val }, select: { id: true } })
-                  if (byId?.id) resolvedId = byId.id
-                } catch { }
-              }
-            }
-            if (resolvedId) normalizedExcludedIds.push(resolvedId)
-          }
-
-          const keepId = await reusableUserId(exportRef || jellyfinHousehold?.ref || _exportUserId)
-            || await reusableUserId(userFields.username ? idByUsernameBeforeImport.get(userFields.username) : null);
-          if (keepId) keptIds++;
-          const user = await prisma.user.create({
-            data: {
-              ...userFields,
-              ...(jellyfinProofs ? { jellyfinServerUrl: provenUrl, ...(provenUrl ? {} : { jellyfinServerId: null, jellyfinUserId: null }) } : {}),
-              ...(keepId ? { id: keepId } : {}),
-              accountId,
-              stremioAuthKey: stremioAuthKey ? encrypt(stremioAuthKey, req) : null,
-              nuvioRefreshToken: nuvioRefreshToken ? encrypt(nuvioRefreshToken, req) : null,
-              jellyfinToken: jellyfinToken && (!jellyfinProofs || provenUrl) ? encrypt(jellyfinToken, req) : null,
-              aioConfigPassword: aioConfigPassword ? encrypt(aioConfigPassword, req) : null,
-              simklAccessToken: simklAccessToken ? encrypt(simklAccessToken, req) : null,
-              protectedAddons: normalizedProtectedNames.length > 0 ? JSON.stringify(normalizedProtectedNames) : null,
-              excludedAddons: normalizedExcludedIds.length > 0 ? JSON.stringify(normalizedExcludedIds) : null
-            }
-          });
-          importedUsers.push(user);
-          if (_exportUserId) exportUserIdToNewId.set(_exportUserId, user.id)
-          if (exportRef) exportUserIdToNewId.set(exportRef, user.id)
-          if (jellyfinHousehold && jellyfinHousehold.ref) {
-            exportUserIdToNewId.set(jellyfinHousehold.ref, user.id)
-            importedHouseholds.push({ owner: user, household: jellyfinHousehold, proofs: jellyfinProofs })
-          }
         }
-      }
 
-      // 3a. Household profiles (AIOStreams / AIOMetadata), now that every
-      // person - including any a profile was separated into - has its new id.
-      // Then re-key the collections arranged per person and per profile.
-      {
-        const byUsername = new Map(importedUsers.filter(u => u.username).map(u => [u.username, u.id]))
-        const profileRefToNewId = new Map()
-        for (const { owner, household, proofs } of importedHouseholds) {
-          for (const p of Array.isArray(household.profiles) ? household.profiles : []) {
-            if (!p || !p.jellyfinUserId || !p.name) continue
+        return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+    }
+
+    async function ensureUniqueUsername(baseUsername, accountId) {
+        const base =
+            (String(baseUsername || "") || "")
+                .trim()
+                .replace(/[^a-zA-Z0-9._-]/g, "")
+                .toLowerCase() || "stremio-user";
+        let candidate = base;
+        let suffix = 1;
+        while (true) {
+            const existing = await prisma.user.findFirst({
+                where: { accountId, username: candidate },
+            });
+            if (!existing) {
+                return candidate;
+            }
+            candidate = `${base}${suffix}`;
+            suffix += 1;
+        }
+    }
+
+    // `reason` says why a check failed, because only two answers mean the
+    // account really isn't this person's any more: nobody here has the email
+    // ('no-user'), or Stremio answered for the stored key with a different
+    // email ('mismatch'). A stored key that is stale, can't be decrypted, or
+    // couldn't be checked because Stremio didn't answer ('unchecked') is not
+    // that - the person signing in has just proved the email with a fresh key.
+    async function validateUserStremioAuth(accountId, email, req) {
+        const user = await prisma.user.findFirst({
+            where: { accountId, email, providerType: "stremio" },
+        });
+
+        if (!user) {
+            return { reason: "no-user", user: null, valid: false };
+        }
+
+        if (!user.stremioAuthKey) {
+            return { reason: "no-key", user, valid: false };
+        }
+
+        let storedEmail;
+        try {
+            const storedAuthKey = decrypt(user.stremioAuthKey, req);
+            const storedAuthKeyInfo = await validateStremioAuthKey(storedAuthKey);
+            storedEmail = String(storedAuthKeyInfo?.user?.email || "")
+                .trim()
+                .toLowerCase();
+        } catch {
+            return { reason: "unchecked", user, valid: false };
+        }
+        if (!storedEmail) {
+            return { reason: "unchecked", user, valid: false };
+        }
+        if (storedEmail !== email) {
+            return { reason: "mismatch", user, valid: false };
+        }
+        return { reason: null, user, valid: true };
+    }
+
+    // Unlinking an account at sign-in is only ever for a real change of owner.
+    const reallyUnlinked = (validation) =>
+        !validation.valid && (validation.reason === "no-user" || validation.reason === "mismatch");
+
+    // Same shape as validateUserStremioAuth, but re-validated via a live
+    // Nuvio/Supabase token refresh instead of a Stremio session check - Nuvio
+    // has no equivalent of Stremio's single long-lived authKey, so the stored
+    // credential is a refresh token and "is it still valid" means "does
+    // refreshing it still work".
+    async function validateUserNuvioAuth(accountId, email, req) {
+        // One Nuvio account can now be present once per profile, all sharing the
+        // same email. Signing in is about the account rather than any one
+        // profile, so this resolves to the primary - the user that was there
+        // before extra profiles could be added - and only falls back to whatever
+        // else exists if the primary is somehow gone.
+        const user = await prisma.user.findFirst({
+            orderBy: { nuvioProfileId: "asc" },
+            where: { accountId, email, providerType: "nuvio" },
+        });
+
+        if (!user) {
+            return { reason: "no-user", user: null, valid: false };
+        }
+
+        if (!user.nuvioRefreshToken) {
+            return { reason: "no-key", user, valid: false };
+        }
+
+        let storedEmail;
+        try {
+            const storedRefreshToken = decrypt(user.nuvioRefreshToken, req);
+            const refreshed = await refreshNuvioToken(storedRefreshToken);
+            const payload = parseJwtPayload(refreshed.access_token);
+            storedEmail = String(payload?.email || "")
+                .trim()
+                .toLowerCase();
+        } catch {
+            return { reason: "unchecked", user, valid: false };
+        }
+        if (!storedEmail) {
+            return { reason: "unchecked", user, valid: false };
+        }
+        if (storedEmail !== email) {
+            return { reason: "mismatch", user, valid: false };
+        }
+        return { reason: null, user, valid: true };
+    }
+
+    // Generate unique UUID endpoint
+    router.get("/generate-uuid", async (_req, res) => {
+        try {
+            let uuid;
             try {
-              // Its id is in the profile's SlickTrax link and its AIOStreams
-              // variant, so it keeps that too when free.
-              const keepProfileId = typeof p.ref === 'string' && SAFE_ID.test(p.ref)
-                && !(await prisma.jellyfinProfile.findUnique({ where: { id: p.ref }, select: { id: true } }).catch(() => true))
-              const row = await prisma.jellyfinProfile.create({
-                data: {
-                  ...(keepProfileId ? { id: p.ref } : {}),
-                  accountId,
-                  ownerUserId: owner.id,
-                  jellyfinUserId: String(p.jellyfinUserId),
-                  name: String(p.name),
-                  loginName: p.loginName || null,
-                  token: p.token && (!proofs || proofs.profileProven.get(p) === true) ? encrypt(String(p.token), req) : null,
-                  needsPin: p.needsPin === true,
-                  skip: p.skip === true,
-                  ownUserId: p.ownUsername ? (byUsername.get(p.ownUsername) || null) : null,
+                uuid = crypto.randomUUID();
+            } catch {
+                // Fallback for older Node.js versions
+                uuid = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+                    const r = (Math.random() * 16) | 0;
+                    const v = c == "x" ? r : (r & 0x3) | 0x8;
+                    return v.toString(16);
+                });
+            }
+
+            res.json({
+                success: true,
+                uuid,
+            });
+        } catch (error) {
+            console.error("Error generating UUID:", error);
+            res.status(500).json({
+                message: "Failed to generate UUID",
+                success: false,
+            });
+        }
+    });
+
+    // Public auth endpoints
+    router.post("/register", async (req, res) => {
+        try {
+            const { uuid, password } = req.body || {};
+            if (!(uuid && password)) {
+                return responseUtils.badRequest(res, "uuid and password are required");
+            }
+            // Enforce RFC 4122 UUID format (any version, correct variant)
+            const uuidPattern =
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            if (!uuidPattern.test(String(uuid))) {
+                return responseUtils.badRequest(res, "Invalid UUID format");
+            }
+            if (String(password).length < 4) {
+                return responseUtils.badRequest(res, "Password must be at least 4 characters");
+            }
+
+            // Soft cap on total registered accounts - unset/0 means unlimited.
+            // Exists so a public instance can be opened up gradually (start small,
+            // watch real memory/CPU for a week or two, raise it) instead of
+            // committing to a number on day one with no way to pump the brakes.
+            // Counts only enabled accounts - a disabled (retired/moderated) account
+            // shouldn't permanently occupy a cap slot forever; otherwise the only
+            // way to free room back up is superadmin manually deleting it, or in
+            // the worst case (cap hit, operator locked out some other way) wiping
+            // the whole database, which is exactly what this cap exists to avoid.
+            const maxAccounts = Number.parseInt(process.env.MAX_PUBLIC_ACCOUNTS || "0", 10);
+            if (maxAccounts > 0) {
+                const currentCount = await prisma.appAccount.count({ where: { disabled: false } });
+                if (currentCount >= maxAccounts) {
+                    return res.status(503).json({
+                        message: "Registration is temporarily full. Please try again later.",
+                    });
+                }
+            }
+
+            const existing = await prisma.appAccount.findUnique({ where: { uuid } });
+            if (existing) {
+                return res.status(409).json({ message: "Account already exists" });
+            }
+
+            const passwordHash = await bcrypt.hash(password, 12);
+            const account = await prisma.appAccount.create({
+                data: { avatarUrl: createDefaultAvatar(), passwordHash, uuid },
+            });
+
+            // Operator-only registration alert - deliberately a separate,
+            // optional Discord webhook rather than the app's normal push/bell
+            // notifyPushForType path, since that's all account-scoped and
+            // Superadmin isn't tied to any account (see superadmin.js's own
+            // comment on why). Fire-and-forget: never blocks/fails registration
+            // itself, and carries only the fact a new account registered - no
+            // uuid, no data from inside the account (same privacy boundary as
+            // the rest of the Superadmin panel).
+            if (process.env.SUPERADMIN_NOTIFY_WEBHOOK_URL) {
+                const { postDiscord } = require("../utils/notify");
+                postDiscord(
+                    process.env.SUPERADMIN_NOTIFY_WEBHOOK_URL,
+                    "🆕 A new SlickSync account just registered."
+                ).catch(() => undefined);
+            }
+
+            // Set access/refresh and CSRF cookies
+            const at = issueAccessToken(account.id);
+            const rt = issueRefreshToken(account.id);
+            const csrf = randomCsrfToken();
+            res.cookie(cookieName("sfm_at"), at, {
+                httpOnly: true,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_rt"), rt, {
+                httpOnly: true,
+                maxAge: 365 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_csrf"), csrf, {
+                httpOnly: false,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            return res.status(201).json({
+                account: { email: account.email || null, id: account.id, uuid: account.uuid },
+                message: "Registered successfully",
+                token: at,
+            });
+        } catch (error) {
+            console.error("Registration error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    router.post("/login", async (req, res) => {
+        try {
+            const { uuid, password } = req.body || {};
+            if (!(uuid && password)) {
+                return responseUtils.badRequest(res, "uuid and password are required");
+            }
+
+            const account = await prisma.appAccount.findUnique({ where: { uuid } });
+            if (!account?.passwordHash) {
+                // No passwordHash covers OIDC-only accounts (created via
+                // /oidc/callback with no password set) - same "Invalid credentials"
+                // response as a wrong uuid, not a 500 from bcrypt rejecting a null hash.
+                return res.status(401).json({ message: "Invalid credentials" });
+            }
+
+            const isValid = await bcrypt.compare(password, account.passwordHash);
+            if (!isValid) {
+                return res.status(401).json({ message: "Invalid credentials" });
+            }
+
+            // Disabled via the superadmin panel - block login without touching any
+            // of the account's data (reversible any time from that panel).
+            if (account.disabled) {
+                return res.status(403).json({ message: "This account has been disabled" });
+            }
+
+            prisma.appAccount
+                .update({ data: { lastLoginAt: new Date() }, where: { id: account.id } })
+                .catch(() => undefined);
+
+            // 2FA gate - password alone isn't enough for this account. Issue a
+            // one-shot pending challenge (see server/utils/twoFactor.js for why
+            // this is deliberately NOT a JWT) instead of real session cookies;
+            // the client completes the login via POST /verify-2fa.
+            if (account.twoFactorEnabled) {
+                const twoFactor = require("../utils/twoFactor");
+                const pendingToken = twoFactor.createPendingChallenge(account.id);
+                return res.json({ pendingToken, requiresTwoFactor: true });
+            }
+
+            const at = issueSessionCookies(res, account.id);
+            return res.json({
+                account: { email: account.email || null, id: account.id, uuid: account.uuid },
+                message: "Login successful",
+                token: at,
+            });
+        } catch (error) {
+            console.error("Login error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // Private instance username/password login
+    router.post("/private-login", async (req, res) => {
+        try {
+            if (!PRIVATE_AUTH_ENABLED) {
+                return res.status(400).json({ message: "Private auth is not enabled" });
+            }
+
+            const { username, password } = req.body || {};
+            if (!(username && password)) {
+                return responseUtils.badRequest(res, "username and password are required");
+            }
+
+            // Compare with env vars (trim whitespace). Both are checked before
+            // either answer is used, so how long this takes never says whether the
+            // user name was the part that was right.
+            const trimmedUsername = (username || "").trim();
+            const trimmedPassword = (password || "").trim();
+            const usernameOk = safeEqual(trimmedUsername, PRIVATE_AUTH_USERNAME);
+            const passwordOk = safeEqual(trimmedPassword, PRIVATE_AUTH_PASSWORD);
+            if (!(usernameOk && passwordOk)) {
+                return res.status(401).json({ message: "Invalid credentials" });
+            }
+
+            // Use DEFAULT_ACCOUNT_ID for private instances
+            const accountId = DEFAULT_ACCOUNT_ID;
+
+            // 2FA gate - same pending-challenge design as /login above. The env-
+            // var credential check has no AppAccount row involved, but the
+            // resolved accountId still points at a real row that can carry a
+            // 2FA secret, so the check works the same way from here on.
+            const account = await prisma.appAccount.findUnique({
+                select: { twoFactorEnabled: true },
+                where: { id: accountId },
+            });
+            if (account?.twoFactorEnabled) {
+                const twoFactor = require("../utils/twoFactor");
+                const pendingToken = twoFactor.createPendingChallenge(accountId);
+                return res.json({ pendingToken, requiresTwoFactor: true });
+            }
+
+            issueSessionCookies(res, accountId);
+
+            return res.json({
+                account: { email: null, id: accountId, uuid: null },
+                message: "Login successful",
+            });
+        } catch (error) {
+            console.error("Private login error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // POST /verify-2fa { pendingToken, code } - completes a login that was
+    // paused by the 2FA gate in /login or /private-login above. Consumes the
+    // pending token (one-shot) and, on a valid TOTP/backup code, issues the
+    // real session cookies exactly like a non-2FA login would have.
+    router.post("/verify-2fa", async (req, res) => {
+        try {
+            const { pendingToken, code } = req.body || {};
+            if (!(pendingToken && code)) {
+                return responseUtils.badRequest(res, "pendingToken and code are required");
+            }
+            const twoFactor = require("../utils/twoFactor");
+            const accountId = twoFactor.consumePendingChallenge(pendingToken);
+            if (!accountId) {
+                return res
+                    .status(401)
+                    .json({ message: "This login attempt has expired - sign in again" });
+            }
+            const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
+            if (!account || account.disabled) {
+                return res.status(401).json({ message: "Invalid credentials" });
+            }
+            const ok = await verifyTwoFactorCode(account, code);
+            if (!ok) {
+                return res.status(400).json({ message: "Incorrect code" });
+            }
+
+            prisma.appAccount
+                .update({ data: { lastLoginAt: new Date() }, where: { id: account.id } })
+                .catch(() => undefined);
+            const at = issueSessionCookies(res, account.id);
+            return res.json({
+                account: {
+                    email: account.email || null,
+                    id: account.id,
+                    uuid: account.uuid || null,
                 },
-              })
-              if (p.ref) profileRefToNewId.set(p.ref, row.id)
-            } catch (e) {
-              console.warn(`Could not import household profile ${p.name}:`, e?.message)
-            }
-          }
+                message: "Login successful",
+                token: at,
+            });
+        } catch (error) {
+            console.error("2FA verification error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
         }
+    });
+
+    // --- Passkey sign-in (see utils/webauthn.js) --------------------------
+    //
+    // Lives here rather than in routes/passkeys.js because this is where
+    // session cookies are issued, and a login request by definition arrives
+    // with no session to authenticate it.
+    //
+    // Passkeys are discoverable, so no username is asked for: the browser
+    // offers whichever passkey belongs to this instance's hostname and the
+    // credential id that comes back identifies the account.
+
+    // POST /passkey/options - challenge for signing in.
+    router.post("/passkey/options", async (req, res) => {
         try {
-          const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-          let cfg = acct?.sync
-          const asString = typeof cfg === 'string'
-          if (asString) { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-          const col = cfg && typeof cfg === 'object' ? cfg.aioCollections : null
-          if (col && typeof col === 'object' && (col.byUser || col.byProfile)) {
-            const rekey = (map, ids) => Object.fromEntries(Object.entries(map && typeof map === 'object' ? map : {})
-              .filter(([k]) => ids.has(k)).map(([k, v]) => [ids.get(k), v]))
-            const next = { ...cfg, aioCollections: { ...col, byUser: rekey(col.byUser, exportUserIdToNewId), byProfile: rekey(col.byProfile, profileRefToNewId) } }
-            await prisma.appAccount.update({ where: { id: accountId }, data: { sync: asString ? JSON.stringify(next) : next } })
-          }
-        } catch (e) {
-          console.warn('Could not re-key imported collections:', e?.message)
-        }
-      }
-
-      // Build username to user ID map
-      const usernameToUserId = new Map()
-      for (const user of importedUsers) {
-        if (user.username) {
-          usernameToUserId.set(user.username, user.id)
-        }
-      }
-
-      // 3b. Update groups.userIds with new user IDs (from usernames only)
-      await require('../utils/helpers/database').withMembershipLock(accountId, async () => {
-      for (const g of importedGroups) {
-        let newUserIds = []
-        if (Array.isArray(g.users) && g.users.length > 0) {
-          newUserIds = g.users.map(username => usernameToUserId.get(username)).filter(Boolean)
-        }
-
-        if (newUserIds.length > 0) {
-          try {
-            await prisma.group.update({
-              where: { id: g.id },
-              data: { userIds: JSON.stringify(newUserIds) }
-            })
-          } catch (e) {
-            console.warn(`Failed to update userIds for group ${g.name}:`, e?.message)
-          }
-        }
-      }
-      })
-
-      // Build quick-lookup map by NAME ONLY for linking between exported and imported addons
-      const exportAddonNameToNewId = new Map(); // map: addon.name -> dbAddon.id
-      for (const a of addons || []) {
-        const matched = importedAddons.find(x => x.name === a.name)
-        if (matched && a.name) exportAddonNameToNewId.set(a.name, matched.id)
-      }
-
-      // Repair newly imported addons before linking users/groups
-      if (importedAddons.length > 0) {
-        await repairAddonsForAccount(importedAddons, req)
-      }
-
-      // Import group-addon relationships from groups (addons by name only)
-      let importedGroupAddons = 0;
-      for (const group of importedGroups) {
-        const addedAddonIds = new Set()
-        const addonsToImport = Array.isArray(group.addons) ? group.addons : []
-
-        for (let index = 0; index < addonsToImport.length; index++) {
-          try {
-            const addonRef = addonsToImport[index];
-            let resolvedAddonId = null;
-            // Use array index as position if not explicitly set
-            let position = addonRef.position !== undefined ? addonRef.position : index;
-            let isEnabled = addonRef.isEnabled !== undefined ? addonRef.isEnabled : true;
-
-            // Resolve by NAME ONLY
-            if (addonRef.name) {
-              resolvedAddonId = exportAddonNameToNewId.get(addonRef.name)
-            } else if (addonRef.addon && addonRef.addon.name) {
-              resolvedAddonId = exportAddonNameToNewId.get(addonRef.addon.name)
+            const {
+                getLib,
+                putChallenge,
+                newChallengeId,
+                rpFromRequest,
+            } = require("../utils/webauthn");
+            const rp = rpFromRequest(req);
+            if (!rp) {
+                return responseUtils.badRequest(res, "Could not determine this instance address");
             }
 
-            if (resolvedAddonId) {
-              if (addedAddonIds.has(resolvedAddonId)) {
-                // Skip duplicates from mixed sources (addonIds + addons arrays)
-                continue
-              }
-              await prisma.groupAddon.create({
-                data: {
-                  groupId: group.id,
-                  addonId: resolvedAddonId,
-                  isEnabled: isEnabled,
-                  position: position
+            // Only advertise passkeys when some exist for this hostname - the
+            // login page uses an empty answer to keep its passkey button hidden
+            // rather than offering a prompt that can only fail.
+            const available = await prisma.passkey.count({ where: { rpId: rp.rpID } });
+            if (available === 0) {
+                return res.json({ available: false });
+            }
+
+            const { generateAuthenticationOptions } = await getLib();
+            const options = await generateAuthenticationOptions({
+                rpID: rp.rpID,
+                userVerification: "preferred",
+            });
+            // Keyed by a random id the client hands back, since there is no
+            // account to key it by yet.
+            const challengeId = newChallengeId();
+            putChallenge(`auth:${challengeId}`, {
+                challenge: options.challenge,
+                origin: rp.origin,
+                rpID: rp.rpID,
+            });
+            return res.json({ available: true, challengeId, options });
+        } catch (error) {
+            console.error("Passkey options error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // POST /passkey/verify - complete a passkey sign-in.
+    router.post("/passkey/verify", async (req, res) => {
+        try {
+            const { getLib, takeChallenge } = require("../utils/webauthn");
+            const { challengeId, credential } = req.body || {};
+            if (!(challengeId && credential)) {
+                return responseUtils.badRequest(res, "challengeId and credential are required");
+            }
+
+            const pending = takeChallenge(`auth:${challengeId}`);
+            if (!pending) {
+                return res
+                    .status(401)
+                    .json({ message: "That sign-in attempt expired - try again" });
+            }
+
+            const stored = await prisma.passkey.findUnique({
+                where: { credentialId: credential.id },
+            });
+            if (!stored) {
+                return res.status(401).json({ message: "That passkey is not registered here" });
+            }
+
+            const { verifyAuthenticationResponse } = await getLib();
+            const verification = await verifyAuthenticationResponse({
+                credential: {
+                    counter: stored.counter,
+                    id: stored.credentialId,
+                    publicKey: new Uint8Array(Buffer.from(stored.publicKey, "base64url")),
+                    transports: (() => {
+                        try {
+                            return JSON.parse(stored.transports || "[]");
+                        } catch {
+                            return [];
+                        }
+                    })(),
+                },
+                expectedChallenge: pending.challenge,
+                expectedOrigin: pending.origin,
+                expectedRPID: pending.rpID,
+                requireUserVerification: false,
+                response: credential,
+            });
+            if (!verification.verified) {
+                return res.status(401).json({ message: "That passkey could not be verified" });
+            }
+
+            // A counter that fails to advance on an authenticator that keeps one
+            // is the signature of a cloned credential. Authenticators that do not
+            // keep a counter report 0 forever, which is normal and not a signal.
+            const newCounter = Number(verification.authenticationInfo?.newCounter || 0);
+            if (stored.counter > 0 && newCounter > 0 && newCounter <= stored.counter) {
+                return res
+                    .status(401)
+                    .json({ message: "That passkey looks cloned and was refused" });
+            }
+
+            const accountId = stored.accountId || DEFAULT_ACCOUNT_ID;
+            const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
+            if (account?.disabled) {
+                return res.status(401).json({ message: "This account has been disabled" });
+            }
+
+            // 2FA still applies unless the authenticator actually verified the
+            // person (PIN, fingerprint, face). A passkey that only proves
+            // possession is one factor, so it does not stand in for a second one;
+            // a user-verified passkey already is two.
+            const userVerified = verification.authenticationInfo?.userVerified === true;
+            if (account?.twoFactorEnabled && !userVerified) {
+                const twoFactor = require("../utils/twoFactor");
+                const pendingToken = twoFactor.createPendingChallenge(accountId);
+                await prisma.passkey
+                    .update({
+                        data: { counter: newCounter, lastUsedAt: new Date() },
+                        where: { id: stored.id },
+                    })
+                    .catch(() => undefined);
+                return res.json({ pendingToken, requiresTwoFactor: true });
+            }
+
+            await prisma.passkey
+                .update({
+                    data: { counter: newCounter, lastUsedAt: new Date() },
+                    where: { id: stored.id },
+                })
+                .catch(() => undefined);
+            if (account) {
+                prisma.appAccount
+                    .update({ data: { lastLoginAt: new Date() }, where: { id: account.id } })
+                    .catch(() => undefined);
+            }
+            const at = issueSessionCookies(res, accountId);
+            return res.json({
+                account: {
+                    email: account?.email || null,
+                    id: accountId,
+                    uuid: account?.uuid || null,
+                },
+                message: "Login successful",
+                token: at,
+            });
+        } catch (error) {
+            console.error("Passkey verify error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // Finishes a login for an already-resolved account (created/matched by
+    // /oidc/callback below) - checks disabled + the same 2FA gate every other
+    // login path respects, then either issues a real session or hands back a
+    // pending-2FA redirect. Returns a path to send the browser to next.
+    async function completeOidcLogin(res, account) {
+        if (account.disabled) {
+            return `/login?oidcError=${encodeURIComponent("This account has been disabled")}`;
+        }
+        if (account.twoFactorEnabled) {
+            const twoFactor = require("../utils/twoFactor");
+            const pendingToken = twoFactor.createPendingChallenge(account.id);
+            return `/login?otp=${encodeURIComponent(pendingToken)}`;
+        }
+        prisma.appAccount
+            .update({ data: { lastLoginAt: new Date() }, where: { id: account.id } })
+            .catch(() => undefined);
+        issueSessionCookies(res, account.id);
+        return "/";
+    }
+
+    // GET /oidc/config - lets the login page know whether to show the SSO
+    // button at all, without needing the env vars client-side.
+    router.get("/oidc/config", async (_req, res) => {
+        const oidc = require("../utils/oidc");
+        return res.json({ configured: oidc.isConfigured(), displayName: oidc.displayName() });
+    });
+
+    // The cookie that ties an SSO round trip to the browser that started it.
+    // SameSite=Lax, not Strict: the browser comes back from the identity
+    // provider by a top-level redirect, which Strict would leave the cookie off.
+    // Path '/' because the __Host- prefix used in production requires it.
+    const oidcStateCookieOptions = (extra) => ({
+        httpOnly: true,
+        path: "/",
+        sameSite: "lax",
+        secure: isProdEnv(),
+        ...extra,
+    });
+
+    // GET /oidc/start - real browser navigation (not fetch/JSON): redirects
+    // straight to the provider's own login page.
+    router.get("/oidc/start", async (_req, res) => {
+        const oidc = require("../utils/oidc");
+        try {
+            if (!oidc.isConfigured()) {
+                return res.status(400).json({ message: "OIDC is not configured" });
+            }
+            const { authorizationUrl, state } = await oidc.startAuthorization();
+            // The callback only accepts a return that carries this same value. Without
+            // it, anyone holding a finished (code, state) pair could send it to
+            // someone else's browser and sign them in to the sender's account.
+            res.cookie(
+                cookieName(OIDC_STATE_COOKIE),
+                state,
+                oidcStateCookieOptions({ maxAge: oidc.PENDING_TTL_MS })
+            );
+            return res.redirect(authorizationUrl);
+        } catch (error) {
+            console.error("OIDC start error:", error);
+            return res.redirect(
+                "/login?oidcError=" +
+                    encodeURIComponent(oidc.publicMessage(error, "Failed to start SSO login"))
+            );
+        }
+    });
+
+    // GET /oidc/callback - where the provider redirects back to. Resolves or
+    // creates the AppAccount (public mode) / logs into DEFAULT_ACCOUNT_ID
+    // (private mode), then redirects into the app or back to /login with
+    // either an error or a pending-2FA token.
+    router.get("/oidc/callback", async (req, res) => {
+        const oidc = require("../utils/oidc");
+        try {
+            if (!oidc.isConfigured()) {
+                return res.redirect(
+                    `/login?oidcError=${encodeURIComponent("OIDC is not configured")}`
+                );
+            }
+            const { code, state, error: providerError } = req.query || {};
+
+            // Did this browser start the sign-in? Where strangers sign in, only a
+            // return carrying the cookie set by /oidc/start, with the same state,
+            // did. A household's own install may be opened by more than one name
+            // (a LAN address and the public one), and the cookie only reaches the
+            // name the sign-in was started on, so there a return without it is let
+            // through - the pending state held here is still required - while one
+            // carrying a different cookie is still refused.
+            const bound = parseCookies
+                ? parseCookies(req)[cookieName(OIDC_STATE_COOKIE)]
+                : undefined;
+            const cookieBound = typeof bound === "string" && bound !== "";
+            const sameBrowser =
+                typeof state === "string" &&
+                state !== "" &&
+                (cookieBound ? safeEqual(bound, state) : INSTANCE_TYPE !== "public");
+            const clearStateCookie = () =>
+                res.cookie(
+                    cookieName(OIDC_STATE_COOKIE),
+                    "",
+                    oidcStateCookieOptions({ expires: new Date(0) })
+                );
+
+            if (providerError) {
+                if (sameBrowser) {
+                    clearStateCookie();
                 }
-              });
-              addedAddonIds.add(resolvedAddonId)
-              importedGroupAddons++;
+                return res.redirect(
+                    `/login?oidcError=${encodeURIComponent(String(providerError))}`
+                );
+            }
+            if (!sameBrowser) {
+                // Left as it is: a return that does not belong to this browser must
+                // not cancel a sign-in this browser really has under way.
+                return res.redirect(
+                    "/login?oidcError=" +
+                        encodeURIComponent(
+                            "This sign-in was not started in this browser - try again"
+                        )
+                );
+            }
+            clearStateCookie();
+
+            const { sub, email, name, emailVerified } = await oidc.handleCallback(code, state);
+            let account;
+
+            if (INSTANCE_TYPE === "public") {
+                account = await prisma.appAccount.findUnique({ where: { oidcSubject: sub } });
+                if (!account) {
+                    // An address is only worth anything here when the provider says it
+                    // has checked that this person owns it: otherwise whoever can get
+                    // the provider to issue an unchecked claim for someone else's
+                    // address could sign in to that person's account.
+                    const byEmail = email
+                        ? await prisma.appAccount.findUnique({ where: { email } })
+                        : null;
+                    // Auto-link onto an existing account with a matching, verified
+                    // email - no separate "link my account" UI to build for this. An
+                    // account already tied to another identity is left as it is.
+                    if (byEmail && emailVerified && !byEmail.oidcSubject) {
+                        account = await prisma.appAccount.update({
+                            data: {
+                                linkedProvider: byEmail.linkedProvider || "oidc",
+                                oidcSubject: sub,
+                            },
+                            where: { id: byEmail.id },
+                        });
+                    }
+                    if (!account) {
+                        // uuid: null, same as the stremio-login/nuvio-login account-
+                        // creation paths above - it's only meaningful for the uuid+
+                        // password /login flow, and this account has no password to go
+                        // with it either way. Multiple accounts can share uuid: null
+                        // (NULL isn't unique-constrained against itself).
+                        //
+                        // The email is kept only when it is verified and nobody else
+                        // holds it - it is unique, and an unverified one could otherwise
+                        // park someone else's address on a new account.
+                        account = await prisma.appAccount.create({
+                            data: {
+                                avatarUrl: createDefaultAvatar(),
+                                displayName: name || null,
+                                email: email && emailVerified && !byEmail ? email : null,
+                                linkedProvider: "oidc",
+                                oidcSubject: sub,
+                                sync: JSON.stringify({ enabled: false, frequency: "0" }),
+                                uuid: null,
+                            },
+                        });
+                    }
+                }
             } else {
-              console.warn(`Could not resolve addon for group-addon relationship from export ref:`, addonRef);
+                // Private mode: one admin account. OIDC_ALLOWED_EMAILS (if set) is
+                // the only extra gate - otherwise any identity the provider itself
+                // authenticates may sign in, same trust boundary as SSO-gating this
+                // app via a reverse proxy.
+                if (!oidc.isEmailAllowedForPrivateMode(email)) {
+                    return res.redirect(
+                        "/login?oidcError=" +
+                            encodeURIComponent("This identity is not allowed to sign in")
+                    );
+                }
+                account = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } });
+                if (!account) {
+                    return res.redirect(
+                        `/login?oidcError=${encodeURIComponent("Account not found")}`
+                    );
+                }
+                if (account.oidcSubject !== sub) {
+                    account = await prisma.appAccount.update({
+                        data: { oidcSubject: sub },
+                        where: { id: DEFAULT_ACCOUNT_ID },
+                    });
+                }
             }
-          } catch (error) {
-            console.error(`Failed to create group-addon relationship:`, error);
-          }
+
+            const redirectTo = await completeOidcLogin(res, account);
+            return res.redirect(redirectTo);
+        } catch (error) {
+            // Whatever went wrong stays in the log; a database error must never end
+            // up in the address bar.
+            console.error("OIDC callback error:", error);
+            return res.redirect(
+                "/login?oidcError=" +
+                    encodeURIComponent(oidc.publicMessage(error, "Sign-in failed"))
+            );
         }
-      }
+    });
 
-      res.json({
-        message: 'Configuration imported successfully',
-        imported: {
-          users: importedUsers.length,
-          groups: importedGroups.length,
-          addons: importedAddons.length,
-          groupAddons: importedGroupAddons
-        },
-        // Backward-compatible aliases expected by older clients
-        addons: { created: importedAddons.length, reused: 0 },
-        users: { created: importedUsers.length, keptHistory: keptIds },
-        groups: { created: importedGroups.length }
-      });
-    } catch (error) {
-      console.error('Config import error:', error);
-      res.status(500).json({ message: 'Failed to import config' });
-    }
-  });
-
-  // Reset (wipe) all data for the logged-in account, but keep the account
-  router.post('/reset', async (req, res) => {
-    try {
-      console.log('Reset endpoint called, prisma available:', !!prisma);
-      const accountId = req.appAccountId || 'default';
-      console.log('Account ID for reset:', accountId);
-
-      await resetAccountData(accountId);
-
-      res.json({ message: 'Account data reset successfully' });
-    } catch (error) {
-      console.error('Reset error:', error);
-      res.status(500).json({ message: 'Failed to reset account data' });
-    }
-  });
-
-  // Import addons from JSON file
-  router.post('/addon-import', upload.single('file'), async (req, res) => {
-    try {
-      if (INSTANCE_TYPE === 'public' && !req.appAccountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-      // Check if file was uploaded
-      if (!req.file) {
-        return responseUtils.badRequest(res, 'No file uploaded');
-      }
-
-      const file = req.file;
-      const fileData = file.buffer.toString('utf8');
-
-      let importData;
-      try {
-        importData = JSON.parse(fileData);
-      } catch (parseError) {
-        return responseUtils.badRequest(res, 'Invalid JSON file');
-      }
-
-      // Normalize input: accept either root array or { addons: [...] }
-      const addonsArray = Array.isArray(importData) ? importData : importData.addons
-      if (!Array.isArray(addonsArray)) {
-        return responseUtils.badRequest(res, 'Invalid JSON structure. Expected an array or an object with "addons" array.');
-      }
-
-      let successful = 0;
-      let failed = 0;
-      let redundant = 0;
-      const imported = []
-
-      // Process each addon
-      for (const addonData of addonsArray) {
+    router.post("/stremio-login", async (req, res) => {
         try {
-          // Get URL from manifestUrl (preferred) or legacy transportUrl
-          const transportUrl = addonData.manifestUrl || addonData.transportUrl;
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Stremio login is only available in public auth mode" });
+            }
 
-          // Validate required fields
-          if (!transportUrl) {
-            console.warn('Skipping addon with missing URL:', addonData);
-            failed++;
-            continue;
-          }
+            const { authKey } = req.body || {};
+            if (!authKey || typeof authKey !== "string" || !authKey.trim()) {
+                return responseUtils.badRequest(res, "authKey is required");
+            }
 
-          // Use the new approach: prefer originalManifest from export, fallback to fetching
-          let originalManifestObj = addonData.originalManifest || null
-
-          // If no originalManifest in export, try to fetch from URL
-          if (!originalManifestObj) {
+            let stremioInfo;
             try {
-              const resp = await safeFetch(transportUrl, {}, instancePolicy())
-              if (resp.ok) {
-                originalManifestObj = await resp.json()
-                console.log(`Fetched originalManifest for import: ${originalManifestObj?.name}`)
-              }
-            } catch (e) {
-              console.warn(`Failed to fetch manifest for ${transportUrl}:`, e.message)
+                stremioInfo = await validateStremioAuthKey(authKey.trim());
+            } catch (err) {
+                const code = err?.code;
+                const message = err?.message || "Failed to validate Stremio auth key";
+                if (code === 1) {
+                    return res.status(401).json({ message: "Invalid or expired Stremio session" });
+                }
+                return res.status(400).json({ message });
             }
-          }
 
-          // Create fallback manifest if nothing else works
-          if (!originalManifestObj) {
-            originalManifestObj = {
-              id: addonData.name || 'unknown.addon',
-              name: addonData.name || 'Unknown',
-              version: addonData.version || null,
-              description: addonData.description || null,
-              logo: addonData.iconUrl || null,
-              resources: [],
-              catalogs: [],
-              types: []
+            const email = String(stremioInfo?.user?.email || "")
+                .trim()
+                .toLowerCase();
+            if (!email) {
+                return res.status(400).json({ message: "Stremio account email not available" });
             }
-          }
 
-          const transportName = addonData.name || addonData.transportName || originalManifestObj.name || 'Unknown';
-
-          // Resolve a unique name within this account (allow duplicate URLs)
-          let finalName = transportName || 'Unknown'
-          try {
-            const existingByName = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: finalName }, select: { id: true } })
-            if (existingByName) {
-              const base = finalName
-              let copyNumber = 1
-              while (true) {
-                const candidate = copyNumber === 1 ? `${base} (Copy)` : `${base} (Copy #${copyNumber})`
-                const exists = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), name: candidate }, select: { id: true } })
-                if (!exists) { finalName = candidate; break }
-                copyNumber++
-              }
+            // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
+            // Only extract if user is actually logged in (has valid session)
+            let originalAccountId = req.appAccountId;
+            if (!originalAccountId && INSTANCE_TYPE === "public" && parseCookies) {
+                try {
+                    const cookies = parseCookies(req);
+                    const accessCookie = cookies[cookieName("sfm_at")] || cookies.sfm_at;
+                    const refreshCookie = cookies[cookieName("sfm_rt")] || cookies.sfm_rt;
+                    const token = accessCookie || refreshCookie;
+                    if (token) {
+                        // Either kind of session token: the refresh cookie stands in once
+                        // the access cookie has expired. Other tokens signed with the same
+                        // secret (superadmin, portal, pending 2FA) are not accounts.
+                        const decoded = verifyAccountToken(token, ["access", "refresh"]);
+                        if (decoded?.accId) {
+                            // Verify the account actually exists before setting originalAccountId
+                            const accountExists = await prisma.appAccount.findUnique({
+                                where: { id: decoded.accId },
+                            });
+                            if (accountExists) {
+                                originalAccountId = decoded.accId;
+                                req.appAccountId = originalAccountId;
+                            }
+                        }
+                    }
+                } catch {
+                    // If we can't extract account ID from cookies, user is not logged in - that's OK
+                    // This is expected for normal login flow
+                }
             }
-          } catch { }
 
-          // Get selected resources and catalogs from export data
-          // If export data is empty, derive from originalManifest (select all)
-          const selectedResources = (() => {
-            const resources = Array.isArray(addonData.resources) ? addonData.resources : []
-            // Ensure we only store resource names, not full objects
-            const parsed = resources.map(r => {
-              if (typeof r === 'string') return r
-              if (r && typeof r === 'object' && r.name) return r.name
-              return null
-            }).filter(Boolean)
-            // Fallback: if empty, derive all resources from manifest
-            if (parsed.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.resources)) {
-              return originalManifestObj.resources.map(r => typeof r === 'string' ? r : (r && (r.name || r.type))).filter(Boolean)
+            let account;
+            let isNewAccount = false;
+
+            // FIRST CHECK: If user is logged in and trying to link, verify Stremio account is not already linked to another account
+            if (originalAccountId) {
+                // Verify current account exists - if it doesn't, treat as not logged in (normal login flow)
+                const currentAccount = await prisma.appAccount.findUnique({
+                    where: { id: originalAccountId },
+                });
+                if (currentAccount) {
+                    // Account exists - user is logged in, check if Stremio account is already linked elsewhere
+                    const existingAccountWithEmail = await prisma.appAccount.findUnique({
+                        where: { email },
+                    });
+                    if (
+                        existingAccountWithEmail &&
+                        existingAccountWithEmail.id !== originalAccountId
+                    ) {
+                        return res.status(409).json({
+                            error: "EMAIL_ALREADY_LINKED",
+                            message:
+                                "This Stremio account is already linked to another SlickSync account",
+                        });
+                    }
+
+                    // Check for legacy account with this email (uuid format: stremio:${email})
+                    const legacyUuid = `stremio:${email}`;
+                    const legacyAccount = await prisma.appAccount.findUnique({
+                        where: { uuid: legacyUuid },
+                    });
+                    if (legacyAccount && legacyAccount.id !== originalAccountId) {
+                        return res.status(409).json({
+                            error: "EMAIL_ALREADY_LINKED",
+                            message:
+                                "This Stremio account is already linked to another SlickSync account",
+                        });
+                    }
+
+                    // If current account already has an email, it must match
+                    if (currentAccount.email && currentAccount.email !== email) {
+                        return res.status(409).json({
+                            error: "ACCOUNT_ALREADY_LINKED",
+                            message:
+                                "Your account is already linked to a different Stremio account",
+                        });
+                    }
+
+                    const validation = await validateUserStremioAuth(currentAccount.id, email, req);
+
+                    if (!validation.user) {
+                        return res.status(400).json({
+                            error: "NO_USER_WITH_EMAIL",
+                            message:
+                                "No user found with this email address. Please create a user with this email first before linking your Stremio account.",
+                        });
+                    }
+
+                    if (!validation.user.stremioAuthKey) {
+                        return res.status(400).json({
+                            error: "USER_NO_STREMIO_AUTH",
+                            message:
+                                "User exists but has no Stremio authentication. Please connect the user to Stremio first before linking the account.",
+                        });
+                    }
+
+                    if (!validation.valid && validation.reason === "mismatch") {
+                        const errorMsg = validation.user.stremioAuthKey
+                            ? "A user with this email already exists in your account, but their Stremio authentication does not match. Please contact support."
+                            : "User exists but the stored Stremio authentication is invalid or expired. Please reconnect the user to Stremio first.";
+                        const errorCode = validation.user.stremioAuthKey
+                            ? "STORED_AUTHKEY_EMAIL_MISMATCH"
+                            : "INVALID_STORED_AUTHKEY";
+                        return res.status(validation.user.stremioAuthKey ? 409 : 400).json({
+                            error: errorCode,
+                            message: errorMsg,
+                        });
+                    }
+
+                    if (currentAccount.email == null) {
+                        account = await prisma.appAccount.update({
+                            data: { email, linkedProvider: "stremio" },
+                            where: { id: currentAccount.id },
+                        });
+                    } else {
+                        account = currentAccount;
+                    }
+                    req.appAccountId = account.id;
+
+                    const encryptedAuthKey = encrypt(authKey.trim(), req);
+                    await prisma.user.update({
+                        data: { isActive: true, stremioAuthKey: encryptedAuthKey },
+                        where: { id: validation.user.id },
+                    });
+
+                    const at = issueAccessToken(account.id);
+                    const rt = issueRefreshToken(account.id);
+                    const csrf = randomCsrfToken();
+                    res.cookie(cookieName("sfm_at"), at, {
+                        httpOnly: true,
+                        maxAge: 30 * 24 * 60 * 60 * 1000,
+                        path: "/",
+                        sameSite: isProdEnv() ? "strict" : "lax",
+                        secure: isProdEnv(),
+                    });
+                    res.cookie(cookieName("sfm_rt"), rt, {
+                        httpOnly: true,
+                        maxAge: 365 * 24 * 60 * 60 * 1000,
+                        path: "/",
+                        sameSite: isProdEnv() ? "strict" : "lax",
+                        secure: isProdEnv(),
+                    });
+                    res.cookie(cookieName("sfm_csrf"), csrf, {
+                        httpOnly: false,
+                        maxAge: 30 * 24 * 60 * 60 * 1000,
+                        path: "/",
+                        sameSite: isProdEnv() ? "strict" : "lax",
+                        secure: isProdEnv(),
+                    });
+
+                    return res.json({
+                        account: {
+                            email: account.email || null,
+                            id: account.id,
+                            uuid: account.uuid,
+                        },
+                        message: "Account already linked",
+                        token: at,
+                    });
+                }
+                // Account doesn't exist - treat as not logged in, proceed with normal login flow
+                originalAccountId = undefined;
             }
-            return parsed
-          })()
-          const selectedCatalogs = (() => {
-            const cats = Array.isArray(addonData.catalogs) ? addonData.catalogs : []
-            // Fallback: if empty, derive all catalogs from manifest
-            if (cats.length === 0 && originalManifestObj && Array.isArray(originalManifestObj.catalogs)) {
-              return originalManifestObj.catalogs.filter(c => c && c.type && c.id).map(c => ({
-                type: c.type,
-                id: c.id,
-                search: c.extra ? c.extra.some(e => e.name === 'search') : false
-              }))
+
+            // Normal login flow (user not logged in, or account from cookie doesn't exist)
+            if (!account) {
+                // Not logged in - normal login flow (find or create account with email)
+
+                account = await prisma.appAccount.findUnique({ where: { email } });
+
+                if (account) {
+                    const validation = await validateUserStremioAuth(account.id, email, req);
+                    if (reallyUnlinked(validation)) {
+                        await prisma.appAccount.update({
+                            data: { email: null, linkedProvider: null },
+                            where: { id: account.id },
+                        });
+                        account = null;
+                    }
+                }
+
+                if (!account) {
+                    const legacyUuid = `stremio:${email}`;
+                    const legacyAccount = await prisma.appAccount.findUnique({
+                        where: { uuid: legacyUuid },
+                    });
+                    if (legacyAccount) {
+                        const validation = await validateUserStremioAuth(
+                            legacyAccount.id,
+                            email,
+                            req
+                        );
+                        if (reallyUnlinked(validation)) {
+                            const newUuid = await generateUniqueAccountUuid();
+                            await prisma.appAccount.update({
+                                data: { email: null, linkedProvider: null, uuid: newUuid },
+                                where: { id: legacyAccount.id },
+                            });
+                            account = null;
+                        } else {
+                            const newUuid = await generateUniqueAccountUuid();
+                            account = await prisma.appAccount.update({
+                                data: { email, linkedProvider: "stremio", uuid: newUuid },
+                                where: { id: legacyAccount.id },
+                            });
+                        }
+                    }
+                }
+
+                // Create new account if none found or all were unlinked
+                if (!account) {
+                    account = await prisma.appAccount.create({
+                        data: {
+                            avatarUrl: createDefaultAvatar(),
+                            email,
+                            linkedProvider: "stremio",
+                            passwordHash: null,
+                            uuid: null,
+                        },
+                    });
+                    isNewAccount = true;
+                } else if (account.email == null) {
+                    // Account exists but email was unlinked - set it now
+                    account = await prisma.appAccount.update({
+                        data: { email, linkedProvider: "stremio" },
+                        where: { id: account.id },
+                    });
+                }
+
+                req.appAccountId = account.id;
             }
-            return cats
-          })()
 
-          console.log(`Importing ${transportName} with resources:`, selectedResources, 'catalogs:', selectedCatalogs)
+            const encryptedAuthKey = encrypt(authKey.trim(), req);
 
-          // Apply filtering to create the filtered manifest (same logic as AddonDetailModal)
-          let filteredManifest = originalManifestObj
-          if (selectedResources.length > 0) {
-            filteredManifest = filterManifestByResources(originalManifestObj, selectedResources)
-            console.log(`Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after resource filtering`)
-          }
-          if (selectedCatalogs.length > 0 && filteredManifest) {
-            filteredManifest = filterManifestByCatalogs(filteredManifest, selectedCatalogs)
-            console.log(`Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after catalog filtering`)
-          }
+            // Ensure email uniqueness across all accounts
+            const { ensureEmailUniqueness } = require("../utils/helpers/database");
+            await ensureEmailUniqueness(prisma, email, account.id);
 
-          // Convert selected catalogs to simplified (type, id, search) format for storage
-          const simplifiedCatalogs = (() => {
-            try {
-              // If selectedCatalogs are already simplified (from export), use them directly
-              if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'object' && selectedCatalogs[0].type && selectedCatalogs[0].id) {
-                return selectedCatalogs.map(c => ({
-                  type: c.type,
-                  id: c.id,
-                  search: c.search !== undefined ? c.search : false
-                }))
-              }
-              // If they're just IDs, try to match them with originalManifest catalogs
-              if (selectedCatalogs.length > 0 && typeof selectedCatalogs[0] === 'string') {
-                const originalCatalogs = Array.isArray(originalManifestObj?.catalogs) ? originalManifestObj.catalogs : []
-                return selectedCatalogs.map(id => {
-                  const catalog = originalCatalogs.find(c => c.id === id)
-                  return catalog ? { type: catalog.type, id: catalog.id } : null
-                }).filter(Boolean)
-              }
-              return []
-            } catch { return [] }
-          })()
+            let user = null;
+            // The person whose Stremio account this is - never just the household's
+            // oldest person, whose own sign-in would be overwritten with this one.
+            const existingUser = await prisma.user.findFirst({
+                orderBy: { id: "asc" },
+                where: { accountId: account.id, email, providerType: "stremio" },
+            });
 
-          // Create new addon with both original and filtered manifests
-          const newAddon = await prisma.addon.create({
-            data: {
-              accountId: getAccountId(req),
-              name: finalName,
-              description: originalManifestObj.description || '',
-              version: originalManifestObj.version || null,
-              iconUrl: originalManifestObj.logo || null,
-              stremioAddonId: originalManifestObj.id || null,
-              isActive: true,
-              manifestUrl: encrypt(transportUrl, req),
-              manifestUrlHash: manifestUrlHmac(req, transportUrl),
-              originalManifest: encrypt(JSON.stringify(originalManifestObj), req), // Full manifest
-              manifest: encrypt(JSON.stringify(filteredManifest), req), // Filtered manifest
-              manifestHash: manifestHash(filteredManifest),
-              resources: JSON.stringify(selectedResources), // Just names: ["stream", "catalog"]
-              catalogs: JSON.stringify(simplifiedCatalogs), // Just (type,id) pairs: [{"type":"movie","id":"123"}]
+            if (isNewAccount) {
+                const baseUsername =
+                    stremioInfo?.user?.username ||
+                    stremioInfo?.user?.name ||
+                    email.split("@")[0] ||
+                    "stremio-user";
+                const username = await ensureUniqueUsername(baseUsername, account.id);
+                const createdUser = await prisma.user.create({
+                    data: {
+                        accountId: account.id,
+                        avatarUrl: createDefaultAvatar(),
+                        email,
+                        isActive: true,
+                        stremioAuthKey: encryptedAuthKey,
+                        username,
+                    },
+                });
+                user = {
+                    email: createdUser.email,
+                    id: createdUser.id,
+                    username: createdUser.username,
+                };
+            } else if (existingUser) {
+                await prisma.user.update({
+                    data: { isActive: true, stremioAuthKey: encryptedAuthKey },
+                    where: { id: existingUser.id },
+                });
             }
-          });
 
-          console.log(`Successfully imported addon: ${transportName}`);
-          successful++;
-          const created = await prisma.addon.findFirst({ where: { accountId: getAccountId(req), manifestUrlHash: manifestUrlHmac(req, transportUrl) } })
-          if (created) imported.push(created)
+            const at = issueAccessToken(account.id);
+            const rt = issueRefreshToken(account.id);
+            const csrf = randomCsrfToken();
+            res.cookie(cookieName("sfm_at"), at, {
+                httpOnly: true,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_rt"), rt, {
+                httpOnly: true,
+                maxAge: 365 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_csrf"), csrf, {
+                httpOnly: false,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
 
-        } catch (addonError) {
-          console.error(`Failed to import addon:`, addonError);
-          failed++;
+            return res.json({
+                account: { email: account.email || null, id: account.id, uuid: account.uuid },
+                message: "Login successful",
+                token: at,
+                ...(user ? { user } : {}),
+            });
+        } catch (error) {
+            console.error("Stremio login error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
         }
-      }
+    });
 
-      // Optional repair step when query ?repair=true
-      if (req.query && String(req.query.repair).toLowerCase() === 'true' && imported.length > 0) {
-        await repairAddonsForAccount(imported, req)
-      }
+    // --- Nuvio admin login ---
+    //
+    // Mirrors the Stremio admin login above (same account find/create/link
+    // logic, same cookie issuance), but Nuvio has no single long-lived authKey
+    // a client can hand over directly - logging in needs its own start/poll/
+    // exchange device-code round trip first. /nuvio-login does that exchange
+    // itself and reads the resulting identity straight out of Nuvio's own
+    // response, so unlike Stremio's flow there's no client-supplied email or
+    // user ID to validate - the exchange succeeding IS the proof of identity.
 
-      res.json({
-        message: 'Import completed',
-        successful,
-        failed,
-        redundant,
-        total: addonsArray.length
-      });
-    } catch (error) {
-      console.error('Addon import error:', error);
-      res.status(500).json({ message: 'Failed to import addons' });
+    const nuvioAdminOAuthSessions = new Map(); // ip -> pending count
+    const NUVIO_ADMIN_OAUTH_CAP = 3;
+    const NUVIO_ADMIN_OAUTH_TTL_MS = 5 * 60 * 1000;
+
+    router.post("/nuvio-start-oauth", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Nuvio login is only available in public auth mode" });
+            }
+
+            // Same anonymous-Supabase-signup spam cap as the authenticated
+            // /api/nuvio/start-oauth flow (server/routes/nuvio.js) - this route
+            // exists specifically so it's reachable BEFORE login, so it needs its
+            // own cap rather than relying on that route's.
+            const ip = req.ip;
+            const current = nuvioAdminOAuthSessions.get(ip) || 0;
+            if (current >= NUVIO_ADMIN_OAUTH_CAP) {
+                return res.status(429).json({
+                    message: "Too many pending Nuvio login attempts. Please wait and try again.",
+                });
+            }
+
+            const result = await startNuvioTvLogin();
+            nuvioAdminOAuthSessions.set(ip, current + 1);
+            setTimeout(() => {
+                const c = nuvioAdminOAuthSessions.get(ip) || 0;
+                if (c <= 1) {
+                    nuvioAdminOAuthSessions.delete(ip);
+                } else {
+                    nuvioAdminOAuthSessions.set(ip, c - 1);
+                }
+            }, NUVIO_ADMIN_OAUTH_TTL_MS);
+
+            res.json(result);
+        } catch (error) {
+            console.error("Nuvio admin start-oauth error:", error?.message);
+            res.status(500).json({ message: "Failed to start Nuvio login" });
+        }
+    });
+
+    router.post("/nuvio-poll-oauth", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Nuvio login is only available in public auth mode" });
+            }
+
+            const { code, deviceNonce, anonToken } = req.body || {};
+            if (!(code && deviceNonce && anonToken)) {
+                return responseUtils.badRequest(
+                    res,
+                    "code, deviceNonce, and anonToken are required"
+                );
+            }
+
+            const result = await pollNuvioTvLogin(code, deviceNonce, anonToken);
+            res.json(result);
+        } catch (error) {
+            console.error("Nuvio admin poll-oauth error:", error?.message);
+            res.status(500).json({ message: "Failed to poll Nuvio login" });
+        }
+    });
+
+    router.post("/nuvio-login", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Nuvio login is only available in public auth mode" });
+            }
+
+            const { code, deviceNonce, anonToken } = req.body || {};
+            if (!(code && deviceNonce && anonToken)) {
+                return responseUtils.badRequest(
+                    res,
+                    "code, deviceNonce, and anonToken are required"
+                );
+            }
+
+            let exchanged;
+            try {
+                exchanged = await exchangeNuvioTvLogin(code, deviceNonce, anonToken);
+            } catch (err) {
+                return res
+                    .status(401)
+                    .json({ message: err?.message || "Nuvio approval failed or expired" });
+            }
+
+            const nuvioUserId = exchanged?.user?.id;
+            const refreshToken = exchanged?.refreshToken;
+            const email = String(exchanged?.user?.email || "")
+                .trim()
+                .toLowerCase();
+            if (!(nuvioUserId && refreshToken && email)) {
+                return res.status(400).json({ message: "Nuvio account email not available" });
+            }
+
+            // Extract account ID from session cookies (since route is allowlisted, middleware might not set it)
+            let originalAccountId = req.appAccountId;
+            if (!originalAccountId && parseCookies) {
+                try {
+                    const cookies = parseCookies(req);
+                    const accessCookie = cookies[cookieName("sfm_at")] || cookies.sfm_at;
+                    const refreshCookie = cookies[cookieName("sfm_rt")] || cookies.sfm_rt;
+                    const token = accessCookie || refreshCookie;
+                    if (token) {
+                        const decoded = verifyAccountToken(token, ["access", "refresh"]);
+                        if (decoded?.accId) {
+                            const accountExists = await prisma.appAccount.findUnique({
+                                where: { id: decoded.accId },
+                            });
+                            if (accountExists) {
+                                originalAccountId = decoded.accId;
+                                req.appAccountId = originalAccountId;
+                            }
+                        }
+                    }
+                } catch {
+                    // Can't extract account ID from cookies - not logged in, that's OK
+                }
+            }
+
+            let account;
+            let isNewAccount = false;
+
+            // If logged in and linking, verify this Nuvio account isn't already linked elsewhere
+            if (originalAccountId) {
+                const currentAccount = await prisma.appAccount.findUnique({
+                    where: { id: originalAccountId },
+                });
+                if (currentAccount) {
+                    const existingAccountWithEmail = await prisma.appAccount.findUnique({
+                        where: { email },
+                    });
+                    if (
+                        existingAccountWithEmail &&
+                        existingAccountWithEmail.id !== originalAccountId
+                    ) {
+                        return res.status(409).json({
+                            error: "EMAIL_ALREADY_LINKED",
+                            message:
+                                "This Nuvio account is already linked to another SlickSync account",
+                        });
+                    }
+
+                    if (currentAccount.email && currentAccount.email !== email) {
+                        return res.status(409).json({
+                            error: "ACCOUNT_ALREADY_LINKED",
+                            message: "Your account is already linked to a different Nuvio account",
+                        });
+                    }
+
+                    const validation = await validateUserNuvioAuth(currentAccount.id, email, req);
+
+                    if (!validation.user) {
+                        return res.status(400).json({
+                            error: "NO_USER_WITH_EMAIL",
+                            message:
+                                "No user found with this email address. Please create a user with this email first before linking your Nuvio account.",
+                        });
+                    }
+
+                    if (!validation.user.nuvioRefreshToken) {
+                        return res.status(400).json({
+                            error: "USER_NO_NUVIO_AUTH",
+                            message:
+                                "User exists but has no Nuvio authentication. Please connect the user to Nuvio first before linking the account.",
+                        });
+                    }
+
+                    if (!validation.valid) {
+                        return res.status(409).json({
+                            error: "STORED_AUTHKEY_EMAIL_MISMATCH",
+                            message:
+                                "A user with this email already exists in your account, but their Nuvio authentication does not match. Please contact support.",
+                        });
+                    }
+
+                    if (currentAccount.email == null) {
+                        account = await prisma.appAccount.update({
+                            data: { email, linkedProvider: "nuvio" },
+                            where: { id: currentAccount.id },
+                        });
+                    } else {
+                        account = currentAccount;
+                    }
+                    req.appAccountId = account.id;
+
+                    const encryptedRefreshToken = encrypt(refreshToken, req);
+                    await prisma.user.update({
+                        data: {
+                            isActive: true,
+                            nuvioRefreshToken: encryptedRefreshToken,
+                            nuvioUserId,
+                        },
+                        where: { id: validation.user.id },
+                    });
+
+                    const at = issueAccessToken(account.id);
+                    const rt = issueRefreshToken(account.id);
+                    const csrf = randomCsrfToken();
+                    res.cookie(cookieName("sfm_at"), at, {
+                        httpOnly: true,
+                        maxAge: 30 * 24 * 60 * 60 * 1000,
+                        path: "/",
+                        sameSite: isProdEnv() ? "strict" : "lax",
+                        secure: isProdEnv(),
+                    });
+                    res.cookie(cookieName("sfm_rt"), rt, {
+                        httpOnly: true,
+                        maxAge: 365 * 24 * 60 * 60 * 1000,
+                        path: "/",
+                        sameSite: isProdEnv() ? "strict" : "lax",
+                        secure: isProdEnv(),
+                    });
+                    res.cookie(cookieName("sfm_csrf"), csrf, {
+                        httpOnly: false,
+                        maxAge: 30 * 24 * 60 * 60 * 1000,
+                        path: "/",
+                        sameSite: isProdEnv() ? "strict" : "lax",
+                        secure: isProdEnv(),
+                    });
+
+                    return res.json({
+                        account: {
+                            email: account.email || null,
+                            id: account.id,
+                            uuid: account.uuid,
+                        },
+                        message: "Account already linked",
+                        token: at,
+                    });
+                }
+                originalAccountId = undefined;
+            }
+
+            // Normal login flow (not logged in, or stale cookie account no longer exists)
+            if (!account) {
+                account = await prisma.appAccount.findUnique({ where: { email } });
+
+                if (account) {
+                    const validation = await validateUserNuvioAuth(account.id, email, req);
+                    if (reallyUnlinked(validation)) {
+                        await prisma.appAccount.update({
+                            data: { email: null, linkedProvider: null },
+                            where: { id: account.id },
+                        });
+                        account = null;
+                    }
+                }
+
+                if (!account) {
+                    account = await prisma.appAccount.create({
+                        data: {
+                            avatarUrl: createDefaultAvatar(),
+                            email,
+                            linkedProvider: "nuvio",
+                            passwordHash: null,
+                            uuid: null,
+                        },
+                    });
+                    isNewAccount = true;
+                } else if (account.email == null) {
+                    account = await prisma.appAccount.update({
+                        data: { email, linkedProvider: "nuvio" },
+                        where: { id: account.id },
+                    });
+                }
+
+                req.appAccountId = account.id;
+            }
+
+            const encryptedRefreshToken = encrypt(refreshToken, req);
+
+            const { ensureEmailUniqueness } = require("../utils/helpers/database");
+            await ensureEmailUniqueness(prisma, email, account.id);
+
+            let user = null;
+            // The Nuvio account that signed in (its main profile) - never just the
+            // household's oldest person.
+            const existingUser = await prisma.user.findFirst({
+                orderBy: { nuvioProfileId: "asc" },
+                where: { accountId: account.id, email, providerType: "nuvio" },
+            });
+
+            if (isNewAccount) {
+                const baseUsername = email.split("@")[0] || "nuvio-user";
+                const username = await ensureUniqueUsername(baseUsername, account.id);
+                const createdUser = await prisma.user.create({
+                    data: {
+                        accountId: account.id,
+                        avatarUrl: createDefaultAvatar(),
+                        email,
+                        isActive: true,
+                        nuvioRefreshToken: encryptedRefreshToken,
+                        nuvioUserId,
+                        providerType: "nuvio",
+                        username,
+                    },
+                });
+                user = {
+                    email: createdUser.email,
+                    id: createdUser.id,
+                    username: createdUser.username,
+                };
+            } else if (existingUser) {
+                await prisma.user.update({
+                    data: { isActive: true, nuvioRefreshToken: encryptedRefreshToken, nuvioUserId },
+                    where: { id: existingUser.id },
+                });
+            }
+
+            const at = issueAccessToken(account.id);
+            const rt = issueRefreshToken(account.id);
+            const csrf = randomCsrfToken();
+            res.cookie(cookieName("sfm_at"), at, {
+                httpOnly: true,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_rt"), rt, {
+                httpOnly: true,
+                maxAge: 365 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_csrf"), csrf, {
+                httpOnly: false,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+
+            return res.json({
+                account: { email: account.email || null, id: account.id, uuid: account.uuid },
+                message: "Login successful",
+                token: at,
+                ...(user ? { user } : {}),
+            });
+        } catch (error) {
+            console.error("Nuvio login error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // --- Sign in with a Jellyfin-compatible server (public instances) ---
+    //
+    // The same shape as the Nuvio sign-in above. A server user has no email, so
+    // the account is keyed by the identity SlickSync stores for that user
+    // (their id on the server plus the server's host - see
+    // providers/jellyfinAuth.js identityEmail). On a public instance the
+    // address must be a public one; jellyfinAuth refuses private networks.
+
+    // POST /jellyfin-probe, /jellyfin-quick-connect, /jellyfin-quick-connect-status
+    require("../utils/jellyfinConnect").mountSignInSteps(router, "jellyfin-");
+
+    router.post("/jellyfin-login", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Server sign-in is only available in public auth mode" });
+            }
+            const {
+                signInFromBody,
+                jellyfinFields,
+                rememberSignIn,
+            } = require("../utils/jellyfinConnect");
+            const { identityEmail } = require("../providers/jellyfinAuth");
+            let signedIn;
+            try {
+                signedIn = await signInFromBody(req.body);
+            } catch (err) {
+                const status = err?.status === 401 ? 401 : 400;
+                return res.status(status).json({
+                    message: err?.message || "Could not sign in to the server",
+                    ...(err?.pinNeeded ? { pinNeeded: true } : {}),
+                });
+            }
+            const { probe, login } = signedIn;
+            // Signing in retired the token anyone else holding this server user had,
+            // so they take the new one now, whatever the checks below decide.
+            await rememberSignIn(prisma, encrypt, probe, login);
+            const email = identityEmail(probe.serverUrl, login.userId);
+
+            // Signed in already: link this server login to the current account,
+            // which must already have a person with this login.
+            let currentAccountId = req.appAccountId;
+            if (!currentAccountId && parseCookies) {
+                try {
+                    const cookies = parseCookies(req);
+                    const token =
+                        cookies[cookieName("sfm_at")] ||
+                        cookies.sfm_at ||
+                        cookies[cookieName("sfm_rt")] ||
+                        cookies.sfm_rt;
+                    if (token) {
+                        const decoded = verifyAccountToken(token, ["access", "refresh"]);
+                        if (
+                            decoded?.accId &&
+                            (await prisma.appAccount.findUnique({ where: { id: decoded.accId } }))
+                        ) {
+                            currentAccountId = decoded.accId;
+                        }
+                    }
+                } catch {
+                    /* not signed in */
+                }
+            }
+
+            let account = await prisma.appAccount.findUnique({ where: { email } });
+            let isNewAccount = false;
+            if (currentAccountId) {
+                if (account && account.id !== currentAccountId) {
+                    return res.status(409).json({
+                        error: "EMAIL_ALREADY_LINKED",
+                        message: "This server login is already linked to another SlickSync account",
+                    });
+                }
+                const current = await prisma.appAccount.findUnique({
+                    where: { id: currentAccountId },
+                });
+                if (current.email && current.email !== email) {
+                    return res.status(409).json({
+                        error: "ACCOUNT_ALREADY_LINKED",
+                        message: "Your account is already linked to a different login",
+                    });
+                }
+                const person = await prisma.user.findFirst({
+                    where: {
+                        accountId: current.id,
+                        jellyfinUserId: login.userId,
+                        providerType: "jellyfin",
+                    },
+                });
+                if (!person) {
+                    return res.status(400).json({
+                        error: "NO_USER_WITH_EMAIL",
+                        message: "Add this server user as a person first, then link the login.",
+                    });
+                }
+                account = current.email
+                    ? current
+                    : await prisma.appAccount.update({
+                          data: { email, linkedProvider: "jellyfin" },
+                          where: { id: current.id },
+                      });
+            } else if (!account) {
+                account = await prisma.appAccount.create({
+                    data: {
+                        avatarUrl: createDefaultAvatar(),
+                        email,
+                        linkedProvider: "jellyfin",
+                        passwordHash: null,
+                        uuid: null,
+                    },
+                });
+                isNewAccount = true;
+            }
+            req.appAccountId = account.id;
+
+            const fields = jellyfinFields(probe, login, encrypt, req);
+            let user = null;
+            const existing = await prisma.user.findFirst({
+                where: {
+                    accountId: account.id,
+                    jellyfinUserId: login.userId,
+                    providerType: "jellyfin",
+                },
+            });
+            if (existing) {
+                await prisma.user.update({
+                    data: { ...fields, isActive: true },
+                    where: { id: existing.id },
+                });
+            } else if (isNewAccount) {
+                const username = await ensureUniqueUsername(
+                    login.userName || "jellyfin-user",
+                    account.id
+                );
+                const created = await prisma.user.create({
+                    data: {
+                        accountId: account.id,
+                        avatarUrl: createDefaultAvatar(),
+                        email,
+                        isActive: true,
+                        username,
+                        ...fields,
+                    },
+                });
+                user = { email: created.email, id: created.id, username: created.username };
+            }
+
+            const at = issueAccessToken(account.id);
+            const rt = issueRefreshToken(account.id);
+            const csrf = randomCsrfToken();
+            res.cookie(cookieName("sfm_at"), at, {
+                httpOnly: true,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_rt"), rt, {
+                httpOnly: true,
+                maxAge: 365 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            res.cookie(cookieName("sfm_csrf"), csrf, {
+                httpOnly: false,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                path: "/",
+                sameSite: isProdEnv() ? "strict" : "lax",
+                secure: isProdEnv(),
+            });
+            return res.json({
+                account: { email: account.email || null, id: account.id, uuid: account.uuid },
+                message: "Login successful",
+                token: at,
+                ...(user ? { user } : {}),
+            });
+        } catch (error) {
+            console.error("Jellyfin login error:", error?.message);
+            return responseUtils.internalError(res, "Could not sign in");
+        }
+    });
+
+    // Unlink Stremio account from current account (keep UUID only)
+    router.post("/unlink-stremio", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Unlinking is only available in public auth mode" });
+            }
+
+            const accountId = req.appAccountId;
+            if (!accountId) {
+                return res.status(401).json({ message: "Authentication required" });
+            }
+
+            const { password } = req.body || {};
+
+            const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
+            if (!account) {
+                return res.status(404).json({ message: "Account not found" });
+            }
+
+            if (!account.email) {
+                return res
+                    .status(400)
+                    .json({ message: "Account is not linked to a Stremio account" });
+            }
+
+            if (!(account.uuid && account.passwordHash)) {
+                return res.status(400).json({
+                    error: "NO_CREDENTIALS",
+                    message:
+                        'Cannot keep UUID-only — this account has no UUID/password set. Use "Add UUID & Password" first.',
+                });
+            }
+
+            // Require password confirmation to prove user knows their credentials
+            if (!password) {
+                return res.status(400).json({
+                    error: "PASSWORD_REQUIRED",
+                    message: "Password is required to confirm unlink",
+                });
+            }
+
+            const passwordValid = await bcrypt.compare(password, account.passwordHash);
+            if (!passwordValid) {
+                return res
+                    .status(401)
+                    .json({ error: "INVALID_PASSWORD", message: "Incorrect password" });
+            }
+
+            await prisma.appAccount.update({
+                data: { email: null, linkedProvider: null },
+                where: { id: accountId },
+            });
+
+            return res.json({
+                message:
+                    "Stremio account unlinked successfully. You can now log in with your UUID and password.",
+                uuid: account.uuid,
+            });
+        } catch (error) {
+            console.error("Unlink Stremio error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // Unlink UUID from current account (keep Stremio only)
+    router.post("/unlink-uuid", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Unlinking is only available in public auth mode" });
+            }
+
+            const accountId = req.appAccountId;
+            if (!accountId) {
+                return res.status(401).json({ message: "Authentication required" });
+            }
+
+            const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
+            if (!account) {
+                return res.status(404).json({ message: "Account not found" });
+            }
+
+            if (!account.email) {
+                return res.status(400).json({
+                    error: "NO_STREMIO",
+                    message:
+                        "Cannot remove UUID — this account has no Stremio linked. You would be locked out.",
+                });
+            }
+
+            if (!account.uuid) {
+                return res
+                    .status(400)
+                    .json({ error: "ALREADY_NO_UUID", message: "Account already has no UUID" });
+            }
+
+            await prisma.appAccount.update({
+                data: { passwordHash: null, uuid: null },
+                where: { id: accountId },
+            });
+
+            return res.json({
+                message: "UUID and password removed. You can now log in with Stremio only.",
+            });
+        } catch (error) {
+            console.error("Unlink UUID error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // Set credentials (add or change UUID + password)
+    router.post("/set-credentials", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ message: "Setting credentials is only available in public auth mode" });
+            }
+
+            const accountId = req.appAccountId;
+            if (!accountId) {
+                return res.status(401).json({ message: "Authentication required" });
+            }
+
+            const { password } = req.body || {};
+            if (!password || typeof password !== "string" || password.trim().length < 4) {
+                return res.status(400).json({
+                    error: "WEAK_PASSWORD",
+                    message: "Password must be at least 4 characters",
+                });
+            }
+
+            const account = await prisma.appAccount.findUnique({ where: { id: accountId } });
+            if (!account) {
+                return res.status(404).json({ message: "Account not found" });
+            }
+
+            const passwordHash = await bcrypt.hash(password.trim(), 12);
+
+            if (account.uuid) {
+                // Account already has a UUID — just update the password
+                await prisma.appAccount.update({
+                    data: { passwordHash },
+                    where: { id: accountId },
+                });
+                return res.json({ message: "Password updated successfully.", uuid: account.uuid });
+            }
+            // Generate a new UUID
+            const newUuid = await generateUniqueAccountUuid();
+            await prisma.appAccount.update({
+                data: { passwordHash, uuid: newUuid },
+                where: { id: accountId },
+            });
+            return res.json({ message: "UUID and password set successfully.", uuid: newUuid });
+        } catch (error) {
+            console.error("Set credentials error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    // Session info endpoint
+    router.get("/me", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public" && !PRIVATE_AUTH_ENABLED) {
+                return res.json({ account: null, message: "Auth disabled" });
+            }
+
+            if (!req.appAccountId) {
+                return res.status(401).json({ message: "Not authenticated" });
+            }
+
+            // For private auth, return a simple account object
+            if (PRIVATE_AUTH_ENABLED && INSTANCE_TYPE !== "public") {
+                return res.json({
+                    account: {
+                        email: null,
+                        id: req.appAccountId,
+                        uuid: null,
+                    },
+                });
+            }
+
+            const account = await prisma.appAccount.findUnique({
+                select: { email: true, id: true, uuid: true },
+                where: { id: req.appAccountId },
+            });
+
+            if (!account) {
+                return responseUtils.notFound(res, "Account");
+            }
+
+            res.json({ account });
+        } catch (error) {
+            console.error("Session error:", error);
+            return responseUtils.internalError(res, GENERIC_FAILURE);
+        }
+    });
+
+    router.post("/logout", (_req, res) => {
+        const opts = {
+            expires: new Date(0),
+            httpOnly: true,
+            path: "/",
+            sameSite: isProdEnv() ? "strict" : "lax",
+            secure: isProdEnv(),
+        };
+        res.cookie(cookieName("sfm_at"), "", opts);
+        res.cookie(cookieName("sfm_rt"), "", opts);
+        res.cookie(cookieName("sfm_csrf"), "", {
+            expires: new Date(0),
+            httpOnly: false,
+            path: "/",
+            sameSite: isProdEnv() ? "strict" : "lax",
+            secure: isProdEnv(),
+        });
+        return res.json({ message: "Logged out" });
+    });
+
+    // Export all data for one account (config export). Extracted from the
+    // route below so the scheduled backup system (server/utils/backup.js) can
+    // call this directly with a synthetic { appAccountId } object instead of
+    // going through a real HTTP request - it previously self-called this same
+    // route over plain fetch() with no auth context at all, which would have
+    // hit the 401 guard below for every account except by accident in private
+    // mode (where whereScope ignores appAccountId entirely). That's the actual
+    // reason scheduled backups only ever worked for the single private-mode
+    // account: there was no way for an unauthenticated internal call to name
+    // which tenant to export. Calling this function directly with a real
+    // accountId sidesteps that entirely - no HTTP hop, no auth token needed,
+    // same account-scoping logic either way.
+    // includeSecrets: opt-in, per export. Off by default - a plain config
+    // backup is unencrypted JSON, and people share those while troubleshooting
+    // without thinking about what is inside. But defaulting to safe is not the
+    // same as deciding for the operator: someone keeping backups on their own
+    // encrypted storage has a legitimate reason to want a restore that does not
+    // require also finding a Disaster Recovery Kit passphrase.
+    async function buildConfigExportPayload(req, { includeSecrets = false } = {}) {
+        const whereScope = INSTANCE_TYPE === "public" ? { accountId: req.appAccountId } : {};
+        if (INSTANCE_TYPE === "public" && !req.appAccountId) {
+            const e = new Error("Unauthorized");
+            e.status = 401;
+            throw e;
+        }
+        // Ensure request-scoped DEK is available for decryption in public mode
+        try {
+            if (
+                INSTANCE_TYPE === "public" &&
+                !req.accountDek &&
+                typeof getAccountDek === "function"
+            ) {
+                let dek = getAccountDek(req.appAccountId);
+                if (!dek) {
+                    const acct = await prisma.appAccount.findUnique({
+                        select: { uuid: true },
+                        where: { id: req.appAccountId },
+                    });
+                    if (acct?.uuid) {
+                        dek = getAccountDek(acct.uuid);
+                    }
+                }
+                if (dek) {
+                    req.accountDek = dek;
+                }
+            }
+        } catch {
+            // Unavailable optional records leave the current result in place.
+        }
+        const [users, groups, addons, accountRec] = await Promise.all([
+            prisma.user.findMany({ where: whereScope }),
+            prisma.group.findMany({
+                include: {
+                    addons: { include: { addon: true } },
+                },
+                where: whereScope,
+            }),
+            prisma.addon.findMany({ include: { groupAddons: true }, where: whereScope }),
+            // Was public-mode only - private-mode config exports/backups never
+            // captured Settings at all as a result (timezone, notification
+            // toggles, safe/unsafe mode, etc. all silently reverted to defaults
+            // on any restore). Now fetched in both modes; the actual secrets
+            // inside (webhookUrl, rpdbApiKey, tmdbApiKey, mdblistApiKey) are
+            // stripped out below before this ever reaches the payload - they
+            // route through the passphrase-encrypted Disaster Recovery Kit
+            // instead, same treatment Vault already gets.
+            prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: req.appAccountId },
+            }),
+        ]);
+        // Build addon id -> name map for user excludedAddons name resolution
+        const addonIdToName = new Map(addons.map((a) => [a.id, a.name]));
+
+        // AIOStreams / AIOMetadata household profiles, per person. They hang off
+        // a person's id, which an import replaces, so each person also carries
+        // an opaque reference (`jellyfinHousehold.ref`) the import maps to the
+        // new id - which is also what re-keys per-person and per-profile
+        // collections in the account settings (sync.aioCollections).
+        const profileRows = await prisma.jellyfinProfile
+            .findMany({ where: whereScope })
+            .catch(() => []);
+        const usernameById = new Map(users.map((u) => [u.id, u.username]));
+        const householdOf = (user) => {
+            const profiles = profileRows
+                .filter((p) => p.ownerUserId === user.id)
+                .map((p) => {
+                    let token = null;
+                    if (p.token) {
+                        try {
+                            token = decrypt(p.token, req);
+                        } catch (e) {
+                            console.warn(
+                                `Failed to decrypt a household sign-in for ${user.id}:`,
+                                e.message
+                            );
+                        }
+                    }
+                    return {
+                        jellyfinUserId: p.jellyfinUserId,
+                        loginName: p.loginName,
+                        name: p.name,
+                        needsPin: p.needsPin,
+                        ownUsername: p.ownUserId ? usernameById.get(p.ownUserId) || null : null,
+                        ref: p.id,
+                        skip: p.skip,
+                        token,
+                    };
+                });
+            return { profiles, ref: user.id };
+        };
+
+        // Decrypt stremioAuthKey AND nuvioRefreshToken for each user before
+        // exporting. nuvioRefreshToken previously rode along un-decrypted via
+        // the {...user} spread below - export never decrypted it, and
+        // config-import never re-encrypted it either, so it only "worked" by
+        // accident when the encryption key hadn't changed between export and
+        // import. A real disaster-recovery restore (new server, new key -
+        // exactly what the Disaster Recovery Kit exists for) would silently
+        // fail to decrypt it, breaking every Nuvio user's connection. Now
+        // handled identically to stremioAuthKey.
+        const decryptedUsers = users.map((user) => {
+            const decryptedUser = { ...user };
+            if (user.stremioAuthKey) {
+                try {
+                    decryptedUser.stremioAuthKey = decrypt(user.stremioAuthKey, req);
+                } catch (e) {
+                    console.warn(`Failed to decrypt auth key for user ${user.id}:`, e.message);
+                    decryptedUser.stremioAuthKey = null;
+                }
+            }
+            if (user.nuvioRefreshToken) {
+                try {
+                    decryptedUser.nuvioRefreshToken = decrypt(user.nuvioRefreshToken, req);
+                } catch (e) {
+                    console.warn(
+                        `Failed to decrypt Nuvio refresh token for user ${user.id}:`,
+                        e.message
+                    );
+                    decryptedUser.nuvioRefreshToken = null;
+                }
+            }
+            if (user.aioConfigPassword) {
+                try {
+                    decryptedUser.aioConfigPassword = decrypt(user.aioConfigPassword, req);
+                } catch {
+                    decryptedUser.aioConfigPassword = null;
+                }
+            }
+            // A Jellyfin server sign-in, for the same reason as the two above.
+            if (user.jellyfinToken) {
+                try {
+                    decryptedUser.jellyfinToken = decrypt(user.jellyfinToken, req);
+                } catch (e) {
+                    console.warn(
+                        `Failed to decrypt Jellyfin token for user ${user.id}:`,
+                        e.message
+                    );
+                    decryptedUser.jellyfinToken = null;
+                }
+            }
+            // Simkl's sign-in too: it used to ride along still encrypted, which
+            // only worked when the import landed under the same key.
+            if (user.simklAccessToken) {
+                try {
+                    decryptedUser.simklAccessToken = decrypt(user.simklAccessToken, req);
+                } catch (e) {
+                    console.warn(`Failed to decrypt Simkl token for user ${user.id}:`, e.message);
+                    decryptedUser.simklAccessToken = null;
+                }
+            }
+            if (user.providerType === "jellyfin") {
+                decryptedUser.jellyfinHousehold = householdOf(user);
+            }
+            // Normalize excludedAddons to addon NAMES for export (keep JSON string format for compatibility)
+            try {
+                const parsedExcluded = user.excludedAddons ? JSON.parse(user.excludedAddons) : [];
+                if (Array.isArray(parsedExcluded)) {
+                    const names = parsedExcluded.map((id) => addonIdToName.get(id)).filter(Boolean);
+                    decryptedUser.excludedAddons = JSON.stringify(names);
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
+            // Ensure protectedAddons remains a JSON string of names
+            try {
+                if (Array.isArray(user.protectedAddons)) {
+                    decryptedUser.protectedAddons = JSON.stringify(user.protectedAddons);
+                } else if (typeof user.protectedAddons !== "string" && user.protectedAddons) {
+                    decryptedUser.protectedAddons = JSON.stringify([]);
+                }
+            } catch {}
+            // Omit internal fields. `ref` is the person's id, kept so an import
+            // back into this instance can give them the same id again - their
+            // watch history, sessions and stats are all filed under it.
+            decryptedUser.ref = user.id;
+            delete decryptedUser.id;
+            delete decryptedUser.accountId;
+            // Omit stremioAddons from export (not needed in exported config)
+            delete decryptedUser.stremioAddons;
+            return decryptedUser;
+        });
+
+        // Build addons with originalManifest and simplified resources/catalogs
+        const exportedAddons = await Promise.all(
+            addons.map(async (addon) => {
+                // Get the original manifest (full, unfiltered)
+                let originalManifest = null;
+                if (addon.originalManifest) {
+                    try {
+                        originalManifest = JSON.parse(decrypt(addon.originalManifest, req));
+                    } catch (e) {
+                        console.warn(
+                            `Failed to decrypt originalManifest for ${addon.name}:`,
+                            e.message
+                        );
+                    }
+                }
+
+                // Fallback: if no originalManifest, try to get from current manifest
+                if (!originalManifest && addon.manifest) {
+                    try {
+                        originalManifest = JSON.parse(decrypt(addon.manifest, req));
+                    } catch (e) {
+                        console.warn(`Failed to decrypt manifest for ${addon.name}:`, e.message);
+                    }
+                }
+
+                // Last resort: fetch from URL if available
+                if (!originalManifest) {
+                    const transportUrl = getDecryptedManifestUrl(addon, req);
+                    if (transportUrl) {
+                        try {
+                            const rsp = await safeFetch(transportUrl, {}, instancePolicy());
+                            if (rsp.ok) {
+                                originalManifest = await rsp.json();
+                                console.log(
+                                    `Fetched originalManifest for config export: ${originalManifest?.name}`
+                                );
+                            }
+                        } catch (err) {
+                            console.warn(
+                                `Failed to fetch manifest for ${transportUrl}:`,
+                                err?.message
+                            );
+                        }
+                    }
+                }
+
+                // Create fallback manifest if nothing else works
+                if (!originalManifest) {
+                    originalManifest = {
+                        catalogs: [],
+                        description: addon.description || null,
+                        id: addon.name || "unknown.addon",
+                        logo: addon.iconUrl || null,
+                        name: addon.name || "Unknown",
+                        resources: [],
+                        types: [],
+                        version: addon.version || null,
+                    };
+                }
+
+                // Get current resource and catalog selections (already in simplified format)
+                const currentResources = (() => {
+                    try {
+                        return addon.resources ? JSON.parse(addon.resources) : [];
+                    } catch {
+                        return [];
+                    }
+                })();
+
+                const currentCatalogs = (() => {
+                    try {
+                        return addon.catalogs ? JSON.parse(addon.catalogs) : [];
+                    } catch {
+                        return [];
+                    }
+                })();
+
+                // cleanedGroupAddons is only calculated for reference if needed but not exported in main payload
+                const _cleanedGroupAddons = (addon.groupAddons || []).map((ga) => ({
+                    isEnabled: ga.isEnabled,
+                    name: addon.name,
+                    // omit groupId, addonId and settings
+                }));
+
+                return {
+                    catalogs: currentCatalogs, // Simplified catalog (type,id) pairs: [{"type":"movie","id":"123"}]
+                    description: addon.description,
+                    iconUrl: addon.iconUrl,
+                    isActive: addon.isActive,
+                    manifestUrl: getDecryptedManifestUrl(addon, req),
+                    name: addon.name,
+                    originalManifest, // Full manifest with all available resources
+                    resources: currentResources, // Simplified resource names: ["stream", "catalog"]
+                    stremioAddonId: addon.stremioAddonId || originalManifest?.id || null,
+                    version: addon.version,
+                    // drop internal ids and relations from export
+                };
+            })
+        );
+
+        // Build quick userId->username map for groups export
+        const userIdToUsername = new Map(users.map((u) => [u.id, u.username]));
+
+        // Clean groups: export addons as ordered list of { name, isEnabled }
+        const cleanedGroups = await Promise.all(
+            groups.map(async (g) => {
+                // Use getGroupAddons to get addons in correct order
+                const { getGroupAddons } = require("../utils/helpers");
+                const orderedAddons = await getGroupAddons(prisma, g.id, req);
+                // Build name->isEnabled map from group include as fallback
+                const enabledByName = new Map();
+                for (const ga of g.addons || []) {
+                    const ref = ga?.addon ? ga.addon : null;
+                    if (ref?.name) {
+                        enabledByName.set(ref.name, ga.isEnabled !== false);
+                    }
+                }
+                const addonsOrdered = orderedAddons.map((a) => ({
+                    isEnabled:
+                        typeof a.isEnabled === "boolean"
+                            ? a.isEnabled
+                            : enabledByName.has(a.name)
+                              ? enabledByName.get(a.name)
+                              : true,
+                    name: a.name,
+                }));
+
+                const usersArr = (() => {
+                    try {
+                        const ids = g.userIds ? JSON.parse(g.userIds) : [];
+                        return ids.map((id) => userIdToUsername.get(id)).filter(Boolean);
+                    } catch {
+                        return [];
+                    }
+                })();
+
+                return {
+                    addons: addonsOrdered,
+                    colorIndex: g.colorIndex,
+                    description: g.description,
+                    isActive: g.isActive,
+                    name: g.name,
+                    users: usersArr,
+                };
+            })
+        );
+
+        // Normalize account sync for export
+        let accountSync = null;
+        try {
+            const rawSync = accountRec?.sync;
+            if (rawSync != null) {
+                if (typeof rawSync === "string") {
+                    try {
+                        accountSync = JSON.parse(rawSync);
+                    } catch {
+                        accountSync = { frequency: "0" };
+                    }
+                } else if (typeof rawSync === "object") {
+                    accountSync = rawSync;
+                }
+            }
+        } catch {
+            // Malformed optional data leaves the existing fallback in place.
+        }
+
+        // Ensure useCustomFields is included in export (default to true if not present)
+        // Migrate old useCustomNames to useCustomFields if present
+        if (accountSync && typeof accountSync === "object") {
+            if (typeof accountSync.useCustomFields !== "boolean") {
+                if (typeof accountSync.useCustomNames === "boolean") {
+                    accountSync.useCustomFields = accountSync.useCustomNames;
+                    delete accountSync.useCustomNames;
+                } else {
+                    accountSync.useCustomFields = true;
+                }
+            }
+        } else if (accountSync === null) {
+            // If no sync config exists, create a minimal one with useCustomFields
+            accountSync = { useCustomFields: true };
+        }
+
+        // Real live secrets, not preferences. Stripped unless the caller
+        // explicitly asked for them, because a plain export is unencrypted and
+        // easy to share by accident. They are always in the Disaster Recovery
+        // Kit regardless (disasterRecoveryKit.js), passphrase-encrypted like
+        // Vault secrets - so leaving them out here never means losing them.
+        if (accountSync && typeof accountSync === "object" && !includeSecrets) {
+            for (const f of SETTINGS_SECRET_FIELDS) {
+                delete accountSync[f];
+            }
+        }
+
+        const payload = {
+            addons: exportedAddons,
+            groups: cleanedGroups,
+            sync: accountSync,
+            users: decryptedUsers,
+        };
+        return payload;
     }
-  });
 
-  // Delete the logged-in account and all scoped data
-  router.delete('/account', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') return res.status(400).json({ error: 'Account deletion only available in public mode' })
+    // Export all data for the logged-in account (config export) - thin HTTP
+    // wrapper around buildConfigExportPayload above.
+    router.get("/config-export", async (req, res) => {
+        try {
+            // ?includeSecrets=1 (or {includeSecrets:true}) opts this one export
+            // into carrying live keys - see buildConfigExportPayload.
+            const wantSecrets =
+                req.query?.includeSecrets === "1" ||
+                req.query?.includeSecrets === "true" ||
+                req.body?.includeSecrets === true;
+            const payload = await buildConfigExportPayload(req, { includeSecrets: wantSecrets });
+            res.setHeader("Content-Disposition", 'attachment; filename="slicksync-export.json"');
+            return res.json(payload);
+        } catch (e) {
+            if (e?.status === 401) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            console.error("Export failed:", e);
+            return res.status(500).json({ error: "Export failed" });
+        }
+    });
 
-      if (!req.appAccountId) {
-        return res.status(401).json({ message: 'Not authenticated' });
-      }
+    // Export only addons for the logged-in account
+    router.get("/addon-export", async (req, res) => {
+        try {
+            const whereScope = INSTANCE_TYPE === "public" ? { accountId: req.appAccountId } : {};
+            if (INSTANCE_TYPE === "public" && !req.appAccountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const addons = await prisma.addon.findMany({ where: whereScope });
 
-      // Delete all data for this account
-      await prisma.groupAddon.deleteMany({
-        where: { group: { accountId: req.appAccountId } }
-      });
-      await prisma.group.deleteMany({
-        where: { accountId: req.appAccountId }
-      });
-      await prisma.addon.deleteMany({
-        where: { accountId: req.appAccountId }
-      });
-      await prisma.user.deleteMany({
-        where: { accountId: req.appAccountId }
-      });
+            // Build addon objects with originalManifest and current selections
+            const exported = await Promise.all(
+                addons.map(async (addon) => {
+                    const transportUrl = getDecryptedManifestUrl(addon, req);
 
-      // Delete the account itself
-      await prisma.appAccount.delete({
-        where: { id: req.appAccountId }
-      });
+                    // Get the original manifest (full, unfiltered)
+                    let originalManifest = null;
+                    if (addon.originalManifest) {
+                        try {
+                            originalManifest = JSON.parse(decrypt(addon.originalManifest, req));
+                        } catch (e) {
+                            console.warn(
+                                `Failed to decrypt originalManifest for ${addon.name}:`,
+                                e.message
+                            );
+                        }
+                    }
 
-      res.json({ message: 'Account deleted successfully' });
-    } catch (error) {
-      console.error('Account deletion error:', error);
-      res.status(500).json({ message: 'Failed to delete account' });
-    }
-  });
+                    // Fallback: if no originalManifest, try to get from current manifest
+                    if (!originalManifest && addon.manifest) {
+                        try {
+                            originalManifest = JSON.parse(decrypt(addon.manifest, req));
+                        } catch (e) {
+                            console.warn(
+                                `Failed to decrypt manifest for ${addon.name}:`,
+                                e.message
+                            );
+                        }
+                    }
 
-  // Attached as a property (not a separate export) so index.js's existing
-  // `app.use('/api/public-auth', publicAuthRouterInstance)` keeps working
-  // unchanged - router is still a real Express Router, just with this one
-  // extra callable hanging off it for backup.js to use directly.
-  router.buildConfigExportPayload = buildConfigExportPayload;
+                    // Last resort: fetch from URL if available
+                    if (!originalManifest && transportUrl) {
+                        try {
+                            const rsp = await safeFetch(transportUrl, {}, instancePolicy());
+                            if (rsp.ok) {
+                                originalManifest = await rsp.json();
+                                console.log(
+                                    `Fetched originalManifest for export: ${originalManifest?.name}`
+                                );
+                            }
+                        } catch (err) {
+                            console.warn(
+                                `Failed to fetch manifest for ${transportUrl}:`,
+                                err?.message
+                            );
+                        }
+                    }
 
-  return router;
+                    // Create fallback manifest if nothing else works
+                    if (!originalManifest) {
+                        originalManifest = {
+                            addonCatalogs: [],
+                            background: null,
+                            behaviorHints: { configurable: false, configurationRequired: false },
+                            catalogs: [],
+                            description: addon.description || null,
+                            id: addon.name || "unknown.addon",
+                            idPrefixes: null,
+                            logo: addon.iconUrl || null,
+                            name: addon.name || "",
+                            resources: (() => {
+                                try {
+                                    return addon.resources ? JSON.parse(addon.resources) : [];
+                                } catch {
+                                    return [];
+                                }
+                            })(),
+                            types: [],
+                            version: addon.version || null,
+                        };
+                    }
+
+                    // Get current resource and catalog selections (already in simplified format)
+                    const currentResources = (() => {
+                        try {
+                            return addon.resources ? JSON.parse(addon.resources) : [];
+                        } catch {
+                            return [];
+                        }
+                    })();
+
+                    const currentCatalogs = (() => {
+                        try {
+                            return addon.catalogs ? JSON.parse(addon.catalogs) : [];
+                        } catch {
+                            return [];
+                        }
+                    })();
+
+                    return {
+                        catalogs: currentCatalogs, // Simplified catalog (type,id) pairs: [{"type":"movie","id":"123"}]
+                        flags: { protected: false },
+                        manifestUrl: transportUrl,
+                        name: addon.name || "",
+                        originalManifest, // Full manifest with all available resources
+                        resources: currentResources, // Simplified resource names: ["stream", "catalog"]
+                        stremioAddonId: addon.stremioAddonId || originalManifest?.id || null,
+                    };
+                })
+            );
+
+            res.setHeader(
+                "Content-Disposition",
+                'attachment; filename="slicksync-addon-export.json"'
+            );
+            return res.json(exported);
+        } catch (e) {
+            console.error("Export addons failed:", e);
+            return res.status(500).json({ error: "Export addons failed" });
+        }
+    });
+
+    // Import full configuration with an account-scoped reset first (canonical path)
+    router.post("/config-import", upload.single("file"), async (req, res) => {
+        try {
+            console.log("Config import started");
+            if (INSTANCE_TYPE === "public" && !req.appAccountId) {
+                return res.status(401).json({ message: "Authentication required" });
+            }
+
+            let jsonData;
+            if (req.file) {
+                // Handle file upload
+                console.log("Processing uploaded file");
+                jsonData = JSON.parse(req.file.buffer.toString("utf8"));
+            } else if (req.body.jsonData) {
+                // Handle JSON string in body
+                console.log("Processing JSON data from body");
+                jsonData = JSON.parse(req.body.jsonData);
+            } else {
+                return responseUtils.badRequest(res, "No file or jsonData provided");
+            }
+
+            // Encrypted off-site backup (.enc envelope from backupTargets'
+            // optional passphrase): decrypt to the real export before anything
+            // else looks at it. Without a passphrase this is a distinct error the
+            // client recognizes and prompts for, not a generic parse failure.
+            if (jsonData?.slicksyncEncryptedBackup) {
+                const passphrase = String(req.body?.passphrase || "");
+                if (!passphrase) {
+                    return res.status(400).json({
+                        code: "PASSPHRASE_REQUIRED",
+                        message:
+                            "This backup is encrypted - its passphrase is required to import it",
+                    });
+                }
+                try {
+                    const { scryptKey, aesGcmDecrypt } = require("../utils/encryption");
+                    const key = await scryptKey(passphrase, jsonData.salt);
+                    jsonData = JSON.parse(aesGcmDecrypt(key, jsonData.payload));
+                } catch {
+                    return res
+                        .status(400)
+                        .json({ message: "Wrong passphrase for this encrypted backup" });
+                }
+            }
+
+            // Handle both wrapped and direct config formats
+            const configData = jsonData.data || jsonData;
+            console.log("Config data structure:", Object.keys(configData));
+
+            // Competitor/legacy tolerance: this importer descends from Syncio's
+            // export format, and other Syncio-family managers rename a field here
+            // and there. Alias the common variants BEFORE validating, so their
+            // files drop straight in instead of failing on a synonym.
+            if (configData && typeof configData === "object") {
+                for (const arrKey of ["users", "groups", "addons"]) {
+                    if (Array.isArray(configData[arrKey])) {
+                        configData[arrKey] = configData[arrKey].map((item) => {
+                            if (!item || typeof item !== "object") {
+                                return item;
+                            }
+                            const mapped = { ...item };
+                            if (!mapped.manifestUrl && typeof mapped.url === "string") {
+                                mapped.manifestUrl = mapped.url;
+                            }
+                            if (!mapped.name && typeof mapped.title === "string") {
+                                mapped.name = mapped.title;
+                            }
+                            if (
+                                arrKey === "users" &&
+                                !mapped.username &&
+                                typeof mapped.name === "string"
+                            ) {
+                                mapped.username = mapped.name;
+                            }
+                            return mapped;
+                        });
+                    }
+                }
+            }
+
+            if (!(configData && (configData.users || configData.addons))) {
+                // Same playbook as the Trakt importer: an unrecognised file should
+                // say what it actually looked like - top-level key names, never
+                // values - so adding support for a new manager's format is a
+                // one-message fix instead of a guessing game.
+                const shape =
+                    configData && typeof configData === "object"
+                        ? `an object with keys: ${Object.keys(configData).slice(0, 12).join(", ")}`
+                        : typeof configData;
+                return responseUtils.badRequest(
+                    res,
+                    `Not a recognised config export - expected "users" and/or "addons" arrays (Syncio-family format). This file is ${shape}.`
+                );
+            }
+
+            const { users, groups, addons, sync: importedSync } = configData;
+            const accountId = req.appAccountId || "default";
+
+            // Who is here right now, by name - so a file exported before people
+            // carried a `ref` can still hand each one back their own id below.
+            const idByUsernameBeforeImport = new Map(
+                (
+                    await prisma.user
+                        .findMany({ select: { id: true, username: true }, where: { accountId } })
+                        .catch(() => [])
+                )
+                    .filter((u) => u.username)
+                    .map((u) => [u.username, u.id])
+            );
+
+            // Reset existing data for this account using shared function
+            await resetAccountData(accountId);
+
+            // Apply account sync settings if provided
+            try {
+                if (
+                    importedSync &&
+                    (typeof importedSync === "object" || typeof importedSync === "string")
+                ) {
+                    const acct = await prisma.appAccount.findUnique({
+                        select: { sync: true },
+                        where: { id: accountId },
+                    });
+                    let parsedSync = importedSync;
+                    if (typeof importedSync === "string") {
+                        try {
+                            parsedSync = JSON.parse(importedSync);
+                        } catch {
+                            parsedSync = { enabled: true, frequency: "0" };
+                        }
+                    }
+
+                    // Ensure useCustomFields is included (default to true if not present for backward compatibility)
+                    // Migrate old useCustomNames to useCustomFields if present
+                    if (
+                        typeof parsedSync === "object" &&
+                        parsedSync !== null &&
+                        typeof parsedSync.useCustomFields !== "boolean"
+                    ) {
+                        if (typeof parsedSync.useCustomNames === "boolean") {
+                            parsedSync.useCustomFields = parsedSync.useCustomNames;
+                            delete parsedSync.useCustomNames;
+                        } else {
+                            parsedSync.useCustomFields = true;
+                        }
+                    }
+
+                    // Merge onto whatever's already there rather than replacing it
+                    // outright - the config export deliberately strips real secrets
+                    // (webhookUrl, rpdbApiKey, tmdbApiKey, mdblistApiKey; see
+                    // buildConfigExportPayload) so they never end up in a plain
+                    // backup file. A naive overwrite here would silently wipe those
+                    // secrets off the account on every restore, since the imported
+                    // payload never has them to begin with. The Disaster Recovery Kit
+                    // restores them separately, after this import, from its own
+                    // passphrase-encrypted bundle - see disasterRecoveryKit.js.
+                    let existingSync = acct?.sync;
+                    if (typeof existingSync === "string") {
+                        try {
+                            existingSync = JSON.parse(existingSync);
+                        } catch {
+                            existingSync = null;
+                        }
+                    }
+                    const mergedSync = {
+                        ...(existingSync && typeof existingSync === "object" ? existingSync : {}),
+                        ...parsedSync,
+                    };
+
+                    let valueToStore = mergedSync;
+                    if (typeof acct?.sync === "string") {
+                        // DB expects string (SQLite)
+                        valueToStore = JSON.stringify(mergedSync);
+                    } else {
+                        // DB expects JSON (Postgres)
+                        valueToStore = mergedSync;
+                    }
+                    await prisma.appAccount.update({
+                        data: { sync: valueToStore },
+                        where: { id: accountId },
+                    });
+                }
+            } catch (e) {
+                console.warn("Failed to apply imported sync settings:", e?.message);
+            }
+
+            // Import in correct order: groups → addons → users
+
+            // 1. Import groups first (always new IDs, defer userIds mapping)
+            const importedGroups = [];
+            if (groups && Array.isArray(groups)) {
+                for (const groupData of groups) {
+                    const {
+                        id: _exportGroupId,
+                        addons,
+                        userIds: _legacyUserIds,
+                        users,
+                        ...groupFields
+                    } = groupData;
+                    const group = await prisma.group.create({
+                        data: {
+                            ...groupFields,
+                            accountId,
+                            // do not include userIds yet; we will remap after users are created
+                        },
+                    });
+                    const groupWithAddons = {
+                        ...group,
+                        addons: Array.isArray(addons) ? addons : [],
+                        users: Array.isArray(users) ? users : [], // Expect usernames only
+                    };
+                    console.log(
+                        `🔍 Storing group "${groupWithAddons.name}" with addons:`,
+                        groupWithAddons.addons
+                    );
+                    importedGroups.push(groupWithAddons);
+                }
+            }
+
+            // 2. Import addons
+            const importedAddons = [];
+            console.log(`Starting addon import, found ${addons ? addons.length : 0} addons`);
+            if (addons && Array.isArray(addons)) {
+                // Use the same logic as the addon-import endpoint
+                for (const addonData of addons) {
+                    try {
+                        // Get URL from manifestUrl (preferred) or legacy transportUrl
+                        const transportUrl = addonData.manifestUrl || addonData.transportUrl;
+
+                        // Validate required fields
+                        if (!transportUrl) {
+                            console.warn("Skipping addon with missing URL:", addonData);
+                            continue;
+                        }
+
+                        // Use the new approach: prefer originalManifest from export, fallback to fetching
+                        let originalManifestObj = addonData.originalManifest || null;
+
+                        // If no originalManifest in export, try to fetch from URL
+                        if (!originalManifestObj) {
+                            try {
+                                const resp = await safeFetch(transportUrl, {}, instancePolicy());
+                                if (resp.ok) {
+                                    originalManifestObj = await resp.json();
+                                    console.log(
+                                        `Fetched originalManifest for config import: ${originalManifestObj?.name}`
+                                    );
+                                }
+                            } catch (e) {
+                                console.warn(
+                                    `Failed to fetch manifest for ${transportUrl}:`,
+                                    e.message
+                                );
+                            }
+                        }
+
+                        // Create fallback manifest if nothing else works
+                        if (!originalManifestObj) {
+                            originalManifestObj = {
+                                catalogs: [],
+                                description: addonData.description || null,
+                                id: addonData.name || "unknown.addon",
+                                logo: addonData.iconUrl || null,
+                                name: addonData.name || "Unknown",
+                                resources: [],
+                                types: [],
+                                version: addonData.version || null,
+                            };
+                        }
+
+                        const transportName =
+                            addonData.name ||
+                            addonData.transportName ||
+                            originalManifestObj.name ||
+                            "Unknown";
+
+                        // Check if addon already exists BY NAME ONLY
+                        const existingAddon = await prisma.addon.findFirst({
+                            where: {
+                                accountId: getAccountId(req),
+                                name: transportName,
+                            },
+                        });
+
+                        // Get selected resources and catalogs from export data
+                        // If export data is empty, derive from originalManifest (select all)
+                        const selectedResources = (() => {
+                            const resources = Array.isArray(addonData.resources)
+                                ? addonData.resources
+                                : [];
+                            // Ensure we only store resource names, not full objects
+                            const parsed = resources
+                                .map((r) => {
+                                    if (typeof r === "string") {
+                                        return r;
+                                    }
+                                    if (r && typeof r === "object" && r.name) {
+                                        return r.name;
+                                    }
+                                    return null;
+                                })
+                                .filter(Boolean);
+                            // Fallback: if empty, derive all resources from manifest
+                            if (
+                                parsed.length === 0 &&
+                                originalManifestObj &&
+                                Array.isArray(originalManifestObj.resources)
+                            ) {
+                                return originalManifestObj.resources
+                                    .map((r) =>
+                                        typeof r === "string" ? r : r && (r.name || r.type)
+                                    )
+                                    .filter(Boolean);
+                            }
+                            return parsed;
+                        })();
+
+                        const selectedCatalogs = (() => {
+                            const cats = Array.isArray(addonData.catalogs)
+                                ? addonData.catalogs
+                                : [];
+                            // Fallback: if empty, derive all catalogs from manifest
+                            if (
+                                cats.length === 0 &&
+                                originalManifestObj &&
+                                Array.isArray(originalManifestObj.catalogs)
+                            ) {
+                                return originalManifestObj.catalogs
+                                    .filter((c) => c?.type && c.id)
+                                    .map((c) => ({
+                                        id: c.id,
+                                        search: c.extra
+                                            ? c.extra.some((e) => e.name === "search")
+                                            : false,
+                                        type: c.type,
+                                    }));
+                            }
+                            return cats;
+                        })();
+
+                        console.log(
+                            `Importing ${transportName} with resources:`,
+                            selectedResources,
+                            "catalogs:",
+                            selectedCatalogs
+                        );
+
+                        // Apply filtering to create the filtered manifest (same logic as AddonDetailModal)
+                        let filteredManifest = originalManifestObj;
+                        if (selectedResources.length > 0) {
+                            filteredManifest = filterManifestByResources(
+                                originalManifestObj,
+                                selectedResources
+                            );
+                            console.log(
+                                `Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after resource filtering`
+                            );
+                        }
+                        if (selectedCatalogs.length > 0 && filteredManifest) {
+                            filteredManifest = filterManifestByCatalogs(
+                                filteredManifest,
+                                selectedCatalogs
+                            );
+                            console.log(
+                                `Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after catalog filtering`
+                            );
+                        }
+
+                        // Convert selected catalogs to simplified (type, id, search) format for storage
+                        const simplifiedCatalogs = (() => {
+                            try {
+                                // If selectedCatalogs are already simplified (from export), use them directly
+                                if (
+                                    selectedCatalogs.length > 0 &&
+                                    typeof selectedCatalogs[0] === "object" &&
+                                    selectedCatalogs[0].type &&
+                                    selectedCatalogs[0].id
+                                ) {
+                                    return selectedCatalogs.map((c) => ({
+                                        id: c.id,
+                                        search: c.search === undefined ? false : c.search,
+                                        type: c.type,
+                                    }));
+                                }
+                                // If they're just IDs, try to match them with originalManifest catalogs
+                                if (
+                                    selectedCatalogs.length > 0 &&
+                                    typeof selectedCatalogs[0] === "string"
+                                ) {
+                                    const originalCatalogs = Array.isArray(
+                                        originalManifestObj?.catalogs
+                                    )
+                                        ? originalManifestObj.catalogs
+                                        : [];
+                                    const processedCatalogs = [];
+
+                                    for (const id of selectedCatalogs) {
+                                        const catalog = originalCatalogs.find((c) => c.id === id);
+                                        if (!catalog) {
+                                            continue;
+                                        }
+
+                                        // Check if catalog has search functionality
+                                        const hasSearch = catalog?.extra?.some(
+                                            (extra) => extra.name === "search"
+                                        );
+                                        const hasOtherExtras = catalog?.extra?.some(
+                                            (extra) => extra.name !== "search"
+                                        );
+                                        const isEmbeddedSearch = hasSearch && hasOtherExtras;
+                                        const isStandaloneSearch = hasSearch && !hasOtherExtras;
+
+                                        if (isStandaloneSearch) {
+                                            // Standalone search catalog: add with original ID (no suffix)
+                                            processedCatalogs.push({
+                                                id: catalog.id,
+                                                type: catalog.type,
+                                            });
+                                        } else if (isEmbeddedSearch) {
+                                            // Embedded search catalog: add both original and search versions
+                                            processedCatalogs.push({
+                                                id: catalog.id,
+                                                type: catalog.type,
+                                            });
+                                            processedCatalogs.push({
+                                                id: `${catalog.id}-embed-search`,
+                                                type: catalog.type,
+                                            });
+                                        } else {
+                                            // Regular catalog: add as-is
+                                            processedCatalogs.push({
+                                                id: catalog.id,
+                                                type: catalog.type,
+                                            });
+                                        }
+                                    }
+
+                                    return processedCatalogs;
+                                }
+                                return [];
+                            } catch {
+                                return [];
+                            }
+                        })();
+
+                        // If addon exists by name, update it, else create
+                        if (existingAddon) {
+                            const updated = await prisma.addon.update({
+                                data: {
+                                    catalogs: JSON.stringify(simplifiedCatalogs),
+                                    description:
+                                        addonData.description || existingAddon.description || "",
+                                    iconUrl:
+                                        addonData.iconUrl ||
+                                        originalManifestObj.logo ||
+                                        existingAddon.iconUrl ||
+                                        null,
+                                    isActive: addonData.isActive !== false,
+                                    manifest: encrypt(JSON.stringify(filteredManifest), req),
+                                    manifestHash: manifestHash(filteredManifest),
+                                    manifestUrl: encrypt(transportUrl, req),
+                                    manifestUrlHash: manifestUrlHmac(req, transportUrl),
+                                    originalManifest: encrypt(
+                                        JSON.stringify(originalManifestObj),
+                                        req
+                                    ),
+                                    resources: JSON.stringify(selectedResources),
+                                    stremioAddonId:
+                                        originalManifestObj.id ||
+                                        existingAddon.stremioAddonId ||
+                                        null,
+                                    version:
+                                        originalManifestObj.version ||
+                                        existingAddon.version ||
+                                        null,
+                                },
+                                where: { id: existingAddon.id },
+                            });
+                            console.log(`Successfully updated existing addon: ${transportName}`);
+                            importedAddons.push(updated);
+                        } else {
+                            const newAddon = await prisma.addon.create({
+                                data: {
+                                    accountId: getAccountId(req),
+                                    catalogs: JSON.stringify(simplifiedCatalogs),
+                                    description: originalManifestObj.description || "",
+                                    iconUrl: originalManifestObj.logo || null,
+                                    isActive: true,
+                                    manifest: encrypt(JSON.stringify(filteredManifest), req),
+                                    manifestHash: manifestHash(filteredManifest),
+                                    manifestUrl: encrypt(transportUrl, req),
+                                    manifestUrlHash: manifestUrlHmac(req, transportUrl),
+                                    name: transportName,
+                                    originalManifest: encrypt(
+                                        JSON.stringify(originalManifestObj),
+                                        req
+                                    ),
+                                    resources: JSON.stringify(selectedResources),
+                                    stremioAddonId: originalManifestObj.id || null,
+                                    version: originalManifestObj.version || null,
+                                },
+                            });
+                            console.log(`Successfully imported addon: ${transportName}`);
+                            importedAddons.push(newAddon);
+                        }
+                    } catch (addonError) {
+                        console.error(`Failed to import addon ${addonData.name}:`, addonError);
+                        // Continue with next addon instead of failing entire import
+                        console.log(`Skipping addon ${addonData.name} due to error`);
+                    }
+                }
+            }
+
+            // 3. Import users and build export->new map.
+            //
+            // Watch history, sessions, stats and the rest are filed under a
+            // person's id with no link back to the person row, so a reset + new
+            // ids left every one of them orphaned: Activity went empty and
+            // everyone showed 0m. A person now gets their original id back
+            // whenever it is free - from the export's `ref`, or, for an older
+            // file, from whoever had that username here before the import - and
+            // everything filed under it reattaches as is. Never an id whose
+            // history belongs to another account.
+            const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+            const reusableUserId = async (candidate) => {
+                if (typeof candidate !== "string" || !SAFE_ID.test(candidate)) {
+                    return null;
+                }
+                const taken = await prisma.user
+                    .findUnique({ select: { id: true }, where: { id: candidate } })
+                    .catch(() => true);
+                if (taken) {
+                    return null;
+                }
+                for (const model of [
+                    "watchActivity",
+                    "movieWatchHistory",
+                    "episodeWatchHistory",
+                    "watchSession",
+                ]) {
+                    const elsewhere = await prisma[model]
+                        ?.findFirst({
+                            select: { userId: true },
+                            where: { NOT: { accountId }, userId: candidate },
+                        })
+                        .catch(() => null);
+                    if (elsewhere) {
+                        return null;
+                    }
+                }
+                return candidate;
+            };
+            const importedUsers = [];
+            const importedHouseholds = [];
+            const exportUserIdToNewId = new Map();
+            let keptIds = 0;
+            if (users && Array.isArray(users)) {
+                // Build addon lookup maps for normalization
+                const nameToAddonId = new Map();
+                const stremioIdToAddonId = new Map();
+                for (const a of importedAddons) {
+                    if (a?.name && a?.id) {
+                        nameToAddonId.set(a.name, a.id);
+                    }
+                    if (a?.stremioAddonId && a?.id) {
+                        stremioIdToAddonId.set(a.stremioAddonId, a.id);
+                    }
+                }
+
+                // On an instance serving strangers a file can claim any server
+                // address and user id, and a person row holding another household's
+                // would be handed that household's next sign-in. So a Jellyfin
+                // identity from the file is kept only once the server vouches for
+                // its token; anyone else reconnects. A household's own install has
+                // no strangers to keep apart and imports as it always did.
+                const jellyfinProofs =
+                    INSTANCE_TYPE === "public"
+                        ? await require("../utils/jellyfinConnect").proveImportedSignIns(users)
+                        : null;
+
+                for (const userData of users) {
+                    const provenUrl = jellyfinProofs
+                        ? jellyfinProofs.personUrl.get(userData) || null
+                        : null;
+                    const {
+                        id: _exportUserId,
+                        ref: exportRef,
+                        stremioAuthKey,
+                        nuvioRefreshToken,
+                        jellyfinToken,
+                        aioConfigPassword,
+                        simklAccessToken,
+                        jellyfinHousehold,
+                        protectedAddons,
+                        excludedAddons,
+                        ...userFields
+                    } = userData;
+
+                    // Parse protectedAddons and excludedAddons if they're JSON strings
+                    const parsedProtectedAddons = (() => {
+                        try {
+                            if (typeof protectedAddons === "string") {
+                                return JSON.parse(protectedAddons);
+                            }
+                            return Array.isArray(protectedAddons) ? protectedAddons : [];
+                        } catch {
+                            return [];
+                        }
+                    })();
+
+                    const parsedExcludedAddons = (() => {
+                        try {
+                            if (typeof excludedAddons === "string") {
+                                return JSON.parse(excludedAddons);
+                            }
+                            return Array.isArray(excludedAddons) ? excludedAddons : [];
+                        } catch {
+                            return [];
+                        }
+                    })();
+
+                    // Normalize protectedAddons to plaintext addon names present in DB
+                    const normalizedProtectedNames = parsedProtectedAddons
+                        .map((x) => (typeof x === "string" ? x : null))
+                        .filter(Boolean)
+                        .filter((name) => nameToAddonId.has(name));
+
+                    // Normalize excludedAddons to current DB addon IDs
+                    const normalizedExcludedIds = [];
+                    for (const raw of parsedExcludedAddons) {
+                        const val = typeof raw === "string" ? raw : null;
+                        if (!val) {
+                            continue;
+                        }
+                        // If looks like an existing DB id, keep as-is (we don't know format, but try fast path by lookup)
+                        let resolvedId = null;
+                        if (nameToAddonId.has(val)) {
+                            resolvedId = nameToAddonId.get(val);
+                        } else if (stremioIdToAddonId.has(val)) {
+                            resolvedId = stremioIdToAddonId.get(val);
+                        } else {
+                            // Try DB lookup by name within account scope
+                            try {
+                                const byName = await prisma.addon.findFirst({
+                                    select: { id: true },
+                                    where: { accountId: getAccountId(req), name: val },
+                                });
+                                if (byName?.id) {
+                                    resolvedId = byName.id;
+                                }
+                            } catch {
+                                // Unavailable optional records leave the current result in place.
+                            }
+                            // As a last resort, if val corresponds to an addon id in DB, accept it
+                            if (!resolvedId) {
+                                try {
+                                    const byId = await prisma.addon.findFirst({
+                                        select: { id: true },
+                                        where: { accountId: getAccountId(req), id: val },
+                                    });
+                                    if (byId?.id) {
+                                        resolvedId = byId.id;
+                                    }
+                                } catch {
+                                    // Unavailable optional records leave the current result in place.
+                                }
+                            }
+                        }
+                        if (resolvedId) {
+                            normalizedExcludedIds.push(resolvedId);
+                        }
+                    }
+
+                    const keepId =
+                        (await reusableUserId(
+                            exportRef || jellyfinHousehold?.ref || _exportUserId
+                        )) ||
+                        (await reusableUserId(
+                            userFields.username
+                                ? idByUsernameBeforeImport.get(userFields.username)
+                                : null
+                        ));
+                    if (keepId) {
+                        keptIds++;
+                    }
+                    const user = await prisma.user.create({
+                        data: {
+                            ...userFields,
+                            ...(jellyfinProofs
+                                ? {
+                                      jellyfinServerUrl: provenUrl,
+                                      ...(provenUrl
+                                          ? {}
+                                          : { jellyfinServerId: null, jellyfinUserId: null }),
+                                  }
+                                : {}),
+                            ...(keepId ? { id: keepId } : {}),
+                            accountId,
+                            aioConfigPassword: aioConfigPassword
+                                ? encrypt(aioConfigPassword, req)
+                                : null,
+                            excludedAddons:
+                                normalizedExcludedIds.length > 0
+                                    ? JSON.stringify(normalizedExcludedIds)
+                                    : null,
+                            jellyfinToken:
+                                jellyfinToken && (!jellyfinProofs || provenUrl)
+                                    ? encrypt(jellyfinToken, req)
+                                    : null,
+                            nuvioRefreshToken: nuvioRefreshToken
+                                ? encrypt(nuvioRefreshToken, req)
+                                : null,
+                            protectedAddons:
+                                normalizedProtectedNames.length > 0
+                                    ? JSON.stringify(normalizedProtectedNames)
+                                    : null,
+                            simklAccessToken: simklAccessToken
+                                ? encrypt(simklAccessToken, req)
+                                : null,
+                            stremioAuthKey: stremioAuthKey ? encrypt(stremioAuthKey, req) : null,
+                        },
+                    });
+                    importedUsers.push(user);
+                    if (_exportUserId) {
+                        exportUserIdToNewId.set(_exportUserId, user.id);
+                    }
+                    if (exportRef) {
+                        exportUserIdToNewId.set(exportRef, user.id);
+                    }
+                    if (jellyfinHousehold?.ref) {
+                        exportUserIdToNewId.set(jellyfinHousehold.ref, user.id);
+                        importedHouseholds.push({
+                            household: jellyfinHousehold,
+                            owner: user,
+                            proofs: jellyfinProofs,
+                        });
+                    }
+                }
+            }
+
+            // 3a. Household profiles (AIOStreams / AIOMetadata), now that every
+            // person - including any a profile was separated into - has its new id.
+            // Then re-key the collections arranged per person and per profile.
+            {
+                const byUsername = new Map(
+                    importedUsers.filter((u) => u.username).map((u) => [u.username, u.id])
+                );
+                const profileRefToNewId = new Map();
+                for (const { owner, household, proofs } of importedHouseholds) {
+                    for (const p of Array.isArray(household.profiles) ? household.profiles : []) {
+                        if (!(p?.jellyfinUserId && p.name)) {
+                            continue;
+                        }
+                        try {
+                            // Its id is in the profile's SlickTrax link and its AIOStreams
+                            // variant, so it keeps that too when free.
+                            const keepProfileId =
+                                typeof p.ref === "string" &&
+                                SAFE_ID.test(p.ref) &&
+                                !(await prisma.jellyfinProfile
+                                    .findUnique({ select: { id: true }, where: { id: p.ref } })
+                                    .catch(() => true));
+                            const row = await prisma.jellyfinProfile.create({
+                                data: {
+                                    ...(keepProfileId ? { id: p.ref } : {}),
+                                    accountId,
+                                    jellyfinUserId: String(p.jellyfinUserId),
+                                    loginName: p.loginName || null,
+                                    name: String(p.name),
+                                    needsPin: p.needsPin === true,
+                                    ownerUserId: owner.id,
+                                    ownUserId: p.ownUsername
+                                        ? byUsername.get(p.ownUsername) || null
+                                        : null,
+                                    skip: p.skip === true,
+                                    token:
+                                        p.token && (!proofs || proofs.profileProven.get(p) === true)
+                                            ? encrypt(String(p.token), req)
+                                            : null,
+                                },
+                            });
+                            if (p.ref) {
+                                profileRefToNewId.set(p.ref, row.id);
+                            }
+                        } catch (e) {
+                            console.warn(
+                                `Could not import household profile ${p.name}:`,
+                                e?.message
+                            );
+                        }
+                    }
+                }
+                try {
+                    const acct = await prisma.appAccount.findUnique({
+                        select: { sync: true },
+                        where: { id: accountId },
+                    });
+                    let cfg = acct?.sync;
+                    const asString = typeof cfg === "string";
+                    if (asString) {
+                        try {
+                            cfg = JSON.parse(cfg);
+                        } catch {
+                            cfg = null;
+                        }
+                    }
+                    const col = cfg && typeof cfg === "object" ? cfg.aioCollections : null;
+                    if (col && typeof col === "object" && (col.byUser || col.byProfile)) {
+                        const rekey = (map, ids) =>
+                            Object.fromEntries(
+                                Object.entries(map && typeof map === "object" ? map : {})
+                                    .filter(([k]) => ids.has(k))
+                                    .map(([k, v]) => [ids.get(k), v])
+                            );
+                        const next = {
+                            ...cfg,
+                            aioCollections: {
+                                ...col,
+                                byProfile: rekey(col.byProfile, profileRefToNewId),
+                                byUser: rekey(col.byUser, exportUserIdToNewId),
+                            },
+                        };
+                        await prisma.appAccount.update({
+                            data: { sync: asString ? JSON.stringify(next) : next },
+                            where: { id: accountId },
+                        });
+                    }
+                } catch (e) {
+                    console.warn("Could not re-key imported collections:", e?.message);
+                }
+            }
+
+            // Build username to user ID map
+            const usernameToUserId = new Map();
+            for (const user of importedUsers) {
+                if (user.username) {
+                    usernameToUserId.set(user.username, user.id);
+                }
+            }
+
+            // 3b. Update groups.userIds with new user IDs (from usernames only)
+            await require("../utils/helpers/database").withMembershipLock(accountId, async () => {
+                for (const g of importedGroups) {
+                    let newUserIds = [];
+                    if (Array.isArray(g.users) && g.users.length > 0) {
+                        newUserIds = g.users
+                            .map((username) => usernameToUserId.get(username))
+                            .filter(Boolean);
+                    }
+
+                    if (newUserIds.length > 0) {
+                        try {
+                            await prisma.group.update({
+                                data: { userIds: JSON.stringify(newUserIds) },
+                                where: { id: g.id },
+                            });
+                        } catch (e) {
+                            console.warn(
+                                `Failed to update userIds for group ${g.name}:`,
+                                e?.message
+                            );
+                        }
+                    }
+                }
+            });
+
+            // Build quick-lookup map by NAME ONLY for linking between exported and imported addons
+            const exportAddonNameToNewId = new Map(); // map: addon.name -> dbAddon.id
+            for (const a of addons || []) {
+                const matched = importedAddons.find((x) => x.name === a.name);
+                if (matched && a.name) {
+                    exportAddonNameToNewId.set(a.name, matched.id);
+                }
+            }
+
+            // Repair newly imported addons before linking users/groups
+            if (importedAddons.length > 0) {
+                await repairAddonsForAccount(importedAddons, req);
+            }
+
+            // Import group-addon relationships from groups (addons by name only)
+            let importedGroupAddons = 0;
+            for (const group of importedGroups) {
+                const addedAddonIds = new Set();
+                const addonsToImport = Array.isArray(group.addons) ? group.addons : [];
+
+                for (let index = 0; index < addonsToImport.length; index++) {
+                    try {
+                        const addonRef = addonsToImport[index];
+                        let resolvedAddonId = null;
+                        // Use array index as position if not explicitly set
+                        const position =
+                            addonRef.position === undefined ? index : addonRef.position;
+                        const isEnabled =
+                            addonRef.isEnabled === undefined ? true : addonRef.isEnabled;
+
+                        // Resolve by NAME ONLY
+                        if (addonRef.name) {
+                            resolvedAddonId = exportAddonNameToNewId.get(addonRef.name);
+                        } else if (addonRef.addon?.name) {
+                            resolvedAddonId = exportAddonNameToNewId.get(addonRef.addon.name);
+                        }
+
+                        if (resolvedAddonId) {
+                            if (addedAddonIds.has(resolvedAddonId)) {
+                                // Skip duplicates from mixed sources (addonIds + addons arrays)
+                                continue;
+                            }
+                            await prisma.groupAddon.create({
+                                data: {
+                                    addonId: resolvedAddonId,
+                                    groupId: group.id,
+                                    isEnabled,
+                                    position,
+                                },
+                            });
+                            addedAddonIds.add(resolvedAddonId);
+                            importedGroupAddons++;
+                        } else {
+                            console.warn(
+                                "Could not resolve addon for group-addon relationship from export ref:",
+                                addonRef
+                            );
+                        }
+                    } catch (error) {
+                        console.error("Failed to create group-addon relationship:", error);
+                    }
+                }
+            }
+
+            res.json({
+                // Backward-compatible aliases expected by older clients
+                addons: { created: importedAddons.length, reused: 0 },
+                groups: { created: importedGroups.length },
+                imported: {
+                    addons: importedAddons.length,
+                    groupAddons: importedGroupAddons,
+                    groups: importedGroups.length,
+                    users: importedUsers.length,
+                },
+                message: "Configuration imported successfully",
+                users: { created: importedUsers.length, keptHistory: keptIds },
+            });
+        } catch (error) {
+            console.error("Config import error:", error);
+            res.status(500).json({ message: "Failed to import config" });
+        }
+    });
+
+    // Reset (wipe) all data for the logged-in account, but keep the account
+    router.post("/reset", async (req, res) => {
+        try {
+            console.log("Reset endpoint called, prisma available:", !!prisma);
+            const accountId = req.appAccountId || "default";
+            console.log("Account ID for reset:", accountId);
+
+            await resetAccountData(accountId);
+
+            res.json({ message: "Account data reset successfully" });
+        } catch (error) {
+            console.error("Reset error:", error);
+            res.status(500).json({ message: "Failed to reset account data" });
+        }
+    });
+
+    // Import addons from JSON file
+    router.post("/addon-import", upload.single("file"), async (req, res) => {
+        try {
+            if (INSTANCE_TYPE === "public" && !req.appAccountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            // Check if file was uploaded
+            if (!req.file) {
+                return responseUtils.badRequest(res, "No file uploaded");
+            }
+
+            const file = req.file;
+            const fileData = file.buffer.toString("utf8");
+
+            let importData;
+            try {
+                importData = JSON.parse(fileData);
+            } catch {
+                return responseUtils.badRequest(res, "Invalid JSON file");
+            }
+
+            // Normalize input: accept either root array or { addons: [...] }
+            const addonsArray = Array.isArray(importData) ? importData : importData.addons;
+            if (!Array.isArray(addonsArray)) {
+                return responseUtils.badRequest(
+                    res,
+                    'Invalid JSON structure. Expected an array or an object with "addons" array.'
+                );
+            }
+
+            let successful = 0;
+            let failed = 0;
+            const redundant = 0;
+            const imported = [];
+
+            // Process each addon
+            for (const addonData of addonsArray) {
+                try {
+                    // Get URL from manifestUrl (preferred) or legacy transportUrl
+                    const transportUrl = addonData.manifestUrl || addonData.transportUrl;
+
+                    // Validate required fields
+                    if (!transportUrl) {
+                        console.warn("Skipping addon with missing URL:", addonData);
+                        failed++;
+                        continue;
+                    }
+
+                    // Use the new approach: prefer originalManifest from export, fallback to fetching
+                    let originalManifestObj = addonData.originalManifest || null;
+
+                    // If no originalManifest in export, try to fetch from URL
+                    if (!originalManifestObj) {
+                        try {
+                            const resp = await safeFetch(transportUrl, {}, instancePolicy());
+                            if (resp.ok) {
+                                originalManifestObj = await resp.json();
+                                console.log(
+                                    `Fetched originalManifest for import: ${originalManifestObj?.name}`
+                                );
+                            }
+                        } catch (e) {
+                            console.warn(
+                                `Failed to fetch manifest for ${transportUrl}:`,
+                                e.message
+                            );
+                        }
+                    }
+
+                    // Create fallback manifest if nothing else works
+                    if (!originalManifestObj) {
+                        originalManifestObj = {
+                            catalogs: [],
+                            description: addonData.description || null,
+                            id: addonData.name || "unknown.addon",
+                            logo: addonData.iconUrl || null,
+                            name: addonData.name || "Unknown",
+                            resources: [],
+                            types: [],
+                            version: addonData.version || null,
+                        };
+                    }
+
+                    const transportName =
+                        addonData.name ||
+                        addonData.transportName ||
+                        originalManifestObj.name ||
+                        "Unknown";
+
+                    // Resolve a unique name within this account (allow duplicate URLs)
+                    let finalName = transportName || "Unknown";
+                    try {
+                        const existingByName = await prisma.addon.findFirst({
+                            select: { id: true },
+                            where: { accountId: getAccountId(req), name: finalName },
+                        });
+                        if (existingByName) {
+                            const base = finalName;
+                            let copyNumber = 1;
+                            while (true) {
+                                const candidate =
+                                    copyNumber === 1
+                                        ? `${base} (Copy)`
+                                        : `${base} (Copy #${copyNumber})`;
+                                const exists = await prisma.addon.findFirst({
+                                    select: { id: true },
+                                    where: { accountId: getAccountId(req), name: candidate },
+                                });
+                                if (!exists) {
+                                    finalName = candidate;
+                                    break;
+                                }
+                                copyNumber++;
+                            }
+                        }
+                    } catch {
+                        // Unavailable optional records leave the current result in place.
+                    }
+
+                    // Get selected resources and catalogs from export data
+                    // If export data is empty, derive from originalManifest (select all)
+                    const selectedResources = (() => {
+                        const resources = Array.isArray(addonData.resources)
+                            ? addonData.resources
+                            : [];
+                        // Ensure we only store resource names, not full objects
+                        const parsed = resources
+                            .map((r) => {
+                                if (typeof r === "string") {
+                                    return r;
+                                }
+                                if (r && typeof r === "object" && r.name) {
+                                    return r.name;
+                                }
+                                return null;
+                            })
+                            .filter(Boolean);
+                        // Fallback: if empty, derive all resources from manifest
+                        if (
+                            parsed.length === 0 &&
+                            originalManifestObj &&
+                            Array.isArray(originalManifestObj.resources)
+                        ) {
+                            return originalManifestObj.resources
+                                .map((r) => (typeof r === "string" ? r : r && (r.name || r.type)))
+                                .filter(Boolean);
+                        }
+                        return parsed;
+                    })();
+                    const selectedCatalogs = (() => {
+                        const cats = Array.isArray(addonData.catalogs) ? addonData.catalogs : [];
+                        // Fallback: if empty, derive all catalogs from manifest
+                        if (
+                            cats.length === 0 &&
+                            originalManifestObj &&
+                            Array.isArray(originalManifestObj.catalogs)
+                        ) {
+                            return originalManifestObj.catalogs
+                                .filter((c) => c?.type && c.id)
+                                .map((c) => ({
+                                    id: c.id,
+                                    search: c.extra
+                                        ? c.extra.some((e) => e.name === "search")
+                                        : false,
+                                    type: c.type,
+                                }));
+                        }
+                        return cats;
+                    })();
+
+                    console.log(
+                        `Importing ${transportName} with resources:`,
+                        selectedResources,
+                        "catalogs:",
+                        selectedCatalogs
+                    );
+
+                    // Apply filtering to create the filtered manifest (same logic as AddonDetailModal)
+                    let filteredManifest = originalManifestObj;
+                    if (selectedResources.length > 0) {
+                        filteredManifest = filterManifestByResources(
+                            originalManifestObj,
+                            selectedResources
+                        );
+                        console.log(
+                            `Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after resource filtering`
+                        );
+                    }
+                    if (selectedCatalogs.length > 0 && filteredManifest) {
+                        filteredManifest = filterManifestByCatalogs(
+                            filteredManifest,
+                            selectedCatalogs
+                        );
+                        console.log(
+                            `Filtered manifest has ${filteredManifest?.catalogs?.length || 0} catalogs after catalog filtering`
+                        );
+                    }
+
+                    // Convert selected catalogs to simplified (type, id, search) format for storage
+                    const simplifiedCatalogs = (() => {
+                        try {
+                            // If selectedCatalogs are already simplified (from export), use them directly
+                            if (
+                                selectedCatalogs.length > 0 &&
+                                typeof selectedCatalogs[0] === "object" &&
+                                selectedCatalogs[0].type &&
+                                selectedCatalogs[0].id
+                            ) {
+                                return selectedCatalogs.map((c) => ({
+                                    id: c.id,
+                                    search: c.search === undefined ? false : c.search,
+                                    type: c.type,
+                                }));
+                            }
+                            // If they're just IDs, try to match them with originalManifest catalogs
+                            if (
+                                selectedCatalogs.length > 0 &&
+                                typeof selectedCatalogs[0] === "string"
+                            ) {
+                                const originalCatalogs = Array.isArray(
+                                    originalManifestObj?.catalogs
+                                )
+                                    ? originalManifestObj.catalogs
+                                    : [];
+                                return selectedCatalogs
+                                    .map((id) => {
+                                        const catalog = originalCatalogs.find((c) => c.id === id);
+                                        return catalog
+                                            ? { id: catalog.id, type: catalog.type }
+                                            : null;
+                                    })
+                                    .filter(Boolean);
+                            }
+                            return [];
+                        } catch {
+                            return [];
+                        }
+                    })();
+
+                    // Create new addon with both original and filtered manifests
+                    const _newAddon = await prisma.addon.create({
+                        data: {
+                            accountId: getAccountId(req),
+                            catalogs: JSON.stringify(simplifiedCatalogs), // Just (type,id) pairs: [{"type":"movie","id":"123"}]
+                            description: originalManifestObj.description || "",
+                            iconUrl: originalManifestObj.logo || null,
+                            isActive: true,
+                            manifest: encrypt(JSON.stringify(filteredManifest), req), // Filtered manifest
+                            manifestHash: manifestHash(filteredManifest),
+                            manifestUrl: encrypt(transportUrl, req),
+                            manifestUrlHash: manifestUrlHmac(req, transportUrl),
+                            name: finalName,
+                            originalManifest: encrypt(JSON.stringify(originalManifestObj), req), // Full manifest
+                            resources: JSON.stringify(selectedResources), // Just names: ["stream", "catalog"]
+                            stremioAddonId: originalManifestObj.id || null,
+                            version: originalManifestObj.version || null,
+                        },
+                    });
+
+                    console.log(`Successfully imported addon: ${transportName}`);
+                    successful++;
+                    const created = await prisma.addon.findFirst({
+                        where: {
+                            accountId: getAccountId(req),
+                            manifestUrlHash: manifestUrlHmac(req, transportUrl),
+                        },
+                    });
+                    if (created) {
+                        imported.push(created);
+                    }
+                } catch (addonError) {
+                    console.error("Failed to import addon:", addonError);
+                    failed++;
+                }
+            }
+
+            // Optional repair step when query ?repair=true
+            if (
+                req.query &&
+                String(req.query.repair).toLowerCase() === "true" &&
+                imported.length > 0
+            ) {
+                await repairAddonsForAccount(imported, req);
+            }
+
+            res.json({
+                failed,
+                message: "Import completed",
+                redundant,
+                successful,
+                total: addonsArray.length,
+            });
+        } catch (error) {
+            console.error("Addon import error:", error);
+            res.status(500).json({ message: "Failed to import addons" });
+        }
+    });
+
+    // Delete the logged-in account and all scoped data
+    router.delete("/account", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res
+                    .status(400)
+                    .json({ error: "Account deletion only available in public mode" });
+            }
+
+            if (!req.appAccountId) {
+                return res.status(401).json({ message: "Not authenticated" });
+            }
+
+            // Delete all data for this account
+            await prisma.groupAddon.deleteMany({
+                where: { group: { accountId: req.appAccountId } },
+            });
+            await prisma.group.deleteMany({
+                where: { accountId: req.appAccountId },
+            });
+            await prisma.addon.deleteMany({
+                where: { accountId: req.appAccountId },
+            });
+            await prisma.user.deleteMany({
+                where: { accountId: req.appAccountId },
+            });
+
+            // Delete the account itself
+            await prisma.appAccount.delete({
+                where: { id: req.appAccountId },
+            });
+
+            res.json({ message: "Account deleted successfully" });
+        } catch (error) {
+            console.error("Account deletion error:", error);
+            res.status(500).json({ message: "Failed to delete account" });
+        }
+    });
+
+    // Attached as a property (not a separate export) so index.js's existing
+    // `app.use('/api/public-auth', publicAuthRouterInstance)` keeps working
+    // unchanged - router is still a real Express Router, just with this one
+    // extra callable hanging off it for backup.js to use directly.
+    router.buildConfigExportPayload = buildConfigExportPayload;
+
+    return router;
 };

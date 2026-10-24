@@ -8,7 +8,7 @@
  * @returns {string} Formatted code block
  */
 function formatCodeBlock(value) {
-  return '```' + (value ?? '') + '```'
+    return `\`\`\`${value ?? ""}\`\`\``;
 }
 
 /**
@@ -17,13 +17,15 @@ function formatCodeBlock(value) {
  * @returns {string|null} Discord timestamp string or null
  */
 function formatRelativeTime(value) {
-  if (!value) return null
-  try {
-    const date = typeof value === 'string' ? new Date(value) : value
-    return `<t:${Math.floor(date.getTime() / 1000)}:R>`
-  } catch {
-    return null
-  }
+    if (!value) {
+        return null;
+    }
+    try {
+        const date = typeof value === "string" ? new Date(value) : value;
+        return `<t:${Math.floor(date.getTime() / 1000)}:R>`;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -32,16 +34,20 @@ function formatRelativeTime(value) {
  * @returns {Object|null} Parsed sync config or null
  */
 function parseSyncConfig(syncCfg) {
-  if (!syncCfg) return null
-  if (typeof syncCfg === 'object') return syncCfg
-  if (typeof syncCfg === 'string') {
-    try {
-      return JSON.parse(syncCfg)
-    } catch {
-      return null
+    if (!syncCfg) {
+        return null;
     }
-  }
-  return null
+    if (typeof syncCfg === "object") {
+        return syncCfg;
+    }
+    if (typeof syncCfg === "string") {
+        try {
+            return JSON.parse(syncCfg);
+        } catch {
+            return null;
+        }
+    }
+    return null;
 }
 
 /**
@@ -49,19 +55,18 @@ function parseSyncConfig(syncCfg) {
  * @returns {string} Application version
  */
 function getAppVersion() {
-  let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-  if (!appVersion) {
-    try {
-      appVersion = require('../../package.json')?.version || ''
-    } catch {}
-  }
-  return appVersion
+    let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+    if (!appVersion) {
+        try {
+            appVersion = require("../../package.json")?.version || "";
+        } catch {}
+    }
+    return appVersion;
 }
 
 module.exports = {
-  formatCodeBlock,
-  formatRelativeTime,
-  parseSyncConfig,
-  getAppVersion
-}
-
+    formatCodeBlock,
+    formatRelativeTime,
+    getAppVersion,
+    parseSyncConfig,
+};

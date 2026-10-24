@@ -17,11 +17,11 @@
 // re-encoding them at serve time is a different mechanism. Those addons
 // keep full rotation-propagation coverage instead.
 
-const PLACEHOLDER_RE = /\{\{vault:([A-Za-z0-9_-]+)\}\}/g
-const MIN_SECRET_LENGTH = 12 // same floor as keyRotation.js, same reason
+const PLACEHOLDER_RE = /\{\{vault:([A-Za-z0-9_-]+)\}\}/g;
+const MIN_SECRET_LENGTH = 12; // same floor as keyRotation.js, same reason
 
 function hasVaultPlaceholders(url) {
-  return typeof url === 'string' && url.includes('{{vault:')
+    return typeof url === "string" && url.includes("{{vault:");
 }
 
 /**
@@ -29,31 +29,39 @@ function hasVaultPlaceholders(url) {
  * and what was found-but-skipped (base64-buried keys).
  */
 function insertPlaceholders(url, entries /* [{id, secret}] */) {
-  let out = url
-  const used = []
-  for (const { id, secret } of entries) {
-    if (!secret || secret.length < MIN_SECRET_LENGTH) continue
-    if (out.includes(secret)) {
-      out = out.split(secret).join(`{{vault:${id}}}`)
-      used.push(id)
+    let out = url;
+    const used = [];
+    for (const { id, secret } of entries) {
+        if (!secret || secret.length < MIN_SECRET_LENGTH) {
+            continue;
+        }
+        if (out.includes(secret)) {
+            out = out.split(secret).join(`{{vault:${id}}}`);
+            used.push(id);
+        }
     }
-  }
-  return { url: out, used }
+    return { url: out, used };
 }
 
 /** Which entries' secrets are only reachable inside base64 blobs. */
 function findBase64BuriedSecrets(url, entries) {
-  const { replaceInBase64 } = require('./keyRotation')
-  const buried = []
-  for (const { id, secret } of entries) {
-    if (!secret || secret.length < MIN_SECRET_LENGTH || url.includes(secret)) continue
-    const found = url.split(/([/?&=])/).some((part) => {
-      if (part.length < 16 || !/^[A-Za-z0-9+/_=-]+$/.test(part)) return false
-      return replaceInBase64(part, secret, secret) !== null
-    })
-    if (found) buried.push(id)
-  }
-  return buried
+    const { replaceInBase64 } = require("./keyRotation");
+    const buried = [];
+    for (const { id, secret } of entries) {
+        if (!secret || secret.length < MIN_SECRET_LENGTH || url.includes(secret)) {
+            continue;
+        }
+        const found = url.split(/([/?&=])/).some((part) => {
+            if (part.length < 16 || !/^[A-Za-z0-9+/_=-]+$/.test(part)) {
+                return false;
+            }
+            return replaceInBase64(part, secret, secret) !== null;
+        });
+        if (found) {
+            buried.push(id);
+        }
+    }
+    return buried;
 }
 
 /**
@@ -63,17 +71,32 @@ function findBase64BuriedSecrets(url, entries) {
  * fetch then fails loudly upstream rather than leaking a guess.
  */
 async function resolvePlaceholders(prisma, accountId, url, decrypt) {
-  if (!hasVaultPlaceholders(url)) return url
-  const ids = [...url.matchAll(PLACEHOLDER_RE)].map((m) => m[1])
-  const entries = await prisma.vaultEntry.findMany({
-    where: { id: { in: [...new Set(ids)] }, accountId, isActive: true },
-  })
-  const byId = new Map(entries.map((e) => {
-    let secret = ''
-    try { secret = decrypt(e.encryptedSecret, { appAccountId: accountId }) } catch { secret = '' }
-    return [e.id, secret]
-  }))
-  return url.replace(PLACEHOLDER_RE, (_m, id) => byId.get(id) || '')
+    if (!hasVaultPlaceholders(url)) {
+        return url;
+    }
+    const ids = [...url.matchAll(PLACEHOLDER_RE)].map((m) => m[1]);
+    const entries = await prisma.vaultEntry.findMany({
+        where: { accountId, id: { in: [...new Set(ids)] }, isActive: true },
+    });
+    const byId = new Map(
+        entries.map((e) => {
+            let secret = "";
+            try {
+                secret = decrypt(e.encryptedSecret, { appAccountId: accountId });
+            } catch {
+                secret = "";
+            }
+            return [e.id, secret];
+        })
+    );
+    return url.replace(PLACEHOLDER_RE, (_m, id) => byId.get(id) || "");
 }
 
-module.exports = { hasVaultPlaceholders, insertPlaceholders, findBase64BuriedSecrets, resolvePlaceholders, PLACEHOLDER_RE, MIN_SECRET_LENGTH }
+module.exports = {
+    findBase64BuriedSecrets,
+    hasVaultPlaceholders,
+    insertPlaceholders,
+    MIN_SECRET_LENGTH,
+    PLACEHOLDER_RE,
+    resolvePlaceholders,
+};

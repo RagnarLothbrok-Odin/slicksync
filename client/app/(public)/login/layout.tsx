@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - Login',
+    title: "SlickSync - Login",
 };
 
-export default function LoginLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function LoginLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

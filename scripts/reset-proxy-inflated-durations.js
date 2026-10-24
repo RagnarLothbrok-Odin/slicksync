@@ -28,79 +28,105 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/reset-proxy-inflated-durations.js
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/reset-proxy-inflated-durations.js --apply
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 function fmt(seconds) {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = seconds % 60
-  return `${h}h ${m}m ${s}s`
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h}h ${m}m ${s}s`;
 }
 
 async function main() {
-  const apply = process.argv.includes('--apply')
-  const thresholdArg = process.argv.find((a) => a.startsWith('--threshold='))
-  const THRESHOLD_SECONDS = thresholdArg ? Number(thresholdArg.split('=')[1]) : 900 // 15 min
+    const apply = process.argv.includes("--apply");
+    const thresholdArg = process.argv.find((a) => a.startsWith("--threshold="));
+    const THRESHOLD_SECONDS = thresholdArg ? Number(thresholdArg.split("=")[1]) : 900; // 15 min
 
-  const prisma = new PrismaClient()
-  try {
-    // 1) Reset inflated proxy WatchSession durations.
-    const inflatedSessions = await prisma.watchSession.findMany({
-      where: { requestCount: { gt: 0 }, durationSeconds: { gt: 0 } },
-      select: { id: true, itemName: true, durationSeconds: true, requestCount: true },
-    })
-    console.log(`\n[1] Proxy WatchSession rows with a stored duration to reset: ${inflatedSessions.length}`)
-    for (const s of inflatedSessions) {
-      console.log(`    ${s.id}  "${s.itemName}"  ${fmt(s.durationSeconds)}  (${s.requestCount} reqs) -> 0`)
-    }
-    if (apply && inflatedSessions.length > 0) {
-      const r = await prisma.watchSession.updateMany({
-        where: { id: { in: inflatedSessions.map((s) => s.id) } },
-        data: { durationSeconds: 0 },
-      })
-      console.log(`    Reset ${r.count} session(s).`)
-    }
+    const prisma = new PrismaClient();
+    try {
+        // 1) Reset inflated proxy WatchSession durations.
+        const inflatedSessions = await prisma.watchSession.findMany({
+            select: { durationSeconds: true, id: true, itemName: true, requestCount: true },
+            where: { durationSeconds: { gt: 0 }, requestCount: { gt: 0 } },
+        });
+        console.log(
+            `\n[1] Proxy WatchSession rows with a stored duration to reset: ${inflatedSessions.length}`
+        );
+        for (const s of inflatedSessions) {
+            console.log(
+                `    ${s.id}  "${s.itemName}"  ${fmt(s.durationSeconds)}  (${s.requestCount} reqs) -> 0`
+            );
+        }
+        if (apply && inflatedSessions.length > 0) {
+            const r = await prisma.watchSession.updateMany({
+                data: { durationSeconds: 0 },
+                where: { id: { in: inflatedSessions.map((s) => s.id) } },
+            });
+            console.log(`    Reset ${r.count} session(s).`);
+        }
 
-    // 2) Delete unambiguously proxy-written WatchActivity (synthetic "proxy:" ids).
-    const proxyActivity = await prisma.watchActivity.findMany({
-      where: { itemId: { startsWith: 'proxy:' } },
-      select: { id: true, itemId: true, watchTimeSeconds: true, date: true },
-    })
-    console.log(`\n[2] WatchActivity rows with synthetic proxy itemIds: ${proxyActivity.length}`)
-    for (const a of proxyActivity) {
-      console.log(`    ${a.id}  ${a.itemId}  ${fmt(a.watchTimeSeconds)}  ${a.date.toISOString().split('T')[0]}`)
-    }
-    if (apply && proxyActivity.length > 0) {
-      const r = await prisma.watchActivity.deleteMany({ where: { id: { in: proxyActivity.map((a) => a.id) } } })
-      console.log(`    Deleted ${r.count} row(s).`)
-    }
+        // 2) Delete unambiguously proxy-written WatchActivity (synthetic "proxy:" ids).
+        const proxyActivity = await prisma.watchActivity.findMany({
+            select: { date: true, id: true, itemId: true, watchTimeSeconds: true },
+            where: { itemId: { startsWith: "proxy:" } },
+        });
+        console.log(
+            `\n[2] WatchActivity rows with synthetic proxy itemIds: ${proxyActivity.length}`
+        );
+        for (const a of proxyActivity) {
+            console.log(
+                `    ${a.id}  ${a.itemId}  ${fmt(a.watchTimeSeconds)}  ${a.date.toISOString().split("T")[0]}`
+            );
+        }
+        if (apply && proxyActivity.length > 0) {
+            const r = await prisma.watchActivity.deleteMany({
+                where: { id: { in: proxyActivity.map((a) => a.id) } },
+            });
+            console.log(`    Deleted ${r.count} row(s).`);
+        }
 
-    // 3) Flag oversized WatchActivity rows (proxy-lifetime artifacts).
-    const oversized = await prisma.watchActivity.findMany({
-      where: { watchTimeSeconds: { gt: THRESHOLD_SECONDS }, itemId: { not: { startsWith: 'proxy:' } } },
-      select: { id: true, itemId: true, itemType: true, watchTimeSeconds: true, date: true, createdAt: true },
-      orderBy: { watchTimeSeconds: 'desc' },
-    })
-    console.log(`\n[3] WatchActivity rows over ${fmt(THRESHOLD_SECONDS)} (single-row max the native pipeline should never produce): ${oversized.length}`)
-    for (const a of oversized) {
-      console.log(`    ${a.id}  ${a.itemId} (${a.itemType})  ${fmt(a.watchTimeSeconds)}  date=${a.date.toISOString().split('T')[0]} created=${a.createdAt.toISOString()}`)
-    }
-    if (apply && oversized.length > 0) {
-      const r = await prisma.watchActivity.deleteMany({ where: { id: { in: oversized.map((a) => a.id) } } })
-      console.log(`    Deleted ${r.count} row(s).`)
-    }
+        // 3) Flag oversized WatchActivity rows (proxy-lifetime artifacts).
+        const oversized = await prisma.watchActivity.findMany({
+            orderBy: { watchTimeSeconds: "desc" },
+            select: {
+                createdAt: true,
+                date: true,
+                id: true,
+                itemId: true,
+                itemType: true,
+                watchTimeSeconds: true,
+            },
+            where: {
+                itemId: { not: { startsWith: "proxy:" } },
+                watchTimeSeconds: { gt: THRESHOLD_SECONDS },
+            },
+        });
+        console.log(
+            `\n[3] WatchActivity rows over ${fmt(THRESHOLD_SECONDS)} (single-row max the native pipeline should never produce): ${oversized.length}`
+        );
+        for (const a of oversized) {
+            console.log(
+                `    ${a.id}  ${a.itemId} (${a.itemType})  ${fmt(a.watchTimeSeconds)}  date=${a.date.toISOString().split("T")[0]} created=${a.createdAt.toISOString()}`
+            );
+        }
+        if (apply && oversized.length > 0) {
+            const r = await prisma.watchActivity.deleteMany({
+                where: { id: { in: oversized.map((a) => a.id) } },
+            });
+            console.log(`    Deleted ${r.count} row(s).`);
+        }
 
-    if (!apply) {
-      console.log('\nDry run only - re-run with --apply to make these changes.')
-    } else {
-      console.log('\nDone.')
+        if (apply) {
+            console.log("\nDone.");
+        } else {
+            console.log("\nDry run only - re-run with --apply to make these changes.");
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-  } finally {
-    await prisma.$disconnect()
-  }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

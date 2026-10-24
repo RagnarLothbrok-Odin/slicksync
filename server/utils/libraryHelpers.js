@@ -11,39 +11,43 @@
  * @returns {Object|null} - The latest episode item, or null if no episodes
  */
 function findLatestEpisode(episodes, options = {}) {
-  if (!episodes || episodes.length === 0) return null
-  
-  const { inheritPoster = false } = options
-  const firstEpisode = episodes[0]
-  let latestEpisode = null
-  
-  // Try to find episode matching video_id (latest watched episode)
-  if (firstEpisode.state?.video_id) {
-    latestEpisode = episodes.find(ep => ep.state?.video_id === firstEpisode.state.video_id)
-  }
-  
-  // If no match found, use the one with highest season/episode number
-  if (!latestEpisode) {
-    latestEpisode = episodes.reduce((latest, current) => {
-      const latestSeason = latest.state?.season || 0
-      const latestEpisodeNum = latest.state?.episode || 0
-      const currentSeason = current.state?.season || 0
-      const currentEpisodeNum = current.state?.episode || 0
-      
-      if (currentSeason > latestSeason || 
-          (currentSeason === latestSeason && currentEpisodeNum > latestEpisodeNum)) {
-        return current
-      }
-      return latest
-    })
-  }
-  
-  // Inherit poster from first episode if missing
-  if (latestEpisode && inheritPoster && !latestEpisode.poster && firstEpisode.poster) {
-    latestEpisode.poster = firstEpisode.poster
-  }
-  
-  return latestEpisode
+    if (!episodes || episodes.length === 0) {
+        return null;
+    }
+
+    const { inheritPoster = false } = options;
+    const firstEpisode = episodes[0];
+    let latestEpisode = null;
+
+    // Try to find episode matching video_id (latest watched episode)
+    if (firstEpisode.state?.video_id) {
+        latestEpisode = episodes.find((ep) => ep.state?.video_id === firstEpisode.state.video_id);
+    }
+
+    // If no match found, use the one with highest season/episode number
+    if (!latestEpisode) {
+        latestEpisode = episodes.reduce((latest, current) => {
+            const latestSeason = latest.state?.season || 0;
+            const latestEpisodeNum = latest.state?.episode || 0;
+            const currentSeason = current.state?.season || 0;
+            const currentEpisodeNum = current.state?.episode || 0;
+
+            if (
+                currentSeason > latestSeason ||
+                (currentSeason === latestSeason && currentEpisodeNum > latestEpisodeNum)
+            ) {
+                return current;
+            }
+            return latest;
+        });
+    }
+
+    // Inherit poster from first episode if missing
+    if (latestEpisode && inheritPoster && !latestEpisode.poster && firstEpisode.poster) {
+        latestEpisode.poster = firstEpisode.poster;
+    }
+
+    return latestEpisode;
 }
 
 /**
@@ -55,55 +59,55 @@ function findLatestEpisode(episodes, options = {}) {
  * @returns {Promise<void>}
  */
 async function enrichPostersFromCinemeta(items, options = {}) {
-  const { timeout = 3000, requestTimeout = 2000 } = options
-  
-  // Only enrich items that don't have posters
-  const enrichPromises = items
-    .filter(item => !item.poster && (item._id || item.id))
-    .map(async (item) => {
-      try {
-        let itemId = item._id || item.id
-        const itemType = item.type || 'movie'
-        
-        // For episode items (format: "tt1234567:season:episode"), extract base show ID
-        if (itemId.includes(':')) {
-          itemId = itemId.split(':')[0]
-        }
-        
-        // Only try Cinemeta for IMDb IDs (starting with "tt")
-        if (!itemId.startsWith('tt')) {
-          return
-        }
-        
-        const endpoint = `https://v3-cinemeta.strem.io/meta/${itemType}/${itemId}.json`
-        
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), requestTimeout)
-        
-        const response = await fetch(endpoint, {
-          headers: { 'User-Agent': 'SlickSync/1.0' },
-          signal: controller.signal
-        })
-        
-        clearTimeout(timeoutId)
-        
-        if (response.ok) {
-          const data = await response.json()
-          const meta = data?.meta
-          if (meta?.poster) {
-            item.poster = meta.poster
-          }
-        }
-      } catch (error) {
-        // Silently fail - poster enrichment is optional
-      }
-    })
-  
-  // Wait for all enrichment to complete (with timeout)
-  await Promise.race([
-    Promise.all(enrichPromises),
-    new Promise(resolve => setTimeout(resolve, timeout))
-  ])
+    const { timeout = 3000, requestTimeout = 2000 } = options;
+
+    // Only enrich items that don't have posters
+    const enrichPromises = items
+        .filter((item) => !item.poster && (item._id || item.id))
+        .map(async (item) => {
+            try {
+                let itemId = item._id || item.id;
+                const itemType = item.type || "movie";
+
+                // For episode items (format: "tt1234567:season:episode"), extract base show ID
+                if (itemId.includes(":")) {
+                    itemId = itemId.split(":")[0];
+                }
+
+                // Only try Cinemeta for IMDb IDs (starting with "tt")
+                if (!itemId.startsWith("tt")) {
+                    return;
+                }
+
+                const endpoint = `https://v3-cinemeta.strem.io/meta/${itemType}/${itemId}.json`;
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
+
+                const response = await fetch(endpoint, {
+                    headers: { "User-Agent": "SlickSync/1.0" },
+                    signal: controller.signal,
+                });
+
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const meta = data?.meta;
+                    if (meta?.poster) {
+                        item.poster = meta.poster;
+                    }
+                }
+            } catch {
+                // Silently fail - poster enrichment is optional
+            }
+        });
+
+    // Wait for all enrichment to complete (with timeout)
+    await Promise.race([
+        Promise.all(enrichPromises),
+        new Promise((resolve) => setTimeout(resolve, timeout)),
+    ]);
 }
 
 /**
@@ -118,21 +122,25 @@ async function enrichPostersFromCinemeta(items, options = {}) {
  * @returns {Promise<string|null>}
  */
 async function resolveSinglePoster(itemId, itemType, existingPoster) {
-  if (existingPoster) return existingPoster
-  if (!itemId || !itemId.startsWith('tt')) return existingPoster || null
-  const target = [{ _id: itemId, type: itemType || 'movie', poster: null }]
-  await enrichPostersFromCinemeta(target, { timeout: 2000, requestTimeout: 1500 })
-  return target[0].poster || null
+    if (existingPoster) {
+        return existingPoster;
+    }
+    if (!itemId?.startsWith("tt")) {
+        return existingPoster || null;
+    }
+    const target = [{ _id: itemId, poster: null, type: itemType || "movie" }];
+    await enrichPostersFromCinemeta(target, { requestTimeout: 1500, timeout: 2000 });
+    return target[0].poster || null;
 }
 
 // Normalize a title for strict equality matching: lowercase, drop a
 // parenthesized year, collapse non-alphanumerics to single spaces.
 function normalizeTitleForMatch(s) {
-  return (s || '')
-    .toLowerCase()
-    .replace(/\(\d{4}\)/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
+    return (s || "")
+        .toLowerCase()
+        .replace(/\(\d{4}\)/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
 }
 
 /**
@@ -157,40 +165,55 @@ function normalizeTitleForMatch(s) {
  * @returns {Promise<{poster: string|null, id: string|null, type: string, name: string|null}|null>}
  */
 async function searchCinemetaPosterByTitle(title, year, type, options = {}) {
-  const { requestTimeout = 2500 } = options
-  if (!title) return null
-  const searchType = type === 'series' ? 'series' : 'movie'
-  const url = `https://v3-cinemeta.strem.io/catalog/${searchType}/top/search=${encodeURIComponent(title)}.json`
-  const want = normalizeTitleForMatch(title)
-
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), requestTimeout)
-  try {
-    const res = await fetch(url, { headers: { 'User-Agent': 'SlickSync/1.0' }, signal: controller.signal })
-    if (!res.ok) return null
-    const data = await res.json()
-    const metas = Array.isArray(data?.metas) ? data.metas : []
-    for (const m of metas) {
-      if (normalizeTitleForMatch(m.name) !== want) continue
-      if (year) {
-        const metaYear = String(m.releaseInfo || m.year || '').slice(0, 4)
-        if (metaYear !== String(year)) continue // includes the no-year-on-candidate case
-      }
-      return { poster: m.poster || null, id: m.id || null, type: searchType, name: m.name || null }
+    const { requestTimeout = 2500 } = options;
+    if (!title) {
+        return null;
     }
-    return null
-  } catch {
-    return null // network/timeout/parse failure - no poster is the safe outcome
-  } finally {
-    clearTimeout(timeoutId)
-  }
+    const searchType = type === "series" ? "series" : "movie";
+    const url = `https://v3-cinemeta.strem.io/catalog/${searchType}/top/search=${encodeURIComponent(title)}.json`;
+    const want = normalizeTitleForMatch(title);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
+    try {
+        const res = await fetch(url, {
+            headers: { "User-Agent": "SlickSync/1.0" },
+            signal: controller.signal,
+        });
+        if (!res.ok) {
+            return null;
+        }
+        const data = await res.json();
+        const metas = Array.isArray(data?.metas) ? data.metas : [];
+        for (const m of metas) {
+            if (normalizeTitleForMatch(m.name) !== want) {
+                continue;
+            }
+            if (year) {
+                const metaYear = String(m.releaseInfo || m.year || "").slice(0, 4);
+                if (metaYear !== String(year)) {
+                    continue; // includes the no-year-on-candidate case
+                }
+            }
+            return {
+                id: m.id || null,
+                name: m.name || null,
+                poster: m.poster || null,
+                type: searchType,
+            };
+        }
+        return null;
+    } catch {
+        return null; // network/timeout/parse failure - no poster is the safe outcome
+    } finally {
+        clearTimeout(timeoutId);
+    }
 }
 
 module.exports = {
-  findLatestEpisode,
-  enrichPostersFromCinemeta,
-  resolveSinglePoster,
-  searchCinemetaPosterByTitle,
-  normalizeTitleForMatch
-}
-
+    enrichPostersFromCinemeta,
+    findLatestEpisode,
+    normalizeTitleForMatch,
+    resolveSinglePoster,
+    searchCinemetaPosterByTitle,
+};

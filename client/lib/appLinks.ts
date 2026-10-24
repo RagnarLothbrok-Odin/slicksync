@@ -11,11 +11,11 @@
  * rather than guessed at.
  */
 
-export function buildStremioAppUrl(imdbId: string, type: 'movie' | 'series'): string {
-  const videoId = type === 'movie' ? imdbId : '';
-  return `stremio:///detail/${type}/${imdbId}/${videoId}`;
+export function buildStremioAppUrl(imdbId: string, type: "movie" | "series"): string {
+    const videoId = type === "movie" ? imdbId : "";
+    return `stremio:///detail/${type}/${imdbId}/${videoId}`;
 }
 
-export function buildNuvioAppUrl(imdbId: string, type: 'movie' | 'series'): string {
-  return `nuvio://meta?type=${encodeURIComponent(type)}&id=${encodeURIComponent(imdbId)}`;
+export function buildNuvioAppUrl(imdbId: string, type: "movie" | "series"): string {
+    return `nuvio://meta?type=${encodeURIComponent(type)}&id=${encodeURIComponent(imdbId)}`;
 }

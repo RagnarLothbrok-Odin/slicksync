@@ -13,63 +13,89 @@
 // index.js's compression middleware explicitly skips text/event-stream -
 // a gzip window would buffer events instead of delivering them.
 
-const { EventEmitter } = require('events')
+const { EventEmitter } = require("node:events");
 
-const bus = new EventEmitter()
+const bus = new EventEmitter();
 // One listener per open browser tab; a household with several devices and
 // tabs is still far under this, but don't warn-spam if someone leaves a
 // wall of tabs open.
-bus.setMaxListeners(200)
+bus.setMaxListeners(200);
 
-const HEARTBEAT_MS = 25 * 1000 // keeps idle connections alive through proxies (Traefik's default timeouts included)
+const HEARTBEAT_MS = 25 * 1000; // keeps idle connections alive through proxies (Traefik's default timeouts included)
 
 /** Fire an event at every connected client of one account. Fire-and-forget
  * by design - callers never await or depend on delivery. */
 function emitLive(accountId, type) {
-  // A stream starting or stopping is exactly what changes Continue Watching.
-  if (type === 'nowplaying') {
-    try { require('./continueWatching').invalidateContinueWatching(accountId) } catch { /* optional */ }
-    // Now Playing is built fresh for every request (metricsBuilder's
-    // liveNowPlaying) and only remembered for a few seconds - drop that, so
-    // the dashboard's refetch on this very event sees the change. The cached
-    // metrics themselves no longer need throwing away for this.
-    try { require('./metricsBuilder').invalidateLiveNowPlaying(accountId) } catch { /* optional */ }
-  }
-  // A sync finishing, or a change to what a user should have, is exactly
-  // what changes a sync status.
-  if (type === 'sync') {
-    try { require('./sync').invalidateSyncStatus(accountId) } catch { /* optional */ }
-  }
-  try {
-    bus.emit('live', { accountId: accountId || 'default', type })
-  } catch { /* a listener throwing must never break the caller */ }
+    // A stream starting or stopping is exactly what changes Continue Watching.
+    if (type === "nowplaying") {
+        try {
+            require("./continueWatching").invalidateContinueWatching(accountId);
+        } catch {
+            /* optional */
+        }
+        // Now Playing is built fresh for every request (metricsBuilder's
+        // liveNowPlaying) and only remembered for a few seconds - drop that, so
+        // the dashboard's refetch on this very event sees the change. The cached
+        // metrics themselves no longer need throwing away for this.
+        try {
+            require("./metricsBuilder").invalidateLiveNowPlaying(accountId);
+        } catch {
+            /* optional */
+        }
+    }
+    // A sync finishing, or a change to what a user should have, is exactly
+    // what changes a sync status.
+    if (type === "sync") {
+        try {
+            require("./sync").invalidateSyncStatus(accountId);
+        } catch {
+            /* optional */
+        }
+    }
+    try {
+        bus.emit("live", { accountId: accountId || "default", type });
+    } catch {
+        /* a listener throwing must never break the caller */
+    }
 }
 
 /** Express handler for GET /api/events. Auth has already run (mounted after
  * the auth gate); getAccountId scopes which events this connection sees. */
 function handleEventsRequest(req, res, getAccountId) {
-  const accountId = getAccountId(req) || 'default'
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache, no-transform')
-  res.setHeader('Connection', 'keep-alive')
-  res.setHeader('X-Accel-Buffering', 'no')
-  if (typeof res.flushHeaders === 'function') res.flushHeaders()
-  res.write(': connected\n\n')
+    const accountId = getAccountId(req) || "default";
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+    }
+    res.write(": connected\n\n");
 
-  const onEvent = (evt) => {
-    if (evt.accountId !== accountId) return
-    try { res.write(`data: ${JSON.stringify({ type: evt.type })}\n\n`) } catch { /* closed mid-write */ }
-  }
-  bus.on('live', onEvent)
+    const onEvent = (evt) => {
+        if (evt.accountId !== accountId) {
+            return;
+        }
+        try {
+            res.write(`data: ${JSON.stringify({ type: evt.type })}\n\n`);
+        } catch {
+            /* closed mid-write */
+        }
+    };
+    bus.on("live", onEvent);
 
-  const heartbeat = setInterval(() => {
-    try { res.write(': ping\n\n') } catch { /* closed */ }
-  }, HEARTBEAT_MS)
+    const heartbeat = setInterval(() => {
+        try {
+            res.write(": ping\n\n");
+        } catch {
+            /* closed */
+        }
+    }, HEARTBEAT_MS);
 
-  req.on('close', () => {
-    clearInterval(heartbeat)
-    bus.off('live', onEvent)
-  })
+    req.on("close", () => {
+        clearInterval(heartbeat);
+        bus.off("live", onEvent);
+    });
 }
 
-module.exports = { emitLive, handleEventsRequest }
+module.exports = { emitLive, handleEventsRequest };

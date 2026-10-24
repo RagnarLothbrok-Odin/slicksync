@@ -20,19 +20,32 @@
 // on Jimp's bitmap-font plugin at all, and a caption above a picture is a
 // perfectly normal Discord message shape anyway.
 
-const { safeFetch, instancePolicy } = require('./safeUrl')
-const { Jimp } = require('jimp')
-const { monthBoundsInTimezone } = require('./dateUtils')
-const { postDiscordFile } = require('./notify')
-const { notifyPushForType } = require('./pushNotifications')
+const { safeFetch, instancePolicy } = require("./safeUrl");
+const { Jimp } = require("jimp");
+const { monthBoundsInTimezone } = require("./dateUtils");
+const { postDiscordFile } = require("./notify");
+const { notifyPushForType } = require("./pushNotifications");
 
-const MAX_TILES = 24
-const TILE_W = 200
-const TILE_H = 300
-const GUTTER = 6
-const BG_COLOR = 0x0d1117ff // matches the app's own dark background
+const MAX_TILES = 24;
+const TILE_W = 200;
+const TILE_H = 300;
+const GUTTER = 6;
+const BG_COLOR = 0x0d_11_17_ff; // matches the app's own dark background
 
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
 
 /**
  * Every distinct title (movie or show) the account's users watched during
@@ -41,50 +54,62 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
  * episodes"), newest-watched first, capped at MAX_TILES.
  */
 async function getMonthTitles(prisma, accountId, yearMonth, timeZone) {
-  const { start, end } = monthBoundsInTimezone(yearMonth, timeZone)
+    const { start, end } = monthBoundsInTimezone(yearMonth, timeZone);
 
-  const [movies, episodes] = await Promise.all([
-    prisma.movieWatchHistory.findMany({
-      where: { accountId, watchedAt: { gte: start, lt: end } },
-      select: { itemId: true, itemName: true, poster: true, watchedAt: true },
-    }),
-    prisma.episodeWatchHistory.findMany({
-      where: { accountId, watchedAt: { gte: start, lt: end } },
-      select: { showId: true, showName: true, poster: true, watchedAt: true },
-    }),
-  ])
+    const [movies, episodes] = await Promise.all([
+        prisma.movieWatchHistory.findMany({
+            select: { itemId: true, itemName: true, poster: true, watchedAt: true },
+            where: { accountId, watchedAt: { gte: start, lt: end } },
+        }),
+        prisma.episodeWatchHistory.findMany({
+            select: { poster: true, showId: true, showName: true, watchedAt: true },
+            where: { accountId, watchedAt: { gte: start, lt: end } },
+        }),
+    ]);
 
-  const byId = new Map()
-  for (const m of movies) {
-    const prev = byId.get(m.itemId)
-    if (!prev || m.watchedAt > prev.watchedAt) {
-      byId.set(m.itemId, { id: m.itemId, name: m.itemName, poster: m.poster, watchedAt: m.watchedAt })
+    const byId = new Map();
+    for (const m of movies) {
+        const prev = byId.get(m.itemId);
+        if (!prev || m.watchedAt > prev.watchedAt) {
+            byId.set(m.itemId, {
+                id: m.itemId,
+                name: m.itemName,
+                poster: m.poster,
+                watchedAt: m.watchedAt,
+            });
+        }
     }
-  }
-  for (const e of episodes) {
-    const prev = byId.get(e.showId)
-    if (!prev || e.watchedAt > prev.watchedAt) {
-      byId.set(e.showId, { id: e.showId, name: e.showName, poster: e.poster, watchedAt: e.watchedAt })
+    for (const e of episodes) {
+        const prev = byId.get(e.showId);
+        if (!prev || e.watchedAt > prev.watchedAt) {
+            byId.set(e.showId, {
+                id: e.showId,
+                name: e.showName,
+                poster: e.poster,
+                watchedAt: e.watchedAt,
+            });
+        }
     }
-  }
 
-  return Array.from(byId.values())
-    .filter((t) => t.poster)
-    .sort((a, b) => b.watchedAt - a.watchedAt)
-    .slice(0, MAX_TILES)
+    return Array.from(byId.values())
+        .filter((t) => t.poster)
+        .sort((a, b) => b.watchedAt - a.watchedAt)
+        .slice(0, MAX_TILES);
 }
 
 async function fetchPosterTile(url) {
-  try {
-    const res = await safeFetch(url, {}, instancePolicy())
-    if (!res.ok) return null
-    const buf = Buffer.from(await res.arrayBuffer())
-    const img = await Jimp.read(buf)
-    img.cover({ w: TILE_W, h: TILE_H })
-    return img
-  } catch {
-    return null
-  }
+    try {
+        const res = await safeFetch(url, {}, instancePolicy());
+        if (!res.ok) {
+            return null;
+        }
+        const buf = Buffer.from(await res.arrayBuffer());
+        const img = await Jimp.read(buf);
+        img.cover({ h: TILE_H, w: TILE_W });
+        return img;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -93,22 +118,24 @@ async function fetchPosterTile(url) {
  * tile beats no mosaic at all.
  */
 async function buildMosaicBuffer(titles) {
-  const tiles = (await Promise.all(titles.map((t) => fetchPosterTile(t.poster)))).filter(Boolean)
-  if (tiles.length === 0) return null
+    const tiles = (await Promise.all(titles.map((t) => fetchPosterTile(t.poster)))).filter(Boolean);
+    if (tiles.length === 0) {
+        return null;
+    }
 
-  const cols = Math.min(6, Math.ceil(Math.sqrt(tiles.length)))
-  const rows = Math.ceil(tiles.length / cols)
-  const width = cols * TILE_W + (cols + 1) * GUTTER
-  const height = rows * TILE_H + (rows + 1) * GUTTER
+    const cols = Math.min(6, Math.ceil(Math.sqrt(tiles.length)));
+    const rows = Math.ceil(tiles.length / cols);
+    const width = cols * TILE_W + (cols + 1) * GUTTER;
+    const height = rows * TILE_H + (rows + 1) * GUTTER;
 
-  const canvas = new Jimp({ width, height, color: BG_COLOR })
-  tiles.forEach((tile, i) => {
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    canvas.composite(tile, GUTTER + col * (TILE_W + GUTTER), GUTTER + row * (TILE_H + GUTTER))
-  })
+    const canvas = new Jimp({ color: BG_COLOR, height, width });
+    tiles.forEach((tile, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        canvas.composite(tile, GUTTER + col * (TILE_W + GUTTER), GUTTER + row * (TILE_H + GUTTER));
+    });
 
-  return canvas.getBuffer('image/png')
+    return canvas.getBuffer("image/png");
 }
 
 /**
@@ -124,64 +151,106 @@ async function buildMosaicBuffer(titles) {
  * still does *something* useful rather than silently requiring Discord.
  */
 async function generateAndPostMosaic(prisma, accountId, webhookUrl, yearMonth, timeZone) {
-  const titles = await getMonthTitles(prisma, accountId, yearMonth, timeZone)
-  if (titles.length === 0) return { posted: false, reason: 'nothing watched', count: 0 }
+    const titles = await getMonthTitles(prisma, accountId, yearMonth, timeZone);
+    if (titles.length === 0) {
+        return { count: 0, posted: false, reason: "nothing watched" };
+    }
 
-  const [y, m] = yearMonth.split('-').map(Number)
-  const label = `${MONTH_NAMES[m - 1]} ${y}`
+    const [y, m] = yearMonth.split("-").map(Number);
+    const label = `${MONTH_NAMES[m - 1]} ${y}`;
 
-  if (!webhookUrl) {
-    await notifyPushForType(prisma, accountId, 'notifyOnMosaic', {
-      title: `📊 ${label} recap`,
-      body: `${titles.length} title${titles.length === 1 ? '' : 's'} watched this month.`,
-      icon: '/android-chrome-192x192.png',
-      url: '/metrics',
-    })
-    return { posted: true, reason: null, count: titles.length, month: label }
-  }
+    if (!webhookUrl) {
+        await notifyPushForType(prisma, accountId, "notifyOnMosaic", {
+            body: `${titles.length} title${titles.length === 1 ? "" : "s"} watched this month.`,
+            icon: "/android-chrome-192x192.png",
+            title: `📊 ${label} recap`,
+            url: "/metrics",
+        });
+        return { count: titles.length, month: label, posted: true, reason: null };
+    }
 
-  const buffer = await buildMosaicBuffer(titles)
-  if (!buffer) return { posted: false, reason: 'no posters resolved', count: 0 }
+    const buffer = await buildMosaicBuffer(titles);
+    if (!buffer) {
+        return { count: 0, posted: false, reason: "no posters resolved" };
+    }
 
-  const content = `**${label} — ${titles.length} title${titles.length === 1 ? '' : 's'} watched**`
+    const content = `**${label} — ${titles.length} title${titles.length === 1 ? "" : "s"} watched**`;
 
-  const ok = await postDiscordFile(webhookUrl, buffer, `slicksync-${yearMonth}.png`, content)
-  return { posted: !!ok, reason: ok ? null : 'discord post failed', count: titles.length, month: label }
+    const ok = await postDiscordFile(webhookUrl, buffer, `slicksync-${yearMonth}.png`, content);
+    return {
+        count: titles.length,
+        month: label,
+        posted: !!ok,
+        reason: ok ? null : "discord post failed",
+    };
 }
 
-let mosaicTimer = null
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // matches vault monitor's cadence - a month rollover only needs catching once, no finer granularity needed
+let mosaicTimer = null;
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // matches vault monitor's cadence - a month rollover only needs catching once, no finer granularity needed
 
 async function checkAndPostIfNewMonth(prisma, accountId) {
-  try {
-    const { getAccountMonthString, previousMonthString, resolveAccountTimezone } = require('./dateUtils')
-    const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-    let cfg = account?.sync
-    if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = {} } }
-    cfg = cfg || {}
-    if (cfg.notifyOnMosaic !== true) return
+    try {
+        const {
+            getAccountMonthString,
+            previousMonthString,
+            resolveAccountTimezone,
+        } = require("./dateUtils");
+        const account = await prisma.appAccount.findUnique({
+            select: { sync: true },
+            where: { id: accountId },
+        });
+        let cfg = account?.sync;
+        if (typeof cfg === "string") {
+            try {
+                cfg = JSON.parse(cfg);
+            } catch {
+                cfg = {};
+            }
+        }
+        cfg = cfg || {};
+        if (cfg.notifyOnMosaic !== true) {
+            return;
+        }
 
-    const timeZone = await resolveAccountTimezone(prisma, accountId)
-    const targetMonth = previousMonthString(getAccountMonthString(new Date(), timeZone))
-    if (cfg.lastMosaicMonth === targetMonth) return // already handled this month
+        const timeZone = await resolveAccountTimezone(prisma, accountId);
+        const targetMonth = previousMonthString(getAccountMonthString(new Date(), timeZone));
+        if (cfg.lastMosaicMonth === targetMonth) {
+            return; // already handled this month
+        }
 
-    const result = await generateAndPostMosaic(prisma, accountId, cfg.webhookUrl, targetMonth, timeZone)
-    // Mark done on a real post OR a genuinely empty month - only leave it
-    // unmarked (so the next 6h check retries) on an actual failure
-    // (Discord unreachable, every poster fetch failed).
-    if (result.posted || result.reason === 'nothing watched') {
-      // A fresh read: building and posting the mosaic takes a while.
-      await require('./accountSync').setAccountSyncKeys(prisma, accountId, { lastMosaicMonth: targetMonth })
+        const result = await generateAndPostMosaic(
+            prisma,
+            accountId,
+            cfg.webhookUrl,
+            targetMonth,
+            timeZone
+        );
+        // Mark done on a real post OR a genuinely empty month - only leave it
+        // unmarked (so the next 6h check retries) on an actual failure
+        // (Discord unreachable, every poster fetch failed).
+        if (result.posted || result.reason === "nothing watched") {
+            // A fresh read: building and posting the mosaic takes a while.
+            await require("./accountSync").setAccountSyncKeys(prisma, accountId, {
+                lastMosaicMonth: targetMonth,
+            });
+        }
+    } catch (e) {
+        console.warn("[PosterMosaic] Monthly check failed:", e?.message);
     }
-  } catch (e) {
-    console.warn('[PosterMosaic] Monthly check failed:', e?.message)
-  }
 }
 
 function scheduleMosaicMonitor(prisma, accountId) {
-  if (mosaicTimer) clearInterval(mosaicTimer)
-  checkAndPostIfNewMonth(prisma, accountId)
-  mosaicTimer = setInterval(() => checkAndPostIfNewMonth(prisma, accountId), CHECK_INTERVAL_MS)
+    if (mosaicTimer) {
+        clearInterval(mosaicTimer);
+    }
+    checkAndPostIfNewMonth(prisma, accountId);
+    mosaicTimer = setInterval(() => checkAndPostIfNewMonth(prisma, accountId), CHECK_INTERVAL_MS);
 }
 
-module.exports = { getMonthTitles, buildMosaicBuffer, generateAndPostMosaic, scheduleMosaicMonitor, MAX_TILES }
+module.exports = {
+    buildMosaicBuffer,
+    generateAndPostMosaic,
+    getMonthTitles,
+    MAX_TILES,
+    scheduleMosaicMonitor,
+};

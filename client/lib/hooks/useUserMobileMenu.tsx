@@ -1,19 +1,19 @@
-'use client';
+"use client";
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext } from "react";
 
 interface UserMobileMenuContextType {
-  isOpen: boolean;
-  onOpen: () => void;
-  onClose: () => void;
+    isOpen: boolean;
+    onClose: () => void;
+    onOpen: () => void;
 }
 
 export const UserMobileMenuContext = createContext<UserMobileMenuContextType>({
-  isOpen: false,
-  onOpen: () => {},
-  onClose: () => {},
+    isOpen: false,
+    onClose: () => undefined,
+    onOpen: () => undefined,
 });
 
 export function useUserMobileMenu() {
-  return useContext(UserMobileMenuContext);
+    return useContext(UserMobileMenuContext);
 }

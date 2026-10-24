@@ -9,20 +9,20 @@
  * - If item activity stopped (old _mtime), close the active session
  */
 
-const { extractSeasonEpisode } = require('./kitsuUtils')
-const { resolveAccountTimezone, getAccountDayNumber } = require('./dateUtils')
-const { postDiscord, fetchMetadata } = require('./notify')
-const { getUserAvatarUrl } = require('./avatarUtils')
-const { resolveSinglePoster } = require('./libraryHelpers')
+const { extractSeasonEpisode } = require("./kitsuUtils");
+const { resolveAccountTimezone, getAccountDayNumber } = require("./dateUtils");
+const { postDiscord, fetchMetadata } = require("./notify");
+const { getUserAvatarUrl } = require("./avatarUtils");
+const { resolveSinglePoster } = require("./libraryHelpers");
 
 // Shares the same debug log file as activityMonitor.js's heartbeat() - one
 // combined trace of the whole pipeline from library fetch through gating.
 function heartbeat(event, data = {}) {
-  try {
-    const fs = require('fs')
-    const line = `[${new Date().toISOString()}] ${event} ${JSON.stringify(data)}\n`
-    require('./debugLogFile').appendCapped('/app/data/activity-monitor-debug.log', line)
-  } catch {}
+    try {
+        const _fs = require("node:fs");
+        const line = `[${new Date().toISOString()}] ${event} ${JSON.stringify(data)}\n`;
+        require("./debugLogFile").appendCapped("/app/data/activity-monitor-debug.log", line);
+    } catch {}
 }
 
 // Intentionally NOT tied to activityMonitor's poll scheduling interval
@@ -33,7 +33,7 @@ function heartbeat(event, data = {}) {
 // reintroduce the false-negative bug fixed in v1.9.26 (isActivelyWatching
 // concluding "stopped" just because the provider hasn't checkpointed
 // recently, even during genuine continuous playback).
-const CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes - freshness window base, not a poll interval
+const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes - freshness window base, not a poll interval
 
 // Ceiling for the wall-clock fallback duration (used only when position data
 // isn't available - see both call sites below). A WatchSession row is reused
@@ -46,7 +46,7 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes - freshness window base, no
 // face value. Capping it stops the absurd display regardless of why the
 // session stayed open that long - a real single-sitting watch is never
 // anywhere near this long anyway.
-const MAX_WALLCLOCK_FALLBACK_SECONDS = 6 * 60 * 60 // 6h
+const MAX_WALLCLOCK_FALLBACK_SECONDS = 6 * 60 * 60; // 6h
 
 /**
  * Format episode info to match UI display
@@ -54,136 +54,158 @@ const MAX_WALLCLOCK_FALLBACK_SECONDS = 6 * 60 * 60 // 6h
  * - Without season (anime): E{episode}
  */
 function formatEpisodeInfo(season, episode) {
-  if (season !== null && season !== undefined) {
-    return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
-  }
-  return `E${episode}`
+    if (season !== null && season !== undefined) {
+        return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
+    }
+    return `E${episode}`;
 }
 
 /**
  * Send Discord notification when a watch session starts (now playing)
  */
 async function sendSessionStartNotification(webhookUrl, session, user) {
-  try {
-    if (!webhookUrl) return
+    try {
+        if (!webhookUrl) {
+            return;
+        }
 
-    // Build title with show/movie name and episode info for shows
-    let itemTitle = session.itemName || 'Unknown'
-    if (session.itemType === 'series' && session.episode !== null && session.episode !== undefined) {
-      itemTitle += ` (${formatEpisodeInfo(session.season, session.episode)})`
+        // Build title with show/movie name and episode info for shows
+        let itemTitle = session.itemName || "Unknown";
+        if (
+            session.itemType === "series" &&
+            session.episode !== null &&
+            session.episode !== undefined
+        ) {
+            itemTitle += ` (${formatEpisodeInfo(session.season, session.episode)})`;
+        }
+
+        // Fetch metadata for additional info
+        const metadata = await fetchMetadata(session.itemId, session.itemType, session.videoId);
+
+        const fields = [];
+
+        // Field 1: Started timestamp
+        const startTime = session.startTime || new Date();
+        fields.push({
+            inline: true,
+            name: "Started",
+            value: `<t:${Math.floor(startTime.getTime() / 1000)}:R>`,
+        });
+
+        // Field 2: Overview (if available)
+        let overviewText = null;
+        if (session.itemType === "series" && metadata?.episode?.overview) {
+            overviewText = metadata.episode.overview;
+        } else if (metadata?.description) {
+            overviewText = metadata.description;
+        }
+
+        if (overviewText) {
+            fields.push({
+                inline: false,
+                name: "Overview",
+                value:
+                    overviewText.length > 1024
+                        ? `${overviewText.substring(0, 1021)}...`
+                        : overviewText,
+            });
+        }
+
+        // Field 3: Episode title (for series)
+        if (session.itemType === "series" && metadata?.episode?.title) {
+            fields.push({
+                inline: true,
+                name: "Episode Title",
+                value: metadata.episode.title,
+            });
+        }
+
+        // Field 4: Links (TMDb and IMDb)
+        const links = [];
+        if (metadata?.moviedb_id) {
+            const tmdbUrl =
+                session.itemType === "movie"
+                    ? `https://www.themoviedb.org/movie/${metadata.moviedb_id}`
+                    : `https://www.themoviedb.org/tv/${metadata.moviedb_id}`;
+            links.push(`[TMDb](${tmdbUrl})`);
+        }
+        if (metadata?.imdb_id) {
+            const imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+            links.push(`[IMDb](${imdbUrl})`);
+        }
+
+        if (links.length > 0) {
+            fields.push({
+                inline: true,
+                name: "Links",
+                value: links.join(" ∙ "),
+            });
+        }
+
+        // Generate user avatar URL
+        const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex);
+
+        const embed = {
+            author: {
+                icon_url: avatarUrl || undefined,
+                name: `${user.username} started watching`,
+            },
+            color: 0x00_ff_00, // Green color to indicate active/started
+            description: "",
+            fields,
+            timestamp: new Date().toISOString(),
+            title: itemTitle,
+        };
+
+        // Add thumbnail (poster)
+        if (session.poster) {
+            embed.thumbnail = {
+                url: session.poster,
+            };
+        }
+
+        // Add footer with SlickSync version
+        let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+        if (!appVersion) {
+            try {
+                appVersion = require("../../package.json")?.version || "";
+            } catch {}
+        }
+        if (appVersion) {
+            embed.footer = { text: `SlickSync v${appVersion}` };
+        }
+
+        await postDiscord(webhookUrl, null, {
+            avatar_url:
+                "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+            embeds: [embed],
+        });
+
+        console.log(
+            `[SessionTracker] Sent now playing notification for user ${user.username}, item: ${session.itemName}`
+        );
+        heartbeat("sessionTracker:discord_start_sent", {
+            itemName: session.itemName,
+            userId: user.id,
+        });
+    } catch (error) {
+        // console.warn alone is lost on the next container restart (docker logs
+        // aren't persisted to the mounted volume) - confirmed real case
+        // (2026-07-29): a "started watching" notification's Discord/push delivery
+        // failed once, self-recovered on its own shortly after, and by the time
+        // it was investigated the only surviving evidence was an indirect
+        // inference from bell-notification/push-lastSeenAt timestamps in the DB -
+        // there was no direct record of the failure itself. heartbeat() writes to
+        // the same mounted-volume debug log sessionTracker already uses
+        // elsewhere in this file, so a delivery failure is diagnosable after a
+        // restart instead of requiring that kind of reconstruction.
+        console.warn("[SessionTracker] Failed to send session start notification:", error.message);
+        heartbeat("sessionTracker:discord_start_failed", {
+            itemName: session?.itemName,
+            message: error.message,
+            userId: user?.id,
+        });
     }
-
-    // Fetch metadata for additional info
-    const metadata = await fetchMetadata(session.itemId, session.itemType, session.videoId)
-
-    const fields = []
-
-    // Field 1: Started timestamp
-    const startTime = session.startTime || new Date()
-    fields.push({
-      name: 'Started',
-      value: `<t:${Math.floor(startTime.getTime() / 1000)}:R>`,
-      inline: true
-    })
-
-    // Field 2: Overview (if available)
-    let overviewText = null
-    if (session.itemType === 'series' && metadata?.episode?.overview) {
-      overviewText = metadata.episode.overview
-    } else if (metadata?.description) {
-      overviewText = metadata.description
-    }
-
-    if (overviewText) {
-      fields.push({
-        name: 'Overview',
-        value: overviewText.length > 1024 ? overviewText.substring(0, 1021) + '...' : overviewText,
-        inline: false
-      })
-    }
-
-    // Field 3: Episode title (for series)
-    if (session.itemType === 'series' && metadata?.episode?.title) {
-      fields.push({
-        name: 'Episode Title',
-        value: metadata.episode.title,
-        inline: true
-      })
-    }
-
-    // Field 4: Links (TMDb and IMDb)
-    const links = []
-    if (metadata?.moviedb_id) {
-      const tmdbUrl = session.itemType === 'movie'
-        ? `https://www.themoviedb.org/movie/${metadata.moviedb_id}`
-        : `https://www.themoviedb.org/tv/${metadata.moviedb_id}`
-      links.push(`[TMDb](${tmdbUrl})`)
-    }
-    if (metadata?.imdb_id) {
-      const imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`
-      links.push(`[IMDb](${imdbUrl})`)
-    }
-
-    if (links.length > 0) {
-      fields.push({
-        name: 'Links',
-        value: links.join(' ∙ '),
-        inline: true
-      })
-    }
-
-    // Generate user avatar URL
-    const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex)
-
-    const embed = {
-      title: itemTitle,
-      author: {
-        name: `${user.username} started watching`,
-        icon_url: avatarUrl || undefined
-      },
-      description: '',
-      color: 0x00ff00, // Green color to indicate active/started
-      fields: fields,
-      timestamp: new Date().toISOString()
-    }
-
-    // Add thumbnail (poster)
-    if (session.poster) {
-      embed.thumbnail = {
-        url: session.poster
-      }
-    }
-
-    // Add footer with SlickSync version
-    let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-    if (!appVersion) {
-      try { appVersion = require('../../package.json')?.version || '' } catch { }
-    }
-    if (appVersion) {
-      embed.footer = { text: `SlickSync v${appVersion}` }
-    }
-
-    await postDiscord(webhookUrl, null, {
-      embeds: [embed],
-      avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-    })
-
-    console.log(`[SessionTracker] Sent now playing notification for user ${user.username}, item: ${session.itemName}`)
-    heartbeat('sessionTracker:discord_start_sent', { userId: user.id, itemName: session.itemName })
-  } catch (error) {
-    // console.warn alone is lost on the next container restart (docker logs
-    // aren't persisted to the mounted volume) - confirmed real case
-    // (2026-07-29): a "started watching" notification's Discord/push delivery
-    // failed once, self-recovered on its own shortly after, and by the time
-    // it was investigated the only surviving evidence was an indirect
-    // inference from bell-notification/push-lastSeenAt timestamps in the DB -
-    // there was no direct record of the failure itself. heartbeat() writes to
-    // the same mounted-volume debug log sessionTracker already uses
-    // elsewhere in this file, so a delivery failure is diagnosable after a
-    // restart instead of requiring that kind of reconstruction.
-    console.warn(`[SessionTracker] Failed to send session start notification:`, error.message)
-    heartbeat('sessionTracker:discord_start_failed', { userId: user?.id, itemName: session?.itemName, message: error.message })
-  }
 }
 
 /**
@@ -196,53 +218,79 @@ async function sendSessionStartNotification(webhookUrl, session, user) {
  * time (see docs/runtime-behavior.md on why durations come from native only).
  */
 async function sendSessionStopNotification(webhookUrl, session, user) {
-  try {
-    if (!webhookUrl) return
+    try {
+        if (!webhookUrl) {
+            return;
+        }
 
-    let itemTitle = session.itemName || 'Unknown'
-    if (session.itemType === 'series' && session.episode !== null && session.episode !== undefined) {
-      itemTitle += ` (${formatEpisodeInfo(session.season, session.episode)})`
+        let itemTitle = session.itemName || "Unknown";
+        if (
+            session.itemType === "series" &&
+            session.episode !== null &&
+            session.episode !== undefined
+        ) {
+            itemTitle += ` (${formatEpisodeInfo(session.season, session.episode)})`;
+        }
+
+        const fields = [];
+        if (session.startTime) {
+            const elapsedMs = Date.now() - new Date(session.startTime).getTime();
+            const mins = Math.max(1, Math.round(elapsedMs / 60_000));
+            fields.push({
+                inline: true,
+                name: "Watched for",
+                value: mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`,
+            });
+        }
+
+        const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex);
+
+        const embed = {
+            author: {
+                icon_url: avatarUrl || undefined,
+                name: `${user.username} finished watching`,
+            },
+            color: 0x80_80_80, // gray - distinct from the green "started" embed
+            description: "",
+            fields,
+            timestamp: new Date().toISOString(),
+            title: itemTitle,
+        };
+        if (session.poster) {
+            embed.thumbnail = { url: session.poster };
+        }
+
+        let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+        if (!appVersion) {
+            try {
+                appVersion = require("../../package.json")?.version || "";
+            } catch {}
+        }
+        if (appVersion) {
+            embed.footer = { text: `SlickSync v${appVersion}` };
+        }
+
+        await postDiscord(webhookUrl, null, {
+            avatar_url:
+                "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+            embeds: [embed],
+        });
+
+        console.log(
+            `[SessionTracker] Sent stopped-watching notification for user ${user.username}, item: ${session.itemName}`
+        );
+        heartbeat("sessionTracker:discord_stop_sent", {
+            itemName: session.itemName,
+            userId: user.id,
+        });
+    } catch (error) {
+        console.warn("[SessionTracker] Failed to send session stop notification:", error.message);
+        heartbeat("sessionTracker:discord_stop_failed", {
+            itemName: session?.itemName,
+            message: error.message,
+            userId: user?.id,
+        });
     }
-
-    const fields = []
-    if (session.startTime) {
-      const elapsedMs = Date.now() - new Date(session.startTime).getTime()
-      const mins = Math.max(1, Math.round(elapsedMs / 60000))
-      fields.push({ name: 'Watched for', value: mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`, inline: true })
-    }
-
-    const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex)
-
-    const embed = {
-      title: itemTitle,
-      author: {
-        name: `${user.username} finished watching`,
-        icon_url: avatarUrl || undefined
-      },
-      description: '',
-      color: 0x808080, // gray - distinct from the green "started" embed
-      fields,
-      timestamp: new Date().toISOString()
-    }
-    if (session.poster) embed.thumbnail = { url: session.poster }
-
-    let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-    if (!appVersion) {
-      try { appVersion = require('../../package.json')?.version || '' } catch { }
-    }
-    if (appVersion) embed.footer = { text: `SlickSync v${appVersion}` }
-
-    await postDiscord(webhookUrl, null, {
-      embeds: [embed],
-      avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-    })
-
-    console.log(`[SessionTracker] Sent stopped-watching notification for user ${user.username}, item: ${session.itemName}`)
-    heartbeat('sessionTracker:discord_stop_sent', { userId: user.id, itemName: session.itemName })
-  } catch (error) {
-    console.warn(`[SessionTracker] Failed to send session stop notification:`, error.message)
-    heartbeat('sessionTracker:discord_stop_failed', { userId: user?.id, itemName: session?.itemName, message: error.message })
-  }
 }
 
 /**
@@ -251,11 +299,13 @@ async function sendSessionStopNotification(webhookUrl, session, user) {
  * Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
  */
 function getWatchDate(item) {
-  if (item.state?.lastWatched) {
-    const d = new Date(item.state.lastWatched)
-    if (!isNaN(d.getTime())) return d
-  }
-  return null
+    if (item.state?.lastWatched) {
+        const d = new Date(item.state.lastWatched);
+        if (!Number.isNaN(d.getTime())) {
+            return d;
+        }
+    }
+    return null;
 }
 
 /**
@@ -292,11 +342,13 @@ function getWatchDate(item) {
  * pause. If this still lingers too long in practice, walk it back toward
  * 15min rather than raising it further.
  */
-function isActivelyWatching(item, userId, now) {
-  const watchDate = getWatchDate(item)
-  if (!watchDate) return false
+function isActivelyWatching(item, _userId, now) {
+    const watchDate = getWatchDate(item);
+    if (!watchDate) {
+        return false;
+    }
 
-  return (now - watchDate.getTime()) < (CHECK_INTERVAL_MS * 3.6)
+    return now - watchDate.getTime() < CHECK_INTERVAL_MS * 3.6;
 }
 
 // The one checkpoint that does say "stopped": a position at the end of the
@@ -309,13 +361,15 @@ function isActivelyWatching(item, userId, now) {
 // 98%, not 100%: players stop a little short of the end (credits, the
 // autoplay countdown), and a position inside the last 2% is still a watch
 // that is over, not one that is paused.
-const END_OF_PLAYBACK_RATIO = 0.98
+const END_OF_PLAYBACK_RATIO = 0.98;
 
 function hasReachedEnd(position, duration) {
-  const pos = Number(position)
-  const dur = Number(duration)
-  if (!Number.isFinite(pos) || !Number.isFinite(dur) || dur <= 0) return false
-  return pos >= dur * END_OF_PLAYBACK_RATIO
+    const pos = Number(position);
+    const dur = Number(duration);
+    if (!(Number.isFinite(pos) && Number.isFinite(dur)) || dur <= 0) {
+        return false;
+    }
+    return pos >= dur * END_OF_PLAYBACK_RATIO;
 }
 
 /**
@@ -323,639 +377,780 @@ function hasReachedEnd(position, duration) {
  * Called during each 5-minute sync
  */
 async function processUserSessions(prisma, accountId, userId, library, now = new Date()) {
-  if (!library || !Array.isArray(library) || library.length === 0) {
-    console.log(`[SessionTracker] No library items for user ${userId}`)
-    return { sessionsCreated: 0, sessionsUpdated: 0, sessionsClosed: 0 }
-  }
-
-  console.log(`[SessionTracker] Processing ${library.length} library items for user ${userId}`)
-
-  const accountIdValue = accountId || 'default'
-  const nowMs = now.getTime()
-  let sessionsCreated = 0
-  let sessionsUpdated = 0
-  let sessionsClosed = 0
-
-  // Fetch user data once (used for session records; the "started watching"
-  // notification is sent from the proxy pipeline, not here - see the note
-  // at the session-create site below).
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, username: true, email: true, colorIndex: true, discordWebhookUrl: true }
-  })
-
-  // Get all active sessions for this user
-  const activeSessions = await prisma.watchSession.findMany({
-    where: {
-      accountId: accountIdValue,
-      userId,
-      isActive: true
+    if (!(library && Array.isArray(library)) || library.length === 0) {
+        console.log(`[SessionTracker] No library items for user ${userId}`);
+        return { sessionsClosed: 0, sessionsCreated: 0, sessionsUpdated: 0 };
     }
-  })
 
-  // The account's timezone, looked up once and only if something below needs
-  // to know whether two moments fall on the same day for this household.
-  let accountTimeZone = null
-  const sameAccountDay = async (a, b) => {
-    if (!accountTimeZone) accountTimeZone = await resolveAccountTimezone(prisma, accountIdValue)
-    return getAccountDayNumber(a, accountTimeZone) === getAccountDayNumber(b, accountTimeZone)
-  }
-  // Rows this pass (re)opened. The close loop below works from the list read
-  // at the top of the pass, which still describes such a row as it WAS.
-  const reopenedSessionIds = new Set()
+    console.log(`[SessionTracker] Processing ${library.length} library items for user ${userId}`);
 
-  // Create a map of active sessions by composite key: userId + itemId + videoId
-  // This ensures we can have multiple active sessions for the same item (different episodes)
-  // but prevents duplicates for the same user+item+videoId combination
-  const activeSessionMap = new Map()
-  const duplicateSessionsToClose = []
+    const accountIdValue = accountId || "default";
+    const nowMs = now.getTime();
+    let sessionsCreated = 0;
+    let sessionsUpdated = 0;
+    let sessionsClosed = 0;
 
-  // Helper to create composite key
-  const getSessionKey = (session) => {
-    return `${session.userId}:${session.itemId}:${session.videoId || 'null'}`
-  }
+    // Fetch user data once (used for session records; the "started watching"
+    // notification is sent from the proxy pipeline, not here - see the note
+    // at the session-create site below).
+    const _user = await prisma.user.findUnique({
+        select: {
+            colorIndex: true,
+            discordWebhookUrl: true,
+            email: true,
+            id: true,
+            username: true,
+        },
+        where: { id: userId },
+    });
 
-  for (const session of activeSessions) {
-    const key = getSessionKey(session)
-    const existing = activeSessionMap.get(key)
-    if (!existing) {
-      activeSessionMap.set(key, session)
-    } else {
-      // Duplicate session for same user+item+videoId - keep the one with earliest startTime
-      const existingTime = existing.startTime.getTime()
-      const currentTime = session.startTime.getTime()
-      if (currentTime < existingTime) {
-        // Current session is older, replace existing
-        duplicateSessionsToClose.push(existing)
-        activeSessionMap.set(key, session)
-      } else {
-        // Existing session is older, mark current as duplicate
-        duplicateSessionsToClose.push(session)
-      }
-    }
-  }
+    // Get all active sessions for this user
+    const activeSessions = await prisma.watchSession.findMany({
+        where: {
+            accountId: accountIdValue,
+            isActive: true,
+            userId,
+        },
+    });
 
-  // Close duplicate sessions (keep only the oldest one per user+item+videoId)
-  for (const duplicate of duplicateSessionsToClose) {
-    const key = getSessionKey(duplicate)
-    const keptSession = activeSessionMap.get(key)
-    if (keptSession && keptSession.id !== duplicate.id) {
-      await prisma.watchSession.update({
-        where: { id: duplicate.id },
-        data: {
-          isActive: false,
-          endTime: keptSession.startTime, // End when the kept session started
-          durationSeconds: Math.max(0, Math.floor((keptSession.startTime.getTime() - duplicate.startTime.getTime()) / 1000))
+    // The account's timezone, looked up once and only if something below needs
+    // to know whether two moments fall on the same day for this household.
+    let accountTimeZone = null;
+    const sameAccountDay = async (a, b) => {
+        if (!accountTimeZone) {
+            accountTimeZone = await resolveAccountTimezone(prisma, accountIdValue);
         }
-      })
-      sessionsClosed++
-    }
-  }
+        return getAccountDayNumber(a, accountTimeZone) === getAccountDayNumber(b, accountTimeZone);
+    };
+    // Rows this pass (re)opened. The close loop below works from the list read
+    // at the top of the pass, which still describes such a row as it WAS.
+    const reopenedSessionIds = new Set();
 
-  // Track which items are currently active
-  const currentlyActiveItems = new Set()
-  // Track last activity time per item from the library (lastWatched only)
-  // NOTE: Do NOT use _mtime - that's modification time, not watch time
-  const lastActivityByItemId = new Map()
-  // Track last known playback position per item, so a closing session's
-  // final duration can be computed the same real-progress way as an
-  // updating one instead of falling back to a checkpoint timestamp that
-  // may never have moved during the whole session.
-  const lastPositionByItemId = new Map()
+    // Create a map of active sessions by composite key: userId + itemId + videoId
+    // This ensures we can have multiple active sessions for the same item (different episodes)
+    // but prevents duplicates for the same user+item+videoId combination
+    const activeSessionMap = new Map();
+    const duplicateSessionsToClose = [];
 
-  // Process each library item
-  for (const item of library) {
-    const itemId = item._id || item.id
-    if (!itemId) continue
+    // Helper to create composite key
+    const getSessionKey = (session) =>
+        `${session.userId}:${session.itemId}:${session.videoId || "null"}`;
 
-    // Skip entirely when the provider's own library has no title for this
-    // item - confirmed real case: a raw/direct stream (no proper Cinemeta-
-    // backed catalog entry) lands in Stremio/Nuvio's library with an empty
-    // name, and this used to fall through to a WatchSession/History row
-    // literally titled "Unknown" with no poster, still counted in Watch
-    // Time Today. There's nothing accurate to show for it - skip rather
-    // than record a placeholder that pollutes the feed and the stats.
-    if (!item.name || !String(item.name).trim()) continue
-
-    // Check if item has watch progress or recent activity
-    const state = item.state || {}
-
-    // Consider item as having watch progress if:
-    // 1. It has any time watched tracked
-    // 2. It has a video_id (series with episode progress)
-    // 3. It has a recent lastWatched (actively being watched)
-    // NOTE: Do NOT use _mtime - that's just modification time, not watch time
-    const hasTimeWatched = state.timeWatched > 0 || state.overallTimeWatched > 0 || state.timeOffset > 0
-    const hasVideoId = !!state.video_id
-    const watchDate = getWatchDate(item)
-    // Same window as isActivelyWatching() above - kept in sync since v1.9.35
-    // specifically to avoid this gate and that one disagreeing about what
-    // counts as "recent."
-    const hasRecentActivity = watchDate && (nowMs - watchDate.getTime()) < (CHECK_INTERVAL_MS * 3.6)
-
-    const hasWatchProgress = hasTimeWatched || hasVideoId || hasRecentActivity
-
-    if (!hasWatchProgress) continue
-
-    // Update last activity tracking (watchDate is already defined above)
-    if (watchDate) {
-      lastActivityByItemId.set(itemId, watchDate)
-    }
-    // state.timeOffset only, never state.overallTimeWatched here - the latter
-    // is a lifetime-cumulative counter that can run to absurd values (see the
-    // docs/runtime-behavior.md note this file already documents elsewhere), unsafe to treat
-    // as a single-point-in-time "position" the way timeOffset is. Falling
-    // back to it produced a bogus 92h+ duration badge on a session that had
-    // been running for minutes, the one time timeOffset was momentarily
-    // absent from a poll's state payload.
-    const currentPositionForItem = Number(state.timeOffset ?? NaN)
-    if (!Number.isNaN(currentPositionForItem)) {
-      lastPositionByItemId.set(itemId, currentPositionForItem)
+    for (const session of activeSessions) {
+        const key = getSessionKey(session);
+        const existing = activeSessionMap.get(key);
+        if (existing) {
+            // Duplicate session for same user+item+videoId - keep the one with earliest startTime
+            const existingTime = existing.startTime.getTime();
+            const currentTime = session.startTime.getTime();
+            if (currentTime < existingTime) {
+                // Current session is older, replace existing
+                duplicateSessionsToClose.push(existing);
+                activeSessionMap.set(key, session);
+            } else {
+                // Existing session is older, mark current as duplicate
+                duplicateSessionsToClose.push(session);
+            }
+        } else {
+            activeSessionMap.set(key, session);
+        }
     }
 
-    const isActive = isActivelyWatching(item, userId, nowMs)
-    // Playback that ran to the end still gets its session created or
-    // updated below, so the duration and the History row are recorded as
-    // for any other checkpoint - it just is not kept open afterwards: it
-    // is left out of currentlyActiveItems, so the close loop at the bottom
-    // closes it on this same poll (an existing session) or the next one (a
-    // session this poll creates), with endTime at the checkpoint itself.
-    const reachedEnd = hasReachedEnd(state.timeOffset, state.duration)
-    const videoId = item.type === 'series' ? state.video_id : null
-    const { season, episode } = await extractSeasonEpisode(videoId)
-
-    // Debug: log active items
-    if (isActive) {
-      const ageMinutes = watchDate ? Math.round((nowMs - watchDate.getTime()) / 60000) : 'unknown'
-      console.log(`[SessionTracker] Active item: ${item.name} (${itemId}), age: ${ageMinutes}min, videoId: ${videoId}`)
-      heartbeat('sessionTracker:item_active', { itemId, userId, itemName: item.name, ageMinutes, videoId })
+    // Close duplicate sessions (keep only the oldest one per user+item+videoId)
+    for (const duplicate of duplicateSessionsToClose) {
+        const key = getSessionKey(duplicate);
+        const keptSession = activeSessionMap.get(key);
+        if (keptSession && keptSession.id !== duplicate.id) {
+            await prisma.watchSession.update({
+                data: {
+                    durationSeconds: Math.max(
+                        0,
+                        Math.floor(
+                            (keptSession.startTime.getTime() - duplicate.startTime.getTime()) / 1000
+                        )
+                    ),
+                    endTime: keptSession.startTime, // End when the kept session started
+                    isActive: false,
+                },
+                where: { id: duplicate.id },
+            });
+            sessionsClosed++;
+        }
     }
 
-    if (isActive) {
-      // Track active items by composite key (not just itemId) to prevent closing wrong sessions
-      const sessionKey = `${userId}:${itemId}:${videoId || 'null'}`
-      if (!reachedEnd) currentlyActiveItems.add(sessionKey)
+    // Track which items are currently active
+    const currentlyActiveItems = new Set();
+    // Track last activity time per item from the library (lastWatched only)
+    // NOTE: Do NOT use _mtime - that's modification time, not watch time
+    const lastActivityByItemId = new Map();
+    // Track last known playback position per item, so a closing session's
+    // final duration can be computed the same real-progress way as an
+    // updating one instead of falling back to a checkpoint timestamp that
+    // may never have moved during the whole session.
+    const lastPositionByItemId = new Map();
 
-      // Use composite key: userId + itemId + videoId for proper session matching
-      const existingSession = activeSessionMap.get(sessionKey)
-
-      if (existingSession) {
-        // Same user+item+videoId - update existing session duration
-        // Since we use composite key with videoId, different episodes create new sessions automatically
-        //
-        // durationSeconds now reflects real watched-content progress (how
-        // far the playback position has actually advanced since this
-        // session started), not wall-clock time since the session record
-        // was created. The provider's position can go stale for several
-        // minutes between checkpoints (see the freshness-window
-        // investigation elsewhere in this file), so a session could sit
-        // "active" for a long time with elapsed wall-clock time climbing
-        // even though nothing new has actually been watched - a
-        // wall-clock-based duration overstated real progress in exactly
-        // that case. Falls back to the previous wall-clock calculation
-        // only when a startPosition isn't available (older sessions, or a
-        // provider/item that doesn't report a position at all).
-        // state.timeOffset only - never state.overallTimeWatched, which is
-        // lifetime-cumulative and can be huge; falling back to it here (when
-        // timeOffset is momentarily missing from a poll) produced a one-poll
-        // "duration" equal to that entire cumulative value once diffed
-        // against a much smaller startPosition.
-        //
-        // Incremental against the session's own running durationSeconds
-        // (added onto, never recomputed from startPosition directly) -
-        // confirmed real case: a session's first-ever checkpoint arrived
-        // ~26min into an episode (Nuvio only checkpoints on pause/stop, so
-        // that's just whenever the first one happened to land), correctly
-        // SEEDING durationSeconds to ~26min at creation (see the seeding
-        // comment below) - but the next poll's checkpoint at ~53min then
-        // computed 53-26=27min from startPosition and OVERWROTE the seed
-        // instead of adding to it, permanently losing the first ~26 real
-        // minutes (recorded 27min for what was actually a ~53min watch).
-        // Delta against lastPosition (this session's most recently observed
-        // position, not its fixed original startPosition) added onto the
-        // existing durationSeconds is a proper running total instead - the
-        // seed survives every subsequent poll since each one only adds its
-        // own incremental progress rather than replacing the whole figure.
-        const currentPosition = Number(state.timeOffset ?? NaN)
-        const previousPosition = existingSession.lastPosition ?? existingSession.startPosition
-        const hasPositionData = previousPosition != null && !Number.isNaN(currentPosition)
-        const sessionDurationSeconds = hasPositionData
-          ? (existingSession.durationSeconds || 0) + Math.max(0, Math.floor((currentPosition - previousPosition) / 1000))
-          : Math.min(MAX_WALLCLOCK_FALLBACK_SECONDS, Math.max(0, Math.floor(((watchDate ? watchDate.getTime() : nowMs) - existingSession.startTime.getTime()) / 1000)))
-
-        // NEVER update startTime forward - only backward if we discover an earlier ping
-        // This prevents resets when lastWatched gets updated to recent times
-        const totalDurationValue = Number.isNaN(Number(state.duration ?? NaN)) ? null : Number(state.duration)
-        const updateData = {
-          durationSeconds: sessionDurationSeconds,
-          lastPosition: Number.isNaN(currentPosition) ? null : currentPosition,
-          totalDuration: totalDurationValue
+    // Process each library item
+    for (const item of library) {
+        const itemId = item._id || item.id;
+        if (!itemId) {
+            continue;
         }
 
-        // Update season/episode if they've changed (e.g., Kitsu API now returns correct season)
-        // This fixes old sessions that were created with season=1
-        if (season !== null && season !== existingSession.season) {
-          updateData.season = season
-        }
-        if (episode !== null && episode !== existingSession.episode) {
-          updateData.episode = episode
-        }
-
-        // Only update startTime if watchDate is at least 2 minutes earlier (conservative threshold)
-        if (watchDate &&
-          watchDate.getTime() < existingSession.startTime.getTime() &&
-          (existingSession.startTime.getTime() - watchDate.getTime()) >= 120000) {
-          updateData.startTime = watchDate
-          console.log(`[SessionTracker] Correcting startTime backward for ${item.name}: ${existingSession.startTime.toISOString()} -> ${watchDate.toISOString()}`)
+        // Skip entirely when the provider's own library has no title for this
+        // item - confirmed real case: a raw/direct stream (no proper Cinemeta-
+        // backed catalog entry) lands in Stremio/Nuvio's library with an empty
+        // name, and this used to fall through to a WatchSession/History row
+        // literally titled "Unknown" with no poster, still counted in Watch
+        // Time Today. There's nothing accurate to show for it - skip rather
+        // than record a placeholder that pollutes the feed and the stats.
+        if (!(item.name && String(item.name).trim())) {
+            continue;
         }
 
-        await prisma.watchSession.update({
-          where: { id: existingSession.id },
-          data: updateData
-        })
-        sessionsUpdated++
-        heartbeat('sessionTracker:session_updated', { itemId, userId, sessionId: existingSession.id })
-      } else {
-        // No active session in memory for this item. A DB row may already
-        // exist though (from a previous, now-closed watch of this same
-        // item) - the schema's @@unique([accountId, userId, itemId])
-        // constraint means there can only ever be ONE row per item, for
-        // the account's whole lifetime, reused/reactivated across repeat
-        // watches rather than one row per watch occasion. A plain create()
-        // here threw "Unique constraint failed" on every single replay of
-        // anything ever watched before, and that error was being silently
-        // swallowed (assumed to be a harmless race-condition guard) -
-        // meaning any item's second-and-later watch never produced a
-        // session at all. Reactivating the existing row via upsert fixes
-        // this properly instead of ignoring the failure.
-        console.log(`[SessionTracker] Creating/reactivating session for ${item.name} (${itemId}), videoId: ${videoId}`)
-        try {
-          // Use watchDate if available and reasonable (not in the future), otherwise use now
-          // Note: The early reactivation loop handles recently closed sessions,
-          // so by the time we get here, we genuinely need a new/reactivated session
-          const sessionStartTime = watchDate && watchDate.getTime() <= nowMs ? watchDate : now
+        // Check if item has watch progress or recent activity
+        const state = item.state || {};
 
-          // state.timeOffset only - see the matching comments above on why
-          // state.overallTimeWatched is never safe to use as a position here.
-          const startPositionValue = Number.isNaN(Number(state.timeOffset ?? NaN))
-            ? null
-            : Number(state.timeOffset)
-          const totalDurationValue = Number.isNaN(Number(state.duration ?? NaN)) ? null : Number(state.duration)
-          const resolvedPoster = await resolveSinglePoster(itemId, item.type, item.poster)
+        // Consider item as having watch progress if:
+        // 1. It has any time watched tracked
+        // 2. It has a video_id (series with episode progress)
+        // 3. It has a recent lastWatched (actively being watched)
+        // NOTE: Do NOT use _mtime - that's just modification time, not watch time
+        const hasTimeWatched =
+            state.timeWatched > 0 || state.overallTimeWatched > 0 || state.timeOffset > 0;
+        const hasVideoId = !!state.video_id;
+        const watchDate = getWatchDate(item);
+        // Same window as isActivelyWatching() above - kept in sync since v1.9.35
+        // specifically to avoid this gate and that one disagreeing about what
+        // counts as "recent."
+        const hasRecentActivity =
+            watchDate && nowMs - watchDate.getTime() < CHECK_INTERVAL_MS * 3.6;
 
-          // If this row was closed moments ago (e.g. by proxyStreamMonitor.js
-          // finalizing an AIOStreams-proxy-detected connection for this same
-          // item), this isn't a new watch occasion - it's this poller
-          // catching up on a viewing session that's still actually
-          // continuing. Resetting durationSeconds to 0 in that case wiped
-          // out whatever the other pipeline had just accumulated, producing
-          // suspiciously short duration badges (e.g. 30s) right after a
-          // proxy-tracked session closed. Preserve the prior duration as a
-          // floor when the gap is small; a real re-watch after a longer gap
-          // still starts fresh as before.
-          let priorDurationSeconds = 0
-          // True when the show's prior WatchSession row (there's only ever
-          // one per show - see the @@unique([accountId, userId, itemId])
-          // upsert below) belonged to a DIFFERENT episode and closed within
-          // the last CHECK_INTERVAL_MS. Confirmed real case (2026-07-30):
-          // Episode 2 of a show was first observed with state.timeOffset
-          // already at 97% of its runtime just 67 SECONDS after Episode 1's
-          // own session closed near-complete - physically impossible to
-          // watch that much of Episode 2 in that time, so the position was
-          // almost certainly Stremio/Nuvio briefly previewing or misreporting
-          // the next episode's state right after Episode 1 finished, not
-          // genuine viewing. Used below to withhold the near-complete seed
-          // in exactly that transition window.
-          let cameFromSiblingEpisode = false
-          // Last known playback position for this exact item/episode, from
-          // whenever its row was last touched - regardless of how long ago
-          // that was (unlike priorDurationSeconds below, which only looks
-          // back CHECK_INTERVAL_MS). Used below so the seeding step can tell
-          // "resumed near where it was left off" apart from "genuinely
-          // watched this much fresh in one sitting".
-          let priorLastPosition = null
-          // What an earlier sitting of this same title TODAY had already
-          // accumulated. There is one row per title, and reopening it used to
-          // start its duration over - so a film watched in three sittings
-          // across one evening ended up showing only the last sitting
-          // (confirmed real case: 32m on the card for a 98-minute film
-          // watched to the end). Carried over for the same account day only:
-          // a row reopened on a later day is a new viewing and starts fresh,
-          // which is what keeps an old row from re-crediting old time.
-          let earlierTodaySeconds = 0
-          try {
-            const priorRow = await prisma.watchSession.findUnique({
-              where: { accountId_userId_itemId: { accountId: accountIdValue, userId, itemId } },
-              select: { durationSeconds: true, endTime: true, videoId: true, lastPosition: true }
-            })
-            if (priorRow && (!priorRow.videoId || priorRow.videoId === videoId)) {
-              priorLastPosition = priorRow.lastPosition ?? null
-              if (priorRow.endTime && priorRow.durationSeconds > 0
-                && (nowMs - priorRow.endTime.getTime()) > CHECK_INTERVAL_MS
-                && await sameAccountDay(priorRow.endTime, sessionStartTime)) {
-                earlierTodaySeconds = priorRow.durationSeconds
-              }
-            }
-            // The finish was already recorded: this row closed (see
-            // reachedEnd above) at the very position the provider still
-            // reports, and the provider keeps reporting it for the rest of
-            // the freshness window. Reactivating it here would reopen the
-            // finished watch every poll, only for the close loop to shut it
-            // again - a session flickering in and out of Now Playing for
-            // 18 minutes. A rewatch starts from a lower position, so it is
-            // not caught by this.
-            if (reachedEnd && priorLastPosition != null && !Number.isNaN(currentPositionForItem)
-              && currentPositionForItem <= priorLastPosition) {
-              heartbeat('sessionTracker:finished_already_recorded', { itemId, userId, videoId })
-              continue
-            }
-            if (priorRow?.endTime && (nowMs - priorRow.endTime.getTime()) <= CHECK_INTERVAL_MS) {
-              if (priorRow.videoId && priorRow.videoId !== videoId) {
-                // Different episode - the "still continuing, don't reset to
-                // 0" floor below only makes sense for the SAME item/episode
-                // (this poller catching up on itself, or the proxy pipeline
-                // finalizing the same viewing). Inheriting Episode 1's
-                // duration as Episode 2's own floor would be the identical
-                // bug as the seed issue above, just via this other path.
-                cameFromSiblingEpisode = true
-              } else {
-                priorDurationSeconds = priorRow.durationSeconds || 0
-              }
-            }
-          } catch {}
+        const hasWatchProgress = hasTimeWatched || hasVideoId || hasRecentActivity;
 
-          // A brand-new session (no recent prior row to inherit from) has no duration
-          // yet, but the provider only checkpoints on pause/stop - so the very first
-          // checkpoint we ever see for a single-sitting, no-pause watch is often ALSO
-          // the only one we'll ever see, and durationSeconds would stay 0 forever
-          // (the position-delta computed elsewhere in this file needs a SECOND
-          // checkpoint to produce anything). state.timeOffset is safe to read
-          // directly here, unlike state.overallTimeWatched: it's a per-item playback
-          // position bounded by the item's own runtime, not a lifetime-cumulative
-          // counter across a whole viewing history (confirmed against real API data -
-          // see stremioWatchedDecoder.js's captured example, where timeOffset ~=
-          // duration for the current video while overallTimeWatched is 30x larger).
-          // Capped against state.duration as a safety net regardless.
-          //
-          // BUT: bounded-by-runtime doesn't mean the position is FRESH. Confirmed
-          // real case (2026-07-30): a profile's very first-ever observed session
-          // for an item had timeOffset already sitting at ~100% of duration
-          // (startPosition === lastPosition === totalDuration, to the
-          // millisecond) - seeding the full ~95min runtime as "watched right
-          // now" produced a bogus full-length History entry for a movie that
-          // was never actually watched in that sitting. A position already at
-          // the end on the FIRST-ever observation is far more likely to mean
-          // "this was finished at some earlier, untracked time and we're only
-          // just now seeing that state" than "watched start-to-finish in the
-          // instant between polls" - same principle as getMaxOverallTimeWatched
-          // (metricsProcessor.js): recovering to/starting at an already-complete
-          // value must never register as fresh progress. Don't seed in that case;
-          // let it accrue from here via the normal incremental delta instead.
-          // Refinement (2026-07-30): "near-complete on first observation" alone
-          // isn't enough to decide old-vs-fresh. The Nutty Professor false
-          // positive was a DIFFERENT profile's OLD finished state surfacing -
-          // its lastWatched was old. A genuine just-finished single-sitting
-          // watch (confirmed real case same day: a 120min movie watched
-          // start-to-finish) has lastWatched ~= now, and NOT seeding it
-          // under-counted the card to a few minutes. So: seed as normal unless
-          // near-complete AND stale - i.e. still seed a near-complete watch
-          // when it was finished recently (real just-watched), only skip the
-          // seed when it's near-complete AND lastWatched is old (surfaced old
-          // state). RECENT window is generous since the provider only
-          // checkpoints at pause/stop and our poll may land a bit later.
-          const NEAR_COMPLETE_RATIO = 0.95
-          const RECENT_FINISH_MS = 6 * 60 * 60 * 1000
-          let seedDurationSeconds = 0
-          if (priorDurationSeconds === 0 && typeof state.timeOffset === 'number' && state.timeOffset > 0) {
-            const durationMs = Number(state.duration ?? NaN)
-            const hasRealDuration = !Number.isNaN(durationMs) && durationMs > 0
-            const alreadyNearComplete = hasRealDuration && state.timeOffset >= durationMs * NEAR_COMPLETE_RATIO
-            const finishedRecently = watchDate instanceof Date && (nowMs - watchDate.getTime()) < RECENT_FINISH_MS
-            // A near-complete first observation is only trusted as "really
-            // just finished" when it ISN'T also the immediate aftermath of a
-            // sibling episode closing out - see cameFromSiblingEpisode above.
-            if (!alreadyNearComplete || (finishedRecently && !cameFromSiblingEpisode)) {
-              const cappedMs = hasRealDuration ? Math.min(state.timeOffset, durationMs) : state.timeOffset
-              // Reactivating a session closed long enough ago that
-              // priorDurationSeconds above didn't inherit it still
-              // remembers its last known position - crediting the FULL
-              // current position as freshly-watched double-counts whatever
-              // had already accumulated in an earlier sitting (confirmed
-              // real case: a movie resumed at the same ~33min mark it was
-              // left at the day before re-credited the whole 33min as
-              // "just watched" even though the position had barely moved
-              // since). Only the portion beyond the last known position is
-              // genuinely new.
-              const baselineMs = priorLastPosition != null ? priorLastPosition : 0
-              seedDurationSeconds = Math.max(0, Math.floor((cappedMs - baselineMs) / 1000))
-            }
-          }
-          // An earlier sitting today adds to this one: what it had, plus
-          // whatever the position has moved since (the seed above is already
-          // measured from where that sitting left off, never from zero).
-          // Never more than the runtime at this point - further viewing
-          // accrues from the checkpoints that follow, as always.
-          let initialDurationSeconds = Math.max(priorDurationSeconds, seedDurationSeconds)
-          if (earlierTodaySeconds > 0 && priorDurationSeconds === 0) {
-            initialDurationSeconds = earlierTodaySeconds + seedDurationSeconds
-            const runtimeMs = Number(state.duration ?? NaN)
-            if (!Number.isNaN(runtimeMs) && runtimeMs > 0) {
-              initialDurationSeconds = Math.min(initialDurationSeconds, Math.floor(runtimeMs / 1000))
-            }
-          }
+        if (!hasWatchProgress) {
+            continue;
+        }
 
-          const newSession = await prisma.watchSession.upsert({
-            where: {
-              accountId_userId_itemId: {
-                accountId: accountIdValue,
+        // Update last activity tracking (watchDate is already defined above)
+        if (watchDate) {
+            lastActivityByItemId.set(itemId, watchDate);
+        }
+        // state.timeOffset only, never state.overallTimeWatched here - the latter
+        // is a lifetime-cumulative counter that can run to absurd values (see the
+        // docs/runtime-behavior.md note this file already documents elsewhere), unsafe to treat
+        // as a single-point-in-time "position" the way timeOffset is. Falling
+        // back to it produced a bogus 92h+ duration badge on a session that had
+        // been running for minutes, the one time timeOffset was momentarily
+        // absent from a poll's state payload.
+        const currentPositionForItem = Number(state.timeOffset ?? Number.NaN);
+        if (!Number.isNaN(currentPositionForItem)) {
+            lastPositionByItemId.set(itemId, currentPositionForItem);
+        }
+
+        const isActive = isActivelyWatching(item, userId, nowMs);
+        // Playback that ran to the end still gets its session created or
+        // updated below, so the duration and the History row are recorded as
+        // for any other checkpoint - it just is not kept open afterwards: it
+        // is left out of currentlyActiveItems, so the close loop at the bottom
+        // closes it on this same poll (an existing session) or the next one (a
+        // session this poll creates), with endTime at the checkpoint itself.
+        const reachedEnd = hasReachedEnd(state.timeOffset, state.duration);
+        const videoId = item.type === "series" ? state.video_id : null;
+        const { season, episode } = await extractSeasonEpisode(videoId);
+
+        // Debug: log active items
+        if (isActive) {
+            const ageMinutes = watchDate
+                ? Math.round((nowMs - watchDate.getTime()) / 60_000)
+                : "unknown";
+            console.log(
+                `[SessionTracker] Active item: ${item.name} (${itemId}), age: ${ageMinutes}min, videoId: ${videoId}`
+            );
+            heartbeat("sessionTracker:item_active", {
+                ageMinutes,
+                itemId,
+                itemName: item.name,
                 userId,
-                itemId
-              }
-            },
-            create: {
-              accountId: accountIdValue,
-              userId,
-              itemId,
-              videoId,
-              itemName: item.name || 'Unknown',
-              itemType: item.type || 'movie',
-              season,
-              episode,
-              poster: resolvedPoster,
-              // Use the first observed watch timestamp (first "ping"), not the sync time
-              startTime: sessionStartTime,
-              startPosition: startPositionValue,
-              lastPosition: startPositionValue,
-              totalDuration: totalDurationValue,
-              isActive: true,
-              durationSeconds: initialDurationSeconds
-            },
-            update: {
-              videoId,
-              itemName: item.name || 'Unknown',
-              itemType: item.type || 'movie',
-              season,
-              episode,
-              poster: resolvedPoster,
-              startTime: sessionStartTime,
-              startPosition: startPositionValue,
-              lastPosition: startPositionValue,
-              totalDuration: totalDurationValue,
-              endTime: null,
-              isActive: true,
-              durationSeconds: initialDurationSeconds
+                videoId,
+            });
+        }
+
+        if (isActive) {
+            // Track active items by composite key (not just itemId) to prevent closing wrong sessions
+            const sessionKey = `${userId}:${itemId}:${videoId || "null"}`;
+            if (!reachedEnd) {
+                currentlyActiveItems.add(sessionKey);
             }
-          })
-          sessionsCreated++
-          reopenedSessionIds.add(newSession.id)
-          console.log(`[SessionTracker] Session created/reactivated successfully`)
-          heartbeat('sessionTracker:session_created', { itemId, userId, sessionId: newSession.id })
 
-          // NOTE: the "started watching" Discord notification is NOT sent
-          // from here anymore. The native pipeline only detects a session
-          // once the provider writes a watch checkpoint (on pause/stop for
-          // Nuvio), so this fired late - typically around when the user
-          // STOPPED, not started. The instant "started watching"
-          // notification is now sent from the proxy pipeline
-          // (proxyStreamMonitor.js), which sees playback begin in real time.
-        } catch (error) {
-          // Ignore duplicate errors
-          if (!error.message.includes('Unique constraint')) {
-            console.warn(`[SessionTracker] Error creating session:`, error.message)
-          }
-          heartbeat('sessionTracker:session_create_error', { itemId, userId, message: error.message })
+            // Use composite key: userId + itemId + videoId for proper session matching
+            const existingSession = activeSessionMap.get(sessionKey);
+
+            if (existingSession) {
+                // Same user+item+videoId - update existing session duration
+                // Since we use composite key with videoId, different episodes create new sessions automatically
+                //
+                // durationSeconds now reflects real watched-content progress (how
+                // far the playback position has actually advanced since this
+                // session started), not wall-clock time since the session record
+                // was created. The provider's position can go stale for several
+                // minutes between checkpoints (see the freshness-window
+                // investigation elsewhere in this file), so a session could sit
+                // "active" for a long time with elapsed wall-clock time climbing
+                // even though nothing new has actually been watched - a
+                // wall-clock-based duration overstated real progress in exactly
+                // that case. Falls back to the previous wall-clock calculation
+                // only when a startPosition isn't available (older sessions, or a
+                // provider/item that doesn't report a position at all).
+                // state.timeOffset only - never state.overallTimeWatched, which is
+                // lifetime-cumulative and can be huge; falling back to it here (when
+                // timeOffset is momentarily missing from a poll) produced a one-poll
+                // "duration" equal to that entire cumulative value once diffed
+                // against a much smaller startPosition.
+                //
+                // Incremental against the session's own running durationSeconds
+                // (added onto, never recomputed from startPosition directly) -
+                // confirmed real case: a session's first-ever checkpoint arrived
+                // ~26min into an episode (Nuvio only checkpoints on pause/stop, so
+                // that's just whenever the first one happened to land), correctly
+                // SEEDING durationSeconds to ~26min at creation (see the seeding
+                // comment below) - but the next poll's checkpoint at ~53min then
+                // computed 53-26=27min from startPosition and OVERWROTE the seed
+                // instead of adding to it, permanently losing the first ~26 real
+                // minutes (recorded 27min for what was actually a ~53min watch).
+                // Delta against lastPosition (this session's most recently observed
+                // position, not its fixed original startPosition) added onto the
+                // existing durationSeconds is a proper running total instead - the
+                // seed survives every subsequent poll since each one only adds its
+                // own incremental progress rather than replacing the whole figure.
+                const currentPosition = Number(state.timeOffset ?? Number.NaN);
+                const previousPosition =
+                    existingSession.lastPosition ?? existingSession.startPosition;
+                const hasPositionData = previousPosition != null && !Number.isNaN(currentPosition);
+                const sessionDurationSeconds = hasPositionData
+                    ? (existingSession.durationSeconds || 0) +
+                      Math.max(0, Math.floor((currentPosition - previousPosition) / 1000))
+                    : Math.min(
+                          MAX_WALLCLOCK_FALLBACK_SECONDS,
+                          Math.max(
+                              0,
+                              Math.floor(
+                                  ((watchDate ? watchDate.getTime() : nowMs) -
+                                      existingSession.startTime.getTime()) /
+                                      1000
+                              )
+                          )
+                      );
+
+                // NEVER update startTime forward - only backward if we discover an earlier ping
+                // This prevents resets when lastWatched gets updated to recent times
+                const totalDurationValue = Number.isNaN(Number(state.duration ?? Number.NaN))
+                    ? null
+                    : Number(state.duration);
+                const updateData = {
+                    durationSeconds: sessionDurationSeconds,
+                    lastPosition: Number.isNaN(currentPosition) ? null : currentPosition,
+                    totalDuration: totalDurationValue,
+                };
+
+                // Update season/episode if they've changed (e.g., Kitsu API now returns correct season)
+                // This fixes old sessions that were created with season=1
+                if (season !== null && season !== existingSession.season) {
+                    updateData.season = season;
+                }
+                if (episode !== null && episode !== existingSession.episode) {
+                    updateData.episode = episode;
+                }
+
+                // Only update startTime if watchDate is at least 2 minutes earlier (conservative threshold)
+                if (
+                    watchDate &&
+                    watchDate.getTime() < existingSession.startTime.getTime() &&
+                    existingSession.startTime.getTime() - watchDate.getTime() >= 120_000
+                ) {
+                    updateData.startTime = watchDate;
+                    console.log(
+                        `[SessionTracker] Correcting startTime backward for ${item.name}: ${existingSession.startTime.toISOString()} -> ${watchDate.toISOString()}`
+                    );
+                }
+
+                await prisma.watchSession.update({
+                    data: updateData,
+                    where: { id: existingSession.id },
+                });
+                sessionsUpdated++;
+                heartbeat("sessionTracker:session_updated", {
+                    itemId,
+                    sessionId: existingSession.id,
+                    userId,
+                });
+            } else {
+                // No active session in memory for this item. A DB row may already
+                // exist though (from a previous, now-closed watch of this same
+                // item) - the schema's @@unique([accountId, userId, itemId])
+                // constraint means there can only ever be ONE row per item, for
+                // the account's whole lifetime, reused/reactivated across repeat
+                // watches rather than one row per watch occasion. A plain create()
+                // here threw "Unique constraint failed" on every single replay of
+                // anything ever watched before, and that error was being silently
+                // swallowed (assumed to be a harmless race-condition guard) -
+                // meaning any item's second-and-later watch never produced a
+                // session at all. Reactivating the existing row via upsert fixes
+                // this properly instead of ignoring the failure.
+                console.log(
+                    `[SessionTracker] Creating/reactivating session for ${item.name} (${itemId}), videoId: ${videoId}`
+                );
+                try {
+                    // Use watchDate if available and reasonable (not in the future), otherwise use now
+                    // Note: The early reactivation loop handles recently closed sessions,
+                    // so by the time we get here, we genuinely need a new/reactivated session
+                    const sessionStartTime =
+                        watchDate && watchDate.getTime() <= nowMs ? watchDate : now;
+
+                    // state.timeOffset only - see the matching comments above on why
+                    // state.overallTimeWatched is never safe to use as a position here.
+                    const startPositionValue = Number.isNaN(Number(state.timeOffset ?? Number.NaN))
+                        ? null
+                        : Number(state.timeOffset);
+                    const totalDurationValue = Number.isNaN(Number(state.duration ?? Number.NaN))
+                        ? null
+                        : Number(state.duration);
+                    const resolvedPoster = await resolveSinglePoster(
+                        itemId,
+                        item.type,
+                        item.poster
+                    );
+
+                    // If this row was closed moments ago (e.g. by proxyStreamMonitor.js
+                    // finalizing an AIOStreams-proxy-detected connection for this same
+                    // item), this isn't a new watch occasion - it's this poller
+                    // catching up on a viewing session that's still actually
+                    // continuing. Resetting durationSeconds to 0 in that case wiped
+                    // out whatever the other pipeline had just accumulated, producing
+                    // suspiciously short duration badges (e.g. 30s) right after a
+                    // proxy-tracked session closed. Preserve the prior duration as a
+                    // floor when the gap is small; a real re-watch after a longer gap
+                    // still starts fresh as before.
+                    let priorDurationSeconds = 0;
+                    // True when the show's prior WatchSession row (there's only ever
+                    // one per show - see the @@unique([accountId, userId, itemId])
+                    // upsert below) belonged to a DIFFERENT episode and closed within
+                    // the last CHECK_INTERVAL_MS. Confirmed real case (2026-07-30):
+                    // Episode 2 of a show was first observed with state.timeOffset
+                    // already at 97% of its runtime just 67 SECONDS after Episode 1's
+                    // own session closed near-complete - physically impossible to
+                    // watch that much of Episode 2 in that time, so the position was
+                    // almost certainly Stremio/Nuvio briefly previewing or misreporting
+                    // the next episode's state right after Episode 1 finished, not
+                    // genuine viewing. Used below to withhold the near-complete seed
+                    // in exactly that transition window.
+                    let cameFromSiblingEpisode = false;
+                    // Last known playback position for this exact item/episode, from
+                    // whenever its row was last touched - regardless of how long ago
+                    // that was (unlike priorDurationSeconds below, which only looks
+                    // back CHECK_INTERVAL_MS). Used below so the seeding step can tell
+                    // "resumed near where it was left off" apart from "genuinely
+                    // watched this much fresh in one sitting".
+                    let priorLastPosition = null;
+                    // What an earlier sitting of this same title TODAY had already
+                    // accumulated. There is one row per title, and reopening it used to
+                    // start its duration over - so a film watched in three sittings
+                    // across one evening ended up showing only the last sitting
+                    // (confirmed real case: 32m on the card for a 98-minute film
+                    // watched to the end). Carried over for the same account day only:
+                    // a row reopened on a later day is a new viewing and starts fresh,
+                    // which is what keeps an old row from re-crediting old time.
+                    let earlierTodaySeconds = 0;
+                    try {
+                        const priorRow = await prisma.watchSession.findUnique({
+                            select: {
+                                durationSeconds: true,
+                                endTime: true,
+                                lastPosition: true,
+                                videoId: true,
+                            },
+                            where: {
+                                accountId_userId_itemId: {
+                                    accountId: accountIdValue,
+                                    itemId,
+                                    userId,
+                                },
+                            },
+                        });
+                        if (priorRow && (!priorRow.videoId || priorRow.videoId === videoId)) {
+                            priorLastPosition = priorRow.lastPosition ?? null;
+                            if (
+                                priorRow.endTime &&
+                                priorRow.durationSeconds > 0 &&
+                                nowMs - priorRow.endTime.getTime() > CHECK_INTERVAL_MS &&
+                                (await sameAccountDay(priorRow.endTime, sessionStartTime))
+                            ) {
+                                earlierTodaySeconds = priorRow.durationSeconds;
+                            }
+                        }
+                        // The finish was already recorded: this row closed (see
+                        // reachedEnd above) at the very position the provider still
+                        // reports, and the provider keeps reporting it for the rest of
+                        // the freshness window. Reactivating it here would reopen the
+                        // finished watch every poll, only for the close loop to shut it
+                        // again - a session flickering in and out of Now Playing for
+                        // 18 minutes. A rewatch starts from a lower position, so it is
+                        // not caught by this.
+                        if (
+                            reachedEnd &&
+                            priorLastPosition != null &&
+                            !Number.isNaN(currentPositionForItem) &&
+                            currentPositionForItem <= priorLastPosition
+                        ) {
+                            heartbeat("sessionTracker:finished_already_recorded", {
+                                itemId,
+                                userId,
+                                videoId,
+                            });
+                            continue;
+                        }
+                        if (
+                            priorRow?.endTime &&
+                            nowMs - priorRow.endTime.getTime() <= CHECK_INTERVAL_MS
+                        ) {
+                            if (priorRow.videoId && priorRow.videoId !== videoId) {
+                                // Different episode - the "still continuing, don't reset to
+                                // 0" floor below only makes sense for the SAME item/episode
+                                // (this poller catching up on itself, or the proxy pipeline
+                                // finalizing the same viewing). Inheriting Episode 1's
+                                // duration as Episode 2's own floor would be the identical
+                                // bug as the seed issue above, just via this other path.
+                                cameFromSiblingEpisode = true;
+                            } else {
+                                priorDurationSeconds = priorRow.durationSeconds || 0;
+                            }
+                        }
+                    } catch {
+                        // Unavailable optional records leave the current result in place.
+                    }
+
+                    // A brand-new session (no recent prior row to inherit from) has no duration
+                    // yet, but the provider only checkpoints on pause/stop - so the very first
+                    // checkpoint we ever see for a single-sitting, no-pause watch is often ALSO
+                    // the only one we'll ever see, and durationSeconds would stay 0 forever
+                    // (the position-delta computed elsewhere in this file needs a SECOND
+                    // checkpoint to produce anything). state.timeOffset is safe to read
+                    // directly here, unlike state.overallTimeWatched: it's a per-item playback
+                    // position bounded by the item's own runtime, not a lifetime-cumulative
+                    // counter across a whole viewing history (confirmed against real API data -
+                    // see stremioWatchedDecoder.js's captured example, where timeOffset ~=
+                    // duration for the current video while overallTimeWatched is 30x larger).
+                    // Capped against state.duration as a safety net regardless.
+                    //
+                    // BUT: bounded-by-runtime doesn't mean the position is FRESH. Confirmed
+                    // real case (2026-07-30): a profile's very first-ever observed session
+                    // for an item had timeOffset already sitting at ~100% of duration
+                    // (startPosition === lastPosition === totalDuration, to the
+                    // millisecond) - seeding the full ~95min runtime as "watched right
+                    // now" produced a bogus full-length History entry for a movie that
+                    // was never actually watched in that sitting. A position already at
+                    // the end on the FIRST-ever observation is far more likely to mean
+                    // "this was finished at some earlier, untracked time and we're only
+                    // just now seeing that state" than "watched start-to-finish in the
+                    // instant between polls" - same principle as getMaxOverallTimeWatched
+                    // (metricsProcessor.js): recovering to/starting at an already-complete
+                    // value must never register as fresh progress. Don't seed in that case;
+                    // let it accrue from here via the normal incremental delta instead.
+                    // Refinement (2026-07-30): "near-complete on first observation" alone
+                    // isn't enough to decide old-vs-fresh. The Nutty Professor false
+                    // positive was a DIFFERENT profile's OLD finished state surfacing -
+                    // its lastWatched was old. A genuine just-finished single-sitting
+                    // watch (confirmed real case same day: a 120min movie watched
+                    // start-to-finish) has lastWatched ~= now, and NOT seeding it
+                    // under-counted the card to a few minutes. So: seed as normal unless
+                    // near-complete AND stale - i.e. still seed a near-complete watch
+                    // when it was finished recently (real just-watched), only skip the
+                    // seed when it's near-complete AND lastWatched is old (surfaced old
+                    // state). RECENT window is generous since the provider only
+                    // checkpoints at pause/stop and our poll may land a bit later.
+                    const NEAR_COMPLETE_RATIO = 0.95;
+                    const RECENT_FINISH_MS = 6 * 60 * 60 * 1000;
+                    let seedDurationSeconds = 0;
+                    if (
+                        priorDurationSeconds === 0 &&
+                        typeof state.timeOffset === "number" &&
+                        state.timeOffset > 0
+                    ) {
+                        const durationMs = Number(state.duration ?? Number.NaN);
+                        const hasRealDuration = !Number.isNaN(durationMs) && durationMs > 0;
+                        const alreadyNearComplete =
+                            hasRealDuration && state.timeOffset >= durationMs * NEAR_COMPLETE_RATIO;
+                        const finishedRecently =
+                            watchDate instanceof Date &&
+                            nowMs - watchDate.getTime() < RECENT_FINISH_MS;
+                        // A near-complete first observation is only trusted as "really
+                        // just finished" when it ISN'T also the immediate aftermath of a
+                        // sibling episode closing out - see cameFromSiblingEpisode above.
+                        if (!alreadyNearComplete || (finishedRecently && !cameFromSiblingEpisode)) {
+                            const cappedMs = hasRealDuration
+                                ? Math.min(state.timeOffset, durationMs)
+                                : state.timeOffset;
+                            // Reactivating a session closed long enough ago that
+                            // priorDurationSeconds above didn't inherit it still
+                            // remembers its last known position - crediting the FULL
+                            // current position as freshly-watched double-counts whatever
+                            // had already accumulated in an earlier sitting (confirmed
+                            // real case: a movie resumed at the same ~33min mark it was
+                            // left at the day before re-credited the whole 33min as
+                            // "just watched" even though the position had barely moved
+                            // since). Only the portion beyond the last known position is
+                            // genuinely new.
+                            const baselineMs = priorLastPosition === null ? 0 : priorLastPosition;
+                            seedDurationSeconds = Math.max(
+                                0,
+                                Math.floor((cappedMs - baselineMs) / 1000)
+                            );
+                        }
+                    }
+                    // An earlier sitting today adds to this one: what it had, plus
+                    // whatever the position has moved since (the seed above is already
+                    // measured from where that sitting left off, never from zero).
+                    // Never more than the runtime at this point - further viewing
+                    // accrues from the checkpoints that follow, as always.
+                    let initialDurationSeconds = Math.max(
+                        priorDurationSeconds,
+                        seedDurationSeconds
+                    );
+                    if (earlierTodaySeconds > 0 && priorDurationSeconds === 0) {
+                        initialDurationSeconds = earlierTodaySeconds + seedDurationSeconds;
+                        const runtimeMs = Number(state.duration ?? Number.NaN);
+                        if (!Number.isNaN(runtimeMs) && runtimeMs > 0) {
+                            initialDurationSeconds = Math.min(
+                                initialDurationSeconds,
+                                Math.floor(runtimeMs / 1000)
+                            );
+                        }
+                    }
+
+                    const newSession = await prisma.watchSession.upsert({
+                        create: {
+                            accountId: accountIdValue,
+                            durationSeconds: initialDurationSeconds,
+                            episode,
+                            isActive: true,
+                            itemId,
+                            itemName: item.name || "Unknown",
+                            itemType: item.type || "movie",
+                            lastPosition: startPositionValue,
+                            poster: resolvedPoster,
+                            season,
+                            startPosition: startPositionValue,
+                            // Use the first observed watch timestamp (first "ping"), not the sync time
+                            startTime: sessionStartTime,
+                            totalDuration: totalDurationValue,
+                            userId,
+                            videoId,
+                        },
+                        update: {
+                            durationSeconds: initialDurationSeconds,
+                            endTime: null,
+                            episode,
+                            isActive: true,
+                            itemName: item.name || "Unknown",
+                            itemType: item.type || "movie",
+                            lastPosition: startPositionValue,
+                            poster: resolvedPoster,
+                            season,
+                            startPosition: startPositionValue,
+                            startTime: sessionStartTime,
+                            totalDuration: totalDurationValue,
+                            videoId,
+                        },
+                        where: {
+                            accountId_userId_itemId: {
+                                accountId: accountIdValue,
+                                itemId,
+                                userId,
+                            },
+                        },
+                    });
+                    sessionsCreated++;
+                    reopenedSessionIds.add(newSession.id);
+                    console.log("[SessionTracker] Session created/reactivated successfully");
+                    heartbeat("sessionTracker:session_created", {
+                        itemId,
+                        sessionId: newSession.id,
+                        userId,
+                    });
+
+                    // NOTE: the "started watching" Discord notification is NOT sent
+                    // from here anymore. The native pipeline only detects a session
+                    // once the provider writes a watch checkpoint (on pause/stop for
+                    // Nuvio), so this fired late - typically around when the user
+                    // STOPPED, not started. The instant "started watching"
+                    // notification is now sent from the proxy pipeline
+                    // (proxyStreamMonitor.js), which sees playback begin in real time.
+                } catch (error) {
+                    // Ignore duplicate errors
+                    if (!error.message.includes("Unique constraint")) {
+                        console.warn("[SessionTracker] Error creating session:", error.message);
+                    }
+                    heartbeat("sessionTracker:session_create_error", {
+                        itemId,
+                        message: error.message,
+                        userId,
+                    });
+                }
+            }
         }
-      }
     }
-  }
 
-  // Close sessions for items that are no longer active
-  // Use composite key to ensure we only close the correct session (not all sessions for an itemId)
-  for (const session of activeSessions) {
-    // Reopened a moment ago for the next episode: there is one row per show,
-    // so `session` here is that same row as it was for the PREVIOUS episode.
-    // Its key is not among the active ones, and closing it would shut the
-    // episode that just started - it dropped out of Now Playing until the
-    // next pass, and came back carrying the previous episode's duration.
-    if (reopenedSessionIds.has(session.id)) continue
-    const sessionKey = getSessionKey(session)
-    if (!currentlyActiveItems.has(sessionKey)) {
-      const lastActivity = lastActivityByItemId.get(session.itemId)
-      const endTime = lastActivity || now
-
-      // Prefer real watched-content progress (position delta since the
-      // session started) over a checkpoint-timestamp-based duration -
-      // without this, a session whose provider checkpoint never advanced
-      // during the whole time it was open (state.lastWatched frozen at the
-      // same value as the session's own startTime) closes with
-      // endTime === startTime and a permanently stored durationSeconds of
-      // exactly 0, regardless of how long it was actually active.
-      // Same incremental-against-running-total fix as the update branch
-      // above (added onto session.durationSeconds via the position observed
-      // since session.lastPosition, not recomputed from the fixed
-      // session.startPosition) - closing a session with the old
-      // startPosition-relative formula had the identical seed-loss bug on
-      // whichever poll happened to close it.
-      const lastPositionValue = lastPositionByItemId.get(session.itemId)
-      const previousPosition = session.lastPosition ?? session.startPosition
-      const hasPositionData = previousPosition != null && lastPositionValue != null
-      const sessionDurationSeconds = hasPositionData
-        ? (session.durationSeconds || 0) + Math.max(0, Math.floor((lastPositionValue - previousPosition) / 1000))
-        : Math.min(MAX_WALLCLOCK_FALLBACK_SECONDS, Math.max(0, Math.floor((endTime.getTime() - session.startTime.getTime()) / 1000)))
-
-      await prisma.watchSession.update({
-        where: { id: session.id },
-        data: {
-          isActive: false,
-          endTime,
-          durationSeconds: sessionDurationSeconds,
-          lastPosition: lastPositionValue ?? session.lastPosition
+    // Close sessions for items that are no longer active
+    // Use composite key to ensure we only close the correct session (not all sessions for an itemId)
+    for (const session of activeSessions) {
+        // Reopened a moment ago for the next episode: there is one row per show,
+        // so `session` here is that same row as it was for the PREVIOUS episode.
+        // Its key is not among the active ones, and closing it would shut the
+        // episode that just started - it dropped out of Now Playing until the
+        // next pass, and came back carrying the previous episode's duration.
+        if (reopenedSessionIds.has(session.id)) {
+            continue;
         }
-      })
-      sessionsClosed++
-    }
-  }
+        const sessionKey = getSessionKey(session);
+        if (!currentlyActiveItems.has(sessionKey)) {
+            const lastActivity = lastActivityByItemId.get(session.itemId);
+            const endTime = lastActivity || now;
 
-  if (sessionsCreated > 0 || sessionsUpdated > 0 || sessionsClosed > 0) {
-    console.log(`[SessionTracker] User ${userId}: Created ${sessionsCreated}, Updated ${sessionsUpdated}, Closed ${sessionsClosed}`)
-  }
-  return { sessionsCreated, sessionsUpdated, sessionsClosed }
+            // Prefer real watched-content progress (position delta since the
+            // session started) over a checkpoint-timestamp-based duration -
+            // without this, a session whose provider checkpoint never advanced
+            // during the whole time it was open (state.lastWatched frozen at the
+            // same value as the session's own startTime) closes with
+            // endTime === startTime and a permanently stored durationSeconds of
+            // exactly 0, regardless of how long it was actually active.
+            // Same incremental-against-running-total fix as the update branch
+            // above (added onto session.durationSeconds via the position observed
+            // since session.lastPosition, not recomputed from the fixed
+            // session.startPosition) - closing a session with the old
+            // startPosition-relative formula had the identical seed-loss bug on
+            // whichever poll happened to close it.
+            const lastPositionValue = lastPositionByItemId.get(session.itemId);
+            const previousPosition = session.lastPosition ?? session.startPosition;
+            const hasPositionData = previousPosition != null && lastPositionValue != null;
+            const sessionDurationSeconds = hasPositionData
+                ? (session.durationSeconds || 0) +
+                  Math.max(0, Math.floor((lastPositionValue - previousPosition) / 1000))
+                : Math.min(
+                      MAX_WALLCLOCK_FALLBACK_SECONDS,
+                      Math.max(
+                          0,
+                          Math.floor((endTime.getTime() - session.startTime.getTime()) / 1000)
+                      )
+                  );
+
+            await prisma.watchSession.update({
+                data: {
+                    durationSeconds: sessionDurationSeconds,
+                    endTime,
+                    isActive: false,
+                    lastPosition: lastPositionValue ?? session.lastPosition,
+                },
+                where: { id: session.id },
+            });
+            sessionsClosed++;
+        }
+    }
+
+    if (sessionsCreated > 0 || sessionsUpdated > 0 || sessionsClosed > 0) {
+        console.log(
+            `[SessionTracker] User ${userId}: Created ${sessionsCreated}, Updated ${sessionsUpdated}, Closed ${sessionsClosed}`
+        );
+    }
+    return { sessionsClosed, sessionsCreated, sessionsUpdated };
 }
 
 /**
  * Process sessions for all users in an account
  */
-async function processAccountSessions(prisma, accountId, users, getLibraryForUser, now = new Date()) {
-  const accountIdValue = accountId || 'default'
-  let totalCreated = 0
-  let totalUpdated = 0
-  let totalClosed = 0
+async function processAccountSessions(
+    prisma,
+    accountId,
+    users,
+    getLibraryForUser,
+    now = new Date()
+) {
+    const accountIdValue = accountId || "default";
+    let totalCreated = 0;
+    let totalUpdated = 0;
+    let totalClosed = 0;
 
-  for (const user of users) {
-    try {
-      const library = await getLibraryForUser(user)
-      if (library && Array.isArray(library) && library.length > 0) {
-        const result = await processUserSessions(prisma, accountIdValue, user.id, library, now)
-        totalCreated += result.sessionsCreated
-        totalUpdated += result.sessionsUpdated
-        totalClosed += result.sessionsClosed
-      }
-    } catch (error) {
-      console.warn(`[SessionTracker] Error processing user ${user.id}:`, error.message)
+    for (const user of users) {
+        try {
+            const library = await getLibraryForUser(user);
+            if (library && Array.isArray(library) && library.length > 0) {
+                const result = await processUserSessions(
+                    prisma,
+                    accountIdValue,
+                    user.id,
+                    library,
+                    now
+                );
+                totalCreated += result.sessionsCreated;
+                totalUpdated += result.sessionsUpdated;
+                totalClosed += result.sessionsClosed;
+            }
+        } catch (error) {
+            console.warn(`[SessionTracker] Error processing user ${user.id}:`, error.message);
+        }
     }
-  }
 
-  if (totalCreated > 0 || totalUpdated > 0 || totalClosed > 0) {
-    console.log(`[SessionTracker] Account ${accountIdValue}: Created ${totalCreated}, Updated ${totalUpdated}, Closed ${totalClosed} sessions`)
-  }
+    if (totalCreated > 0 || totalUpdated > 0 || totalClosed > 0) {
+        console.log(
+            `[SessionTracker] Account ${accountIdValue}: Created ${totalCreated}, Updated ${totalUpdated}, Closed ${totalClosed} sessions`
+        );
+    }
 
-  return { totalCreated, totalUpdated, totalClosed }
+    return { totalClosed, totalCreated, totalUpdated };
 }
 
 /**
  * Get recent watch sessions for an account
  */
 async function getRecentSessions(prisma, accountId, since, limit = 100) {
-  const accountIdValue = accountId || 'default'
+    const accountIdValue = accountId || "default";
 
-  return prisma.watchSession.findMany({
-    where: {
-      accountId: accountIdValue,
-      startTime: {
-        gte: since
-      }
-    },
-    orderBy: {
-      startTime: 'desc'
-    },
-    take: limit
-  })
+    return prisma.watchSession.findMany({
+        orderBy: {
+            startTime: "desc",
+        },
+        take: limit,
+        where: {
+            accountId: accountIdValue,
+            startTime: {
+                gte: since,
+            },
+        },
+    });
 }
 
 /**
  * Get active sessions (currently watching)
  */
 async function getActiveSessions(prisma, accountId) {
-  const accountIdValue = accountId || 'default'
+    const accountIdValue = accountId || "default";
 
-  return prisma.watchSession.findMany({
-    where: {
-      accountId: accountIdValue,
-      isActive: true
-    },
-    orderBy: {
-      startTime: 'desc'
-    }
-  })
+    return prisma.watchSession.findMany({
+        orderBy: {
+            startTime: "desc",
+        },
+        where: {
+            accountId: accountIdValue,
+            isActive: true,
+        },
+    });
 }
 
 module.exports = {
-  processUserSessions,
-  processAccountSessions,
-  getRecentSessions,
-  getActiveSessions,
-  extractSeasonEpisode,
-  sendSessionStartNotification,
-  sendSessionStopNotification,
-  hasReachedEnd
-}
+    extractSeasonEpisode,
+    getActiveSessions,
+    getRecentSessions,
+    hasReachedEnd,
+    processAccountSessions,
+    processUserSessions,
+    sendSessionStartNotification,
+    sendSessionStopNotification,
+};

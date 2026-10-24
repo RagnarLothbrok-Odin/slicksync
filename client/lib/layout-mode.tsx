@@ -1,27 +1,34 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useState, ReactNode } from 'react';
-import { useIsTV } from './hooks/useIsTV';
+import {
+    createContext,
+    type ReactNode,
+    useContext,
+    useEffect,
+    useLayoutEffect,
+    useState,
+} from "react";
+import { useIsTV } from "./hooks/useIsTV";
 
 // Layout mode is independent of Theme: it selects the navigation and
 // arrangement of pages while the theme supplies colors and typography.
-export const layoutModeIds = ['current', 'nebula'] as const;
+export const layoutModeIds = ["current", "nebula"] as const;
 export type LayoutModeId = (typeof layoutModeIds)[number];
 
 export const layoutModeMeta: Record<LayoutModeId, { name: string; description: string }> = {
-  current: {
-    name: 'Sidebar',
-    description: 'Keep every destination beside your workspace',
-  },
-  nebula: {
-    name: 'Top navigation',
-    description: 'A compact floating bar above your content',
-  },
+    current: {
+        description: "Keep every destination beside your workspace",
+        name: "Sidebar",
+    },
+    nebula: {
+        description: "A compact floating bar above your content",
+        name: "Top navigation",
+    },
 };
 
 interface LayoutModeContextValue {
-  layoutMode: LayoutModeId;
-  setLayoutMode: (id: LayoutModeId) => void;
+    layoutMode: LayoutModeId;
+    setLayoutMode: (id: LayoutModeId) => void;
 }
 
 // Default is 'nebula' ("Top Navi") - the earlier Nebula-specific issues
@@ -29,56 +36,60 @@ interface LayoutModeContextValue {
 // reverting to Original as the default have since been fixed. Original
 // remains fully available as an opt-in from Settings.
 const defaultContextValue: LayoutModeContextValue = {
-  layoutMode: 'nebula',
-  setLayoutMode: () => {},
+    layoutMode: "nebula",
+    setLayoutMode: () => undefined,
 };
 
 const LayoutModeContext = createContext<LayoutModeContextValue>(defaultContextValue);
 
 export function LayoutModeProvider({ children }: { children: ReactNode }) {
-  const [layoutMode, setLayoutModeState] = useState<LayoutModeId>('nebula');
-  const [mounted, setMounted] = useState(false);
-  // TV mode has no D-pad wiring built for Original's sidebar/card chrome at
-  // all - every TVPageProvider/TVFocusable/TVLink pass this session
-  // specifically targeted Nebula's render paths. A fresh TV app install has
-  // no saved localStorage preference (Capacitor's WebView storage is
-  // isolated per-device), so it would otherwise fall through to whatever
-  // the default above is - if that's ever 'current', the TV app loses all
-  // D-pad navigation on first launch. Forcing Nebula here decouples "what
-  // regular users see by default" from "what TV mode requires to function
-  // at all" - TV mode ignores both the default and any saved preference.
-  const isTV = useIsTV();
+    const [layoutMode, setLayoutModeState] = useState<LayoutModeId>("nebula");
+    const [mounted, setMounted] = useState(false);
+    // TV mode has no D-pad wiring built for Original's sidebar/card chrome at
+    // all - every TVPageProvider/TVFocusable/TVLink pass this session
+    // specifically targeted Nebula's render paths. A fresh TV app install has
+    // no saved localStorage preference (Capacitor's WebView storage is
+    // isolated per-device), so it would otherwise fall through to whatever
+    // the default above is - if that's ever 'current', the TV app loses all
+    // D-pad navigation on first launch. Forcing Nebula here decouples "what
+    // regular users see by default" from "what TV mode requires to function
+    // at all" - TV mode ignores both the default and any saved preference.
+    const isTV = useIsTV();
 
-  // Read before the first paint after hydration (a layout effect, not a
-  // plain one): with a plain effect someone on Original saw Top Navi drawn
-  // first and then the whole page rebuilt in the other layout.
-  useLayoutEffect(() => {
-    const saved = localStorage.getItem('slicksync-layout-mode') as LayoutModeId | null;
-    const initial = saved && layoutModeIds.includes(saved) ? saved : 'nebula';
-    setLayoutModeState(initial);
-    setMounted(true);
-  }, []);
+    // Read before the first paint after hydration (a layout effect, not a
+    // plain one): with a plain effect someone on Original saw Top Navi drawn
+    // first and then the whole page rebuilt in the other layout.
+    useLayoutEffect(() => {
+        const saved = localStorage.getItem("slicksync-layout-mode") as LayoutModeId | null;
+        const initial = saved && layoutModeIds.includes(saved) ? saved : "nebula";
+        setLayoutModeState(initial);
+        setMounted(true);
+    }, []);
 
-  useEffect(() => {
-    if (!mounted) return;
-    localStorage.setItem('slicksync-layout-mode', layoutMode);
-  }, [layoutMode, mounted]);
+    useEffect(() => {
+        if (!mounted) {
+            return;
+        }
+        localStorage.setItem("slicksync-layout-mode", layoutMode);
+    }, [layoutMode, mounted]);
 
-  const setLayoutMode = (id: LayoutModeId) => {
-    if (layoutModeIds.includes(id)) {
-      setLayoutModeState(id);
-    }
-  };
+    const setLayoutMode = (id: LayoutModeId) => {
+        if (layoutModeIds.includes(id)) {
+            setLayoutModeState(id);
+        }
+    };
 
-  return (
-    <LayoutModeContext.Provider value={{ layoutMode: isTV ? 'nebula' : layoutMode, setLayoutMode }}>
-      {children}
-    </LayoutModeContext.Provider>
-  );
+    return (
+        <LayoutModeContext.Provider
+            value={{ layoutMode: isTV ? "nebula" : layoutMode, setLayoutMode }}
+        >
+            {children}
+        </LayoutModeContext.Provider>
+    );
 }
 
 export function useLayoutMode() {
-  return useContext(LayoutModeContext);
+    return useContext(LayoutModeContext);
 }
 
 // Pages that actually have a Nebula-styled render path. Everything else
@@ -86,9 +97,21 @@ export function useLayoutMode() {
 // there's no Nebula version of those pages (yet), so there's nothing to
 // switch to. This is every top-level admin page - full Nebula coverage.
 const NEBULA_ELIGIBLE_PATHS = [
-  '/', '/activity', '/users', '/groups', '/addons',
-  '/discover', '/catalogs', '/metrics', '/vault', '/invitations', '/tasks', '/settings', '/themes', '/changelog',
-  '/guides',
+    "/",
+    "/activity",
+    "/users",
+    "/groups",
+    "/addons",
+    "/discover",
+    "/catalogs",
+    "/metrics",
+    "/vault",
+    "/invitations",
+    "/tasks",
+    "/settings",
+    "/themes",
+    "/changelog",
+    "/guides",
 ];
 
 // Dynamic detail routes (/users/[id], /groups/[id]) - prefix match since
@@ -106,9 +129,19 @@ const NEBULA_ELIGIBLE_PATHS = [
 // opening a guide from the command palette snapped you into the other layout
 // mid-session, which reads as the layout setting resetting itself.
 // '/invitations/' is an invitation's own page - it was missed the same way.
-const NEBULA_ELIGIBLE_PREFIXES = ['/users/', '/groups/', '/addons/', '/catalogs/', '/guides/', '/invitations/', '/tasks/'];
+const NEBULA_ELIGIBLE_PREFIXES = [
+    "/users/",
+    "/groups/",
+    "/addons/",
+    "/catalogs/",
+    "/guides/",
+    "/invitations/",
+    "/tasks/",
+];
 
 export function isNebulaEligiblePath(pathname: string): boolean {
-  return NEBULA_ELIGIBLE_PATHS.includes(pathname)
-    || NEBULA_ELIGIBLE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+    return (
+        NEBULA_ELIGIBLE_PATHS.includes(pathname) ||
+        NEBULA_ELIGIBLE_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    );
 }

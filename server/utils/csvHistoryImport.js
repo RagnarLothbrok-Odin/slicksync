@@ -20,57 +20,101 @@
 // this; every other data-import path in this codebase (listImport.js) is
 // already dependency-free too.
 function parseCsv(text) {
-  const rows = []
-  let row = []
-  let field = ''
-  let inQuotes = false
-  let i = 0
-  const n = text.length
-  while (i < n) {
-    const c = text[i]
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue }
-        inQuotes = false; i++; continue
-      }
-      field += c; i++; continue
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    let i = 0;
+    const n = text.length;
+    while (i < n) {
+        const c = text[i];
+        if (inQuotes) {
+            if (c === '"') {
+                if (text[i + 1] === '"') {
+                    field += '"';
+                    i += 2;
+                    continue;
+                }
+                inQuotes = false;
+                i++;
+                continue;
+            }
+            field += c;
+            i++;
+            continue;
+        }
+        if (c === '"') {
+            inQuotes = true;
+            i++;
+            continue;
+        }
+        if (c === ",") {
+            row.push(field);
+            field = "";
+            i++;
+            continue;
+        }
+        if (c === "\r") {
+            i++;
+            continue;
+        }
+        if (c === "\n") {
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = "";
+            i++;
+            continue;
+        }
+        field += c;
+        i++;
     }
-    if (c === '"') { inQuotes = true; i++; continue }
-    if (c === ',') { row.push(field); field = ''; i++; continue }
-    if (c === '\r') { i++; continue }
-    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue }
-    field += c; i++
-  }
-  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row) }
-  if (rows.length === 0) return { headers: [], records: [] }
-  const headers = rows[0].map((h) => h.trim())
-  const records = rows.slice(1)
-    .filter((r) => r.some((v) => v.trim() !== ''))
-    .map((r) => {
-      const obj = {}
-      headers.forEach((h, idx) => { obj[h] = (r[idx] || '').trim() })
-      return obj
-    })
-  return { headers, records }
+    if (field.length > 0 || row.length > 0) {
+        row.push(field);
+        rows.push(row);
+    }
+    if (rows.length === 0) {
+        return { headers: [], records: [] };
+    }
+    const headers = rows[0].map((h) => h.trim());
+    const records = rows
+        .slice(1)
+        .filter((r) => r.some((v) => v.trim() !== ""))
+        .map((r) => {
+            const obj = {};
+            headers.forEach((h, idx) => {
+                obj[h] = (r[idx] || "").trim();
+            });
+            return obj;
+        });
+    return { headers, records };
 }
 
 // Column name aliases across the formats this needs to read, checked
 // case-insensitively in this priority order.
 const COLUMN_ALIASES = {
-  imdbId: ['Const', 'imdbID', 'imdb_id', 'IMDb ID', 'imdbId'],
-  // 'movie_name' is TV Time's GDPR export; 'full_title' is Tautulli's
-  // history export. Matching stays case-insensitive (see findColumn), so
-  // Movary's lowercase headers ride the same aliases.
-  title: ['Title', 'Name', 'movie_name', 'full_title'],
-  year: ['Year'],
-  // 'Watched At' is Plex's watch-history export, 'created_at' TV Time's,
-  // 'watchedAt' Movary's CSV. Netflix's viewing-activity CSV is just
-  // Title,Date - both already covered. Its M/D/YY dates parse natively
-  // (verified: '9/1/26' -> 2026-09-01), so no format shim is needed.
-  watchedDate: ['Date Rated', 'WatchedDate', 'Watched Date', 'Date', 'Watched At', 'created_at', 'watchedAt'],
-  rating: ['Your Rating', 'Rating10', 'Rating', 'userRating'],
-  titleType: ['Title Type', 'type', 'media_type'],
-}
+    imdbId: ["Const", "imdbID", "imdb_id", "IMDb ID", "imdbId"],
+    rating: ["Your Rating", "Rating10", "Rating", "userRating"],
+    // 'movie_name' is TV Time's GDPR export; 'full_title' is Tautulli's
+    // history export. Matching stays case-insensitive (see findColumn), so
+    // Movary's lowercase headers ride the same aliases.
+    title: ["Title", "Name", "movie_name", "full_title"],
+    titleType: ["Title Type", "type", "media_type"],
+    // 'Watched At' is Plex's watch-history export, 'created_at' TV Time's,
+    // 'watchedAt' Movary's CSV. Netflix's viewing-activity CSV is just
+    // Title,Date - both already covered. Its M/D/YY dates parse natively
+    // (verified: '9/1/26' -> 2026-09-01), so no format shim is needed.
+    watchedDate: [
+        "Date Rated",
+        "WatchedDate",
+        "Watched Date",
+        "Date",
+        "Watched At",
+        "created_at",
+        "watchedAt",
+    ],
+    year: ["Year"],
+};
 
 // Netflix's viewing-activity CSV mixes movies and episodes in one file, and
 // an episode row's title is the show + a middle segment naming the season
@@ -80,50 +124,63 @@ const COLUMN_ALIASES = {
 // hundreds of rows for a normal account. Keyed on Netflix's own segment
 // vocabulary rather than counting colons, so "Mission: Impossible" stays a
 // movie.
-const NETFLIX_EPISODE_SEGMENT = /:\s*(Season \d+|Series \d+|Part \d+|Volume \d+|Book \d+|Chapter \d+|Limited Series|Collection \d+)\s*:/i
+const NETFLIX_EPISODE_SEGMENT =
+    /:\s*(Season \d+|Series \d+|Part \d+|Volume \d+|Book \d+|Chapter \d+|Limited Series|Collection \d+)\s*:/i;
 function looksLikeSeriesEpisodeTitle(title) {
-  return typeof title === 'string' && NETFLIX_EPISODE_SEGMENT.test(title)
+    return typeof title === "string" && NETFLIX_EPISODE_SEGMENT.test(title);
 }
 
 function findColumn(headers, aliases) {
-  const lower = headers.map((h) => h.toLowerCase())
-  for (const alias of aliases) {
-    const idx = lower.indexOf(alias.toLowerCase())
-    if (idx !== -1) return headers[idx]
-  }
-  return null
+    const lower = headers.map((h) => h.toLowerCase());
+    for (const alias of aliases) {
+        const idx = lower.indexOf(alias.toLowerCase());
+        if (idx !== -1) {
+            return headers[idx];
+        }
+    }
+    return null;
 }
 
 function mapColumns(headers) {
-  const map = {}
-  for (const [key, aliases] of Object.entries(COLUMN_ALIASES)) {
-    map[key] = findColumn(headers, aliases)
-  }
-  return map
+    const map = {};
+    for (const [key, aliases] of Object.entries(COLUMN_ALIASES)) {
+        map[key] = findColumn(headers, aliases);
+    }
+    return map;
 }
 
 // Folds a title down to letters and digits, so "Spider-Man: No Way Home"
 // and "spider man no way home" compare equal.
-const fold = (t) => String(t || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '')
+const fold = (t) =>
+    String(t || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/&/g, "and")
+        .replace(/[^a-z0-9]+/g, "");
 
 // LumiereDB reads a title the way a person typed it - a typo, the title in
 // another language, a year on the end - and has no daily limit. A row with
 // a year takes the best match within a year of it (release dates differ by
 // country); one without a year only takes a match whose title is the same.
 async function matchWithLumiere(base, title, year) {
-  const { searchTitles } = require('./lumiere')
-  const y = Number(String(year || '').slice(0, 4)) || null
-  let found = []
-  try {
-    found = await searchTitles(base, 'movie', y ? `${title} ${y}` : title, { limit: 10 })
-    if (y && !found.some((f) => f.year && Math.abs(f.year - y) <= 1)) found = await searchTitles(base, 'movie', title, { limit: 10 })
-  } catch {
-    return null
-  }
-  const pick = y
-    ? found.find((f) => f.year && Math.abs(f.year - y) <= 1)
-    : found.find((f) => fold(f.name) === fold(title))
-  return pick ? { imdbId: pick.id, title: pick.name || title, year: pick.year ? String(pick.year) : year } : null
+    const { searchTitles } = require("./lumiere");
+    const y = Number(String(year || "").slice(0, 4)) || null;
+    let found = [];
+    try {
+        found = await searchTitles(base, "movie", y ? `${title} ${y}` : title, { limit: 10 });
+        if (y && !found.some((f) => f.year && Math.abs(f.year - y) <= 1)) {
+            found = await searchTitles(base, "movie", title, { limit: 10 });
+        }
+    } catch {
+        return null;
+    }
+    const pick = y
+        ? found.find((f) => f.year && Math.abs(f.year - y) <= 1)
+        : found.find((f) => fold(f.name) === fold(title));
+    return pick
+        ? { imdbId: pick.id, title: pick.name || title, year: pick.year ? String(pick.year) : year }
+        : null;
 }
 
 // Resolves one CSV row to a real IMDb id + title/year - a direct imdb-style
@@ -131,36 +188,52 @@ async function matchWithLumiere(base, title, year) {
 // trusted outright; otherwise the account's LumiereDB when there is one,
 // then an OMDb title+year search, the same resolution path listImport.js's
 // own title-based imports already use.
-async function resolveRowToImdbItem(row, colMap, omdbApiKey, lumiereBase = '') {
-  const rawId = colMap.imdbId ? row[colMap.imdbId] : null
-  if (rawId && /^tt\d+$/.test(rawId.trim())) {
-    return { imdbId: rawId.trim(), title: colMap.title ? row[colMap.title] : null, year: colMap.year ? row[colMap.year] : null }
-  }
-  const title = colMap.title ? row[colMap.title]?.trim() : null
-  if (!title) return null
-  const year = colMap.year ? row[colMap.year]?.trim() : null
-  if (lumiereBase) {
-    const matched = await matchWithLumiere(lumiereBase, title, year)
-    if (matched) return matched
-  }
-  if (!omdbApiKey) return null
-  try {
-    require('./omdbMeter').recordOmdbRequest(omdbApiKey)
-    const url = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbApiKey)}&t=${encodeURIComponent(title)}${year ? `&y=${encodeURIComponent(year)}` : ''}`
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const data = await res.json()
-    if (data?.Response === 'False' || !data?.imdbID) return null
-    return { imdbId: data.imdbID, title: data.Title || title, year: data.Year || year }
-  } catch {
-    return null
-  }
+async function resolveRowToImdbItem(row, colMap, omdbApiKey, lumiereBase = "") {
+    const rawId = colMap.imdbId ? row[colMap.imdbId] : null;
+    if (rawId && /^tt\d+$/.test(rawId.trim())) {
+        return {
+            imdbId: rawId.trim(),
+            title: colMap.title ? row[colMap.title] : null,
+            year: colMap.year ? row[colMap.year] : null,
+        };
+    }
+    const title = colMap.title ? row[colMap.title]?.trim() : null;
+    if (!title) {
+        return null;
+    }
+    const year = colMap.year ? row[colMap.year]?.trim() : null;
+    if (lumiereBase) {
+        const matched = await matchWithLumiere(lumiereBase, title, year);
+        if (matched) {
+            return matched;
+        }
+    }
+    if (!omdbApiKey) {
+        return null;
+    }
+    try {
+        require("./omdbMeter").recordOmdbRequest(omdbApiKey);
+        const url = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbApiKey)}&t=${encodeURIComponent(title)}${year ? `&y=${encodeURIComponent(year)}` : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+            return null;
+        }
+        const data = await res.json();
+        if (data?.Response === "False" || !data?.imdbID) {
+            return null;
+        }
+        return { imdbId: data.imdbID, title: data.Title || title, year: data.Year || year };
+    } catch {
+        return null;
+    }
 }
 
 function parseWatchedDate(raw) {
-  if (!raw) return null
-  const d = new Date(raw)
-  return Number.isNaN(d.getTime()) ? null : d
+    if (!raw) {
+        return null;
+    }
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
 }
 
 // 1-10 rating from either a direct 1-10 column or Letterboxd's 0.5-5 scale
@@ -170,11 +243,25 @@ function parseWatchedDate(raw) {
 // in the 1-5 integer range are treated as already being out of 10, since
 // that's the more common export format among these three sources).
 function normalizeRating(raw) {
-  if (!raw) return null
-  const n = Number(raw)
-  if (!Number.isFinite(n) || n <= 0) return null
-  if (n % 1 === 0.5 && n <= 5) return Math.round(n * 2) // Letterboxd 0.5-5 -> 1-10
-  return Math.min(10, Math.round(n))
+    if (!raw) {
+        return null;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+        return null;
+    }
+    if (n % 1 === 0.5 && n <= 5) {
+        return Math.round(n * 2); // Letterboxd 0.5-5 -> 1-10
+    }
+    return Math.min(10, Math.round(n));
 }
 
-module.exports = { parseCsv, mapColumns, resolveRowToImdbItem, parseWatchedDate, normalizeRating, looksLikeSeriesEpisodeTitle, COLUMN_ALIASES }
+module.exports = {
+    COLUMN_ALIASES,
+    looksLikeSeriesEpisodeTitle,
+    mapColumns,
+    normalizeRating,
+    parseCsv,
+    parseWatchedDate,
+    resolveRowToImdbItem,
+};

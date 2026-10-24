@@ -1,18 +1,27 @@
-const { createDefaultAvatar } = require('../utils/defaultAvatar')
-const express = require('express');
-const { publicMessage } = require('../utils/publicError');
-const { StremioAPIClient } = require('stremio-api-client');
-const crypto = require('crypto');
-const { handleStremioError } = require('../utils/handlers');
-const { findUserById } = require('../utils/helpers');
-const { responseUtils, dbUtils } = require('../utils/routeUtils');
-const { sendShareNotification } = require('../utils/activityMonitor');
-const { postDiscord, fetchMetadata } = require('../utils/notify');
-const { getAccountDateString, resolveAccountTimezone, getAccountDayNumber } = require('../utils/dateUtils');
-const { assertSafeUrl, safeFetch, instancePolicy } = require('../utils/safeUrl');
-const { fetchOmdbRatings } = require('../utils/omdb');
-const { isProviderConnected, PROVIDER_SELECT } = require('../utils/providerInfo');
-const { resolveSimklClientId, startSimklPin, pollSimklPin, getSimklAccountInfo } = require('../utils/simklAuth');
+const { createDefaultAvatar } = require("../utils/defaultAvatar");
+const express = require("express");
+const { publicMessage } = require("../utils/publicError");
+const { StremioAPIClient } = require("stremio-api-client");
+const _crypto = require("node:crypto");
+const { handleStremioError } = require("../utils/handlers");
+const { findUserById } = require("../utils/helpers");
+const { responseUtils, dbUtils } = require("../utils/routeUtils");
+const { sendShareNotification } = require("../utils/activityMonitor");
+const { postDiscord, fetchMetadata } = require("../utils/notify");
+const {
+    getAccountDateString,
+    resolveAccountTimezone,
+    getAccountDayNumber,
+} = require("../utils/dateUtils");
+const { assertSafeUrl, safeFetch, instancePolicy } = require("../utils/safeUrl");
+const { fetchOmdbRatings } = require("../utils/omdb");
+const { isProviderConnected, PROVIDER_SELECT } = require("../utils/providerInfo");
+const {
+    resolveSimklClientId,
+    startSimklPin,
+    pollSimklPin,
+    getSimklAccountInfo,
+} = require("../utils/simklAuth");
 
 // What a person is told when an addon address they brought in is one this
 // server will not connect to. Anything else (a timeout, a 404) is described
@@ -20,8605 +29,10661 @@ const { resolveSimklClientId, startSimklPin, pollSimklPin, getSimklAccountInfo }
 // as when an addon is added by hand: an instance serving strangers refuses
 // its own network, a household install only refuses link-local.
 function addonAddressProblem(err) {
-  switch (err?.message) {
-    case 'invalid url':
-      return 'That is not a valid web address.'
-    case 'unsupported protocol':
-      return 'Addon addresses must start with http:// or https://.'
-    case 'blocked host':
-      return instancePolicy().allowPrivate
-        ? 'That address is a link-local one (such as 169.254.x.x), which this server never connects to.'
-        : 'That address is on a private or internal network, which this server does not connect to.'
-    case 'too many redirects':
-      return 'That address redirected too many times.'
-    default:
-      return null
-  }
+    switch (err?.message) {
+        case "invalid url":
+            return "That is not a valid web address.";
+        case "unsupported protocol":
+            return "Addon addresses must start with http:// or https://.";
+        case "blocked host":
+            return instancePolicy().allowPrivate
+                ? "That address is a link-local one (such as 169.254.x.x), which this server never connects to."
+                : "That address is on a private or internal network, which this server does not connect to.";
+        case "too many redirects":
+            return "That address redirected too many times.";
+        default:
+            return null;
+    }
 }
 
 // Whether this address is one the server will never connect to. A name it
 // cannot look up is not: the addon may simply be down today, and an import
 // still keeps it.
 async function isRefusedAddonAddress(url) {
-  try {
-    await assertSafeUrl(url, instancePolicy())
-    return false
-  } catch (e) {
-    return e?.message === 'blocked host'
-  }
+    try {
+        await assertSafeUrl(url, instancePolicy());
+        return false;
+    } catch (e) {
+        return e?.message === "blocked host";
+    }
 }
 
 // Export a function that returns the router, allowing dependency injection
-module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, encrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, StremioAPIClient, StremioAPIStore, assignUserToGroup, debug, defaultAddons, canonicalizeManifestUrl, getAccountDek, getServerKey, aesGcmDecrypt, validateStremioAuthKey, manifestUrlHmac, manifestHash, createProvider }) => {
-  const { findLatestEpisode, enrichPostersFromCinemeta } = require('../utils/libraryHelpers')
-  const router = express.Router();
+module.exports = ({
+    prisma,
+    getAccountId,
+    scopedWhere,
+    INSTANCE_TYPE,
+    decrypt,
+    encrypt,
+    parseAddonIds,
+    parseProtectedAddons,
+    getDecryptedManifestUrl,
+    StremioAPIClient,
+    StremioAPIStore,
+    assignUserToGroup,
+    debug,
+    defaultAddons,
+    canonicalizeManifestUrl,
+    getAccountDek,
+    getServerKey,
+    aesGcmDecrypt,
+    validateStremioAuthKey,
+    manifestUrlHmac,
+    manifestHash,
+    createProvider,
+}) => {
+    const { findLatestEpisode, enrichPostersFromCinemeta } = require("../utils/libraryHelpers");
+    const router = express.Router();
 
-  // User API key middleware - allows users to access their own data via API key
-  const { createUserApiKeyMiddleware } = require('../middleware/userApiKey')
-  router.use(createUserApiKeyMiddleware(prisma))
+    // User API key middleware - allows users to access their own data via API key
+    const { createUserApiKeyMiddleware } = require("../middleware/userApiKey");
+    router.use(createUserApiKeyMiddleware(prisma));
 
-  // PUT /api/users/reorder - bulk update user display order (drag-and-drop),
-  // same pattern as addons.js's own /reorder.
-  router.put('/reorder', async (req, res) => {
-    try {
-      const { orderedIds } = req.body || {};
-      if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
-        return res.status(400).json({ error: 'orderedIds is required' });
-      }
-      // Confirm every id actually belongs to this account before touching anything
-      const existing = await prisma.user.findMany({
-        where: scopedWhere(req, { id: { in: orderedIds } }),
-        select: { id: true },
-      });
-      if (existing.length !== orderedIds.length) {
-        return res.status(400).json({ error: 'One or more users do not belong to this account' });
-      }
-      await Promise.all(
-        orderedIds.map((id, index) =>
-          prisma.user.update({ where: { id }, data: { position: index } })
-        )
-      );
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error reordering users:', error);
-      res.status(500).json({ error: 'Failed to reorder users' });
-    }
-  });
-
-  // Check if user exists by email or username (for validation)
-  router.get('/check', async (req, res) => {
-    try {
-      const { email, username } = req.query
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      if (!email && !username) {
-        return res.status(400).json({ error: 'Email or username is required' })
-      }
-
-      const where = { accountId }
-
-      if (email && username) {
-        where.OR = [
-          { email: email.trim().toLowerCase() },
-          { username: username.trim() }
-        ]
-      } else if (email) {
-        where.email = email.trim().toLowerCase()
-      } else if (username) {
-        where.username = username.trim()
-      }
-
-      const existingUser = await prisma.user.findFirst({
-        where,
-        select: {
-          id: true,
-          email: true,
-          username: true
-        }
-      })
-
-      if (existingUser) {
-        const conflicts = {}
-        if (email && existingUser.email === email.trim().toLowerCase()) {
-          conflicts.email = true
-        }
-        if (username && existingUser.username === username.trim()) {
-          conflicts.username = true
-        }
-        return res.json({
-          exists: true,
-          conflicts
-        })
-      }
-
-      return res.json({
-        exists: false,
-        conflicts: {}
-      })
-    } catch (error) {
-      console.error('Error checking user existence:', error)
-      return res.status(500).json({ error: publicMessage(error, 'Failed to check user existence') })
-    }
-  })
-
-  // Get gravatar URL for an email
-  router.get('/gravatar', async (req, res) => {
-    try {
-      const { email } = req.query;
-      if (!email) {
-        return res.status(400).json({ error: 'Email is required' });
-      }
-
-      const normalized = email.trim().toLowerCase();
-
-      // Compute MD5 hash
-      const crypto = require('crypto');
-      const hash = crypto.createHash('md5').update(normalized).digest('hex');
-
-      res.json({
-        url: `https://www.gravatar.com/avatar/${hash}?d=404`,
-        hash
-      });
-    } catch (error) {
-      console.error('Error computing gravatar:', error);
-      res.status(500).json({ error: 'Failed to compute gravatar' });
-    }
-  });
-
-  // Get all users
-  // The Users list's live addon count asks each person's Stremio/Nuvio
-  // account - a network round trip per person on every visit. Kept a minute,
-  // and dropped as soon as they're synced (the key carries their last sync).
-  const liveAddonCountCache = new Map()
-  const LIVE_ADDON_COUNT_MS = 60 * 1000
-  async function liveAddonCount(user, req) {
-    const key = `${user.id}|${user.lastSyncedAt ? new Date(user.lastSyncedAt).getTime() : ''}`
-    const hit = liveAddonCountCache.get(key)
-    if (hit && Date.now() - hit.at < LIVE_ADDON_COUNT_MS) return hit.count
-    const { getUserAddons } = require('../utils/sync')
-    const result = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
-    // A sign-in that can't answer is kept the same minute too - otherwise
-    // every visit waits on it again.
-    const count = result.success && Array.isArray(result.addons) ? result.addons.length : 0
-    if (!result.success) console.error(`Error fetching live addons for user ${user.id}:`, result.error)
-    if (liveAddonCountCache.size > 5000) liveAddonCountCache.delete(liveAddonCountCache.keys().next().value)
-    liveAddonCountCache.set(key, { at: Date.now(), count })
-    return count
-  }
-
-  router.get('/', async (req, res) => {
-    try {
-      const users = await prisma.user.findMany({
-        where: scopedWhere(req, {}),
-        include: {},
-        orderBy: [{ position: 'asc' }, { id: 'asc' }]
-      });
-
-      // One bulk lookup for every merged user's absorbed second provider,
-      // rather than a per-user query inside the map below.
-      const secondaryCredentials = await prisma.userProviderCredential.findMany({
-        where: { userId: { in: users.map((u) => u.id) } },
-        select: { userId: true, providerType: true }
-      })
-      const secondaryProviderByUserId = new Map(secondaryCredentials.map((c) => [c.userId, c.providerType]))
-
-      // "Last seen" on every card, from SlickSync's own records (utils/lastSeen.js).
-      let lastSeen = new Map()
-      try {
-        lastSeen = await require('../utils/lastSeen').lastSeenByUser(prisma, getAccountId(req) || 'default', users)
-      } catch (error) {
-        console.warn('[users] last seen failed:', error.message)
-      }
-
-      // Every group once (not one query per person); each person's are the
-      // ones listing them, in the same order as before.
-      const allGroups = await prisma.group.findMany({
-        where: scopedWhere(req, {}),
-        select: { id: true, name: true, userIds: true, _count: { select: { addons: true } } },
-      })
-      const groupMembers = allGroups.map((g) => {
-        try { return new Set(JSON.parse(g.userIds || '[]')) } catch { return new Set() }
-      })
-
-      // Watch time for everyone in one read of the account's activity, not
-      // one full read per person. Cross-user dedup applied so library-sync
-      // phantoms from shared-email sibling accounts don't inflate anyone's
-      // total - see utils/watchDedup.js for the rationale.
-      const watchSecondsByUser = new Map()
-      try {
-        const accountIdForScope = getAccountId(req) || 'default'
-        const [activities, siblings] = await Promise.all([
-          prisma.watchActivity.findMany({
-            where: { accountId: accountIdForScope },
-            select: { userId: true, itemId: true, date: true, watchTimeSeconds: true, profileLabel: true }
-          }),
-          prisma.user.findMany({
-            where: { accountId: accountIdForScope },
-            select: { id: true, email: true, nuvioProfileId: true }
-          })
-        ])
-        const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require('../utils/watchDedup')
-        for (const a of dedupWatchActivityBySharedEmail(activities, findSharedEmailUserIds(siblings))) {
-          watchSecondsByUser.set(a.userId, (watchSecondsByUser.get(a.userId) || 0) + (a.watchTimeSeconds || 0))
-        }
-      } catch (error) {
-        console.warn('Error fetching watch time:', error.message)
-      }
-
-      // Transform data for frontend compatibility
-      const transformedUsers = await Promise.all(users.map(async (user) => {
-        const groups = allGroups.filter((g, i) => groupMembers[i].has(user.id))
-
-        const userGroup = groups[0] // Use first group
-        const addonCount = userGroup?._count?.addons || 0
-
-        // Calculate Stremio addons count by fetching live data
-        let stremioAddonsCount = 0
-        if (user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)) {
-          // Calculate live addon count - reused getUserAddons for provider-agnostic count
-          // (was Stremio-only before, silently leaving Nuvio users to fall back to a
-          // completely different number - the DB-assigned group addon count - instead
-          // of a genuine live count, which is why counts and sync status could differ
-          // between provider types even when both were actually in sync)
-          try {
-            stremioAddonsCount = await liveAddonCount(user, req)
-          } catch (error) {
-            console.error(`Error fetching live addons for user ${user.id}:`, error.message)
-            // No fallback to database value available
-          }
-        }
-
-        const excludedAddons = parseAddonIds(user.excludedAddons)
-        const protectedAddons = parseProtectedAddons(user.protectedAddons, req)
-
-        const totalWatchTimeMinutes = Math.round((watchSecondsByUser.get(user.id) || 0) / 60)
-
-        return {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          providerType: user.providerType || 'stremio',
-          nuvioProfileId: user.nuvioProfileId ?? 1,
-          ...jellyfinSummary(user),
-          secondaryProviderType: secondaryProviderByUserId.get(user.id) || null,
-          providerConnectionError: user.providerConnectionError || null,
-          groupName: userGroup?.name || null,
-          groupId: userGroup?.id || null,
-          status: user.isActive ? 'active' : 'inactive',
-          addons: addonCount,
-          stremioAddonsCount: stremioAddonsCount,
-          groups: groups.length,
-          lastActive: lastSeen.get(user.id)?.toISOString() || null,
-          createdAt: user.createdAt || null,
-          hasStremioConnection: !!user.stremioAuthKey,
-          isActive: user.isActive,
-          excludedAddons: excludedAddons,
-          protectedAddons: protectedAddons,
-          colorIndex: user.colorIndex,
-          avatarUrl: user.avatarUrl,
-          // Whether this person switched Gravatar on, for every avatar of them.
-          useGravatar: user.useGravatar === true,
-          inviteCode: user.inviteCode,
-          watchTime: totalWatchTimeMinutes,
-          // The Users list has always had a "Last sync" column; until now it
-          // rendered a hardcoded 'Unknown' for every row. Two separate causes:
-          // this allowlist dropped the field, AND nothing ever wrote it.
-          // syncUserAddons now records the outcome of every sync, so these
-          // two are the real values rather than always-null columns.
-          lastSyncedAt: user.lastSyncedAt || null,
-          syncStatus: user.syncStatus || null,
-          // Account Guard: non-null when the provider account was changed by
-          // something other than SlickSync since our last write (see
-          // utils/accountGuard.js) - {provider, detectedAt, added[], removed[]}.
-          guardExternal: require('../utils/accountGuard').summarizeExternal(user.guardStateJson)
-        };
-      }));
-
-      res.json(transformedUsers);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      res.status(500).json({ message: 'Failed to fetch users' });
-    }
-  });
-
-  // Same opt-in-key pattern as discover.js's cast/crew deep-dive: per-account
-  // (Settings, sync.tmdbApiKey) takes precedence, else TMDB_API_KEY env var.
-  // Goes through the shared resolver (listImport.js), which also applies the
-  // backup-key failover - the previous hand-rolled copy here did not.
-  async function resolveTmdbKeyForBackdrop(req) {
-    const { resolveKeyFromSettings } = require('../utils/listImport')
-    return resolveKeyFromSettings(prisma, getAccountId, req, 'tmdbApiKey', 'TMDB_API_KEY')
-  }
-
-  // TMDb backdrop lookup by IMDb id, cached (backdrops don't change) - kept
-  // separate from fetchMetadata's own cache since that function has no `req`
-  // to resolve a per-account key from, and is shared with callers (Discord
-  // notifications, Continue Watching) that have no use for a backdrop image.
-  // RPDB serves backdrops too, but only at RPDB's paid Tier 2+ - TMDb's are
-  // free at any tier, so this is the one that actually works for everyone.
-  const backdropCache = new Map()
-  const BACKDROP_CACHE_TTL_MS = 24 * 60 * 60 * 1000
-  async function fetchTmdbBackdrop(imdbId, req) {
-    if (!imdbId || !/^tt\d+$/.test(imdbId)) return null
-    const cached = backdropCache.get(imdbId)
-    if (cached && (Date.now() - cached.at) < BACKDROP_CACHE_TTL_MS) return cached.value
-    const key = await resolveTmdbKeyForBackdrop(req)
-    if (!key) return null
-    try {
-      const rsp = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${encodeURIComponent(key)}&external_source=imdb_id`)
-      if (!rsp.ok) return null
-      const data = await rsp.json()
-      const hit = (data.movie_results || [])[0] || (data.tv_results || [])[0]
-      const backdropPath = hit?.backdrop_path
-      const value = backdropPath ? `https://image.tmdb.org/t/p/w1280${backdropPath}` : null
-      backdropCache.set(imdbId, { value, at: Date.now() })
-      return value
-    } catch {
-      return null
-    }
-  }
-
-  // TMDb "part of a collection" lookup (e.g. Dune (2021) -> Dune Collection
-  // -> [Dune, Dune: Part Two, ...]) - movies only, TMDb has no equivalent
-  // grouping for TV. Same find-by-imdb-id + backdrop's own key resolution,
-  // then one extra call for the movie's own belongs_to_collection field,
-  // then one more for the collection's full parts list. Each part only
-  // carries a TMDb id, and this app routes everything by IMDb id, so each
-  // part needs its own external_ids lookup too - capped at 12 to bound the
-  // worst case (a long-running franchise) to a handful of requests, all
-  // cached together under a long TTL since a collection's lineup is static
-  // apart from a genuinely new sequel releasing.
-  const collectionCache = new Map()
-  const COLLECTION_CACHE_TTL_MS = 24 * 60 * 60 * 1000
-  const COLLECTION_MAX_PARTS = 12
-  async function fetchTmdbCollection(imdbId, itemType, req) {
-    if (!imdbId || !/^tt\d+$/.test(imdbId) || itemType !== 'movie') return null
-    const cached = collectionCache.get(imdbId)
-    if (cached && (Date.now() - cached.at) < COLLECTION_CACHE_TTL_MS) return cached.value
-    const key = await resolveTmdbKeyForBackdrop(req)
-    if (!key) return null
-    try {
-      const findRsp = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${encodeURIComponent(key)}&external_source=imdb_id`)
-      if (!findRsp.ok) return null
-      const findData = await findRsp.json()
-      const movieHit = (findData.movie_results || [])[0]
-      if (!movieHit?.id) {
-        collectionCache.set(imdbId, { value: null, at: Date.now() })
-        return null
-      }
-
-      const movieRsp = await fetch(`https://api.themoviedb.org/3/movie/${movieHit.id}?api_key=${encodeURIComponent(key)}`)
-      if (!movieRsp.ok) return null
-      const movieData = await movieRsp.json()
-      const collectionRef = movieData.belongs_to_collection
-      if (!collectionRef?.id) {
-        collectionCache.set(imdbId, { value: null, at: Date.now() })
-        return null
-      }
-
-      const collRsp = await fetch(`https://api.themoviedb.org/3/collection/${collectionRef.id}?api_key=${encodeURIComponent(key)}`)
-      if (!collRsp.ok) return null
-      const collData = await collRsp.json()
-      const parts = (collData.parts || [])
-        .filter((p) => p.id !== movieHit.id)
-        .sort((a, b) => (a.release_date || '9999').localeCompare(b.release_date || '9999'))
-        .slice(0, COLLECTION_MAX_PARTS)
-
-      const partsWithImdbIds = await Promise.all(parts.map(async (p) => {
+    // PUT /api/users/reorder - bulk update user display order (drag-and-drop),
+    // same pattern as addons.js's own /reorder.
+    router.put("/reorder", async (req, res) => {
         try {
-          const extRsp = await fetch(`https://api.themoviedb.org/3/movie/${p.id}/external_ids?api_key=${encodeURIComponent(key)}`)
-          if (!extRsp.ok) return null
-          const extData = await extRsp.json()
-          if (!extData.imdb_id) return null
-          return {
-            id: extData.imdb_id,
-            title: p.title,
-            poster: p.poster_path ? `https://image.tmdb.org/t/p/w342${p.poster_path}` : null,
-            releaseYear: p.release_date ? p.release_date.slice(0, 4) : null,
-          }
+            const { orderedIds } = req.body || {};
+            if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+                return res.status(400).json({ error: "orderedIds is required" });
+            }
+            // Confirm every id actually belongs to this account before touching anything
+            const existing = await prisma.user.findMany({
+                select: { id: true },
+                where: scopedWhere(req, { id: { in: orderedIds } }),
+            });
+            if (existing.length !== orderedIds.length) {
+                return res
+                    .status(400)
+                    .json({ error: "One or more users do not belong to this account" });
+            }
+            await Promise.all(
+                orderedIds.map((id, index) =>
+                    prisma.user.update({ data: { position: index }, where: { id } })
+                )
+            );
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error reordering users:", error);
+            res.status(500).json({ error: "Failed to reorder users" });
+        }
+    });
+
+    // Check if user exists by email or username (for validation)
+    router.get("/check", async (req, res) => {
+        try {
+            const { email, username } = req.query;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            if (!(email || username)) {
+                return res.status(400).json({ error: "Email or username is required" });
+            }
+
+            const where = { accountId };
+
+            if (email && username) {
+                where.OR = [{ email: email.trim().toLowerCase() }, { username: username.trim() }];
+            } else if (email) {
+                where.email = email.trim().toLowerCase();
+            } else if (username) {
+                where.username = username.trim();
+            }
+
+            const existingUser = await prisma.user.findFirst({
+                select: {
+                    email: true,
+                    id: true,
+                    username: true,
+                },
+                where,
+            });
+
+            if (existingUser) {
+                const conflicts = {};
+                if (email && existingUser.email === email.trim().toLowerCase()) {
+                    conflicts.email = true;
+                }
+                if (username && existingUser.username === username.trim()) {
+                    conflicts.username = true;
+                }
+                return res.json({
+                    conflicts,
+                    exists: true,
+                });
+            }
+
+            return res.json({
+                conflicts: {},
+                exists: false,
+            });
+        } catch (error) {
+            console.error("Error checking user existence:", error);
+            return res
+                .status(500)
+                .json({ error: publicMessage(error, "Failed to check user existence") });
+        }
+    });
+
+    // Get gravatar URL for an email
+    router.get("/gravatar", async (req, res) => {
+        try {
+            const { email } = req.query;
+            if (!email) {
+                return res.status(400).json({ error: "Email is required" });
+            }
+
+            const normalized = email.trim().toLowerCase();
+
+            // Compute MD5 hash
+            const crypto = require("node:crypto");
+            const hash = crypto.createHash("md5").update(normalized).digest("hex");
+
+            res.json({
+                hash,
+                url: `https://www.gravatar.com/avatar/${hash}?d=404`,
+            });
+        } catch (error) {
+            console.error("Error computing gravatar:", error);
+            res.status(500).json({ error: "Failed to compute gravatar" });
+        }
+    });
+
+    // Get all users
+    // The Users list's live addon count asks each person's Stremio/Nuvio
+    // account - a network round trip per person on every visit. Kept a minute,
+    // and dropped as soon as they're synced (the key carries their last sync).
+    const liveAddonCountCache = new Map();
+    const LIVE_ADDON_COUNT_MS = 60 * 1000;
+    async function liveAddonCount(user, req) {
+        const key = `${user.id}|${user.lastSyncedAt ? new Date(user.lastSyncedAt).getTime() : ""}`;
+        const hit = liveAddonCountCache.get(key);
+        if (hit && Date.now() - hit.at < LIVE_ADDON_COUNT_MS) {
+            return hit.count;
+        }
+        const { getUserAddons } = require("../utils/sync");
+        const result = await getUserAddons(user, req, {
+            createProvider,
+            decrypt,
+            StremioAPIClient,
+        });
+        // A sign-in that can't answer is kept the same minute too - otherwise
+        // every visit waits on it again.
+        const count = result.success && Array.isArray(result.addons) ? result.addons.length : 0;
+        if (!result.success) {
+            console.error(`Error fetching live addons for user ${user.id}:`, result.error);
+        }
+        if (liveAddonCountCache.size > 5000) {
+            liveAddonCountCache.delete(liveAddonCountCache.keys().next().value);
+        }
+        liveAddonCountCache.set(key, { at: Date.now(), count });
+        return count;
+    }
+
+    router.get("/", async (req, res) => {
+        try {
+            const users = await prisma.user.findMany({
+                include: {},
+                orderBy: [{ position: "asc" }, { id: "asc" }],
+                where: scopedWhere(req, {}),
+            });
+
+            // One bulk lookup for every merged user's absorbed second provider,
+            // rather than a per-user query inside the map below.
+            const secondaryCredentials = await prisma.userProviderCredential.findMany({
+                select: { providerType: true, userId: true },
+                where: { userId: { in: users.map((u) => u.id) } },
+            });
+            const secondaryProviderByUserId = new Map(
+                secondaryCredentials.map((c) => [c.userId, c.providerType])
+            );
+
+            // "Last seen" on every card, from SlickSync's own records (utils/lastSeen.js).
+            let lastSeen = new Map();
+            try {
+                lastSeen = await require("../utils/lastSeen").lastSeenByUser(
+                    prisma,
+                    getAccountId(req) || "default",
+                    users
+                );
+            } catch (error) {
+                console.warn("[users] last seen failed:", error.message);
+            }
+
+            // Every group once (not one query per person); each person's are the
+            // ones listing them, in the same order as before.
+            const allGroups = await prisma.group.findMany({
+                select: {
+                    _count: { select: { addons: true } },
+                    id: true,
+                    name: true,
+                    userIds: true,
+                },
+                where: scopedWhere(req, {}),
+            });
+            const groupMembers = allGroups.map((g) => {
+                try {
+                    return new Set(JSON.parse(g.userIds || "[]"));
+                } catch {
+                    return new Set();
+                }
+            });
+
+            // Watch time for everyone in one read of the account's activity, not
+            // one full read per person. Cross-user dedup applied so library-sync
+            // phantoms from shared-email sibling accounts don't inflate anyone's
+            // total - see utils/watchDedup.js for the rationale.
+            const watchSecondsByUser = new Map();
+            try {
+                const accountIdForScope = getAccountId(req) || "default";
+                const [activities, siblings] = await Promise.all([
+                    prisma.watchActivity.findMany({
+                        select: {
+                            date: true,
+                            itemId: true,
+                            profileLabel: true,
+                            userId: true,
+                            watchTimeSeconds: true,
+                        },
+                        where: { accountId: accountIdForScope },
+                    }),
+                    prisma.user.findMany({
+                        select: { email: true, id: true, nuvioProfileId: true },
+                        where: { accountId: accountIdForScope },
+                    }),
+                ]);
+                const {
+                    findSharedEmailUserIds,
+                    dedupWatchActivityBySharedEmail,
+                } = require("../utils/watchDedup");
+                for (const a of dedupWatchActivityBySharedEmail(
+                    activities,
+                    findSharedEmailUserIds(siblings)
+                )) {
+                    watchSecondsByUser.set(
+                        a.userId,
+                        (watchSecondsByUser.get(a.userId) || 0) + (a.watchTimeSeconds || 0)
+                    );
+                }
+            } catch (error) {
+                console.warn("Error fetching watch time:", error.message);
+            }
+
+            // Transform data for frontend compatibility
+            const transformedUsers = await Promise.all(
+                users.map(async (user) => {
+                    const groups = allGroups.filter((_g, i) => groupMembers[i].has(user.id));
+
+                    const userGroup = groups[0]; // Use first group
+                    const addonCount = userGroup?._count?.addons || 0;
+
+                    // Calculate Stremio addons count by fetching live data
+                    let stremioAddonsCount = 0;
+                    if (user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)) {
+                        // Calculate live addon count - reused getUserAddons for provider-agnostic count
+                        // (was Stremio-only before, silently leaving Nuvio users to fall back to a
+                        // completely different number - the DB-assigned group addon count - instead
+                        // of a genuine live count, which is why counts and sync status could differ
+                        // between provider types even when both were actually in sync)
+                        try {
+                            stremioAddonsCount = await liveAddonCount(user, req);
+                        } catch (error) {
+                            console.error(
+                                `Error fetching live addons for user ${user.id}:`,
+                                error.message
+                            );
+                            // No fallback to database value available
+                        }
+                    }
+
+                    const excludedAddons = parseAddonIds(user.excludedAddons);
+                    const protectedAddons = parseProtectedAddons(user.protectedAddons, req);
+
+                    const totalWatchTimeMinutes = Math.round(
+                        (watchSecondsByUser.get(user.id) || 0) / 60
+                    );
+
+                    return {
+                        email: user.email,
+                        id: user.id,
+                        nuvioProfileId: user.nuvioProfileId ?? 1,
+                        providerType: user.providerType || "stremio",
+                        username: user.username,
+                        ...jellyfinSummary(user),
+                        addons: addonCount,
+                        avatarUrl: user.avatarUrl,
+                        colorIndex: user.colorIndex,
+                        createdAt: user.createdAt || null,
+                        excludedAddons,
+                        groupId: userGroup?.id || null,
+                        groupName: userGroup?.name || null,
+                        groups: groups.length,
+                        // Account Guard: non-null when the provider account was changed by
+                        // something other than SlickSync since our last write (see
+                        // utils/accountGuard.js) - {provider, detectedAt, added[], removed[]}.
+                        guardExternal: require("../utils/accountGuard").summarizeExternal(
+                            user.guardStateJson
+                        ),
+                        hasStremioConnection: !!user.stremioAuthKey,
+                        inviteCode: user.inviteCode,
+                        isActive: user.isActive,
+                        lastActive: lastSeen.get(user.id)?.toISOString() || null,
+                        // The Users list has always had a "Last sync" column; until now it
+                        // rendered a hardcoded 'Unknown' for every row. Two separate causes:
+                        // this allowlist dropped the field, AND nothing ever wrote it.
+                        // syncUserAddons now records the outcome of every sync, so these
+                        // two are the real values rather than always-null columns.
+                        lastSyncedAt: user.lastSyncedAt || null,
+                        protectedAddons,
+                        providerConnectionError: user.providerConnectionError || null,
+                        secondaryProviderType: secondaryProviderByUserId.get(user.id) || null,
+                        status: user.isActive ? "active" : "inactive",
+                        stremioAddonsCount,
+                        syncStatus: user.syncStatus || null,
+                        // Whether this person switched Gravatar on, for every avatar of them.
+                        useGravatar: user.useGravatar === true,
+                        watchTime: totalWatchTimeMinutes,
+                    };
+                })
+            );
+
+            res.json(transformedUsers);
+        } catch (error) {
+            console.error("Error fetching users:", error);
+            res.status(500).json({ message: "Failed to fetch users" });
+        }
+    });
+
+    // Same opt-in-key pattern as discover.js's cast/crew deep-dive: per-account
+    // (Settings, sync.tmdbApiKey) takes precedence, else TMDB_API_KEY env var.
+    // Goes through the shared resolver (listImport.js), which also applies the
+    // backup-key failover - the previous hand-rolled copy here did not.
+    async function resolveTmdbKeyForBackdrop(req) {
+        const { resolveKeyFromSettings } = require("../utils/listImport");
+        return resolveKeyFromSettings(prisma, getAccountId, req, "tmdbApiKey", "TMDB_API_KEY");
+    }
+
+    // TMDb backdrop lookup by IMDb id, cached (backdrops don't change) - kept
+    // separate from fetchMetadata's own cache since that function has no `req`
+    // to resolve a per-account key from, and is shared with callers (Discord
+    // notifications, Continue Watching) that have no use for a backdrop image.
+    // RPDB serves backdrops too, but only at RPDB's paid Tier 2+ - TMDb's are
+    // free at any tier, so this is the one that actually works for everyone.
+    const backdropCache = new Map();
+    const BACKDROP_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+    async function fetchTmdbBackdrop(imdbId, req) {
+        if (!(imdbId && /^tt\d+$/.test(imdbId))) {
+            return null;
+        }
+        const cached = backdropCache.get(imdbId);
+        if (cached && Date.now() - cached.at < BACKDROP_CACHE_TTL_MS) {
+            return cached.value;
+        }
+        const key = await resolveTmdbKeyForBackdrop(req);
+        if (!key) {
+            return null;
+        }
+        try {
+            const rsp = await fetch(
+                `https://api.themoviedb.org/3/find/${imdbId}?api_key=${encodeURIComponent(key)}&external_source=imdb_id`
+            );
+            if (!rsp.ok) {
+                return null;
+            }
+            const data = await rsp.json();
+            const hit = (data.movie_results || [])[0] || (data.tv_results || [])[0];
+            const backdropPath = hit?.backdrop_path;
+            const value = backdropPath ? `https://image.tmdb.org/t/p/w1280${backdropPath}` : null;
+            backdropCache.set(imdbId, { at: Date.now(), value });
+            return value;
         } catch {
-          return null
+            return null;
         }
-      }))
-
-      const value = {
-        id: collectionRef.id,
-        name: collectionRef.name,
-        parts: partsWithImdbIds.filter(Boolean),
-      }
-      // A collection with no OTHER resolvable entries isn't worth showing -
-      // same "don't render a section that can't do anything" rule as
-      // everywhere else in this app.
-      const finalValue = value.parts.length > 0 ? value : null
-      collectionCache.set(imdbId, { value: finalValue, at: Date.now() })
-      return finalValue
-    } catch {
-      return null
-    }
-  }
-
-  // TMDb "where to watch" (JustWatch data via TMDb) - answers "do I even
-  // need an addon for this" right on the detail popup. Hardcoded to the US
-  // region for now - TMDb's response covers every region in one call, but
-  // there's no per-account locale/country setting anywhere in this codebase
-  // yet to pick from, and US is the most complete JustWatch dataset by far.
-  // Only flatrate (subscription) and free (ad-supported) tiers are surfaced -
-  // rent/buy costs money too, which defeats the entire "you already have
-  // this" point of the badge. `link` is TMDb's own JustWatch attribution
-  // page - their API terms require linking back to it when this data is
-  // shown, not just displaying provider logos on their own.
-  const watchProvidersCache = new Map()
-  const WATCH_PROVIDERS_CACHE_TTL_MS = 24 * 60 * 60 * 1000
-  async function fetchTmdbWatchProviders(imdbId, type, req) {
-    if (!imdbId || !/^tt\d+$/.test(imdbId)) return null
-    const cacheKey = `${imdbId}:${type}`
-    const cached = watchProvidersCache.get(cacheKey)
-    if (cached && (Date.now() - cached.at) < WATCH_PROVIDERS_CACHE_TTL_MS) return cached.value
-    const key = await resolveTmdbKeyForBackdrop(req)
-    if (!key) return null
-    try {
-      const findRsp = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${encodeURIComponent(key)}&external_source=imdb_id`)
-      if (!findRsp.ok) return null
-      const findData = await findRsp.json()
-      const tmdbType = type === 'series' ? 'tv' : 'movie'
-      const hit = (tmdbType === 'tv' ? findData.tv_results : findData.movie_results)?.[0]
-      if (!hit?.id) {
-        watchProvidersCache.set(cacheKey, { value: null, at: Date.now() })
-        return null
-      }
-
-      const provRsp = await fetch(`https://api.themoviedb.org/3/${tmdbType}/${hit.id}/watch/providers?api_key=${encodeURIComponent(key)}`)
-      if (!provRsp.ok) return null
-      const provData = await provRsp.json()
-      const usResult = provData.results?.US
-      if (!usResult) {
-        watchProvidersCache.set(cacheKey, { value: null, at: Date.now() })
-        return null
-      }
-
-      const mapProvider = (p) => ({ name: p.provider_name, logo: p.logo_path ? `https://image.tmdb.org/t/p/w92${p.logo_path}` : null })
-      const providers = [...(usResult.flatrate || []), ...(usResult.free || [])].map(mapProvider)
-      // Dedupe - the same service can appear in both flatrate and free tiers
-      // for different content on the same title (rare but confirmed possible).
-      const seen = new Set()
-      const deduped = providers.filter((p) => (seen.has(p.name) ? false : (seen.add(p.name), true)))
-
-      const finalValue = deduped.length > 0 ? { link: usResult.link || null, providers: deduped } : null
-      watchProvidersCache.set(cacheKey, { value: finalValue, at: Date.now() })
-      return finalValue
-    } catch {
-      return null
-    }
-  }
-
-  // MDBList's own blended `score` (0-100, weighted across IMDb/RT/Metacritic/
-  // Letterboxd/Trakt etc, not any single source) - the mdblistApiKey was
-  // previously only ever used for whole-list import/export (listImport.js),
-  // never this per-title lookup. Confirmed against MDBList's own OpenAPI
-  // schema (https://api.mdblist.com/schema/): GET /{provider}/{media_type}/
-  // {media_id}/ returns `score` at the top level. Silently absent (not an
-  // error) when no MDBList key is configured, same as every other optional
-  // metadata source on this endpoint.
-  const mdblistScoreCache = new Map()
-  const MDBLIST_SCORE_CACHE_TTL_MS = 24 * 60 * 60 * 1000
-  async function fetchMdblistScore(imdbId, type, apiKey) {
-    if (!apiKey || !imdbId || !/^tt\d+$/.test(imdbId)) return null
-    const cacheKey = `${imdbId}:${type}`
-    const cached = mdblistScoreCache.get(cacheKey)
-    if (cached && (Date.now() - cached.at) < MDBLIST_SCORE_CACHE_TTL_MS) return cached.value
-    try {
-      const mediaType = type === 'series' ? 'show' : 'movie'
-      const rsp = await fetch(`https://api.mdblist.com/imdb/${mediaType}/${imdbId}/?apikey=${encodeURIComponent(apiKey)}`)
-      if (!rsp.ok) return null
-      const data = await rsp.json()
-      const finalValue = typeof data.score === 'number' ? data.score : null
-      mdblistScoreCache.set(cacheKey, { value: finalValue, at: Date.now() })
-      return finalValue
-    } catch {
-      return null
-    }
-  }
-
-  // ==================== PUBLIC STATS ====================
-  // A genuinely public, unauthenticated share link - distinct from
-  // activityVisibility (which only ever exposes data to other members of
-  // the SAME account). Opt-in per user, off by default, enabled from the
-  // user's own Settings page (see routes/publicLibrary.js's POST
-  // /public-stats/enable|disable, which use that self-service authKey
-  // identity check instead of an admin session). The slug (not the user's
-  // real id) is what a public visitor presents - no accountId/getAccountId
-  // check on the GET below, since a visitor has no session at all; the
-  // slug itself, a random 32-char token unguessable by brute force, is the
-  // only "auth" this needs.
-
-  // The link is a page meant to be shared, so it can be loaded again and again
-  // by anyone who has it, and working out the stats reads every watch-history
-  // row the person has. That part is done at most once per link per five
-  // minutes (and once, not several times, when many views arrive together).
-  // The link itself is looked up on every view - one indexed row - so a link
-  // that has been turned off stops answering at once instead of when the
-  // cached numbers expire, and a changed name or picture shows straight away.
-  const PUBLIC_STATS_TTL_MS = 5 * 60 * 1000
-  const PUBLIC_STATS_MAX_LINKS = 500
-  const publicStatsCache = new Map() // slug -> { userId, at, stats }, oldest first
-  const publicStatsPending = new Map() // slug -> the scan already running for it
-
-  // The calendar day before `day`, both as YYYYMMDD numbers (see
-  // getAccountDayNumber). Plain calendar arithmetic in UTC, so a daylight-
-  // saving change in the account's zone can never skip or repeat a day.
-  const dayBefore = (day) => {
-    const earlier = new Date(Date.UTC(Math.floor(day / 10000), (Math.floor(day / 100) % 100) - 1, day % 100) - 86400000)
-    return earlier.getUTCFullYear() * 10000 + (earlier.getUTCMonth() + 1) * 100 + earlier.getUTCDate()
-  }
-
-  async function computePublicStats(user) {
-    const accountId = user.accountId || 'default'
-    const [movies, episodes, timeZone] = await Promise.all([
-      prisma.movieWatchHistory.findMany({
-        where: { accountId, userId: user.id },
-        select: { itemName: true, poster: true, durationSeconds: true, watchedAt: true },
-      }),
-      prisma.episodeWatchHistory.findMany({
-        where: { accountId, userId: user.id },
-        select: { showName: true, poster: true, durationSeconds: true, watchedAt: true },
-      }),
-      resolveAccountTimezone(prisma, accountId),
-    ])
-
-    const totalWatchSeconds = [...movies, ...episodes].reduce((sum, r) => sum + (r.durationSeconds || 0), 0)
-
-    // Top titles by accumulated duration - movies and episodes of the same
-    // show grouped together under the show's own name.
-    const byTitle = new Map()
-    for (const m of movies) {
-      if (!m.itemName) continue
-      const key = m.itemName
-      const cur = byTitle.get(key) || { name: m.itemName, poster: m.poster, seconds: 0 }
-      cur.seconds += m.durationSeconds || 0
-      byTitle.set(key, cur)
-    }
-    for (const e of episodes) {
-      if (!e.showName) continue
-      const key = e.showName
-      const cur = byTitle.get(key) || { name: e.showName, poster: e.poster, seconds: 0 }
-      cur.seconds += e.durationSeconds || 0
-      if (!cur.poster && e.poster) cur.poster = e.poster
-      byTitle.set(key, cur)
-    }
-    const topTitles = Array.from(byTitle.values())
-      .sort((a, b) => b.seconds - a.seconds)
-      .slice(0, 10)
-      .map((t) => ({ name: t.name, poster: t.poster }))
-
-    // Simple day-streak over this user's own watchedAt dates - ending
-    // today or yesterday (so a streak survives up until the point the
-    // account's actual "today" catches up), consecutive days back from
-    // there. Days are the account's own calendar days, not UTC ones, so a
-    // late-evening watch counts for the evening it happened in. Self-contained
-    // rather than reusing buildMetricsForAccount's version, which is entangled
-    // with a full account-wide, period-filtered aggregation this lightweight
-    // public endpoint has no need for.
-    const watchDays = new Set()
-    for (const r of [...movies, ...episodes]) {
-      if (!r.watchedAt) continue
-      const watched = new Date(r.watchedAt)
-      if (!Number.isNaN(watched.getTime())) watchDays.add(getAccountDayNumber(watched, timeZone))
-    }
-    let streak = 0
-    const today = getAccountDayNumber(new Date(Date.now()), timeZone)
-    let day = watchDays.has(today) ? today : (watchDays.has(dayBefore(today)) ? dayBefore(today) : null)
-    // Each pass uses up one distinct watched day, so this ends on its own.
-    while (day !== null && watchDays.has(day)) {
-      streak++
-      day = dayBefore(day)
     }
 
-    return {
-      totalWatchHours: Math.round((totalWatchSeconds / 3600) * 10) / 10,
-      totalTitles: byTitle.size,
-      streak,
-      topTitles,
-    }
-  }
-
-  function publicStatsFor(slug, user) {
-    const cached = publicStatsCache.get(slug)
-    if (cached && cached.userId === user.id && Date.now() - cached.at < PUBLIC_STATS_TTL_MS) {
-      return Promise.resolve(cached.stats)
-    }
-    let pending = publicStatsPending.get(slug)
-    if (!pending) {
-      pending = computePublicStats(user)
-        .then((stats) => {
-          // Re-adding moves a link to the newest end; when the cache is full
-          // the link that was worked out longest ago goes.
-          publicStatsCache.delete(slug)
-          while (publicStatsCache.size >= PUBLIC_STATS_MAX_LINKS) {
-            publicStatsCache.delete(publicStatsCache.keys().next().value)
-          }
-          publicStatsCache.set(slug, { userId: user.id, at: Date.now(), stats })
-          return stats
-        })
-        .finally(() => publicStatsPending.delete(slug))
-      publicStatsPending.set(slug, pending)
-    }
-    return pending
-  }
-
-  // GET /users/public-stats/:slug - the actual public payload. No auth, no
-  // accountId scoping (the slug IS the scope - it's globally unique). Only
-  // ever returns a small, deliberately curated set of fields: username,
-  // avatar, total watch time, top titles, streak. Never email, never
-  // provider details, never anything else on the account.
-  router.get('/public-stats/:slug', async (req, res) => {
-    try {
-      const slug = req.params.slug
-      const user = await prisma.user.findFirst({
-        where: { publicStatsSlug: slug, publicStatsEnabled: true },
-        select: { id: true, accountId: true, username: true, avatarUrl: true, colorIndex: true },
-      })
-      if (!user) {
-        publicStatsCache.delete(slug)
-        return res.status(404).json({ error: 'This stats page is not available' })
-      }
-
-      const stats = await publicStatsFor(slug, user)
-
-      res.json({
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        colorIndex: user.colorIndex,
-        totalWatchHours: stats.totalWatchHours,
-        totalTitles: stats.totalTitles,
-        streak: stats.streak,
-        topTitles: stats.topTitles,
-      })
-    } catch (error) {
-      console.error('Error fetching public stats:', error)
-      res.status(500).json({ error: 'Failed to fetch public stats' })
-    }
-  })
-
-  // ==================== HISTORY CSV IMPORT/EXPORT ====================
-  // The biggest adoption blocker for a Trakt alternative is leaving your
-  // history behind - see csvHistoryImport.js's own comment for why this
-  // reads by flexible column name (IMDb/Letterboxd/loose-Trakt-export
-  // compatible) rather than three hardcoded exact formats.
-  const { createMulterInstance } = require('../utils/helpers/multer')
-  const csvUpload = createMulterInstance({
-    limits: { fileSize: 20 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-      const looksLikeCsv = file.mimetype === 'text/csv' || file.mimetype === 'application/vnd.ms-excel' || /\.csv$/i.test(file.originalname || '')
-      // Trakt's own free export (Settings -> Data) is JSON, not CSV - see
-      // traktExportImport.js. Same endpoint handles both.
-      const looksLikeJsonFile = file.mimetype === 'application/json' || /\.json$/i.test(file.originalname || '')
-      if (looksLikeCsv || looksLikeJsonFile) return cb(null, true)
-      cb(new Error('Only .csv or .json files are allowed'), false)
-    },
-  })
-
-  // POST /users/:id/import-history - multipart file upload (field name
-  // "file"). Must be before /:id route.
-  router.post('/:id/import-history', csvUpload.single('file'), async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      if (!req.file) return res.status(400).json({ error: 'No file uploaded (expected multipart field "file")' })
-
-      const { parseCsv, mapColumns, resolveRowToImdbItem, parseWatchedDate, normalizeRating, looksLikeSeriesEpisodeTitle } = require('../utils/csvHistoryImport')
-      const { resolveSinglePoster } = require('../utils/libraryHelpers')
-      const { resolveOmdbKeyForAccount } = require('../utils/listImport')
-
-      const text = req.file.buffer.toString('utf8')
-
-      // A Trakt export JSON is flattened into the same column names the CSV
-      // path already understands, so everything below this point is shared.
-      const { parseTraktExport, looksLikeJson } = require('../utils/traktExportImport')
-      let headers, records, skippedNonMovie = 0, skippedNoTimestamp = 0
-      if (looksLikeJson(text)) {
-        const parsed = parseTraktExport(text)
-        if (!parsed) return res.status(400).json({ error: 'That file is not valid JSON.' })
-        ;({ headers, records, skippedNonMovie, skippedNoTimestamp } = parsed)
-        if (records.length === 0) {
-          if (skippedNonMovie > 0) {
-            return res.status(400).json({ error: `That file contains ${skippedNonMovie} episode or show entr${skippedNonMovie === 1 ? 'y' : 'ies'} and no movies. Movie history and ratings can be imported; episode history cannot yet.` })
-          }
-          if (skippedNoTimestamp > 0) {
-            // Named plainly - this is Trakt's collection or watchlist export
-            // (or similar), which is correctly not importable: a title
-            // merely owned or queued was never actually watched.
-            return res.status(400).json({ error: `That file lists ${skippedNoTimestamp} title(s) with no watch date or rating attached - looks like a collection or watchlist export rather than history. Only history and ratings files can be imported.` })
-          }
-          // Say what the file actually looked like. A format that doesn't
-          // match is a one-line fix here, but only if the shape is known -
-          // "no entries found" on its own is a dead end for whoever hit it.
-          return res.status(400).json({
-            error: `No importable entries found. Expected Trakt's export format (entries with a "movie" object containing ids.imdb). This file is ${parsed.shape || 'in an unrecognised shape'}.`,
-            shape: parsed.shape || null,
-          })
+    // TMDb "part of a collection" lookup (e.g. Dune (2021) -> Dune Collection
+    // -> [Dune, Dune: Part Two, ...]) - movies only, TMDb has no equivalent
+    // grouping for TV. Same find-by-imdb-id + backdrop's own key resolution,
+    // then one extra call for the movie's own belongs_to_collection field,
+    // then one more for the collection's full parts list. Each part only
+    // carries a TMDb id, and this app routes everything by IMDb id, so each
+    // part needs its own external_ids lookup too - capped at 12 to bound the
+    // worst case (a long-running franchise) to a handful of requests, all
+    // cached together under a long TTL since a collection's lineup is static
+    // apart from a genuinely new sequel releasing.
+    const collectionCache = new Map();
+    const COLLECTION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+    const COLLECTION_MAX_PARTS = 12;
+    async function fetchTmdbCollection(imdbId, itemType, req) {
+        if (!(imdbId && /^tt\d+$/.test(imdbId)) || itemType !== "movie") {
+            return null;
         }
-      } else {
-        ({ headers, records } = parseCsv(text))
-        if (records.length === 0) return res.status(400).json({ error: 'No rows found in that CSV' })
-      }
-      const colMap = mapColumns(headers)
-      const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountId).catch(() => null)
-      const lumiereBase = await require('../utils/lumiere').readyLumiere(prisma, accountId).catch(() => '')
-
-      // Capped so one enormous export (a decade of Letterboxd diary
-      // entries) can't turn a single request into thousands of sequential
-      // OMDb lookups - matches the same protective cap listImport.js's own
-      // MAX_IMPORT_ITEMS already applies to title-based catalog imports.
-      const MAX_ROWS = 2000
-      const rows = records.slice(0, MAX_ROWS)
-
-      let imported = 0
-      let skipped = 0
-      const unresolved = []
-
-      // Undo bookkeeping: snapshot which items/ratings already exist so the
-      // rows this run CREATES can be told apart from ones it merely skipped
-      // (the upserts below never modify existing rows - update: {}).
-      const preExistingItemIds = new Set(
-        (await prisma.movieWatchHistory.findMany({ where: { accountId, userId: user.id }, select: { itemId: true } })).map((r) => r.itemId)
-      )
-      const preExistingRatingIds = new Set(
-        (await prisma.titleRating.findMany({ where: { accountId, season: 0 }, select: { itemId: true } })).map((r) => r.itemId)
-      )
-      const createdItemIds = []
-      const createdRatingIds = []
-
-      for (const row of rows) {
-        // Netflix-style episode rows (Show: Season N: Episode) carry no id
-        // and cannot resolve as movies - counted with the other episode
-        // skips instead of burning a doomed OMDb lookup each and landing in
-        // "couldn't resolve" noise. Only when there's no real id to trust.
-        const rawRowId = colMap.imdbId ? row[colMap.imdbId] : null
-        const hasRealId = rawRowId && /^tt\d+$/.test(String(rawRowId).trim())
-        if (!hasRealId && looksLikeSeriesEpisodeTitle(colMap.title ? row[colMap.title] : null)) {
-          skippedNonMovie++
-          continue
+        const cached = collectionCache.get(imdbId);
+        if (cached && Date.now() - cached.at < COLLECTION_CACHE_TTL_MS) {
+            return cached.value;
         }
-        const resolved = await resolveRowToImdbItem(row, colMap, omdbApiKey, lumiereBase)
-        if (!resolved) {
-          skipped++
-          if (colMap.title && row[colMap.title]) unresolved.push(row[colMap.title])
-          continue
+        const key = await resolveTmdbKeyForBackdrop(req);
+        if (!key) {
+            return null;
         }
-        const watchedAt = colMap.watchedDate ? (parseWatchedDate(row[colMap.watchedDate]) || new Date()) : new Date()
-        const rating = colMap.rating ? normalizeRating(row[colMap.rating]) : null
-
         try {
-          const poster = await resolveSinglePoster(resolved.imdbId, 'movie', null)
-          await prisma.movieWatchHistory.upsert({
-            where: { accountId_userId_itemId: { accountId, userId: user.id, itemId: resolved.imdbId } },
-            create: { accountId, userId: user.id, itemId: resolved.imdbId, itemName: resolved.title || resolved.imdbId, poster, profileLabel: 'Imported', completed: true, watchedAt },
-            update: {}, // never overwrite an existing native record with an imported one
-          })
-          if (!preExistingItemIds.has(resolved.imdbId)) {
-            preExistingItemIds.add(resolved.imdbId) // a file can repeat a title
-            createdItemIds.push(resolved.imdbId)
-          }
-          if (rating) {
-            await prisma.titleRating.upsert({
-              where: { accountId_itemId_season: { accountId, itemId: resolved.imdbId, season: 0 } },
-              create: { accountId, itemId: resolved.imdbId, itemType: 'movie', season: 0, rating, itemName: resolved.title || null },
-              update: {},
-            }).catch(() => {}) // best-effort - a rating conflict must never fail the whole import
-            if (!preExistingRatingIds.has(resolved.imdbId)) {
-              preExistingRatingIds.add(resolved.imdbId)
-              createdRatingIds.push(resolved.imdbId)
+            const findRsp = await fetch(
+                `https://api.themoviedb.org/3/find/${imdbId}?api_key=${encodeURIComponent(key)}&external_source=imdb_id`
+            );
+            if (!findRsp.ok) {
+                return null;
             }
-          }
-          imported++
-        } catch (e) {
-          skipped++
-        }
-      }
-
-      // One Trash entry per import run: undoing it deletes exactly the rows
-      // this run created and nothing that predated it.
-      try {
-        await require('../utils/trash').archiveHistoryImport(prisma, accountId, user.id, { createdItemIds, createdRatingIds })
-      } catch (e) {
-        console.warn('Import undo-archive failed (import itself succeeded):', e?.message)
-      }
-
-      res.json({
-        imported,
-        // Entries the export carried but this importer cannot write (episode
-        // and show history) are counted as skipped rather than omitted, so
-        // the totals shown add up to what was actually in the file.
-        skipped: skipped + skippedNonMovie,
-        skippedEpisodes: skippedNonMovie,
-        totalRows: records.length + skippedNonMovie,
-        truncated: records.length > MAX_ROWS,
-        unresolvedTitles: unresolved.slice(0, 20),
-      })
-    } catch (error) {
-      console.error('Error importing history CSV:', error)
-      res.status(500).json({ error: publicMessage(error, 'Failed to import history') })
-    }
-  })
-
-
-  // POST /users/:id/trax-addon - enable/disable the SlickTrax Addon for this
-  // user (body: {enabled}). The URL token is a bearer credential (see
-  // routes/traxAddon.js): crypto-random, generated on first enable, and kept
-  // stable across later toggles so the URL already synced into the account
-  // keeps working. Pass {rotate: true} to force a fresh token - which
-  // deliberately kills the old URL everywhere it was ever installed.
-  router.post('/:id/trax-addon', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-
-      const enabled = !!req.body?.enabled
-      const rotate = !!req.body?.rotate
-      let traxToken = user.traxToken
-      if ((enabled && !traxToken) || rotate) {
-        traxToken = require('crypto').randomBytes(24).toString('hex')
-      }
-      const data = { traxAddonEnabled: enabled, traxToken }
-      // In-player actions ride this same endpoint rather than the generic
-      // user PUT (whose field allowlist is deliberately narrow): it is part
-      // of the same addon's configuration, and changing it must also bump
-      // the manifest the next sync installs.
-      await prisma.user.update({ where: { id: user.id }, data })
-
-      // The base URL sync will use. Reported honestly rather than guessed
-      // from the request: sync itself has no request to borrow a hostname
-      // from, so if PUBLIC_APP_URL is unset the auto-install genuinely will
-      // not happen and the UI should say so instead of showing a URL that
-      // only works from this browser's vantage point.
-      // The admin reaching this route opened SlickSync from the address their
-      // devices use - learned, like on any admin visit (utils/ownAddress.js);
-      // never one only this server knows (a container's name, localhost).
-      const own = require('../utils/ownAddress')
-      const reqBase = own.requestBase(req)
-      const reqBaseUsable = require('../utils/streamGate').deviceReachable(reqBase)
-      if (enabled && reqBaseUsable) await own.learn(prisma, accountId, reqBase).catch(() => {})
-      const base = await own.publicBase(prisma, accountId).catch(() => '')
-      const baseSource = base ? (process.env.PUBLIC_APP_URL ? 'env' : 'observed') : null
-      // baseKnown is the honest bit: with no address configured, sync cannot
-      // install this on anyone's device no matter what the toggle says, and
-      // the url below only works from the browser that asked for it.
-      const effectiveBase = base || (reqBaseUsable ? reqBase : '')
-      res.json({
-        enabled,
-        manifestUrl: effectiveBase ? `${effectiveBase}/trax/${traxToken}/v${require('./traxAddon').traxPathVersion(user)}/manifest.json` : null,
-        autoInstall: !!base,
-        baseKnown: !!base,
-        baseSource,
-      })
-    } catch (error) {
-      console.error('Error toggling SlickTrax addon:', error)
-      res.status(500).json({ error: 'Failed to update SlickTrax addon' })
-    }
-  })
-
-  // Leave a person out of household numbers - a test or guest person. Their
-  // own page keeps everything; totals, Top Viewers and Wrapped skip them.
-  router.put('/:id/household-stats', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId }, select: { id: true } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      const excluded = req.body?.excluded === true
-      await prisma.user.update({ where: { id: user.id }, data: { excludeFromHouseholdStats: excluded } })
-      try { require('../utils/metricsCache').clearMetricsForAccount(accountId) } catch { /* optional */ }
-      res.json({ excludeFromHouseholdStats: excluded })
-    } catch (error) {
-      console.error('Error changing household stats:', error)
-      res.status(500).json({ error: 'Failed to change that' })
-    }
-  })
-
-  // --- Each person's SlickTrax rows (routes/traxAddon.js orderedTraxRows) ---
-
-  async function traxRowsView(user) {
-    const { orderedTraxRows, getListsForAccount } = require('./traxAddon')
-    const lists = await getListsForAccount(prisma, user.accountId || 'default')
-    return {
-      enabled: !!user.traxAddonEnabled,
-      rows: orderedTraxRows(lists, user.traxRowsJson).map((r) => ({ key: r.key, name: r.name, hidden: r.hidden })),
-    }
-  }
-
-  router.get('/:id/trax-rows', async (req, res) => {
-    try {
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId: getAccountId(req) } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      res.json(await traxRowsView(user))
-    } catch (error) {
-      console.error('Error reading SlickTrax rows:', error)
-      res.status(500).json({ error: 'Failed to read SlickTrax rows' })
-    }
-  })
-
-  // Saving changes the person's SlickTrax address (traxPathVersion), so their
-  // apps fetch the new rows; a sync for them is started straight away so the
-  // new address reaches their account without waiting for the schedule.
-  router.put('/:id/trax-rows', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      const clean = (v) => (Array.isArray(v) ? v.filter((k) => typeof k === 'string' && k.length < 200).slice(0, 500) : [])
-      const order = clean(req.body?.order)
-      const hidden = clean(req.body?.hidden)
-      const traxRowsJson = order.length || hidden.length ? JSON.stringify({ order, hidden }) : null
-      const updated = await prisma.user.update({ where: { id: user.id }, data: { traxRowsJson } })
-
-      if (updated.traxAddonEnabled && updated.isActive) {
-        setImmediate(async () => {
-          try {
-            let unsafeMode = false
-            let useCustomFields = true
-            const acct = await prisma.appAccount.findFirst({ where: { id: accountId }, select: { sync: true } })
-            let cfg = acct?.sync
-            if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-            if (cfg && typeof cfg === 'object') {
-              if (typeof cfg.safe === 'boolean') unsafeMode = !cfg.safe
-              if (typeof cfg.useCustomFields === 'boolean') useCustomFields = cfg.useCustomFields
-              else if (typeof cfg.useCustomNames === 'boolean') useCustomFields = cfg.useCustomNames
+            const findData = await findRsp.json();
+            const movieHit = (findData.movie_results || [])[0];
+            if (!movieHit?.id) {
+                collectionCache.set(imdbId, { at: Date.now(), value: null });
+                return null;
             }
-            await syncUserAddons(prisma, updated.id, [], unsafeMode, req, decrypt, getAccountId, useCustomFields)
-          } catch (e) {
-            console.warn('[SlickTrax] sync after a rows change failed:', e?.message)
-          }
-        })
-      }
-      res.json(await traxRowsView(updated))
-    } catch (error) {
-      console.error('Error saving SlickTrax rows:', error)
-      res.status(500).json({ error: 'Failed to save SlickTrax rows' })
-    }
-  })
 
-  // --- Watch State with AIOStreams (utils/watchState.js) -------------------
-  //
-  // One switch per person: their consent for their watch history to be read
-  // by, and written from, an AIOStreams configuration. The link it produces
-  // goes into AIOStreams by hand (Addons -> add by URL). AIOStreams then names
-  // each of its household profiles on every request, and each profile is
-  // linked here to the SlickSync user it really is.
+            const movieRsp = await fetch(
+                `https://api.themoviedb.org/3/movie/${movieHit.id}?api_key=${encodeURIComponent(key)}`
+            );
+            if (!movieRsp.ok) {
+                return null;
+            }
+            const movieData = await movieRsp.json();
+            const collectionRef = movieData.belongs_to_collection;
+            if (!collectionRef?.id) {
+                collectionCache.set(imdbId, { at: Date.now(), value: null });
+                return null;
+            }
 
-  async function watchStateBase(req, accountId) {
-    const own = require('../utils/ownAddress')
-    let base = await own.publicBase(prisma, accountId).catch(() => '')
-    if (!base) {
-      const reqBase = own.requestBase(req)
-      if (require('../utils/streamGate').deviceReachable(reqBase)) base = reqBase
-    }
-    return base
-  }
+            const collRsp = await fetch(
+                `https://api.themoviedb.org/3/collection/${collectionRef.id}?api_key=${encodeURIComponent(key)}`
+            );
+            if (!collRsp.ok) {
+                return null;
+            }
+            const collData = await collRsp.json();
+            const parts = (collData.parts || [])
+                .filter((p) => p.id !== movieHit.id)
+                .sort((a, b) => (a.release_date || "9999").localeCompare(b.release_date || "9999"))
+                .slice(0, COLLECTION_MAX_PARTS);
 
-  async function watchStateView(req, accountId, user, extra = {}) {
-    const { readViewerMap } = require('../utils/watchState')
-    const base = await watchStateBase(req, accountId)
-    // What the 30-minute check last found wrong (utils/aioSlickTrax.js).
-    let issues = []
-    let collectionsFirst = false
-    try {
-      const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-      let cfg = acct?.sync
-      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-      issues = Object.keys(cfg?.aioSlickTraxIssues?.[user.id] || {})
-      collectionsFirst = cfg?.aioSlickTraxFirst?.[user.id] === true
-    } catch { /* optional */ }
-    const map = readViewerMap(user)
-    const people = await prisma.user.findMany({ where: { accountId, isActive: true }, select: { id: true, username: true, watchStateEnabled: true } })
-    const byId = new Map(people.map((p) => [p.id, p]))
-    return {
-      enabled: !!user.watchStateEnabled,
-      manifestUrl: user.watchStateEnabled && user.traxToken && base ? `${base}/trax/${user.traxToken}/aio/manifest.json` : null,
-      baseKnown: !!base,
-      // Every AIOStreams profile seen so far, and who it is linked to. An
-      // unlinked one is refused until someone picks who it is; a skipped one
-      // was deliberately left out.
-      viewers: Object.entries(map).map(([viewer, raw]) => {
-        const userId = raw && raw !== 'skip' ? raw : null
-        return {
-          viewer,
-          userId,
-          skipped: raw === 'skip',
-          username: userId ? byId.get(userId)?.username || null : null,
-          userEnabled: userId ? !!byId.get(userId)?.watchStateEnabled : null,
+            const partsWithImdbIds = await Promise.all(
+                parts.map(async (p) => {
+                    try {
+                        const extRsp = await fetch(
+                            `https://api.themoviedb.org/3/movie/${p.id}/external_ids?api_key=${encodeURIComponent(key)}`
+                        );
+                        if (!extRsp.ok) {
+                            return null;
+                        }
+                        const extData = await extRsp.json();
+                        if (!extData.imdb_id) {
+                            return null;
+                        }
+                        return {
+                            id: extData.imdb_id,
+                            poster: p.poster_path
+                                ? `https://image.tmdb.org/t/p/w342${p.poster_path}`
+                                : null,
+                            releaseYear: p.release_date ? p.release_date.slice(0, 4) : null,
+                            title: p.title,
+                        };
+                    } catch {
+                        return null;
+                    }
+                })
+            );
+
+            const value = {
+                id: collectionRef.id,
+                name: collectionRef.name,
+                parts: partsWithImdbIds.filter(Boolean),
+            };
+            // A collection with no OTHER resolvable entries isn't worth showing -
+            // same "don't render a section that can't do anything" rule as
+            // everywhere else in this app.
+            const finalValue = value.parts.length > 0 ? value : null;
+            collectionCache.set(imdbId, { at: Date.now(), value: finalValue });
+            return finalValue;
+        } catch {
+            return null;
         }
-      }),
-      people: people.map((p) => ({ id: p.id, username: p.username, enabled: !!p.watchStateEnabled })),
-      // Someone added with their AIOStreams configuration password: SlickSync
-      // adds the link to that configuration itself.
-      canInstall: user.providerType === 'jellyfin' && user.jellyfinServerKind === 'aiostreams' && !!user.aioConfigId && !!user.aioConfigPassword,
-      issues,
-      // Their choice: keep SlickSync's collections at the top of their AIOStreams catalogs.
-      collectionsFirst,
-      ...extra,
     }
-  }
 
-  // Add the SlickTrax link to their AIOStreams configuration (utils/aioSlickTrax.js).
-  async function installIntoAio(req, accountId, user) {
-    try {
-      const base = await watchStateBase(req, accountId)
-      const result = await require('../utils/aioSlickTrax').installSlickTrax(prisma, decrypt, user, base)
-      return { install: result.added ? 'added' : 'already' }
-    } catch (e) {
-      return { install: 'failed', installError: e?.message || 'AIOStreams refused the change' }
-    }
-  }
-
-  router.get('/:id/watch-state', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      res.json(await watchStateView(req, accountId, user))
-    } catch (error) {
-      console.error('Error reading Watch State:', error)
-      res.status(500).json({ error: 'Failed to read Watch State' })
-    }
-  })
-
-  router.post('/:id/watch-state', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      const enabled = !!req.body?.enabled
-      // Reuses the SlickTrax token as the credential, made on first need and
-      // then kept stable so a link already pasted into AIOStreams keeps working.
-      const traxToken = user.traxToken || (enabled ? require('crypto').randomBytes(24).toString('hex') : null)
-      const updated = await prisma.user.update({ where: { id: user.id }, data: { watchStateEnabled: enabled, traxToken } })
-      // Turning it on for someone whose configuration SlickSync can write to
-      // adds the link there too, instead of handing it over to paste.
-      const canInstall = enabled && updated.providerType === 'jellyfin' && updated.jellyfinServerKind === 'aiostreams' && updated.aioConfigId && updated.aioConfigPassword
-      res.json(await watchStateView(req, accountId, updated, canInstall ? await installIntoAio(req, accountId, updated) : {}))
-    } catch (error) {
-      console.error('Error toggling Watch State:', error)
-      res.status(500).json({ error: 'Failed to update Watch State' })
-    }
-  })
-
-  // "Caught up to here" (utils/catchUp.js): mark an episode and every aired
-  // one before it watched - History only, never watch time - and on their
-  // Jellyfin or AIOStreams server.
-  const catchUpError = (res, error, fallback) => res.status(error.status || 500).json({ message: error.status ? error.message : fallback })
-
-  router.get('/:id/catch-up/shows', async (req, res) => {
-    try {
-      res.json({ shows: await require('../utils/catchUp').showsFor(prisma, getAccountId(req), String(req.params.id)) })
-    } catch (error) {
-      catchUpError(res, error, 'Could not read their shows')
-    }
-  })
-
-  router.get('/:id/catch-up/episodes', async (req, res) => {
-    try {
-      res.json(await require('../utils/catchUp').episodesFor(prisma, decrypt, getAccountId(req), String(req.params.id), String(req.query.showId || '')))
-    } catch (error) {
-      catchUpError(res, error, 'Could not read the episodes')
-    }
-  })
-
-  router.post('/:id/catch-up', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      const exists = await prisma.user.findFirst({ where: { id: req.params.id, accountId }, select: { id: true } })
-      if (!exists) return res.status(404).json({ message: 'User not found' })
-      res.json(await require('../utils/catchUp').start(prisma, decrypt, accountId, String(req.params.id), {
-        showId: req.body?.showId, season: req.body?.season, episode: req.body?.episode,
-      }))
-    } catch (error) {
-      catchUpError(res, error, 'Could not mark them caught up')
-    }
-  })
-
-  router.get('/:id/catch-up/status', async (req, res) => {
-    const accountId = getAccountId(req)
-    const exists = await prisma.user.findFirst({ where: { id: req.params.id, accountId }, select: { id: true } }).catch(() => null)
-    if (!exists) return res.status(404).json({ message: 'User not found' })
-    res.json({ job: require('../utils/catchUp').status(String(req.params.id)) })
-  })
-
-  // Take back the last run (personFor scopes the person to this account).
-  router.post('/:id/catch-up/undo', async (req, res) => {
-    try {
-      res.json({ job: await require('../utils/catchUp').undo(prisma, decrypt, getAccountId(req), String(req.params.id)) })
-    } catch (error) {
-      catchUpError(res, error, 'Could not undo that')
-    }
-  })
-
-  // Clear a finished run's card (and its Undo).
-  router.post('/:id/catch-up/dismiss', async (req, res) => {
-    const accountId = getAccountId(req)
-    const exists = await prisma.user.findFirst({ where: { id: req.params.id, accountId }, select: { id: true } }).catch(() => null)
-    if (!exists) return res.status(404).json({ message: 'User not found' })
-    res.json({ job: require('../utils/catchUp').dismiss(String(req.params.id)) })
-  })
-
-  // One episode back to not watched.
-  router.post('/:id/catch-up/unmark', async (req, res) => {
-    try {
-      res.json(await require('../utils/catchUp').unmark(prisma, decrypt, getAccountId(req), String(req.params.id), {
-        showId: String(req.body?.showId || ''), season: req.body?.season, episode: req.body?.episode,
-      }))
-    } catch (error) {
-      catchUpError(res, error, 'Could not mark it not watched')
-    }
-  })
-
-  // Copy watch history (utils/watchCopy): watched titles and resume points
-  // from one of a person's sign-ins or profiles to another, undoable 7 days.
-  const watchCopyDeps = (req) => ({
-    decrypt: (text, opts) => decrypt(text, opts || req),
-    createProvider: (row) => createProvider(row, { decrypt, req }),
-  })
-  const watchCopyError = (res, error, fallback) => {
-    const status = error?.status && error.status < 500 ? error.status : 502
-    res.status(status).json({ message: error?.status && error.status < 500 ? error.message : publicMessage(error, fallback) })
-  }
-  router.get('/:id/watch-copy/sides', async (req, res) => {
-    try {
-      const watchCopy = require('../utils/watchCopy')
-      const id = String(req.params.id)
-      const [sides, last, person, others] = await Promise.all([
-        watchCopy.sides(prisma, watchCopyDeps(req), getAccountId(req), id),
-        watchCopy.lastRun(prisma, getAccountId(req), id),
-        watchCopy.personOf(prisma, getAccountId(req), id),
-        req.query.others === '1' ? watchCopy.others(prisma, getAccountId(req), id) : [],
-      ])
-      res.json({ sides, others, person, lastRun: last, job: watchCopy.status(id) })
-    } catch (error) {
-      watchCopyError(res, error, 'Could not read their sign-ins')
-    }
-  })
-  router.post('/:id/watch-copy/preview', async (req, res) => {
-    try {
-      const { _ctx, ...result } = await require('../utils/watchCopy').preview(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id), req.body || {})
-      res.json(result)
-    } catch (error) {
-      watchCopyError(res, error, 'Could not read their watch history')
-    }
-  })
-  router.post('/:id/watch-copy/run', async (req, res) => {
-    try {
-      res.json(await require('../utils/watchCopy').run(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id), req.body || {}))
-    } catch (error) {
-      watchCopyError(res, error, 'Could not copy their watch history')
-    }
-  })
-  router.get('/:id/watch-copy/status', async (req, res) => {
-    const watchCopy = require('../utils/watchCopy')
-    const id = String(req.params.id)
-    const person = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) }, select: { id: true } }).catch(() => null)
-    if (!person) return res.status(404).json({ message: 'User not found' })
-    res.json({ job: watchCopy.status(id), lastRun: await watchCopy.lastRun(prisma, getAccountId(req), id).catch(() => null) })
-  })
-  router.post('/:id/watch-copy/undo', async (req, res) => {
-    try {
-      res.json(await require('../utils/watchCopy').undo(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id), req.body?.runId))
-    } catch (error) {
-      watchCopyError(res, error, 'Could not undo that copy')
-    }
-  })
-  // Keep in step (utils/watchCopy/keepInStep.js): per person, off by default.
-  router.get('/:id/keep-in-step', async (req, res) => {
-    try {
-      res.json(await require('../utils/watchCopy/keepInStep').describe(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id)))
-    } catch (error) {
-      watchCopyError(res, error, 'Could not read Keep in step')
-    }
-  })
-  router.put('/:id/keep-in-step', async (req, res) => {
-    try {
-      const id = String(req.params.id)
-      const person = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) }, select: { id: true } })
-      if (!person) return res.status(404).json({ message: 'User not found' })
-      res.json(await require('../utils/watchCopy/keepInStep').save(prisma, watchCopyDeps(req), getAccountId(req), id, { enabled: req.body?.enabled, members: req.body?.members }))
-    } catch (error) {
-      watchCopyError(res, error, 'Could not change Keep in step')
-    }
-  })
-  // "Just added a sign-in - bring their history over?" (utils/watchCopy/offer.js)
-  router.get('/:id/watch-copy/offer', async (req, res) => {
-    try {
-      res.json({ offer: await require('../utils/watchCopy/offer').offerFor(prisma, watchCopyDeps(req), getAccountId(req), String(req.params.id)) })
-    } catch (error) {
-      res.json({ offer: null })
-    }
-  })
-  router.post('/:id/watch-copy/offer/dismiss', async (req, res) => {
-    try {
-      const id = String(req.params.id)
-      const person = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) }, select: { id: true } })
-      if (!person) return res.status(404).json({ message: 'User not found' })
-      await require('../utils/watchCopy/offer').dismiss(prisma, getAccountId(req), id, req.body?.provider)
-      res.json({ success: true })
-    } catch (error) {
-      watchCopyError(res, error, 'Could not hide that')
-    }
-  })
-  router.get('/:id/watch-copy/candidates', async (req, res) => {
-    res.json({ candidates: await require('../utils/watchCopy').candidates(String(req.query.name || ''), String(req.query.type || '')) })
-  })
-
-  // "Remove from Activity": one viewing out of the page and the person's
-  // watch time and history, into the Trash (utils/removeViewing.js).
-  router.post('/:id/activity/remove', async (req, res) => {
-    try {
-      const r = await require('../utils/removeViewing').removeViewing(prisma, getAccountId(req), String(req.params.id), req.body || {})
-      res.json(r)
-    } catch (error) {
-      const status = error?.status && error.status < 500 ? error.status : 500
-      res.status(status).json({ message: status < 500 ? error.message : publicMessage(error, 'Could not remove that viewing') })
-    }
-  })
-
-  // Who is kept in step with what, for the AIOSync card on Tasks: per person,
-  // the names of their sign-ins and profiles that take part.
-  router.get('/watch-sync/overview', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      const rows = await prisma.watchSyncSetting.findMany({ where: { accountId, enabled: true }, select: { userId: true } })
-      const kis = require('../utils/watchCopy/keepInStep')
-      const synced = []
-      for (const r of rows) {
-        const person = await prisma.user.findFirst({ where: { id: r.userId, accountId }, select: { username: true } })
-        if (!person) continue
-        const info = await kis.describe(prisma, watchCopyDeps(req), accountId, r.userId).catch(() => null)
-        const places = (info?.places || []).filter((p) => p.mode !== 'off').map((p) => p.profile || p.name)
-        if (places.length >= 2) synced.push({ userId: r.userId, name: person.username, places })
-      }
-      res.json({ keepInStep: rows.map((r) => r.userId), synced })
-    } catch (error) {
-      res.json({ keepInStep: [], synced: [] })
-    }
-  })
-
-  // Who has a limit or a pause, for the Limits pills on the Users page.
-  router.get('/screen-time/overview', async (req, res) => {
-    try {
-      res.json(await require('../utils/screenTime').overview(prisma, getAccountId(req)))
-    } catch (error) {
-      res.status(500).json({ message: 'Could not read the limits' })
-    }
-  })
-
-  // An age limit (utils/ageLimits.js): a real Jellyfin server's own, or the
-  // one SlickSync holds Stremio, Nuvio, a Nuvio profile and AIOMetadata to.
-  router.get('/:id/age-limit', async (req, res) => {
-    try {
-      res.json(await require('../utils/ageLimits').getAgeLimit(prisma, decrypt, getAccountId(req), String(req.params.id)))
-    } catch (error) {
-      res.status(error.status || 500).json({ message: error.status ? error.message : 'Could not read the age limit' })
-    }
-  })
-
-  router.put('/:id/age-limit', async (req, res) => {
-    try {
-      res.json(await require('../utils/ageLimits').setAgeLimit(prisma, decrypt, getAccountId(req), String(req.params.id), { value: req.body?.value ?? null, blockUnrated: req.body?.blockUnrated }))
-    } catch (error) {
-      res.status(error.status || 500).json({ message: error.status ? error.message : 'Could not set the age limit' })
-    }
-  })
-
-  // A daily screen-time limit (utils/screenTime.js) - counted across every app.
-  // The id can be a person's, or a merged profile's (utils/screenSubjects.js).
-  router.get('/:id/screen-time', async (req, res) => {
-    try {
-      res.json(await require('../utils/screenTime').getLimit(prisma, getAccountId(req), String(req.params.id), { decrypt }))
-    } catch (error) {
-      res.status(error.status || 500).json({ message: error.status ? error.message : 'Could not read the daily limit' })
-    }
-  })
-
-  router.put('/:id/screen-time', async (req, res) => {
-    try {
-      res.json(await require('../utils/screenTime').setLimit(prisma, getAccountId(req), String(req.params.id), req.body?.limit ?? null, { decrypt }))
-    } catch (error) {
-      res.status(error.status || 500).json({ message: error.status ? error.message : 'Could not set the daily limit' })
-    }
-  })
-
-  // "Resume now" on a paused person - streaming back for the rest of today.
-  router.post('/:id/screen-time/resume', async (req, res) => {
-    try {
-      res.json(await require('../utils/screenTime').resume(prisma, getAccountId(req), String(req.params.id), { decrypt }))
-    } catch (error) {
-      res.status(error.status || 500).json({ message: error.status ? error.message : 'Could not resume them' })
-    }
-  })
-
-  // Try adding it to their AIOStreams configuration again (after fixing what stopped it).
-  router.post('/:id/watch-state/install', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      res.json(await watchStateView(req, accountId, user, await installIntoAio(req, accountId, user)))
-    } catch (error) {
-      console.error('Error adding SlickTrax to AIOStreams:', error)
-      res.status(500).json({ error: 'Failed to add it to AIOStreams' })
-    }
-  })
-
-  // "Keep SlickSync's collections first" in their AIOStreams catalog order -
-  // the household's choice, off by default (utils/aioSlickTrax.js).
-  router.put('/:id/watch-state/collections-first', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      let moveError = null
-      try {
-        await require('../utils/aioSlickTrax').setCollectionsFirst(prisma, decrypt, user, !!req.body?.enabled)
-      } catch (e) {
-        // The choice is kept either way; the 30-minute check tries again.
-        moveError = e?.message || 'AIOStreams refused the change'
-      }
-      res.json(await watchStateView(req, accountId, user, moveError ? { firstError: moveError } : {}))
-    } catch (error) {
-      console.error('Error changing collections first:', error)
-      res.status(500).json({ error: 'Failed to change that' })
-    }
-  })
-
-  // Link one AIOStreams profile to a SlickSync user, or unlink it (null).
-  router.put('/:id/watch-state/viewers', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      const { readViewerMap, viewerSlug } = require('../utils/watchState')
-      const viewer = viewerSlug(req.body?.viewer)
-      if (!viewer) return res.status(400).json({ error: 'viewer is required' })
-      const target = req.body?.userId || null
-      if (target && target !== 'skip') {
-        const exists = await prisma.user.findFirst({ where: { id: target, accountId }, select: { id: true } })
-        if (!exists) return res.status(400).json({ error: 'That user is not in this account' })
-      }
-      const map = readViewerMap(user)
-      map[viewer] = target
-      const updated = await prisma.user.update({ where: { id: user.id }, data: { watchStateViewers: JSON.stringify(map) } })
-      res.json(await watchStateView(req, accountId, updated))
-    } catch (error) {
-      console.error('Error linking a Watch State viewer:', error)
-      res.status(500).json({ error: 'Failed to link that profile' })
-    }
-  })
-
-  // GET /users/:id/export-history.csv - Letterboxd-import-compatible CSV
-  // (Title,Year,imdbID,WatchedDate,Rating10 - the exact column names
-  // Letterboxd's own importer accepts, confirmed against
-  // letterboxd.com/about/importing-data/). Must be before /:id route.
-  router.get('/:id/export-history.csv', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-
-      const movies = await prisma.movieWatchHistory.findMany({
-        where: { accountId, userId: user.id },
-        orderBy: { watchedAt: 'desc' },
-      })
-      const ratings = await prisma.titleRating.findMany({ where: { accountId, itemId: { in: movies.map((m) => m.itemId) } } })
-      const ratingByItemId = new Map(ratings.map((r) => [r.itemId, r.rating]))
-
-      const escapeCsv = (v) => {
-        const s = String(v ?? '')
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-      }
-      const lines = ['Title,Year,imdbID,WatchedDate,Rating10']
-      for (const m of movies) {
-        const year = '' // MovieWatchHistory doesn't store release year separately
-        const watchedDate = m.watchedAt ? new Date(m.watchedAt).toISOString().split('T')[0] : ''
-        const rating = ratingByItemId.get(m.itemId) || ''
-        lines.push([escapeCsv(m.itemName), year, m.itemId, watchedDate, rating].join(','))
-      }
-
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-      res.setHeader('Content-Disposition', `attachment; filename="${user.username || 'watch-history'}.csv"`)
-      res.send(lines.join('\n'))
-    } catch (error) {
-      console.error('Error exporting history CSV:', error)
-      res.status(500).json({ error: 'Failed to export history' })
-    }
-  })
-
-  // GET /users/media-episodes - a series' full episode list, grouped by
-  // season, with what the household has already watched marked.
-  //
-  // Deliberately its own endpoint rather than part of /media-details: that
-  // response strips the episode list precisely because it can run to
-  // hundreds of entries for a long-running show, and paying for that on
-  // every poster tap would slow the modal for the majority of opens that
-  // never look at the season list. This is fetched only when someone
-  // expands it.
-  router.get('/media-episodes', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { itemId } = req.query
-      if (!itemId || !/^tt\d+$/.test(String(itemId))) return res.status(400).json({ error: 'A valid itemId is required' })
-
-      const { coalesce } = require('../utils/singleFlight')
-      const metadata = await coalesce(`media-episodes:${itemId}`, 300_000, async () => {
-        const { resolveOmdbKey } = require('../utils/listImport')
-        const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-        return fetchMetadata(String(itemId), 'series', null, omdbApiKey)
-      })
-      const all = Array.isArray(metadata?.allEpisodes) ? metadata.allEpisodes : []
-      if (all.length === 0) return res.json({ seasons: [] })
-
-      // Which episodes anyone here has already watched - the reason to show
-      // this list at all is usually "where am I up to".
-      const watched = await prisma.episodeWatchHistory.findMany({
-        where: { accountId, showId: String(itemId) },
-        select: { season: true, episode: true },
-      }).catch(() => [])
-      const seen = new Set(watched.map((w) => `${w.season}:${w.episode}`))
-
-      const bySeason = new Map()
-      for (const e of all) {
-        if (!bySeason.has(e.season)) bySeason.set(e.season, [])
-        bySeason.get(e.season).push({
-          season: e.season,
-          episode: e.episode,
-          title: e.title,
-          released: e.released,
-          watched: seen.has(`${e.season}:${e.episode}`),
-        })
-      }
-      const seasons = [...bySeason.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([season, episodes]) => ({
-          season,
-          episodes,
-          watchedCount: episodes.filter((e) => e.watched).length,
-        }))
-      res.json({ seasons })
-    } catch (error) {
-      console.error('Error fetching episodes:', error)
-      res.status(500).json({ error: 'Failed to fetch episodes' })
-    }
-  })
-
-  // GET /users/media-details - Cinemeta detail lookup for the Activity page's
-  // poster-click modal (cast, rating, genres, etc). Must be before /:id route.
-  router.get('/media-details', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { itemId, type, videoId } = req.query
-      if (!itemId || !type) {
-        return res.status(400).json({ error: 'itemId and type are required' })
-      }
-
-      // Movie night makes this endpoint bursty: several people open the same
-      // title within a minute and each open used to mean its own Cinemeta +
-      // TMDb + OMDb round-trips (and its own OMDb quota). Coalescing by
-      // (account, item, type, video) collapses a burst into one upstream
-      // fetch, and holds the result briefly so an open arriving just after
-      // one completes is served from it too. Account-scoped because the
-      // per-account keys below change what comes back.
-      const { coalesce } = require('../utils/singleFlight')
-      const flightKey = `media-details:${accountId}:${itemId}:${type}:${videoId || ''}`
-      const payload = await coalesce(flightKey, 60_000, async () => {
-        const { resolveOmdbKey, resolveMdblistKey } = require('../utils/listImport')
-        const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-        const metadata = await fetchMetadata(itemId, type, videoId || null, omdbApiKey)
-        if (!metadata) return null
-
-        // allEpisodes (every episode of the whole series - can be hundreds of
-        // entries for long-running shows) only exists for Continue Watching's
-        // "find the next episode" logic. This modal only ever renders the one
-        // current episode (already in `episode`), so shipping the full list
-        // here is pure wasted payload/parse time competing with the modal's
-        // opening animation on mobile. Stripped at the response boundary only -
-        // fetchMetadata's cache entry (shared with Continue Watching) still has it.
-        const { allEpisodes, ...detailsForClient } = metadata
-        const mdblistKey = await resolveMdblistKey(prisma, getAccountId, req)
-        const [backdrop, collection, watchProviders, mdblistScore] = await Promise.all([
-          fetchTmdbBackdrop(itemId, req),
-          fetchTmdbCollection(itemId, type, req),
-          fetchTmdbWatchProviders(itemId, type, req),
-          fetchMdblistScore(itemId, type, mdblistKey),
-        ])
-        return { ...detailsForClient, backdrop, collection, watchProviders, mdblistScore }
-      })
-      if (!payload) {
-        return res.status(404).json({ error: 'No metadata found for this item' })
-      }
-      res.json(payload)
-    } catch (error) {
-      console.error('Error fetching media details:', error)
-      res.status(500).json({ error: 'Failed to fetch media details' })
-    }
-  })
-
-  // POST /users/ratings-batch - Rotten Tomatoes/Metacritic/IMDb ratings for a
-  // batch of IMDb IDs, for grid views (Discover, Activity) that render many
-  // poster cards at once and can't afford a full fetchMetadata() round trip
-  // (Cinemeta + OMDb) per item the way the detail modal and Continue
-  // Watching do. Callers are expected to pass only the IMDb IDs of items
-  // actually rendered on screen, deduplicated - fetchOmdbRatings's own
-  // 7-day cache absorbs repeat calls across page loads, but a single
-  // request here is still capped to keep one grid render from firing an
-  // unbounded number of concurrent external requests.
-  const RATINGS_BATCH_MAX = 60
-  router.post('/ratings-batch', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { imdbIds } = req.body || {}
-      if (!Array.isArray(imdbIds)) {
-        return res.status(400).json({ error: 'imdbIds must be an array' })
-      }
-
-      const uniqueIds = [...new Set(imdbIds)].filter(id => typeof id === 'string' && /^tt\d+$/.test(id)).slice(0, RATINGS_BATCH_MAX)
-
-      const { resolveOmdbKey } = require('../utils/listImport')
-      const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req)
-      const results = await Promise.all(uniqueIds.map(async (id) => {
-        const ratings = await fetchOmdbRatings(id, omdbApiKey)
-        return [id, ratings]
-      }))
-
-      const ratingsById = {}
-      for (const [id, ratings] of results) {
-        if (ratings) ratingsById[id] = ratings
-      }
-
-      res.json({ ratings: ratingsById })
-    } catch (error) {
-      console.error('Error fetching ratings batch:', error)
-      res.status(500).json({ error: 'Failed to fetch ratings batch' })
-    }
-  })
-
-  // GET /users/continue-watching - next unwatched episode per in-progress
-  // show, across all users on the account. Must be before /:id route.
-  router.get('/continue-watching', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { getContinueWatching } = require('../utils/continueWatching')
-      const items = await getContinueWatching(prisma, accountId)
-      res.json(items)
-      // The dashboard's first row - its pictures are requested the instant
-      // this response lands, so start producing them now: the one each card
-      // shows (episode still, then backdrop, then poster), at the card's size.
-      try {
-        const shown = items.map((i) => i?.nextEpisode?.thumbnail || i?.background || i?.poster).filter(Boolean)
-        require('../utils/posterWarm').warmPosters(shown, { widths: [342], urgent: true })
-      } catch { /* optimisation only */ }
-    } catch (error) {
-      console.error('Error fetching continue watching:', error)
-      res.status(500).json({ error: 'Failed to fetch continue watching' })
-    }
-  })
-
-  // GET /users/abandoned-shows - shows started and then dropped long enough
-  // ago that Continue Watching's own 120-day window has stopped showing them
-  // at all. See getAbandonedShows. Must be before /:id route.
-  router.get('/abandoned-shows', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { getAbandonedShows } = require('../utils/continueWatching')
-      res.json(await getAbandonedShows(prisma, accountId))
-    } catch (error) {
-      console.error('Error fetching abandoned shows:', error)
-      res.status(500).json({ error: 'Failed to fetch abandoned shows' })
-    }
-  })
-
-  // GET /users/graveyard - every buried show (see getBuriedShows for why
-  // Continue Watching dismissals rest here too). Must be before /:id.
-  router.get('/graveyard', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { getBuriedShows } = require('../utils/continueWatching')
-      res.json(await getBuriedShows(prisma, accountId))
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to load the graveyard') })
-    }
-  })
-
-  // POST /users/graveyard/unbury - dig a show back up. It reappears in
-  // Continue Watching (if recent) or the abandoned list (if not).
-  router.post('/graveyard/unbury', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { userId, showId } = req.body || {}
-      if (!userId || !showId) return res.status(400).json({ error: 'Missing userId or showId' })
-      const { unburyShow } = require('../utils/continueWatching')
-      await unburyShow(prisma, accountId, userId, showId)
-      res.json({ success: true })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to unbury') })
-    }
-  })
-
-  // POST /users/graveyard/wipe - the permanent exit. Deletes every episode
-  // watch-history row for that user+show plus the burial itself. Watch time
-  // and metrics stop counting it; nothing brings it back. The client's
-  // confirmation names the episode count before this ever runs.
-  // Finish the Saga - franchises the household is mid-way through. For each
-  // recently-watched movie, resolve its TMDb collection (fetchTmdbCollection
-  // above, 24h-cached) and keep collections with at least one watched and at
-  // least one unwatched member. Watched-ness uses the same account-level
-  // semantics as /watchlist/watched-status: history rows, with manual
-  // overrides winning in either direction. The whole answer is cached for
-  // 6h per account - franchise membership and watch history both move
-  // slowly, and a cold run can cost a few dozen TMDb calls.
-  const sagaCache = new Map()
-  const SAGA_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-  const SAGA_CANDIDATES = 40
-  router.get('/finish-the-saga', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const cached = sagaCache.get(accountId)
-      if (cached && Date.now() - cached.at < SAGA_CACHE_TTL_MS) return res.json(cached.value)
-
-      const [historyRows, overrides] = await Promise.all([
-        prisma.movieWatchHistory.findMany({
-          where: { accountId },
-          select: { itemId: true },
-          orderBy: { watchedAt: 'desc' },
-        }),
-        prisma.manualWatchOverride.findMany({ where: { accountId }, select: { itemId: true, watched: true } }),
-      ])
-      const overrideMap = new Map(overrides.map((o) => [o.itemId, o.watched]))
-      const watchedSet = new Set()
-      const ordered = []
-      for (const r of historyRows) {
-        if (overrideMap.get(r.itemId) === false) continue
-        if (!watchedSet.has(r.itemId)) { watchedSet.add(r.itemId); ordered.push(r.itemId) }
-      }
-      for (const [id, w] of overrideMap.entries()) { if (w === true) watchedSet.add(id) }
-
-      const seenCollections = new Set()
-      const sagas = []
-      // Forty lookups, each its own call to TMDb. Asked for one at a time
-      // they ran end to end - measured at four seconds even when every one
-      // of them missed. Eight at a time is quick without being a burst the
-      // upstream would object to. Dedupe still happens in the original
-      // order below, so the result is unchanged.
-      const { mapLimit } = require('../utils/mapLimit')
-      const collections = await mapLimit(
-        ordered.slice(0, SAGA_CANDIDATES), 8,
-        (imdbId) => fetchTmdbCollection(imdbId, 'movie', req).catch(() => null)
-      )
-      for (const coll of collections) {
-        if (!coll || seenCollections.has(coll.id)) continue
-        seenCollections.add(coll.id)
-        // fetchTmdbCollection's parts exclude the seed - membership is
-        // seed + parts, and the seed is watched by construction.
-        // Unreleased entries (no release year, or a year still in the
-        // future) can't be watched - counting "Untitled Sequel" as the one
-        // film keeping a saga incomplete is a treadmill, not an itch
-        // (confirmed live: 'Untitled Michael Sequel' ranked as one-to-go).
-        const currentYear = new Date().getFullYear()
-        const released = (p) => p.releaseYear && Number(p.releaseYear) <= currentYear
-        const unwatched = coll.parts.filter((p) => p.id && !watchedSet.has(p.id) && released(p))
-        if (unwatched.length === 0) continue
-        const total = coll.parts.filter((p) => released(p) || watchedSet.has(p.id)).length + 1
-        const watchedCount = total - unwatched.length
-        sagas.push({ collectionId: coll.id, name: coll.name, watchedCount, total, unwatched })
-      }
-      // Closest-to-finished first - "one film left" is the itch worth
-      // scratching, a 1-of-9 franchise barely counts as started.
-      sagas.sort((a, b) => (b.watchedCount / b.total) - (a.watchedCount / a.total))
-      const value = sagas.slice(0, 8)
-      sagaCache.set(accountId, { at: Date.now(), value })
-      res.json(value)
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to compute sagas') })
-    }
-  })
-
-  // Device claims - per-person attribution on a shared provider login.
-  // GET lists every client IP the AIOStreams proxy has seen recently, with
-  // what it was last carrying, who the guesser currently thinks it is, and
-  // any standing claim; POST/DELETE manage the claims themselves. Claims
-  // beat learned affinity in proxyNowPlaying's disambiguation.
-  router.get('/device-claims', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const since = new Date(Date.now() - 30 * 86400000)
-      const [sessions, claims, affinity, accountUsers] = await Promise.all([
-        prisma.proxyStreamSession.findMany({
-          where: { accountId, lastSeenAt: { gte: since } },
-          select: { clientIp: true, displayName: true, lastSeenAt: true },
-          orderBy: { lastSeenAt: 'desc' },
-          take: 500,
-        }),
-        prisma.proxyDeviceClaim.findMany({ where: { accountId } }),
-        prisma.proxyUserIpAffinity.findMany({ where: { accountId } }),
-        prisma.user.findMany({ where: { accountId }, select: { id: true, username: true } }),
-      ])
-      const nameOf = (id) => accountUsers.find((u) => u.id === id)?.username || null
-      const byIp = new Map()
-      for (const sess of sessions) {
-        if (!sess.clientIp) continue
-        const cur = byIp.get(sess.clientIp)
-        if (!cur) {
-          byIp.set(sess.clientIp, { clientIp: sess.clientIp, lastSeenAt: sess.lastSeenAt, lastTitle: sess.displayName || null, streams: 1 })
-        } else {
-          cur.streams++
-          if (!cur.lastTitle && sess.displayName) cur.lastTitle = sess.displayName
+    // TMDb "where to watch" (JustWatch data via TMDb) - answers "do I even
+    // need an addon for this" right on the detail popup. Hardcoded to the US
+    // region for now - TMDb's response covers every region in one call, but
+    // there's no per-account locale/country setting anywhere in this codebase
+    // yet to pick from, and US is the most complete JustWatch dataset by far.
+    // Only flatrate (subscription) and free (ad-supported) tiers are surfaced -
+    // rent/buy costs money too, which defeats the entire "you already have
+    // this" point of the badge. `link` is TMDb's own JustWatch attribution
+    // page - their API terms require linking back to it when this data is
+    // shown, not just displaying provider logos on their own.
+    const watchProvidersCache = new Map();
+    const WATCH_PROVIDERS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+    async function fetchTmdbWatchProviders(imdbId, type, req) {
+        if (!(imdbId && /^tt\d+$/.test(imdbId))) {
+            return null;
         }
-      }
-      // Claimed IPs always appear, even quiet ones - a claim you can't see
-      // is a claim you can't remove.
-      for (const c of claims) {
-        if (!byIp.has(c.clientIp)) byIp.set(c.clientIp, { clientIp: c.clientIp, lastSeenAt: null, lastTitle: null, streams: 0 })
-      }
-      const claimByIp = new Map(claims.map((c) => [c.clientIp, c]))
-      const affinityByIp = new Map(affinity.map((a) => [a.clientIp, a.userId]))
-      const devices = [...byIp.values()].map((d) => {
-        const claim = claimByIp.get(d.clientIp) || null
-        const guessId = affinityByIp.get(d.clientIp) || null
-        return {
-          ...d,
-          claim: claim ? { userId: claim.userId, username: nameOf(claim.userId), label: claim.label || null } : null,
-          guess: !claim && guessId ? { userId: guessId, username: nameOf(guessId) } : null,
+        const cacheKey = `${imdbId}:${type}`;
+        const cached = watchProvidersCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < WATCH_PROVIDERS_CACHE_TTL_MS) {
+            return cached.value;
         }
-      }).sort((a, b) => new Date(b.lastSeenAt || 0).getTime() - new Date(a.lastSeenAt || 0).getTime())
-      res.json({ devices, users: accountUsers })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to list devices') })
-    }
-  })
-
-  router.post('/device-claims', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const { clientIp, userId, label } = req.body || {}
-      if (!clientIp || typeof clientIp !== 'string') return res.status(400).json({ error: 'clientIp is required' })
-      if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'userId is required' })
-      const user = await prisma.user.findFirst({ where: { id: userId, accountId }, select: { id: true } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      await prisma.proxyDeviceClaim.upsert({
-        where: { accountId_clientIp: { accountId, clientIp } },
-        create: { accountId, clientIp, userId, label: typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : null },
-        update: { userId, label: typeof label === 'string' && label.trim() ? label.trim().slice(0, 60) : null },
-      })
-      res.json({ success: true })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to save claim') })
-    }
-  })
-
-  router.delete('/device-claims/:clientIp', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      await prisma.proxyDeviceClaim.deleteMany({ where: { accountId, clientIp: req.params.clientIp } })
-      res.json({ success: true })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to remove claim') })
-    }
-  })
-
-  // Account Guard: accept an externally-made change as the new baseline
-  // (the alternative to re-asserting via a normal sync). Must be before /:id.
-  router.post('/guard/accept', async (req, res) => {
-    try {
-      const { userId } = req.body || {}
-      if (!userId) return res.status(400).json({ error: 'userId is required' })
-      const user = await prisma.user.findFirst({ where: scopedWhere(req, { id: userId }), select: { id: true } })
-      if (!user) return res.status(404).json({ error: 'User not found' })
-      const { acceptExternalState } = require('../utils/accountGuard')
-      const accepted = await acceptExternalState(prisma, userId)
-      if (!accepted) return res.status(400).json({ error: 'No external change is recorded for this user' })
-      res.json({ success: true })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to accept change') })
-    }
-  })
-
-  // Account Guard: run a detection pass now instead of waiting for the hourly
-  // sweep - used right after someone suspects a foreign write ("check now").
-  router.post('/guard/sweep', async (req, res) => {
-    try {
-      const { runGuardSweep } = require('../utils/accountGuard')
-      const summary = await runGuardSweep(prisma, { decrypt, StremioAPIClient, createProvider }, { onlyAccountId: getAccountId(req) })
-      res.json({ success: true, ...summary })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Sweep failed') })
-    }
-  })
-
-  router.post('/graveyard/wipe', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { userId, showId, removeFromDevice } = req.body || {}
-      if (!userId || !showId) return res.status(400).json({ error: 'Missing userId or showId' })
-      // Even the permanent option gets the 30-day net: the erased rows go
-      // to the Trash first, so "forever" still survives a same-week regret.
-      await require('../utils/trash').archiveGraveyardWipe(prisma, accountId, userId, showId)
-      const { wipeBuriedShow } = require('../utils/continueWatching')
-      const result = await wipeBuriedShow(prisma, accountId, userId, showId)
-      // Optional: also remove the title from the provider account's own
-      // library, so it disappears from the device's home screen too - the
-      // tombstone already stops SlickSync resurrecting it, but without this
-      // the provider still shows it on the device. Best-effort: the wipe
-      // above is already done and correct, a device-removal failure only
-      // gets reported, never rolls anything back.
-      let deviceRemoved = false
-      if (removeFromDevice) {
+        const key = await resolveTmdbKeyForBackdrop(req);
+        if (!key) {
+            return null;
+        }
         try {
-          const wipeUser = await prisma.user.findFirst({
-            where: { id: userId, accountId },
-            select: { id: true, stremioAuthKey: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true },
-          })
-          const providerInstance = wipeUser && createProvider(wipeUser, { decrypt, req })
-          if (providerInstance && providerInstance.supportsLibraryWrite !== false) {
-            const { markLibraryItemRemoved } = require('../utils/libraryDelete')
-            await markLibraryItemRemoved({ provider: providerInstance, itemId: showId, logPrefix: '[graveyard/wipe]' })
-            require('../utils/libraryCache').clearCache(accountId, userId)
-            deviceRemoved = true
-          }
-        } catch (e) {
-          console.warn('[graveyard/wipe] device-library removal failed:', e?.message)
+            const findRsp = await fetch(
+                `https://api.themoviedb.org/3/find/${imdbId}?api_key=${encodeURIComponent(key)}&external_source=imdb_id`
+            );
+            if (!findRsp.ok) {
+                return null;
+            }
+            const findData = await findRsp.json();
+            const tmdbType = type === "series" ? "tv" : "movie";
+            const hit = (tmdbType === "tv" ? findData.tv_results : findData.movie_results)?.[0];
+            if (!hit?.id) {
+                watchProvidersCache.set(cacheKey, { at: Date.now(), value: null });
+                return null;
+            }
+
+            const provRsp = await fetch(
+                `https://api.themoviedb.org/3/${tmdbType}/${hit.id}/watch/providers?api_key=${encodeURIComponent(key)}`
+            );
+            if (!provRsp.ok) {
+                return null;
+            }
+            const provData = await provRsp.json();
+            const usResult = provData.results?.US;
+            if (!usResult) {
+                watchProvidersCache.set(cacheKey, { at: Date.now(), value: null });
+                return null;
+            }
+
+            const mapProvider = (p) => ({
+                logo: p.logo_path ? `https://image.tmdb.org/t/p/w92${p.logo_path}` : null,
+                name: p.provider_name,
+            });
+            const providers = [...(usResult.flatrate || []), ...(usResult.free || [])].map(
+                mapProvider
+            );
+            // Dedupe - the same service can appear in both flatrate and free tiers
+            // for different content on the same title (rare but confirmed possible).
+            const seen = new Set();
+            const deduped = providers.filter((p) =>
+                seen.has(p.name) ? false : (seen.add(p.name), true)
+            );
+
+            const finalValue =
+                deduped.length > 0 ? { link: usResult.link || null, providers: deduped } : null;
+            watchProvidersCache.set(cacheKey, { at: Date.now(), value: finalValue });
+            return finalValue;
+        } catch {
+            return null;
         }
-      }
-      res.json({ success: true, ...result, deviceRemoved })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to wipe') })
     }
-  })
 
-  // POST /users/continue-watching/dismiss - remove a show from the Continue
-  // Watching row. Must be before /:id route.
-  router.post('/continue-watching/dismiss', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { userId, showId } = req.body
-      if (!userId || !showId) {
-        return res.status(400).json({ error: 'userId and showId are required' })
-      }
-
-      const { dismissContinueWatching } = require('../utils/continueWatching')
-      await dismissContinueWatching(prisma, accountId, userId, showId)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error dismissing continue watching item:', error)
-      res.status(500).json({ error: 'Failed to dismiss item' })
-    }
-  })
-
-  // GET /users/upcoming-episodes - next upcoming episode per mid-season show,
-  // for the Dashboard "Coming up" calendar. Must be before /:id route.
-  router.get('/upcoming-episodes', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-      const { getUpcomingEpisodes } = require('../utils/episodeAlerts')
-      const items = await getUpcomingEpisodes(prisma, accountId)
-      res.json(items)
-    } catch (error) {
-      console.error('Error fetching upcoming episodes:', error)
-      res.status(500).json({ error: 'Failed to fetch upcoming episodes' })
-    }
-  })
-
-  // POST /users/upcoming-episodes/dismiss - hide a specific upcoming episode
-  // (keyed by (showId, season, episode)) from the "Coming up" panel. Reappears
-  // automatically when the poller advances the show to a new next episode.
-  router.post('/upcoming-episodes/dismiss', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-      const { showId, season, episode } = req.body || {}
-      if (!showId || !Number.isFinite(season) || !Number.isFinite(episode)) {
-        return res.status(400).json({ error: 'showId, season and episode are required' })
-      }
-      const { dismissUpcomingEpisode } = require('../utils/episodeAlerts')
-      await dismissUpcomingEpisode(prisma, accountId, showId, season, episode)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error dismissing upcoming episode:', error)
-      res.status(500).json({ error: 'Failed to dismiss upcoming episode' })
-    }
-  })
-
-  // POST /users/upcoming-episodes/mute - whole-show opt-out. Stops the show
-  // appearing in "Coming up" AND stops new-episode alerts for it entirely,
-  // until unmuted - see utils/episodeAlerts.js's muteShow.
-  router.post('/upcoming-episodes/mute', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-      const { showId, showName, poster } = req.body || {}
-      if (!showId) {
-        return res.status(400).json({ error: 'showId is required' })
-      }
-      const { muteShow } = require('../utils/episodeAlerts')
-      await muteShow(prisma, accountId, showId, showName, poster)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error muting show:', error)
-      res.status(500).json({ error: 'Failed to mute show' })
-    }
-  })
-
-  // POST /users/upcoming-episodes/unmute
-  router.post('/upcoming-episodes/unmute', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-      const { showId } = req.body || {}
-      if (!showId) {
-        return res.status(400).json({ error: 'showId is required' })
-      }
-      const { unmuteShow } = require('../utils/episodeAlerts')
-      await unmuteShow(prisma, accountId, showId)
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error unmuting show:', error)
-      res.status(500).json({ error: 'Failed to unmute show' })
-    }
-  })
-
-  // GET /users/upcoming-episodes/muted - list for the "manage muted shows" UI
-  router.get('/upcoming-episodes/muted', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-      const { getMutedShows } = require('../utils/episodeAlerts')
-      const shows = await getMutedShows(prisma, accountId)
-      res.json(shows)
-    } catch (error) {
-      console.error('Error fetching muted shows:', error)
-      res.status(500).json({ error: 'Failed to fetch muted shows' })
-    }
-  })
-
-  // GET /users/episode-alerts - recent new-episode alerts (fired by
-  // utils/episodeAlerts.js's poller) for the notification bell. Must be
-  // before /:id route.
-  router.get('/episode-alerts', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14))
-      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-      const alerts = await prisma.episodeAlert.findMany({
-        where: { accountId, createdAt: { gte: since } },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      })
-      res.json(alerts)
-    } catch (error) {
-      console.error('Error fetching episode alerts:', error)
-      res.status(500).json({ error: 'Failed to fetch episode alerts' })
-    }
-  })
-
-  // GET /users/notifications - persistent in-app bell notifications (written
-  // by notificationStore.js from the same dispatch path as push/Discord).
-  // Must be before the /:id route. Returns newest-first with server-side read
-  // state, so the bell is consistent across devices (unlike the old
-  // localStorage-only read tracking).
-  router.get('/notifications', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14))
-      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-      const notifications = await prisma.notification.findMany({
-        where: { accountId, createdAt: { gte: since } },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      })
-      res.json(notifications)
-    } catch (error) {
-      console.error('Error fetching notifications:', error)
-      res.status(500).json({ error: 'Failed to fetch notifications' })
-    }
-  })
-
-  // POST /users/notifications/mark-read - mark specific ids read, or all when
-  // no ids are given (the bell's "Mark all read").
-  router.post('/notifications/mark-read', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const ids = Array.isArray(req.body?.ids) ? req.body.ids : null
-      await prisma.notification.updateMany({
-        where: { accountId, read: false, ...(ids ? { id: { in: ids } } : {}) },
-        data: { read: true, readAt: new Date() },
-      })
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error marking notifications read:', error)
-      res.status(500).json({ error: 'Failed to mark notifications read' })
-    }
-  })
-
-  // POST /users/notifications/dismiss - delete specific ids, or all when no
-  // ids are given (the bell's "Clear"). Deletion (not a hidden flag) matches
-  // the bell's existing Clear semantics and keeps the table from growing
-  // unbounded on a long-lived instance.
-  router.post('/notifications/dismiss', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const ids = Array.isArray(req.body?.ids) ? req.body.ids : null
-      await prisma.notification.deleteMany({
-        where: { accountId, ...(ids ? { id: { in: ids } } : {}) },
-      })
-      res.json({ success: true })
-    } catch (error) {
-      console.error('Error dismissing notifications:', error)
-      res.status(500).json({ error: 'Failed to dismiss notifications' })
-    }
-  })
-
-  // GET /users/metrics - Get metrics data for dashboard (must be before /:id route)
-  // The Activity feed asks for the posters of the newest sessions the moment
-  // this response lands; have them ready. Newest-first, capped - the feed
-  // shows the first screenful, not the whole period.
-  const warmedMetrics = new WeakSet() // cached builds whose posters were warmed
-  const warmActivityPosters = (metrics) => {
-    try {
-      const sessions = Array.isArray(metrics?.watchSessions) ? metrics.watchSessions.slice(0, 60) : []
-      const playing = Array.isArray(metrics?.nowPlaying) ? metrics.nowPlaying : []
-      // A session carries its title as `item`; the poster is on that.
-      const posters = [...sessions, ...playing].map((x) => x?.item?.poster || x?.poster).filter(Boolean)
-      require('../utils/posterWarm').warmPosters(posters)
-    } catch { /* optimisation only */ }
-  }
-
-  router.get('/metrics', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      console.log(`[API] GET /metrics called for account ${accountId}`)
-
-      const { period = '30d', nocache } = req.query // '7d', '30d', '90d', '1y', 'all'
-      // The Activity page asks for this once its reader reaches the end of the
-      // capped feed. It is a deliberately heavier build, so it neither reads
-      // from nor writes to the shared cache - the dashboard has to keep being
-      // handed the small, fast payload it was built for.
-      const deepActivity = req.query.deep === '1' || req.query.deep === 'true'
-
-      const { getCachedMetrics, setCachedMetrics, buildOnce } = require('../utils/metricsCache')
-      const { buildMetricsForAccount } = require('../utils/metricsBuilder')
-
-      // Try in-memory metrics cache first (populated by activityMonitor every 5 minutes)
-      // Skip cache if nocache query param is set (useful for debugging)
-      const cached = (nocache || deepActivity) ? null : getCachedMetrics(accountId, period)
-      if (cached) {
-        console.log(`[API] Returning cached metrics for ${period}`)
-        // Everything in the cached object can be a few minutes old except
-        // who is watching right now - that is read live on every request.
-        let answer = cached
+    // MDBList's own blended `score` (0-100, weighted across IMDb/RT/Metacritic/
+    // Letterboxd/Trakt etc, not any single source) - the mdblistApiKey was
+    // previously only ever used for whole-list import/export (listImport.js),
+    // never this per-title lookup. Confirmed against MDBList's own OpenAPI
+    // schema (https://api.mdblist.com/schema/): GET /{provider}/{media_type}/
+    // {media_id}/ returns `score` at the top level. Silently absent (not an
+    // error) when no MDBList key is configured, same as every other optional
+    // metadata source on this endpoint.
+    const mdblistScoreCache = new Map();
+    const MDBLIST_SCORE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+    async function fetchMdblistScore(imdbId, type, apiKey) {
+        if (!(apiKey && imdbId && /^tt\d+$/.test(imdbId))) {
+            return null;
+        }
+        const cacheKey = `${imdbId}:${type}`;
+        const cached = mdblistScoreCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < MDBLIST_SCORE_CACHE_TTL_MS) {
+            return cached.value;
+        }
         try {
-          const { liveNowPlaying } = require('../utils/metricsBuilder')
-          answer = { ...cached, nowPlaying: await liveNowPlaying(prisma, accountId) }
-        } catch (e) {
-          console.warn('[API] Live Now Playing failed, sending the cached list:', e?.message)
+            const mediaType = type === "series" ? "show" : "movie";
+            const rsp = await fetch(
+                `https://api.mdblist.com/imdb/${mediaType}/${imdbId}/?apikey=${encodeURIComponent(apiKey)}`
+            );
+            if (!rsp.ok) {
+                return null;
+            }
+            const data = await rsp.json();
+            const finalValue = typeof data.score === "number" ? data.score : null;
+            mdblistScoreCache.set(cacheKey, { at: Date.now(), value: finalValue });
+            return finalValue;
+        } catch {
+            return null;
         }
-        res.json(answer)
-        // Posters are warmed once per cached build, not on every visit.
-        if (!warmedMetrics.has(cached)) { warmedMetrics.add(cached); warmActivityPosters(answer) }
-        return
-      }
-
-      console.log(`[API] Building metrics for ${period}...`)
-      // Build on demand (also used on first boot or if scheduler hasn't run yet)
-      const build = () => buildMetricsForAccount({ prisma, accountId, period, decrypt, deepActivity })
-      const metrics = deepActivity ? await build() : await buildOnce(accountId, period, build)
-
-      console.log(`[API] Metrics built. Sessions: ${metrics.watchSessions?.length}, Episodes: ${metrics.recentEpisodes?.length}`)
-
-      if (!deepActivity) setCachedMetrics(accountId, period, metrics)
-      res.json(metrics)
-      warmActivityPosters(metrics)
-    } catch (error) {
-      console.error('Error fetching metrics:', error)
-      res.status(500).json({ error: 'Failed to fetch metrics' })
     }
-  })
 
-  // GET /users/year-in-review?year=YYYY - a read-only "Wrapped"-style yearly
-  // summary aggregated from the metrics tables. Defaults to the current year.
-  // Must be before /:id route.
-  router.get('/year-in-review', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const year = req.query.year ? Number(req.query.year) : new Date().getFullYear()
-      const users = await prisma.user.findMany({
-        where: { accountId },
-        select: { id: true, username: true, email: true },
-      })
-      const { buildYearInReview } = require('../utils/yearInReview')
-      const data = await buildYearInReview(prisma, accountId, year, users)
-      res.json(data)
-    } catch (error) {
-      console.error('Error building year in review:', error)
-      res.status(500).json({ error: 'Failed to build year in review' })
+    // ==================== PUBLIC STATS ====================
+    // A genuinely public, unauthenticated share link - distinct from
+    // activityVisibility (which only ever exposes data to other members of
+    // the SAME account). Opt-in per user, off by default, enabled from the
+    // user's own Settings page (see routes/publicLibrary.js's POST
+    // /public-stats/enable|disable, which use that self-service authKey
+    // identity check instead of an admin session). The slug (not the user's
+    // real id) is what a public visitor presents - no accountId/getAccountId
+    // check on the GET below, since a visitor has no session at all; the
+    // slug itself, a random 32-char token unguessable by brute force, is the
+    // only "auth" this needs.
+
+    // The link is a page meant to be shared, so it can be loaded again and again
+    // by anyone who has it, and working out the stats reads every watch-history
+    // row the person has. That part is done at most once per link per five
+    // minutes (and once, not several times, when many views arrive together).
+    // The link itself is looked up on every view - one indexed row - so a link
+    // that has been turned off stops answering at once instead of when the
+    // cached numbers expire, and a changed name or picture shows straight away.
+    const PUBLIC_STATS_TTL_MS = 5 * 60 * 1000;
+    const PUBLIC_STATS_MAX_LINKS = 500;
+    const publicStatsCache = new Map(); // slug -> { userId, at, stats }, oldest first
+    const publicStatsPending = new Map(); // slug -> the scan already running for it
+
+    // The calendar day before `day`, both as YYYYMMDD numbers (see
+    // getAccountDayNumber). Plain calendar arithmetic in UTC, so a daylight-
+    // saving change in the account's zone can never skip or repeat a day.
+    const dayBefore = (day) => {
+        const earlier = new Date(
+            Date.UTC(Math.floor(day / 10_000), (Math.floor(day / 100) % 100) - 1, day % 100) -
+                86_400_000
+        );
+        return (
+            earlier.getUTCFullYear() * 10_000 +
+            (earlier.getUTCMonth() + 1) * 100 +
+            earlier.getUTCDate()
+        );
+    };
+
+    async function computePublicStats(user) {
+        const accountId = user.accountId || "default";
+        const [movies, episodes, timeZone] = await Promise.all([
+            prisma.movieWatchHistory.findMany({
+                select: { durationSeconds: true, itemName: true, poster: true, watchedAt: true },
+                where: { accountId, userId: user.id },
+            }),
+            prisma.episodeWatchHistory.findMany({
+                select: { durationSeconds: true, poster: true, showName: true, watchedAt: true },
+                where: { accountId, userId: user.id },
+            }),
+            resolveAccountTimezone(prisma, accountId),
+        ]);
+
+        const totalWatchSeconds = [...movies, ...episodes].reduce(
+            (sum, r) => sum + (r.durationSeconds || 0),
+            0
+        );
+
+        // Top titles by accumulated duration - movies and episodes of the same
+        // show grouped together under the show's own name.
+        const byTitle = new Map();
+        for (const m of movies) {
+            if (!m.itemName) {
+                continue;
+            }
+            const key = m.itemName;
+            const cur = byTitle.get(key) || { name: m.itemName, poster: m.poster, seconds: 0 };
+            cur.seconds += m.durationSeconds || 0;
+            byTitle.set(key, cur);
+        }
+        for (const e of episodes) {
+            if (!e.showName) {
+                continue;
+            }
+            const key = e.showName;
+            const cur = byTitle.get(key) || { name: e.showName, poster: e.poster, seconds: 0 };
+            cur.seconds += e.durationSeconds || 0;
+            if (!cur.poster && e.poster) {
+                cur.poster = e.poster;
+            }
+            byTitle.set(key, cur);
+        }
+        const topTitles = Array.from(byTitle.values())
+            .sort((a, b) => b.seconds - a.seconds)
+            .slice(0, 10)
+            .map((t) => ({ name: t.name, poster: t.poster }));
+
+        // Simple day-streak over this user's own watchedAt dates - ending
+        // today or yesterday (so a streak survives up until the point the
+        // account's actual "today" catches up), consecutive days back from
+        // there. Days are the account's own calendar days, not UTC ones, so a
+        // late-evening watch counts for the evening it happened in. Self-contained
+        // rather than reusing buildMetricsForAccount's version, which is entangled
+        // with a full account-wide, period-filtered aggregation this lightweight
+        // public endpoint has no need for.
+        const watchDays = new Set();
+        for (const r of [...movies, ...episodes]) {
+            if (!r.watchedAt) {
+                continue;
+            }
+            const watched = new Date(r.watchedAt);
+            if (!Number.isNaN(watched.getTime())) {
+                watchDays.add(getAccountDayNumber(watched, timeZone));
+            }
+        }
+        let streak = 0;
+        const today = getAccountDayNumber(new Date(Date.now()), timeZone);
+        let day = watchDays.has(today)
+            ? today
+            : watchDays.has(dayBefore(today))
+              ? dayBefore(today)
+              : null;
+        // Each pass uses up one distinct watched day, so this ends on its own.
+        while (day !== null && watchDays.has(day)) {
+            streak++;
+            day = dayBefore(day);
+        }
+
+        return {
+            streak,
+            topTitles,
+            totalTitles: byTitle.size,
+            totalWatchHours: Math.round((totalWatchSeconds / 3600) * 10) / 10,
+        };
     }
-  })
 
-  // GET /users/parity - side-by-side view of Stremio vs Nuvio users: provider,
-  // assigned addon count (fast, DB-only), and optionally live addon count.
-  // Must be before /:id route. Pass ?live=true to also fetch each user's actual
-  // live addon count from their provider (slower — one API call per user).
-  router.get('/parity', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      const live = req.query.live === 'true';
+    function publicStatsFor(slug, user) {
+        const cached = publicStatsCache.get(slug);
+        if (cached && cached.userId === user.id && Date.now() - cached.at < PUBLIC_STATS_TTL_MS) {
+            return Promise.resolve(cached.stats);
+        }
+        let pending = publicStatsPending.get(slug);
+        if (!pending) {
+            pending = computePublicStats(user)
+                .then((stats) => {
+                    // Re-adding moves a link to the newest end; when the cache is full
+                    // the link that was worked out longest ago goes.
+                    publicStatsCache.delete(slug);
+                    while (publicStatsCache.size >= PUBLIC_STATS_MAX_LINKS) {
+                        publicStatsCache.delete(publicStatsCache.keys().next().value);
+                    }
+                    publicStatsCache.set(slug, { at: Date.now(), stats, userId: user.id });
+                    return stats;
+                })
+                .finally(() => publicStatsPending.delete(slug));
+            publicStatsPending.set(slug, pending);
+        }
+        return pending;
+    }
 
-      const users = await prisma.user.findMany({
-        where: { accountId },
-        select: {
-          id: true, username: true, email: true, providerType: true,
-          isActive: true, expiresAt: true, createdAt: true,
+    // GET /users/public-stats/:slug - the actual public payload. No auth, no
+    // accountId scoping (the slug IS the scope - it's globally unique). Only
+    // ever returns a small, deliberately curated set of fields: username,
+    // avatar, total watch time, top titles, streak. Never email, never
+    // provider details, never anything else on the account.
+    router.get("/public-stats/:slug", async (req, res) => {
+        try {
+            const slug = req.params.slug;
+            const user = await prisma.user.findFirst({
+                select: {
+                    accountId: true,
+                    avatarUrl: true,
+                    colorIndex: true,
+                    id: true,
+                    username: true,
+                },
+                where: { publicStatsEnabled: true, publicStatsSlug: slug },
+            });
+            if (!user) {
+                publicStatsCache.delete(slug);
+                return res.status(404).json({ error: "This stats page is not available" });
+            }
+
+            const stats = await publicStatsFor(slug, user);
+
+            res.json({
+                avatarUrl: user.avatarUrl,
+                colorIndex: user.colorIndex,
+                streak: stats.streak,
+                topTitles: stats.topTitles,
+                totalTitles: stats.totalTitles,
+                totalWatchHours: stats.totalWatchHours,
+                username: user.username,
+            });
+        } catch (error) {
+            console.error("Error fetching public stats:", error);
+            res.status(500).json({ error: "Failed to fetch public stats" });
+        }
+    });
+
+    // ==================== HISTORY CSV IMPORT/EXPORT ====================
+    // The biggest adoption blocker for a Trakt alternative is leaving your
+    // history behind - see csvHistoryImport.js's own comment for why this
+    // reads by flexible column name (IMDb/Letterboxd/loose-Trakt-export
+    // compatible) rather than three hardcoded exact formats.
+    const { createMulterInstance } = require("../utils/helpers/multer");
+    const csvUpload = createMulterInstance({
+        fileFilter: (_req, file, cb) => {
+            const looksLikeCsv =
+                file.mimetype === "text/csv" ||
+                file.mimetype === "application/vnd.ms-excel" ||
+                /\.csv$/i.test(file.originalname || "");
+            // Trakt's own free export (Settings -> Data) is JSON, not CSV - see
+            // traktExportImport.js. Same endpoint handles both.
+            const looksLikeJsonFile =
+                file.mimetype === "application/json" || /\.json$/i.test(file.originalname || "");
+            if (looksLikeCsv || looksLikeJsonFile) {
+                return cb(null, true);
+            }
+            cb(new Error("Only .csv or .json files are allowed"), false);
         },
-        orderBy: [{ providerType: 'asc' }, { username: 'asc' }],
-      });
+        limits: { fileSize: 20 * 1024 * 1024 },
+    });
 
-      const groups = await prisma.group.findMany({
-        where: { accountId },
-        select: { id: true, name: true, userIds: true, addons: { where: { isEnabled: true }, select: { id: true } } },
-      });
+    // POST /users/:id/import-history - multipart file upload (field name
+    // "file"). Must be before /:id route.
+    router.post("/:id/import-history", csvUpload.single("file"), async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            if (!req.file) {
+                return res
+                    .status(400)
+                    .json({ error: 'No file uploaded (expected multipart field "file")' });
+            }
 
-      function groupsForUser(userId) {
-        return groups.filter(g => {
-          let ids = [];
-          try { ids = Array.isArray(g.userIds) ? g.userIds : JSON.parse(g.userIds || '[]'); } catch {}
-          return ids.includes(userId);
-        });
-      }
+            const {
+                parseCsv,
+                mapColumns,
+                resolveRowToImdbItem,
+                parseWatchedDate,
+                normalizeRating,
+                looksLikeSeriesEpisodeTitle,
+            } = require("../utils/csvHistoryImport");
+            const { resolveSinglePoster } = require("../utils/libraryHelpers");
+            const { resolveOmdbKeyForAccount } = require("../utils/listImport");
 
-      const rows = [];
-      for (const u of users) {
-        const memberGroups = groupsForUser(u.id);
-        const assignedAddonCount = memberGroups.reduce((sum, g) => sum + (g.addons?.length || 0), 0);
+            const text = req.file.buffer.toString("utf8");
 
-        let liveAddonCount = null;
-        if (live) {
-          try {
-            const fullUser = await prisma.user.findUnique({ where: { id: u.id } });
-            const provider = createProvider(fullUser, { decrypt, req });
-            if (!provider) {
-              liveAddonCount = 'not-connected';
+            // A Trakt export JSON is flattened into the same column names the CSV
+            // path already understands, so everything below this point is shared.
+            const { parseTraktExport, looksLikeJson } = require("../utils/traktExportImport");
+            let headers,
+                records,
+                skippedNonMovie = 0,
+                skippedNoTimestamp = 0;
+            if (looksLikeJson(text)) {
+                const parsed = parseTraktExport(text);
+                if (!parsed) {
+                    return res.status(400).json({ error: "That file is not valid JSON." });
+                }
+                ({ headers, records, skippedNonMovie, skippedNoTimestamp } = parsed);
+                if (records.length === 0) {
+                    if (skippedNonMovie > 0) {
+                        return res.status(400).json({
+                            error: `That file contains ${skippedNonMovie} episode or show entr${skippedNonMovie === 1 ? "y" : "ies"} and no movies. Movie history and ratings can be imported; episode history cannot yet.`,
+                        });
+                    }
+                    if (skippedNoTimestamp > 0) {
+                        // Named plainly - this is Trakt's collection or watchlist export
+                        // (or similar), which is correctly not importable: a title
+                        // merely owned or queued was never actually watched.
+                        return res.status(400).json({
+                            error: `That file lists ${skippedNoTimestamp} title(s) with no watch date or rating attached - looks like a collection or watchlist export rather than history. Only history and ratings files can be imported.`,
+                        });
+                    }
+                    // Say what the file actually looked like. A format that doesn't
+                    // match is a one-line fix here, but only if the shape is known -
+                    // "no entries found" on its own is a dead end for whoever hit it.
+                    return res.status(400).json({
+                        error: `No importable entries found. Expected Trakt's export format (entries with a "movie" object containing ids.imdb). This file is ${parsed.shape || "in an unrecognised shape"}.`,
+                        shape: parsed.shape || null,
+                    });
+                }
             } else {
-              const result = await provider.getAddons();
-              liveAddonCount = (result?.addons || []).length;
+                ({ headers, records } = parseCsv(text));
+                if (records.length === 0) {
+                    return res.status(400).json({ error: "No rows found in that CSV" });
+                }
             }
-          } catch {
-            liveAddonCount = 'error';
-          }
-        }
+            const colMap = mapColumns(headers);
+            const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountId).catch(() => null);
+            const lumiereBase = await require("../utils/lumiere")
+                .readyLumiere(prisma, accountId)
+                .catch(() => "");
 
-        rows.push({
-          id: u.id,
-          username: u.username,
-          email: u.email,
-          provider: u.providerType,
-          isActive: u.isActive,
-          expiresAt: u.expiresAt,
-          groups: memberGroups.map(g => g.name),
-          assignedAddonCount,
-          liveAddonCount,
+            // Capped so one enormous export (a decade of Letterboxd diary
+            // entries) can't turn a single request into thousands of sequential
+            // OMDb lookups - matches the same protective cap listImport.js's own
+            // MAX_IMPORT_ITEMS already applies to title-based catalog imports.
+            const MAX_ROWS = 2000;
+            const rows = records.slice(0, MAX_ROWS);
+
+            let imported = 0;
+            let skipped = 0;
+            const unresolved = [];
+
+            // Undo bookkeeping: snapshot which items/ratings already exist so the
+            // rows this run CREATES can be told apart from ones it merely skipped
+            // (the upserts below never modify existing rows - update: {}).
+            const preExistingItemIds = new Set(
+                (
+                    await prisma.movieWatchHistory.findMany({
+                        select: { itemId: true },
+                        where: { accountId, userId: user.id },
+                    })
+                ).map((r) => r.itemId)
+            );
+            const preExistingRatingIds = new Set(
+                (
+                    await prisma.titleRating.findMany({
+                        select: { itemId: true },
+                        where: { accountId, season: 0 },
+                    })
+                ).map((r) => r.itemId)
+            );
+            const createdItemIds = [];
+            const createdRatingIds = [];
+
+            for (const row of rows) {
+                // Netflix-style episode rows (Show: Season N: Episode) carry no id
+                // and cannot resolve as movies - counted with the other episode
+                // skips instead of burning a doomed OMDb lookup each and landing in
+                // "couldn't resolve" noise. Only when there's no real id to trust.
+                const rawRowId = colMap.imdbId ? row[colMap.imdbId] : null;
+                const hasRealId = rawRowId && /^tt\d+$/.test(String(rawRowId).trim());
+                if (
+                    !hasRealId &&
+                    looksLikeSeriesEpisodeTitle(colMap.title ? row[colMap.title] : null)
+                ) {
+                    skippedNonMovie++;
+                    continue;
+                }
+                const resolved = await resolveRowToImdbItem(row, colMap, omdbApiKey, lumiereBase);
+                if (!resolved) {
+                    skipped++;
+                    if (colMap.title && row[colMap.title]) {
+                        unresolved.push(row[colMap.title]);
+                    }
+                    continue;
+                }
+                const watchedAt = colMap.watchedDate
+                    ? parseWatchedDate(row[colMap.watchedDate]) || new Date()
+                    : new Date();
+                const rating = colMap.rating ? normalizeRating(row[colMap.rating]) : null;
+
+                try {
+                    const poster = await resolveSinglePoster(resolved.imdbId, "movie", null);
+                    await prisma.movieWatchHistory.upsert({
+                        create: {
+                            accountId,
+                            completed: true,
+                            itemId: resolved.imdbId,
+                            itemName: resolved.title || resolved.imdbId,
+                            poster,
+                            profileLabel: "Imported",
+                            userId: user.id,
+                            watchedAt,
+                        },
+                        update: {}, // never overwrite an existing native record with an imported one
+                        where: {
+                            accountId_userId_itemId: {
+                                accountId,
+                                itemId: resolved.imdbId,
+                                userId: user.id,
+                            },
+                        },
+                    });
+                    if (!preExistingItemIds.has(resolved.imdbId)) {
+                        preExistingItemIds.add(resolved.imdbId); // a file can repeat a title
+                        createdItemIds.push(resolved.imdbId);
+                    }
+                    if (rating) {
+                        await prisma.titleRating
+                            .upsert({
+                                create: {
+                                    accountId,
+                                    itemId: resolved.imdbId,
+                                    itemName: resolved.title || null,
+                                    itemType: "movie",
+                                    rating,
+                                    season: 0,
+                                },
+                                update: {},
+                                where: {
+                                    accountId_itemId_season: {
+                                        accountId,
+                                        itemId: resolved.imdbId,
+                                        season: 0,
+                                    },
+                                },
+                            })
+                            .catch(() => undefined); // best-effort - a rating conflict must never fail the whole import
+                        if (!preExistingRatingIds.has(resolved.imdbId)) {
+                            preExistingRatingIds.add(resolved.imdbId);
+                            createdRatingIds.push(resolved.imdbId);
+                        }
+                    }
+                    imported++;
+                } catch {
+                    skipped++;
+                }
+            }
+
+            // One Trash entry per import run: undoing it deletes exactly the rows
+            // this run created and nothing that predated it.
+            try {
+                await require("../utils/trash").archiveHistoryImport(prisma, accountId, user.id, {
+                    createdItemIds,
+                    createdRatingIds,
+                });
+            } catch (e) {
+                console.warn("Import undo-archive failed (import itself succeeded):", e?.message);
+            }
+
+            res.json({
+                imported,
+                // Entries the export carried but this importer cannot write (episode
+                // and show history) are counted as skipped rather than omitted, so
+                // the totals shown add up to what was actually in the file.
+                skipped: skipped + skippedNonMovie,
+                skippedEpisodes: skippedNonMovie,
+                totalRows: records.length + skippedNonMovie,
+                truncated: records.length > MAX_ROWS,
+                unresolvedTitles: unresolved.slice(0, 20),
+            });
+        } catch (error) {
+            console.error("Error importing history CSV:", error);
+            res.status(500).json({ error: publicMessage(error, "Failed to import history") });
+        }
+    });
+
+    // POST /users/:id/trax-addon - enable/disable the SlickTrax Addon for this
+    // user (body: {enabled}). The URL token is a bearer credential (see
+    // routes/traxAddon.js): crypto-random, generated on first enable, and kept
+    // stable across later toggles so the URL already synced into the account
+    // keeps working. Pass {rotate: true} to force a fresh token - which
+    // deliberately kills the old URL everywhere it was ever installed.
+    router.post("/:id/trax-addon", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const enabled = !!req.body?.enabled;
+            const rotate = !!req.body?.rotate;
+            let traxToken = user.traxToken;
+            if ((enabled && !traxToken) || rotate) {
+                traxToken = require("node:crypto").randomBytes(24).toString("hex");
+            }
+            const data = { traxAddonEnabled: enabled, traxToken };
+            // In-player actions ride this same endpoint rather than the generic
+            // user PUT (whose field allowlist is deliberately narrow): it is part
+            // of the same addon's configuration, and changing it must also bump
+            // the manifest the next sync installs.
+            await prisma.user.update({ data, where: { id: user.id } });
+
+            // The base URL sync will use. Reported honestly rather than guessed
+            // from the request: sync itself has no request to borrow a hostname
+            // from, so if PUBLIC_APP_URL is unset the auto-install genuinely will
+            // not happen and the UI should say so instead of showing a URL that
+            // only works from this browser's vantage point.
+            // The admin reaching this route opened SlickSync from the address their
+            // devices use - learned, like on any admin visit (utils/ownAddress.js);
+            // never one only this server knows (a container's name, localhost).
+            const own = require("../utils/ownAddress");
+            const reqBase = own.requestBase(req);
+            const reqBaseUsable = require("../utils/streamGate").deviceReachable(reqBase);
+            if (enabled && reqBaseUsable) {
+                await own.learn(prisma, accountId, reqBase).catch(() => undefined);
+            }
+            const base = await own.publicBase(prisma, accountId).catch(() => "");
+            const baseSource = base ? (process.env.PUBLIC_APP_URL ? "env" : "observed") : null;
+            // baseKnown is the honest bit: with no address configured, sync cannot
+            // install this on anyone's device no matter what the toggle says, and
+            // the url below only works from the browser that asked for it.
+            const effectiveBase = base || (reqBaseUsable ? reqBase : "");
+            res.json({
+                autoInstall: !!base,
+                baseKnown: !!base,
+                baseSource,
+                enabled,
+                manifestUrl: effectiveBase
+                    ? `${effectiveBase}/trax/${traxToken}/v${require("./traxAddon").traxPathVersion(user)}/manifest.json`
+                    : null,
+            });
+        } catch (error) {
+            console.error("Error toggling SlickTrax addon:", error);
+            res.status(500).json({ error: "Failed to update SlickTrax addon" });
+        }
+    });
+
+    // Leave a person out of household numbers - a test or guest person. Their
+    // own page keeps everything; totals, Top Viewers and Wrapped skip them.
+    router.put("/:id/household-stats", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: req.params.id },
+            });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            const excluded = req.body?.excluded === true;
+            await prisma.user.update({
+                data: { excludeFromHouseholdStats: excluded },
+                where: { id: user.id },
+            });
+            try {
+                require("../utils/metricsCache").clearMetricsForAccount(accountId);
+            } catch {
+                /* optional */
+            }
+            res.json({ excludeFromHouseholdStats: excluded });
+        } catch (error) {
+            console.error("Error changing household stats:", error);
+            res.status(500).json({ error: "Failed to change that" });
+        }
+    });
+
+    // --- Each person's SlickTrax rows (routes/traxAddon.js orderedTraxRows) ---
+
+    async function traxRowsView(user) {
+        const { orderedTraxRows, getListsForAccount } = require("./traxAddon");
+        const lists = await getListsForAccount(prisma, user.accountId || "default");
+        return {
+            enabled: !!user.traxAddonEnabled,
+            rows: orderedTraxRows(lists, user.traxRowsJson).map((r) => ({
+                hidden: r.hidden,
+                key: r.key,
+                name: r.name,
+            })),
+        };
+    }
+
+    router.get("/:id/trax-rows", async (req, res) => {
+        try {
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id: req.params.id },
+            });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            res.json(await traxRowsView(user));
+        } catch (error) {
+            console.error("Error reading SlickTrax rows:", error);
+            res.status(500).json({ error: "Failed to read SlickTrax rows" });
+        }
+    });
+
+    // Saving changes the person's SlickTrax address (traxPathVersion), so their
+    // apps fetch the new rows; a sync for them is started straight away so the
+    // new address reaches their account without waiting for the schedule.
+    router.put("/:id/trax-rows", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            const clean = (v) =>
+                Array.isArray(v)
+                    ? v.filter((k) => typeof k === "string" && k.length < 200).slice(0, 500)
+                    : [];
+            const order = clean(req.body?.order);
+            const hidden = clean(req.body?.hidden);
+            const traxRowsJson =
+                order.length || hidden.length ? JSON.stringify({ hidden, order }) : null;
+            const updated = await prisma.user.update({
+                data: { traxRowsJson },
+                where: { id: user.id },
+            });
+
+            if (updated.traxAddonEnabled && updated.isActive) {
+                setImmediate(async () => {
+                    try {
+                        let unsafeMode = false;
+                        let useCustomFields = true;
+                        const acct = await prisma.appAccount.findFirst({
+                            select: { sync: true },
+                            where: { id: accountId },
+                        });
+                        let cfg = acct?.sync;
+                        if (typeof cfg === "string") {
+                            try {
+                                cfg = JSON.parse(cfg);
+                            } catch {
+                                cfg = null;
+                            }
+                        }
+                        if (cfg && typeof cfg === "object") {
+                            if (typeof cfg.safe === "boolean") {
+                                unsafeMode = !cfg.safe;
+                            }
+                            if (typeof cfg.useCustomFields === "boolean") {
+                                useCustomFields = cfg.useCustomFields;
+                            } else if (typeof cfg.useCustomNames === "boolean") {
+                                useCustomFields = cfg.useCustomNames;
+                            }
+                        }
+                        await syncUserAddons(
+                            prisma,
+                            updated.id,
+                            [],
+                            unsafeMode,
+                            req,
+                            decrypt,
+                            getAccountId,
+                            useCustomFields
+                        );
+                    } catch (e) {
+                        console.warn("[SlickTrax] sync after a rows change failed:", e?.message);
+                    }
+                });
+            }
+            res.json(await traxRowsView(updated));
+        } catch (error) {
+            console.error("Error saving SlickTrax rows:", error);
+            res.status(500).json({ error: "Failed to save SlickTrax rows" });
+        }
+    });
+
+    // --- Watch State with AIOStreams (utils/watchState.js) -------------------
+    //
+    // One switch per person: their consent for their watch history to be read
+    // by, and written from, an AIOStreams configuration. The link it produces
+    // goes into AIOStreams by hand (Addons -> add by URL). AIOStreams then names
+    // each of its household profiles on every request, and each profile is
+    // linked here to the SlickSync user it really is.
+
+    async function watchStateBase(req, accountId) {
+        const own = require("../utils/ownAddress");
+        let base = await own.publicBase(prisma, accountId).catch(() => "");
+        if (!base) {
+            const reqBase = own.requestBase(req);
+            if (require("../utils/streamGate").deviceReachable(reqBase)) {
+                base = reqBase;
+            }
+        }
+        return base;
+    }
+
+    async function watchStateView(req, accountId, user, extra = {}) {
+        const { readViewerMap } = require("../utils/watchState");
+        const base = await watchStateBase(req, accountId);
+        // What the 30-minute check last found wrong (utils/aioSlickTrax.js).
+        let issues = [];
+        let collectionsFirst = false;
+        try {
+            const acct = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+            let cfg = acct?.sync;
+            if (typeof cfg === "string") {
+                try {
+                    cfg = JSON.parse(cfg);
+                } catch {
+                    cfg = null;
+                }
+            }
+            issues = Object.keys(cfg?.aioSlickTraxIssues?.[user.id] || {});
+            collectionsFirst = cfg?.aioSlickTraxFirst?.[user.id] === true;
+        } catch {
+            /* optional */
+        }
+        const map = readViewerMap(user);
+        const people = await prisma.user.findMany({
+            select: { id: true, username: true, watchStateEnabled: true },
+            where: { accountId, isActive: true },
         });
-      }
-
-      const summary = {
-        total: rows.length,
-        stremio: rows.filter(r => r.provider === 'stremio').length,
-        nuvio: rows.filter(r => r.provider === 'nuvio').length,
-      };
-
-      res.json({ summary, users: rows });
-    } catch (error) {
-      console.error('Error building parity view:', error);
-      res.status(500).json({ error: 'Failed to build parity view' });
-    }
-  })
-
-  // GET /users/metrics-migration-preview - Preview what would be migrated
-  router.get('/metrics-migration-preview', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const accountIdValue = accountId || 'default'
-
-      // Check current migration status
-      const [sessionCount, episodeCount, activityCount] = await Promise.all([
-        prisma.watchSession.count({ where: { accountId: accountIdValue } }),
-        prisma.episodeWatchHistory.count({ where: { accountId: accountIdValue } }),
-        prisma.watchActivity.count({ where: { accountId: accountIdValue } })
-      ])
-
-      // Get watch activity grouped by user
-      const activities = await prisma.watchActivity.findMany({
-        where: { accountId: accountIdValue },
-        select: {
-          userId: true,
-          itemId: true,
-          itemType: true,
-          watchTimeSeconds: true,
-          date: true
-        },
-        orderBy: { date: 'asc' }
-      })
-
-      // Group by user
-      const userActivityMap = {}
-      for (const activity of activities) {
-        if (!userActivityMap[activity.userId]) {
-          userActivityMap[activity.userId] = {
-            userId: activity.userId,
-            movies: 0,
-            shows: 0,
-            watchTime: 0,
-            dates: []
-          }
-        }
-        if (activity.itemType === 'movie') {
-          userActivityMap[activity.userId].movies++
-        } else if (activity.itemType === 'series') {
-          userActivityMap[activity.userId].shows++
-        }
-        userActivityMap[activity.userId].watchTime += activity.watchTimeSeconds || 0
-        userActivityMap[activity.userId].dates.push(activity.date)
-      }
-
-      // Get user info
-      const userIds = Object.keys(userActivityMap)
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, username: true, email: true }
-      })
-
-      // Build user preview data
-      const userPreviews = users.map(user => {
-        const activity = userActivityMap[user.id]
-        const dates = activity.dates.map(d => new Date(d)).sort((a, b) => a - b)
+        const byId = new Map(people.map((p) => [p.id, p]));
         return {
-          userId: user.id,
-          username: user.username || user.email,
-          movies: activity.movies,
-          shows: activity.shows,
-          watchTimeSeconds: activity.watchTime,
-          watchTimeHours: Math.round((activity.watchTime / 3600) * 100) / 100,
-          dateRange: dates.length > 0 ? {
-            earliest: dates[0].toISOString().split('T')[0],
-            latest: dates[dates.length - 1].toISOString().split('T')[0]
-          } : null
-        }
-      })
-
-      const totalMovies = Object.values(userActivityMap).reduce((sum, u) => sum + u.movies, 0)
-      const totalShows = Object.values(userActivityMap).reduce((sum, u) => sum + u.shows, 0)
-      const totalWatchTime = Object.values(userActivityMap).reduce((sum, u) => sum + u.watchTime, 0)
-
-      return res.json({
-        migrationStatus: {
-          hasExistingData: sessionCount > 0 || episodeCount > 0,
-          alreadyMigrated: sessionCount > 0,
-          sessionsCount: sessionCount,
-          episodesCount: episodeCount,
-          activitiesCount: activityCount
-        },
-        users: userPreviews,
-        totals: {
-          users: userPreviews.length,
-          movies: totalMovies,
-          shows: totalShows,
-          watchTimeSeconds: totalWatchTime,
-          watchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100,
-          pendingMigration: activityCount > 0 && sessionCount === 0
-        }
-      })
-    } catch (error) {
-      console.error('Error fetching migration preview:', error)
-      res.status(500).json({ error: 'Failed to fetch migration preview' })
+            baseKnown: !!base,
+            // Someone added with their AIOStreams configuration password: SlickSync
+            // adds the link to that configuration itself.
+            canInstall:
+                user.providerType === "jellyfin" &&
+                user.jellyfinServerKind === "aiostreams" &&
+                !!user.aioConfigId &&
+                !!user.aioConfigPassword,
+            // Their choice: keep SlickSync's collections at the top of their AIOStreams catalogs.
+            collectionsFirst,
+            enabled: !!user.watchStateEnabled,
+            issues,
+            manifestUrl:
+                user.watchStateEnabled && user.traxToken && base
+                    ? `${base}/trax/${user.traxToken}/aio/manifest.json`
+                    : null,
+            people: people.map((p) => ({
+                enabled: !!p.watchStateEnabled,
+                id: p.id,
+                username: p.username,
+            })),
+            // Every AIOStreams profile seen so far, and who it is linked to. An
+            // unlinked one is refused until someone picks who it is; a skipped one
+            // was deliberately left out.
+            viewers: Object.entries(map).map(([viewer, raw]) => {
+                const userId = raw && raw !== "skip" ? raw : null;
+                return {
+                    skipped: raw === "skip",
+                    userEnabled: userId ? !!byId.get(userId)?.watchStateEnabled : null,
+                    userId,
+                    username: userId ? byId.get(userId)?.username || null : null,
+                    viewer,
+                };
+            }),
+            ...extra,
+        };
     }
-  })
 
-  // POST /users/metrics-migration - Execute the migration
-  router.post('/metrics-migration', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { migrateAccountMetrics } = require('../utils/metricsMigration')
-      const result = await migrateAccountMetrics(prisma, accountId)
-
-      return res.json({
-        success: true,
-        ...result
-      })
-    } catch (error) {
-      console.error('Error executing migration:', error)
-      res.status(500).json({ error: 'Failed to execute migration' })
-    }
-  })
-
-  // GET /users/:id/watch-time - Get watch time for a specific user
-  router.get('/:id/watch-time', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { id: userId } = req.params
-      const {
-        startDate,
-        endDate,
-        itemId,  // Optional: filter by specific item
-        itemType, // Optional: 'movie' or 'series'
-        groupBy = 'day' // 'day' or 'week'
-      } = req.query
-
-      const accountIdValue = accountId || 'default'
-
-      // If user API key is used, restrict to own data only
-      if (req.appUserId && req.appUserId !== userId) {
-        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
-      }
-
-      // Verify user belongs to account
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountIdValue
-        },
-        select: { id: true, username: true, email: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Build date range
-      let start = startDate ? new Date(startDate) : new Date()
-      start.setDate(start.getDate() - 7) // Default: last 7 days
-      let end = endDate ? new Date(endDate) : new Date()
-
-      // Build query
-      const where = {
-        accountId: accountIdValue,
-        userId: userId,
-        date: {
-          gte: start,
-          lte: end
-        }
-      }
-
-      if (itemId) {
-        where.itemId = itemId
-      }
-
-      if (itemType) {
-        where.itemType = itemType
-      }
-
-      // Cross-user library-sync dedup: fetch ALL account-wide activity in
-      // the date window (not just this user's), run the shared-email dedup
-      // to strip phantoms, then narrow back to this user. Same rationale as
-      // getUser's totalWatchTimeMinutes above.
-      const [allWindowActivities, siblings] = await Promise.all([
-        prisma.watchActivity.findMany({
-          where: { accountId: accountIdValue, date: { gte: start, lte: end }, ...(itemId ? { itemId } : {}), ...(itemType ? { itemType } : {}) },
-          select: { userId: true, date: true, watchTimeSeconds: true, itemId: true, itemType: true, profileLabel: true },
-          orderBy: { date: 'asc' }
-        }),
-        prisma.user.findMany({
-          where: { accountId: accountIdValue },
-          select: { id: true, email: true, nuvioProfileId: true }
-        })
-      ])
-      const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require('../utils/watchDedup')
-      const shared = findSharedEmailUserIds(siblings)
-      const cleaned = dedupWatchActivityBySharedEmail(allWindowActivities, shared)
-      const activities = cleaned.filter((a) => a.userId === userId)
-
-      // Group by day or week
-      const grouped = {}
-      let totalSeconds = 0
-
-      for (const activity of activities) {
-        const date = new Date(activity.date)
-        let key
-
-        if (groupBy === 'week') {
-          // Get week start (Monday)
-          const weekStart = new Date(date)
-          const day = date.getDay()
-          const diff = date.getDate() - day + (day === 0 ? -6 : 1) // Adjust to Monday
-          weekStart.setDate(diff)
-          key = weekStart.toISOString().split('T')[0]
-        } else {
-          key = date.toISOString().split('T')[0]
-        }
-
-        if (!grouped[key]) {
-          grouped[key] = {
-            date: key,
-            watchTimeSeconds: 0,
-            watchTimeHours: 0,
-            items: new Set(),
-            movies: 0,
-            shows: 0
-          }
-        }
-
-        const duration = activity.watchTimeSeconds || 0
-        grouped[key].watchTimeSeconds += duration
-        grouped[key].items.add(activity.itemId)
-        totalSeconds += duration
-
-        if (activity.itemType === 'movie') {
-          grouped[key].movies += 1
-        } else if (activity.itemType === 'series') {
-          grouped[key].shows += 1
-        }
-      }
-
-      // Convert to array and format
-      const result = Object.values(grouped).map(entry => ({
-        date: entry.date,
-        watchTimeSeconds: entry.watchTimeSeconds,
-        watchTimeHours: Math.round((entry.watchTimeSeconds / 3600) * 100) / 100,
-        itemsCount: entry.items.size,
-        movies: entry.movies,
-        shows: entry.shows
-      }))
-
-      // If itemId specified, also return per-item breakdown
-      let itemBreakdown = null
-      if (itemId) {
-        itemBreakdown = {
-          itemId,
-          totalWatchTimeSeconds: totalSeconds,
-          totalWatchTimeHours: Math.round((totalSeconds / 3600) * 100) / 100,
-          days: result.length
-        }
-      }
-
-      // start/end default to a real "N days ago from right now" timestamp
-      // (not pre-bucketed like WatchActivity.date), so their day string needs
-      // the account's timezone too - purely informational here (unconsumed by
-      // the client, which only reads byDate), but kept consistent with
-      // everything else fixed this session rather than left as a stray UTC one.
-      const accountTimeZone = await resolveAccountTimezone(prisma, accountIdValue)
-      res.json({
-        userId: user.id,
-        username: user.username || user.email,
-        startDate: getAccountDateString(start, accountTimeZone),
-        endDate: getAccountDateString(end, accountTimeZone),
-        totalWatchTimeSeconds: totalSeconds,
-        totalWatchTimeHours: Math.round((totalSeconds / 3600) * 100) / 100,
-        byDate: result,
-        itemBreakdown
-      })
-    } catch (error) {
-      console.error('Error fetching watch time:', error)
-      res.status(500).json({ error: 'Failed to fetch watch time', message: publicMessage(error, 'Failed to fetch watch time') })
-    }
-  })
-
-  // GET /users/:id/top-items - Get top shows/movies by watch time
-  router.get('/:id/top-items', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { id: userId } = req.params
-      const {
-        period = '30d',  // '1h', '12h', '1d', '3d', '7d', '30d', '90d', '1y', 'all'
-        itemType,        // 'movie' or 'series' (optional)
-        limit = 10       // Number of items to return
-      } = req.query
-
-      const accountIdValue = accountId || 'default'
-
-      // If user API key is used, restrict to own data only
-      if (req.appUserId && req.appUserId !== userId) {
-        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
-      }
-
-      // Verify user belongs to account
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountIdValue
-        },
-        select: { id: true, username: true, email: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Calculate date range
-      let startDate = new Date()
-      switch (period) {
-        case '1h':
-          startDate.setHours(startDate.getHours() - 1)
-          break
-        case '12h':
-          startDate.setHours(startDate.getHours() - 12)
-          break
-        case '1d':
-          startDate.setDate(startDate.getDate() - 1)
-          break
-        case '3d':
-          startDate.setDate(startDate.getDate() - 3)
-          break
-        case '7d':
-          startDate.setDate(startDate.getDate() - 7)
-          break
-        case '30d':
-          startDate.setDate(startDate.getDate() - 30)
-          break
-        case '90d':
-          startDate.setDate(startDate.getDate() - 90)
-          break
-        case '1y':
-          startDate.setFullYear(startDate.getFullYear() - 1)
-          break
-        case 'all':
-          startDate = new Date(0)
-          break
-        default:
-          startDate.setDate(startDate.getDate() - 30)
-      }
-
-      // Build query
-      const where = {
-        accountId: accountIdValue,
-        userId: userId,
-        date: {
-          gte: startDate
-        }
-      }
-
-      if (itemType) {
-        where.itemType = itemType
-      }
-
-      // Aggregate watch time by item using watch activity
-      const activities = await prisma.watchActivity.findMany({
-        where,
-        select: {
-          itemId: true,
-          itemType: true,
-          watchTimeSeconds: true,
-          date: true
-        }
-      })
-
-      // Group by itemId
-      const itemStats = {}
-      for (const activity of activities) {
-        if (!itemStats[activity.itemId]) {
-          itemStats[activity.itemId] = {
-            itemId: activity.itemId,
-            itemType: activity.itemType,
-            totalWatchTimeSeconds: 0,
-            daysWatched: new Set(),
-            firstWatched: activity.date,
-            lastWatched: activity.date
-          }
-        }
-
-        const duration = activity.watchTimeSeconds || 0
-        itemStats[activity.itemId].totalWatchTimeSeconds += duration
-        itemStats[activity.itemId].daysWatched.add(activity.date.toISOString().split('T')[0])
-
-        if (activity.date < itemStats[activity.itemId].firstWatched) {
-          itemStats[activity.itemId].firstWatched = activity.date
-        }
-        if (activity.date > itemStats[activity.itemId].lastWatched) {
-          itemStats[activity.itemId].lastWatched = activity.date
-        }
-      }
-
-      // Convert to array and sort
-      const topItems = Object.values(itemStats)
-        .map(item => ({
-          itemId: item.itemId,
-          itemType: item.itemType,
-          totalWatchTimeSeconds: item.totalWatchTimeSeconds,
-          totalWatchTimeHours: Math.round((item.totalWatchTimeSeconds / 3600) * 100) / 100,
-          daysWatched: item.daysWatched.size,
-          firstWatched: item.firstWatched.toISOString().split('T')[0],
-          lastWatched: item.lastWatched.toISOString().split('T')[0]
-        }))
-        .sort((a, b) => b.totalWatchTimeSeconds - a.totalWatchTimeSeconds)
-        .slice(0, parseInt(limit) || 10)
-
-      res.json({
-        userId: user.id,
-        username: user.username || user.email,
-        period,
-        itemType: itemType || 'all',
-        totalItems: Object.keys(itemStats).length,
-        topItems
-      })
-    } catch (error) {
-      console.error('Error fetching top items:', error)
-      res.status(500).json({ error: 'Failed to fetch top items', message: publicMessage(error, 'Failed to fetch top items') })
-    }
-  })
-
-  // GET /users/:id/streaks - Get watch streaks
-  router.get('/:id/streaks', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { id: userId } = req.params
-      const accountIdValue = accountId || 'default'
-
-      // If user API key is used, restrict to own data only
-      if (req.appUserId && req.appUserId !== userId) {
-        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
-      }
-
-      // Verify user belongs to account
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountIdValue
-        },
-        select: { id: true, username: true, email: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Get all watch activity dates
-      const activities = await prisma.watchActivity.findMany({
-        where: {
-          accountId: accountIdValue,
-          userId: userId
-        },
-        select: {
-          date: true
-        },
-        orderBy: {
-          date: 'desc'
-        }
-      })
-
-      if (activities.length === 0) {
-        return res.json({
-          userId: user.id,
-          username: user.username || user.email,
-          currentStreak: 0,
-          longestStreak: 0,
-          streakStartDate: null,
-          longestStreakStartDate: null,
-          longestStreakEndDate: null,
-          totalDaysWatched: 0
-        })
-      }
-
-      // Get unique date strings (YYYY-MM-DD) from watch activity and sort
-      const dateStrings = [...new Set(activities.map(a => {
-        const d = new Date(a.date)
-        // Normalize to UTC date string to avoid timezone issues
-        const year = d.getUTCFullYear()
-        const month = String(d.getUTCMonth() + 1).padStart(2, '0')
-        const day = String(d.getUTCDate()).padStart(2, '0')
-        return `${year}-${month}-${day}`
-      }))].sort((a, b) => b.localeCompare(a)) // Most recent first
-
-      // Calculate current streak
-      let currentStreak = 0
-      let streakStartDate = null
-      const today = new Date()
-      // Normalize today to UTC date string
-      const todayYear = today.getUTCFullYear()
-      const todayMonth = String(today.getUTCMonth() + 1).padStart(2, '0')
-      const todayDay = String(today.getUTCDate()).padStart(2, '0')
-      const todayStr = `${todayYear}-${todayMonth}-${todayDay}`
-
-      let checkDate = new Date(today)
-      checkDate.setUTCHours(0, 0, 0, 0)
-      let isFirstCheck = true
-
-      // Keep checking consecutive days until we find a gap
-      while (true) {
-        const year = checkDate.getUTCFullYear()
-        const month = String(checkDate.getUTCMonth() + 1).padStart(2, '0')
-        const day = String(checkDate.getUTCDate()).padStart(2, '0')
-        const dateStr = `${year}-${month}-${day}`
-        const hasActivity = dateStrings.includes(dateStr)
-
-        if (hasActivity) {
-          if (currentStreak === 0) {
-            streakStartDate = new Date(checkDate)
-          }
-          currentStreak++
-          checkDate.setUTCDate(checkDate.getUTCDate() - 1)
-          isFirstCheck = false
-        } else {
-          // Allow 1 day gap (yesterday) for current streak only on first check (if today has no activity)
-          if (isFirstCheck && dateStr === todayStr) {
-            checkDate.setUTCDate(checkDate.getUTCDate() - 1)
-            isFirstCheck = false
-            continue
-          }
-          break
-        }
-      }
-
-      // Calculate longest streak
-      let longestStreak = 0
-      let longestStreakStartDate = null
-      let longestStreakEndDate = null
-      let currentStreakLength = 1
-      let currentStreakStart = dateStrings[0]
-
-      for (let i = 1; i < dateStrings.length; i++) {
-        const prevDateStr = dateStrings[i - 1]
-        const currDateStr = dateStrings[i]
-        const prevDate = new Date(prevDateStr + 'T00:00:00Z')
-        const currDate = new Date(currDateStr + 'T00:00:00Z')
-        const daysDiff = Math.floor((prevDate - currDate) / (1000 * 60 * 60 * 24))
-
-        if (daysDiff === 1) {
-          // Consecutive day
-          currentStreakLength++
-        } else {
-          // Streak broken
-          if (currentStreakLength > longestStreak) {
-            longestStreak = currentStreakLength
-            longestStreakStartDate = new Date(currDateStr + 'T00:00:00Z')
-            longestStreakEndDate = new Date(prevDateStr + 'T00:00:00Z')
-          }
-          currentStreakLength = 1
-          currentStreakStart = dateStrings[i]
-        }
-      }
-
-      // Check if last streak is longest
-      if (currentStreakLength > longestStreak) {
-        longestStreak = currentStreakLength
-        longestStreakStartDate = new Date(currentStreakStart + 'T00:00:00Z')
-        longestStreakEndDate = new Date(dateStrings[0] + 'T00:00:00Z')
-      }
-
-      res.json({
-        userId: user.id,
-        username: user.username || user.email,
-        currentStreak,
-        longestStreak,
-        streakStartDate: streakStartDate ? streakStartDate.toISOString().split('T')[0] : null,
-        longestStreakStartDate: longestStreakStartDate ? longestStreakStartDate.toISOString().split('T')[0] : null,
-        longestStreakEndDate: longestStreakEndDate ? longestStreakEndDate.toISOString().split('T')[0] : null,
-        totalDaysWatched: dateStrings.length
-      })
-    } catch (error) {
-      console.error('Error fetching streaks:', error)
-      res.status(500).json({ error: 'Failed to fetch streaks', message: publicMessage(error, 'Failed to fetch streaks') })
-    }
-  })
-
-  // GET /users/:id/velocity - Get watch velocity (episodes per day for shows)
-  router.get('/:id/velocity', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const { id: userId } = req.params
-      const {
-        itemId,  // Optional: specific show
-        period = '30d'  // '1h', '12h', '1d', '3d', '7d', '30d', '90d', '1y', 'all'
-      } = req.query
-
-      const accountIdValue = accountId || 'default'
-
-      // If user API key is used, restrict to own data only
-      if (req.appUserId && req.appUserId !== userId) {
-        return res.status(403).json({ error: 'Forbidden: You can only access your own data' })
-      }
-
-      // Verify user belongs to account
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountIdValue
-        },
-        select: { id: true, username: true, email: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Calculate date range
-      let startDate = new Date()
-      switch (period) {
-        case '1h':
-          startDate.setHours(startDate.getHours() - 1)
-          break
-        case '12h':
-          startDate.setHours(startDate.getHours() - 12)
-          break
-        case '1d':
-          startDate.setDate(startDate.getDate() - 1)
-          break
-        case '3d':
-          startDate.setDate(startDate.getDate() - 3)
-          break
-        case '7d':
-          startDate.setDate(startDate.getDate() - 7)
-          break
-        case '30d':
-          startDate.setDate(startDate.getDate() - 30)
-          break
-        case '90d':
-          startDate.setDate(startDate.getDate() - 90)
-          break
-        case '1y':
-          startDate.setFullYear(startDate.getFullYear() - 1)
-          break
-        case 'all':
-          startDate = new Date(0)
-          break
-        default:
-          startDate.setDate(startDate.getDate() - 30)
-      }
-
-      // Get watch snapshots to track episode progress
-      const snapshotWhere = {
-        accountId: accountIdValue,
-        userId: userId,
-        date: {
-          gte: startDate
-        }
-      }
-
-      if (itemId) {
-        snapshotWhere.itemId = itemId
-      }
-
-      // Get snapshots for series only
-      const snapshots = await prisma.watchSnapshot.findMany({
-        where: snapshotWhere,
-        select: {
-          itemId: true,
-          date: true,
-          overallTimeWatched: true
-        },
-        orderBy: {
-          date: 'asc'
-        }
-      })
-
-      // Get watch activities to see daily changes
-      const activities = await prisma.watchActivity.findMany({
-        where: {
-          accountId: accountIdValue,
-          userId: userId,
-          itemType: 'series',
-          date: {
-            gte: startDate
-          },
-          ...(itemId ? { itemId } : {})
-        },
-        select: {
-          itemId: true,
-          date: true,
-          watchTimeSeconds: true
-        },
-        orderBy: {
-          date: 'asc'
-        }
-      })
-
-      // Group by itemId and calculate velocity
-      const velocityByItem = {}
-
-      // Process activities to estimate episodes watched
-      // Assume average episode is ~45 minutes (2700 seconds)
-      const avgEpisodeSeconds = 45 * 60
-
-      for (const activity of activities) {
-        if (!velocityByItem[activity.itemId]) {
-          velocityByItem[activity.itemId] = {
-            itemId: activity.itemId,
-            totalWatchTimeSeconds: 0,
-            estimatedEpisodes: 0,
-            daysActive: new Set(),
-            firstWatched: activity.date,
-            lastWatched: activity.date,
-            watchDays: []
-          }
-        }
-
-        const item = velocityByItem[activity.itemId]
-        item.totalWatchTimeSeconds += activity.watchTimeSeconds || 0
-        item.daysActive.add(activity.date.toISOString().split('T')[0])
-        item.watchDays.push({
-          date: activity.date.toISOString().split('T')[0],
-          watchTimeSeconds: activity.watchTimeSeconds
-        })
-
-        if (activity.date < item.firstWatched) {
-          item.firstWatched = activity.date
-        }
-        if (activity.date > item.lastWatched) {
-          item.lastWatched = activity.date
-        }
-      }
-
-      // Calculate velocity metrics
-      const velocityResults = Object.values(velocityByItem).map(item => {
-        const daysActive = item.daysActive.size
-        const totalDays = Math.max(1, Math.ceil((item.lastWatched - item.firstWatched) / (1000 * 60 * 60 * 24)) + 1)
-        const estimatedEpisodes = Math.round(item.totalWatchTimeSeconds / avgEpisodeSeconds)
-        const episodesPerDay = daysActive > 0 ? (estimatedEpisodes / daysActive) : 0
-        const episodesPerWeek = episodesPerDay * 7
-
-        // Estimate completion date (if we have current progress)
-        let estimatedCompletion = null
-        if (itemId && snapshots.length > 0) {
-          const latestSnapshot = snapshots[snapshots.length - 1]
-          // This is a rough estimate - would need total episodes from metadata
-          // For now, just show velocity
-        }
-
-        return {
-          itemId: item.itemId,
-          totalWatchTimeSeconds: item.totalWatchTimeSeconds,
-          totalWatchTimeHours: Math.round((item.totalWatchTimeSeconds / 3600) * 100) / 100,
-          estimatedEpisodes,
-          daysActive,
-          totalDays,
-          episodesPerDay: Math.round(episodesPerDay * 100) / 100,
-          episodesPerWeek: Math.round(episodesPerWeek * 100) / 100,
-          firstWatched: item.firstWatched.toISOString().split('T')[0],
-          lastWatched: item.lastWatched.toISOString().split('T')[0],
-          watchDays: item.watchDays.slice(-7) // Last 7 days of activity
-        }
-      }).sort((a, b) => b.episodesPerDay - a.episodesPerDay)
-
-      res.json({
-        userId: user.id,
-        username: user.username || user.email,
-        period,
-        itemId: itemId || null,
-        averageEpisodeLength: avgEpisodeSeconds,
-        items: velocityResults
-      })
-    } catch (error) {
-      console.error('Error fetching velocity:', error)
-      res.status(500).json({ error: 'Failed to fetch velocity', message: publicMessage(error, 'Failed to fetch velocity') })
-    }
-  })
-
-  // Get single user with detailed information
-  router.get('/:id', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { basic } = req.query
-
-      const user = await findUserById(prisma, id, getAccountId(req), {})
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Find groups that contain this user
-      const groups = await prisma.group.findMany({
-        where: {
-          accountId: getAccountId(req),
-          userIds: {
-            contains: user.id
-          }
-        },
-        include: {
-          addons: {
-            include: {
-              addon: true
-            }
-          }
-        }
-      })
-
-      // Group addons come from the user's primary group assignment
-      const primaryGroup = groups[0]
-      const currentAccountId = getAccountId(req)
-      // Resolve ordered addons via shared helper
-      const { getGroupAddons } = require('../utils/helpers')
-      const orderedAddons = primaryGroup ? await getGroupAddons(prisma, primaryGroup.id, req) : []
-
-      // Get all groups the user belongs to
-      const userGroups = groups.map(g => ({ id: g.id, name: g.name }))
-
-      // Note: stremioAddons field was removed from User schema
-      // Stremio addons are now fetched live when needed
-      let stremioAddonsCount = 0
-      let stremioAddons = []
-
-      // Parse excluded and protected addons from database
-      let excludedAddons = []
-      let protectedAddons = []
-
-      excludedAddons = parseAddonIds(user.excludedAddons)
-
-      // protectedAddons are stored as plaintext names (JSON array)
-      try {
-        protectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-      } catch {
-        protectedAddons = []
-      }
-
-      // Calculate total watch time from completed sessions
-      let totalWatchTimeMinutes = 0
-      try {
-        const activities = await prisma.watchActivity.findMany({
-          where: {
-            accountId: currentAccountId || 'default',
-            userId: id
-          },
-          select: {
-            watchTimeSeconds: true
-          }
-        })
-        const totalSeconds = activities.reduce((sum, a) => sum + (a.watchTimeSeconds || 0), 0)
-        totalWatchTimeMinutes = Math.round(totalSeconds / 60)
-      } catch (error) {
-        console.warn(`Error fetching watch time for user ${id}:`, error.message)
-      }
-
-      let lastActive = null
-      try {
-        lastActive = (await require('../utils/lastSeen').lastSeenFor(prisma, currentAccountId || 'default', id))?.toISOString() || null
-      } catch (error) {
-        console.warn(`[users] last seen failed for ${id}:`, error.message)
-      }
-
-      // Transform for frontend
-      // The address sync itself uses (utils/ownAddress.js).
-      const traxBase = await require('../utils/ownAddress').publicBase(prisma, getAccountId(req)).catch(() => '')
-
-      const transformedUser = {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        providerType: user.providerType || 'stremio',
-        nuvioProfileId: user.nuvioProfileId ?? 1,
-        ...jellyfinSummary(user),
-        hasStremioConnection: !!user.stremioAuthKey,
-        status: user.isActive ? 'active' : 'inactive',
-        addons: orderedAddons,
-        groups: userGroups,
-        groupName: groups[0]?.name || null,
-        groupId: groups[0]?.id || null,
-        lastActive,
-        stremioAddonsCount: stremioAddonsCount,
-        stremioAddons: stremioAddons,
-        excludedAddons: excludedAddons,
-        protectedAddons: protectedAddons,
-        colorIndex: user.colorIndex,
-        avatarUrl: user.avatarUrl,
-        useGravatar: user.useGravatar === true,
-        expiresAt: user.expiresAt,
-        inviteCode: user.inviteCode,
-        createdAt: user.createdAt,
-        discordWebhookUrl: user.discordWebhookUrl || null,
-        notifyOnWatch: user.notifyOnWatch !== false,
-        watchTime: totalWatchTimeMinutes,
-        providerConnectionError: user.providerConnectionError || null,
-        providerConnectionErrorAt: user.providerConnectionErrorAt || null,
-        simklConnected: !!user.simklAccessToken,
-        simklConnectedAt: user.simklConnectedAt || null,
-        // SlickTrax Addon state. The token is a bearer credential, but this
-        // response is admin-session-only and the admin can already read it
-        // from the manifest URL the toggle returns - it is needed here so a
-        // page reload can still display/copy that URL.
-        traxAddonEnabled: !!user.traxAddonEnabled,
-        excludeFromHouseholdStats: !!user.excludeFromHouseholdStats,
-        traxToken: user.traxToken || null,
-        // Whether SYNC can actually install it, and the url it would use.
-        // The page used to build this url from the browser's own address,
-        // which looks right and proves nothing: with no public address
-        // configured, sync skips SlickTrax entirely while the row still
-        // shows a link. Answering from the server is the only honest way.
-        traxBaseKnown: !!traxBase,
-        traxManifestUrl: (traxBase && user.traxToken)
-          ? traxBase + '/trax/' + user.traxToken + '/v' + require('./traxAddon').traxPathVersion(user) + '/manifest.json'
-          : null,
-      }
-
-      res.json(transformedUser)
-    } catch (error) {
-      console.error('Error fetching user details:', error)
-      res.status(500).json({ error: 'Failed to fetch user details' })
-    }
-  });
-
-  // Account merge (Stremio<->Nuvio, same real person) - see
-  // server/utils/userMerge.js for the full design/reasoning.
-  router.get('/:id/merge-preview', async (req, res) => {
-    try {
-      const { donorId } = req.query
-      if (!donorId) return res.status(400).json({ error: 'donorId is required' })
-      const { getMergePreview } = require('../utils/userMerge')
-      const preview = await getMergePreview(prisma, req.params.id, donorId)
-      res.json(preview)
-    } catch (error) {
-      console.error('Error building merge preview:', error)
-      res.status(400).json({ error: publicMessage(error, 'Failed to build merge preview') })
-    }
-  });
-
-  router.post('/:id/merge', async (req, res) => {
-    try {
-      const { donorId } = req.body || {}
-      if (!donorId) return res.status(400).json({ error: 'donorId is required' })
-      const { mergeUsers } = require('../utils/userMerge')
-      const result = await mergeUsers(prisma, req.params.id, donorId)
-      res.json({ success: true, ...result })
-    } catch (error) {
-      console.error('Error merging users:', error)
-      res.status(400).json({ error: publicMessage(error, 'Failed to merge users') })
-    }
-  });
-
-  router.get('/:id/merge-info', async (req, res) => {
-    try {
-      const { getUndoInfo } = require('../utils/userMerge')
-      const info = await getUndoInfo(prisma, req.params.id)
-      res.json({ info })
-    } catch (error) {
-      console.error('Error checking merge info:', error)
-      res.status(500).json({ error: 'Failed to check merge info' })
-    }
-  });
-
-  router.post('/:id/undo-merge', async (req, res) => {
-    try {
-      const { undoMerge } = require('../utils/userMerge')
-      const result = await undoMerge(prisma, req.params.id)
-      res.json({ success: true, ...result })
-    } catch (error) {
-      console.error('Error undoing merge:', error)
-      res.status(400).json({ error: publicMessage(error, 'Failed to undo merge') })
-    }
-  });
-
-  // Update user (including Discord settings for public users)
-  router.put('/:id', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { username, email, groupId, colorIndex, avatarUrl, expiresAt } = req.body
-
-
-      // Check if user exists
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-      })
-
-      if (!existingUser) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Prepare update data
-      const updateData = {}
-
-      if (username !== undefined) {
-        updateData.username = username
-      }
-
-      if (email !== undefined) {
-        // Check if email is already taken by another user of the SAME provider type
-        // (a Stremio user and a Nuvio user are allowed to share an email by design)
-        const emailExists = await prisma.user.findFirst({
-          where: {
-            AND: [
-              { email },
-              { id: { not: id } },
-              { providerType: existingUser.providerType || 'stremio' },
-              ...((INSTANCE_TYPE === 'public') && req.appAccountId ? [{ accountId: req.appAccountId }] : [])
-            ]
-          }
-        })
-
-        if (emailExists) {
-          return res.status(400).json({ error: 'Email already exists' })
-        }
-
-        updateData.email = email
-      }
-
-      if (colorIndex !== undefined) {
-        updateData.colorIndex = colorIndex
-      }
-
-      if (avatarUrl !== undefined) {
-        updateData.avatarUrl = avatarUrl || null // allow clearing back to the generated/color avatar
-      }
-
-      if (expiresAt !== undefined) {
-        updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
-      }
-
-      // Handle Discord settings (for public users)
-      if (req.body.discordWebhookUrl !== undefined) {
-        updateData.discordWebhookUrl = req.body.discordWebhookUrl || null
-      }
-      if (req.body.discordUserId !== undefined) {
-        updateData.discordUserId = req.body.discordUserId || null
-      }
-      if (req.body.notifyOnWatch !== undefined) {
-        updateData.notifyOnWatch = req.body.notifyOnWatch !== false
-      }
-
-      // Update user
-      const updatedUser = await prisma.user.update({
-        where: { id },
-        data: updateData
-      })
-
-      // Handle group assignment
-      if (groupId !== undefined) {
-        // Treat empty string as null (remove from all groups)
-        if (groupId === null || groupId === '') {
-          // Remove user from all groups
-          await require('../utils/helpers/database').removeUserFromAllGroups(prisma, id, getAccountId(req));
-        } else {
-          // Validate groupId is a valid string before calling assignUserToGroup
-          if (typeof groupId === 'string' && groupId.trim() !== '') {
-            // First verify the group exists for this account
-            const accountId = getAccountId(req)
-            const groupExists = await prisma.group.findFirst({
-              where: {
-                id: groupId,
-                accountId: accountId
-              },
-              select: { id: true }
-            })
-
-            if (!groupExists) {
-              return res.status(404).json({
-                error: `Group not found: ${groupId} (accountId: ${accountId})`
-              })
-            }
-
-            await assignUserToGroup(prisma, id, groupId, req)
-          }
-        }
-      }
-
-      // Fetch updated user for response
-      const userWithGroups = await prisma.user.findFirst({
-        // Scoped to the account - see the note in routes/addons.js. Without
-        // it, an id from another account resolves and is then written to.
-        where: { id, accountId: getAccountId(req) }
-      })
-
-      // Find groups that contain this user using userIds JSON array
-      const userGroups = await prisma.group.findMany({
-        where: {
-          userIds: {
-            contains: id
-          }
-        }
-      })
-
-      // Transform for frontend response
-      const userGroup = userGroups[0] // Get first group if any
-      const transformedUser = {
-        id: userWithGroups.id,
-        username: userWithGroups.username,
-        email: userWithGroups.email,
-        status: userWithGroups.isActive ? 'active' : 'inactive',
-        addons: userWithGroups.stremioAddons ?
-          (Array.isArray(userWithGroups.stremioAddons) ? userWithGroups.stremioAddons.length : Object.keys(userWithGroups.stremioAddons).length) : 0,
-        groups: userGroups.length,
-        groupName: userGroup?.name || null,
-        groupId: userGroup?.id || null,
-        lastActive: null
-      }
-      try {
-        transformedUser.lastActive = (await require('../utils/lastSeen').lastSeenFor(prisma, getAccountId(req) || 'default', id))?.toISOString() || null
-      } catch (error) {
-        console.warn(`[users] last seen failed for ${id}:`, error.message)
-      }
-
-      // Log activity (temporarily disabled for debugging)
-      // try {
-      //   await prisma.activityLog.create({
-      //     data: {
-      //       userId: id,
-      //       action: 'user_updated',
-      //       details: JSON.stringify({ updatedFields: Object.keys(updateData) }),
-      //       accountId: getAccountId(req)
-      //     }
-      //   })
-      // } catch (logError) {
-      //   console.warn('Failed to log user update activity:', logError.message)
-      // }
-
-      res.json(transformedUser)
-    } catch (error) {
-      console.error('Error updating user:', error)
-      res.status(500).json({ error: 'Failed to update user', details: publicMessage(error, 'Failed to update user') })
-    }
-  });
-
-  // Test user's Discord webhook
-  router.post('/:id/test-webhook', async (req, res) => {
-    try {
-      const { id } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      // Get user's webhook URL
-      const user = await prisma.user.findFirst({
-        where: { id, accountId },
-        select: { id: true, username: true, discordWebhookUrl: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Use provided URL or user's stored URL
-      const providedUrl = typeof req.body?.webhookUrl === 'string' ? req.body.webhookUrl.trim() : ''
-      const targetUrl = providedUrl || user.discordWebhookUrl
-
-      if (!targetUrl) {
-        return res.status(400).json({ message: 'No webhook URL configured' })
-      }
-
-      await postDiscord(targetUrl, `🔬 SlickSync test webhook message for ${user.username}`)
-      return res.json({ message: 'Test message sent' })
-    } catch (error) {
-      console.error('Failed to send user webhook test:', error)
-      return res.status(500).json({ message: 'Failed to send test message', error: publicMessage(error, 'Failed to send test message') })
-    }
-  });
-
-  // Enable user
-  router.put('/:id/enable', async (req, res) => {
-    try {
-      const { id } = req.params
-
-
-      // Update user status to active
-      const updatedUser = await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: { isActive: true },
-        include: {}
-      })
-
-      // Remove sensitive data
-      delete updatedUser.password
-      delete updatedUser.stremioAuthKey
-
-      res.json(updatedUser)
-    } catch (error) {
-      console.error('Error enabling user:', error)
-      res.status(500).json({ error: 'Failed to enable user', details: publicMessage(error, 'Failed to enable user') })
-    }
-  });
-
-  // Disable user
-  router.put('/:id/disable', async (req, res) => {
-    try {
-      const { id } = req.params
-
-
-      // Update user status to inactive
-      const updatedUser = await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: { isActive: false },
-        include: {}
-      })
-
-      // Remove sensitive data
-      delete updatedUser.password
-      delete updatedUser.stremioAuthKey
-
-      res.json(updatedUser)
-    } catch (error) {
-      console.error('Error disabling user:', error)
-      res.status(500).json({ error: 'Failed to disable user', details: publicMessage(error, 'Failed to disable user') })
-    }
-  });
-
-  // Delete user
-  router.delete('/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      // Ensure user exists
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-      if (!existingUser) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Into the Trash first (30-day undo) - archived BEFORE anything is
-      // removed, so a failed archive aborts the delete, never the reverse.
-      await require('../utils/trash').archiveUserDelete(prisma, getAccountId(req), id)
-
-      // Remove user from all groups first (update userIds arrays)
-      await require('../utils/helpers/database').removeUserFromAllGroups(prisma, id, getAccountId(req))
-
-      // Delete related records first to avoid FK constraint errors
-      await prisma.$transaction([
-        // ActivityLog model removed
-        prisma.user.delete({
-          where: {
-            id,
-            accountId: getAccountId(req)
-          }
-        })
-      ])
-      await require('../utils/jellyfinProfiles').forgetPersonHousehold(prisma, id)
-
-      res.json({ message: 'User deleted successfully' });
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      res.status(500).json({ message: 'Failed to delete user' });
-    }
-  });
-
-  // Get user sync status (delegates to shared util)
-  router.get('/:id/sync-status', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { groupId } = req.query
-
-      // Read account-backed sync settings; fallback to query param only if unavailable
-      let unsafeMode = false
-      try {
-        const acct = await prisma.appAccount.findFirst({ where: { id: getAccountId(req) }, select: { sync: true } })
-        let cfg = acct?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object' && typeof cfg.safe === 'boolean') {
-          unsafeMode = !cfg.safe
-        } else {
-          unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
-        }
-      } catch {
-        unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
-      }
-
-      const { createGetUserSyncStatus } = require('../utils/sync')
-      const getUserSyncStatus = createGetUserSyncStatus({
-        prisma,
-        getAccountId,
-        decrypt,
-        parseAddonIds,
-        parseProtectedAddons,
-        getDecryptedManifestUrl,
-        canonicalizeManifestUrl,
-        StremioAPIClient,
-        createProvider,
-      })
-
-      const result = await getUserSyncStatus(id, { groupId, unsafe: unsafeMode }, req)
-      return res.json(result)
-    } catch (error) {
-      console.error('Error getting sync status:', error)
-      res.status(500).json({ message: 'Failed to get sync status' })
-    }
-  });
-
-  // Get user's sync plan (current vs desired addons for debugging)
-  router.get('/:id/sync-plan', async (req, res) => {
-    try {
-      const { id } = req.params
-      console.log('[sync-plan] Request for user:', id)
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: { id, accountId: getAccountId(req) },
-        select: { id: true, stremioAuthKey: true, isActive: true, protectedAddons: true, excludedAddons: true, accountId: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true, traxAddonEnabled: true, traxToken: true }
-      })
-      console.log('[sync-plan] User found:', user ? user.id : 'null')
-      if (!user) return res.status(404).json({ message: 'User not found' })
-      const hasCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
-      if (!hasCreds) return res.status(400).json({ message: 'User not connected to a provider' })
-
-      // Read account-backed sync settings
-      let unsafeMode = false
-      let useCustomFields = true
-      try {
-        const acct = await prisma.appAccount.findFirst({ where: { id: getAccountId(req) }, select: { sync: true } })
-        let cfg = acct?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object') {
-          if (typeof cfg.safe === 'boolean') unsafeMode = !cfg.safe
-          if (typeof cfg.useCustomFields === 'boolean') useCustomFields = cfg.useCustomFields
-        }
-      } catch { }
-
-      // Compute sync plan
-      console.log('[sync-plan] Computing sync plan...')
-      const { computeUserSyncPlan } = require('../utils/sync')
-      const plan = await computeUserSyncPlan(user, req, {
-        prisma,
-        getAccountId,
-        decrypt,
-        parseAddonIds,
-        parseProtectedAddons,
-        canonicalizeManifestUrl,
-        StremioAPIClient,
-        createProvider,
-        unsafeMode,
-        useCustomFields
-      })
-      console.log('[sync-plan] Plan computed, success:', plan.success, 'error:', plan.error)
-
-      if (!plan.success) {
-        return res.status(500).json({ message: plan.error || 'Failed to compute sync plan' })
-      }
-
-      // Debug: show actual comparison (same urlOnly mode the plan itself uses)
-      const { createManifestFingerprint } = require('../utils/sync')
-      const urlOnly = (user.providerType || 'stremio') !== 'stremio'
-      const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly })
-      const currentKeys = (plan.current || []).map(fingerprint)
-      const desiredKeys = (plan.desired || []).map(fingerprint)
-      const debugComparison = {
-        currentLength: currentKeys.length,
-        desiredLength: desiredKeys.length,
-        lengthsMatch: currentKeys.length === desiredKeys.length,
-        currentKeys,
-        desiredKeys,
-        allMatch: currentKeys.length === desiredKeys.length && currentKeys.every((k, i) => k === desiredKeys[i])
-      }
-      console.log('[sync-plan] Comparison:', JSON.stringify(debugComparison))
-
-      const currentWithFingerprint = (plan.current || []).map(addon => ({
-        name: addon?.manifest?.name || addon?.transportName || 'Unknown',
-        transportUrl: addon?.transportUrl || addon?.manifestUrl || '',
-        fingerprint: fingerprint(addon)
-      }))
-
-      const desiredWithFingerprint = (plan.desired || []).map(addon => ({
-        name: addon?.manifest?.name || addon?.transportName || 'Unknown',
-        transportUrl: addon?.transportUrl || addon?.manifestUrl || '',
-        fingerprint: fingerprint(addon)
-      }))
-
-      const alreadySynced = plan.alreadySynced
-      console.log('[sync-plan] Sending response, current:', currentWithFingerprint.length, 'desired:', desiredWithFingerprint.length)
-      console.log('[sync-plan] Already synced:', alreadySynced)
-      console.log('[sync-plan] Current fingerprints:', currentWithFingerprint.map(f => f.fingerprint))
-      console.log('[sync-plan] Desired fingerprints:', desiredWithFingerprint.map(f => f.fingerprint))
-      res.json({
-        alreadySynced,
-        current: currentWithFingerprint,
-        desired: desiredWithFingerprint,
-        currentCount: currentWithFingerprint.length,
-        desiredCount: desiredWithFingerprint.length,
-        debug: {
-          lengthsMatch: debugComparison.lengthsMatch,
-          allMatch: debugComparison.allMatch
-        }
-      })
-    } catch (error) {
-      console.error('[sync-plan] Error:', error.message, error.stack)
-      res.status(500).json({ message: publicMessage(error, 'Failed to get sync plan') })
-    }
-  });
-
-  // Get user's raw Stremio addons (getUserAddons function)
-  router.get('/:id/user-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        select: {
-          id: true,
-          stremioAuthKey: true,
-          isActive: true,
-          providerType: true,
-          nuvioRefreshToken: true,
-          nuvioUserId: true,
-          traxAddonEnabled: true,
-          traxToken: true
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      if (!user.stremioAuthKey && !(user.nuvioRefreshToken && user.nuvioUserId)) {
-        return res.status(400).json({ message: 'User not connected to a provider' })
-      }
-
-      // Import the getUserAddons function
-      const { getUserAddons } = require('../utils/sync')
-
-      // Get raw addons from the user's provider
-      const result = await getUserAddons(user, req, {
-        decrypt,
-        StremioAPIClient,
-        createProvider
-      })
-
-      if (!result.success) {
-        console.error('❌ getUserAddons failed:', result.error)
-        return res.status(500).json({ message: 'Failed to fetch Stremio addons', error: result.error })
-      }
-
-      // Nuvio stores only {url, name} per addon, so the manifest that comes
-      // back with each entry is a stub: no catalogs, no resources. Anything
-      // that has to answer "does this addon still serve this catalog" - the
-      // Nuvio Collections editor validating a folder's sources, most
-      // obviously - reads those empty arrays and concludes every source is
-      // broken, which is exactly how a perfectly good linked catalog ends up
-      // labelled "addon removed or catalog no longer exists". Fetching each
-      // addon's own manifest (cached, best-effort, shared with the home-row
-      // editor) is what makes those checks mean anything on Nuvio.
-      let addonsOut = result.addons
-      if (user.providerType === 'nuvio') {
+    // Add the SlickTrax link to their AIOStreams configuration (utils/aioSlickTrax.js).
+    async function installIntoAio(req, accountId, user) {
         try {
-          const { fetchManifest } = require('../utils/nuvioHomeLayout')
-          const { localTraxManifest } = require('../utils/localTraxManifest')
-          const list = Array.isArray(addonsOut) ? addonsOut : (addonsOut?.addons || [])
-          const enriched = await Promise.all(list.map(async (a) => {
-            // Our own SlickTrax manifest is built here rather than fetched:
-            // see utils/localTraxManifest.js. It is authoritative, instant,
-            // and works on instances whose hostname sits behind a login.
-            const real = (await localTraxManifest(prisma, a?.transportUrl))
-              || (await fetchManifest(a?.transportUrl))
-            // The stub's own fields stay as a floor: a dead addon keeps its
-            // name rather than becoming nameless.
-            return real ? { ...a, manifest: { ...(a?.manifest || {}), ...real } } : a
-          }))
-          addonsOut = Array.isArray(addonsOut) ? enriched : { ...addonsOut, addons: enriched }
-        } catch { /* stubs are still better than an error */ }
-      }
-      res.json(addonsOut)
-    } catch (error) {
-      console.error('❌ Error fetching raw Stremio addons:', error)
-      res.status(500).json({ message: 'Failed to fetch raw Stremio addons', error: publicMessage(error, 'Failed to fetch raw Stremio addons') })
-    }
-  });
-
-  // Get user's Stremio addons
-  router.get('/:id/stremio-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-      // Fetch the full user record - need providerType to know which
-      // provider's addon fetch to use, not just Stremio's
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Non-Stremio providers (e.g. Nuvio) don't have a stremioAuthKey at
-      // all - they were previously always rejected here with "not
-      // connected to Stremio" even though the account has its own addon
-      // list. Route those through the provider-agnostic getAddons()
-      // instead, same as the live addon count on the Users list.
-      if (user.providerType && user.providerType !== 'stremio') {
-        try {
-          const provider = createProvider(user, { decrypt, req })
-          if (!provider) {
-            return res.status(400).json({ message: `User is not connected to ${user.providerType}` })
-          }
-          const result = await provider.getAddons()
-          const rawAddons = Array.isArray(result?.addons) ? result.addons : []
-
-          // Nuvio only stores {url, name} per addon ("urlOnly" sync mode) -
-          // no logo/version/description, unlike Stremio's account API which
-          // returns full manifests directly. Fetch each addon's own
-          // manifest.json to get real icon/version data, same as what a
-          // user would see in Nuvio/Stremio itself. Best-effort per addon -
-          // a slow or dead addon server shouldn't fail the whole import.
-          async function fetchManifest(transportUrl) {
-            if (!transportUrl) return null
-            const manifestUrl = transportUrl.endsWith('.json')
-              ? transportUrl
-              : `${transportUrl.replace(/\/$/, '')}/manifest.json`
-            try {
-              const controller = new AbortController()
-              const timeout = setTimeout(() => controller.abort(), 5000)
-              // The address comes from the person's own provider account, so
-              // it is checked like any other address typed in somewhere. A
-              // refused one reads as an addon that did not answer.
-              const resp = await safeFetch(manifestUrl, { signal: controller.signal }, instancePolicy())
-              clearTimeout(timeout)
-              if (!resp.ok) return null
-              return await resp.json()
-            } catch (e) {
-              return null
-            }
-          }
-
-          const { localTraxManifest } = require('../utils/localTraxManifest')
-          const enriched = await Promise.all(rawAddons.map(async (a) => {
-            const fetched = (await localTraxManifest(prisma, a?.transportUrl))
-              || (await fetchManifest(a?.transportUrl))
-            return { ...a, manifest: { ...(a?.manifest || {}), ...(fetched || {}) } }
-          }))
-
-          const addons = enriched.map((a) => ({
-            id: a?.manifest?.id || a?.transportUrl || 'unknown',
-            name: a?.manifest?.name || a?.transportName || 'Unknown',
-            manifestUrl: a?.transportUrl || null,
-            version: a?.manifest?.version || null,
-            description: a?.manifest?.description || '',
-            iconUrl: a?.manifest?.logo || null,
-            manifest: {
-              id: a?.manifest?.id || 'unknown',
-              name: a?.manifest?.name || 'Unknown',
-              version: a?.manifest?.version || null,
-              description: a?.manifest?.description || '',
-              logo: a?.manifest?.logo || null,
-              types: a?.manifest?.types || ['other'],
-              resources: a?.manifest?.resources || [],
-              catalogs: a?.manifest?.catalogs || []
-            }
-          }))
-          return res.json({ userId: id, count: addons.length, addons })
-        } catch (error) {
-          console.error(`Error fetching ${user.providerType} addons:`, error)
-          // An expired sign-in says so, with what to do - not a bare "failed".
-          if (/session does not exist|unauthorized|invalid auth| 401|authentication expired/i.test(String(error?.message || ''))) {
-            const app = user.providerType === 'nuvio' ? 'Nuvio' : user.providerType === 'jellyfin' ? 'server' : 'Stremio'
-            return res.status(409).json({ message: `${user.username || 'This person'}'s ${app} sign-in has expired - reconnect them first (Reconnect, next to their name)`, reconnect: true })
-          }
-          const appName = user.providerType === 'nuvio' ? 'Nuvio' : user.providerType === 'jellyfin' ? 'their server' : 'Stremio'
-          return res.status(500).json({ message: `Couldn't read their addons from ${appName}`, error: publicMessage(error, `Couldn't read their addons from ${appName}`) })
-        }
-      }
-
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User is not connected to Stremio' })
-      }
-
-      // Decrypt stored auth key
-      let authKeyPlain
-      try {
-        authKeyPlain = decrypt(user.stremioAuthKey, req)
-      } catch (e) {
-        console.error('Decryption failed:', e.message)
-        return res.status(500).json({ message: 'Failed to decrypt Stremio credentials' })
-      }
-
-      // Use stateless client with authKey to fetch addon collection directly
-      try {
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-        const collection = await apiClient.request('addonCollectionGet', {})
-
-        const rawAddons = collection?.addons || collection || {}
-        const addonsNormalized = Array.isArray(rawAddons)
-          ? rawAddons
-          : (typeof rawAddons === 'object' ? Object.values(rawAddons) : [])
-
-        // Keep only safe serializable fields (skip manifest fetching for performance)
-        const allAddons = addonsNormalized.map((a) => {
-          return {
-            id: a?.id || a?.manifest?.id || 'unknown',
-            name: a?.name || a?.manifest?.name || 'Unknown',
-            manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
-            version: a?.version || a?.manifest?.version || 'unknown',
-            description: a?.description || a?.manifest?.description || '',
-            iconUrl: a?.iconUrl || a?.manifest?.logo || null, // Add iconUrl field
-            // Include manifest object for frontend compatibility - ensure it's never null
-            manifest: a?.manifest || {
-              id: a?.manifest?.id || a?.id || 'unknown',
-              name: a?.manifest?.name || a?.name || 'Unknown',
-              version: a?.manifest?.version || a?.version || 'unknown',
-              description: a?.manifest?.description || a?.description || '',
-              logo: a?.iconUrl || a?.manifest?.logo || null, // Add logo to manifest
-              // Include other essential manifest fields to prevent null errors
-              types: a?.manifest?.types || ['other'],
-              resources: a?.manifest?.resources || [],
-              catalogs: a?.manifest?.catalogs || []
-            }
-          }
-        })
-
-        // Keep all addons for display (don't filter default addons in the main endpoint)
-        const addons = allAddons
-
-        return res.json({
-          userId: id,
-          count: addons.length,
-          addons
-        })
-      } catch (error) {
-        console.error('Error fetching Stremio addons:', error)
-        if (/session does not exist|unauthorized|invalid auth| 401/i.test(String(error?.message || ''))) {
-          return res.status(409).json({ message: `${user.username || 'This person'}'s Stremio sign-in has expired - reconnect them first (Reconnect, next to their name)`, reconnect: true })
-        }
-        return res.status(500).json({ message: "Couldn't read their addons from Stremio", error: publicMessage(error, "Couldn't read their addons from Stremio") })
-      }
-    } catch (error) {
-      console.error('Error getting Stremio addons:', error)
-      res.status(500).json({ message: 'Failed to get Stremio addons' })
-    }
-  });
-
-  // --- Nuvio Collections (admin) - the home-screen folder/catalog-source
-  // organizer in the real Nuvio app, not to be confused with this app's own
-  // local "Catalogs" lists. Lives here alongside stremio-addons above since
-  // it's the same "look up a managed User, get a provider, call a method"
-  // shape as every other per-user provider passthrough in this file.
-
-  // List a Nuvio account's profiles (Netflix-style sub-profiles on one login).
-  router.get('/:id/nuvio-profiles', async (req, res) => {
-    try {
-      const { id } = req.params
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      if (user.providerType !== 'nuvio') {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const profiles = await provider.getProfiles()
-
-      // Say which profiles are actually worth pointing a user at. A profile
-      // set to use the primary's addons has no list of its own, and one that
-      // is already managed by another user here should not be offered twice.
-      const siblings = await prisma.user.findMany({
-        where: { accountId: getAccountId(req), providerType: 'nuvio', email: user.email },
-        select: { id: true, username: true, nuvioProfileId: true }
-      })
-      const byProfile = new Map(siblings.map((u) => [u.nuvioProfileId ?? 1, u]))
-
-      const annotated = (profiles || []).map((p) => {
-        const index = Number(p.profile_index ?? p.profileIndex)
-        const owner = byProfile.get(index) || null
-        return {
-          ...p,
-          profileIndex: index,
-          usesPrimaryAddons: p.uses_primary_addons === true,
-          managedBy: owner ? { id: owner.id, username: owner.username } : null,
-          isThisUser: owner ? owner.id === user.id : false,
-          // Addable when it keeps its own addons and nothing here manages it
-          // yet. The primary is always managed by whoever was imported first.
-          canAdd: p.uses_primary_addons !== true && !owner
-        }
-      })
-
-      res.json({ profiles: annotated })
-    } catch (error) {
-      console.error('Error fetching Nuvio profiles:', error)
-      res.status(500).json({ message: 'Failed to fetch Nuvio profiles', error: publicMessage(error, 'Failed to fetch Nuvio profiles') })
-    }
-  });
-
-  // Add one of this account's other profiles as its own user, so that
-  // profile's addon list can be managed and synced like anyone else's. The
-  // account is already connected, so this reuses the credential already
-  // stored rather than asking for the password a second time.
-  router.post('/:id/nuvio-profiles/:profileId/add-user', async (req, res) => {
-    try {
-      const { id, profileId } = req.params
-      const accountId = getAccountId(req)
-      const profileIndex = Number(profileId)
-      if (!Number.isInteger(profileIndex) || profileIndex < 1) {
-        return res.status(400).json({ message: 'Invalid profile' })
-      }
-      if (profileIndex === 1) {
-        return res.status(400).json({ message: 'The primary profile is already managed by this user' })
-      }
-
-      const user = await prisma.user.findFirst({ where: { id, accountId } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      if (user.providerType !== 'nuvio') {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      if (!user.nuvioRefreshToken || !user.nuvioUserId) {
-        return res.status(400).json({ message: 'This user has no stored Nuvio credential to reuse' })
-      }
-
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) return res.status(400).json({ message: 'User is not connected to Nuvio' })
-
-      const profiles = await provider.getProfiles()
-      const match = (profiles || []).find((pr) => Number(pr.profile_index ?? pr.profileIndex) === profileIndex)
-      if (!match) return res.status(404).json({ message: 'That profile no longer exists on this Nuvio account' })
-      if (match.uses_primary_addons === true) {
-        return res.status(400).json({
-          message: `"${match.name || `Profile ${profileIndex}`}" is set to use the primary profile's addons, so it has no list of its own to manage.`
-        })
-      }
-
-      const already = await prisma.user.findFirst({
-        where: { accountId, providerType: 'nuvio', email: user.email, nuvioProfileId: profileIndex },
-        select: { id: true, username: true }
-      })
-      if (already) {
-        return res.status(409).json({ message: `That profile is already managed by ${already.username}` })
-      }
-
-      // Same credential, re-encrypted rather than copied, so the new row is
-      // written exactly the way every other credential here is.
-      const plainToken = decrypt(user.nuvioRefreshToken, req)
-      if (!plainToken) return res.status(400).json({ message: 'Could not read the stored Nuvio credential' })
-
-      let username = (match.name || `Profile ${profileIndex}`).trim().slice(0, 40)
-      const base = username
-      let attempt = 0
-      while (await prisma.user.findFirst({ where: { accountId, username } })) {
-        attempt++
-        if (attempt > 100) return res.status(409).json({ message: 'Could not pick a free username for that profile' })
-        username = `${base} ${attempt + 1}`
-      }
-
-      const created = await prisma.user.create({
-        data: {
-          avatarUrl: createDefaultAvatar(),
-          accountId,
-          username,
-          email: user.email,
-          providerType: 'nuvio',
-          nuvioRefreshToken: encrypt(plainToken, req),
-          nuvioUserId: user.nuvioUserId,
-          nuvioProfileId: profileIndex,
-          isActive: true,
-          // The picker wraps whatever it is given, so this just nudges each
-          // profile onto a different colour from the one it came from.
-          colorIndex: (user.colorIndex || 0) + profileIndex
-        }
-      })
-
-      res.status(201).json({
-        user: { id: created.id, username: created.username, nuvioProfileId: profileIndex },
-        message: `${username} now manages that profile's addons`
-      })
-    } catch (error) {
-      console.error('Error adding a Nuvio profile as a user:', error)
-      res.status(500).json({ message: 'Failed to add that profile', error: publicMessage(error, 'Failed to add that profile') })
-    }
-  });
-
-  // --- Profiles: whose viewing each of a Nuvio account's profiles is ------
-  // The rules live in utils/nuvioProfiles.js; these routes are the Profiles
-  // card on a Nuvio person's page.
-
-  // Everything about one Nuvio account the card needs, read once.
-  async function profileContext(req, id) {
-    const accountId = getAccountId(req)
-    const user = await prisma.user.findFirst({ where: { id, accountId } })
-    if (!user) return { status: 404, message: 'User not found' }
-    if (user.providerType !== 'nuvio' || !user.nuvioUserId) return { status: 400, message: 'User is not connected to Nuvio' }
-    const provider = createProvider(user, { decrypt, req })
-    if (!provider) return { status: 400, message: 'User is not connected to Nuvio' }
-    let raw = []
-    try {
-      raw = await provider.getProfiles()
-    } catch (e) {
-      // An expired sign-in won't fix itself on a retry - say what to do.
-      if (/authentication expired|session does not exist|unauthori[sz]ed|invalid auth| 401/i.test(e?.message || '')) {
-        return { status: 502, message: `${user.username || 'This person'}'s Nuvio sign-in has expired - reconnect them to see their profiles` }
-      }
-      return { status: 502, message: "Could not read this account's profiles from Nuvio just now" }
-    }
-    const profiles = (raw || [])
-      .map((p) => ({
-        index: Number(p.profile_index ?? p.profileIndex),
-        name: p.name || null,
-        color: p.avatar_color_hex || null,
-        usesPrimaryAddons: p.uses_primary_addons === true,
-      }))
-      .filter((p) => Number.isInteger(p.index) && p.index > 0)
-      .sort((a, b) => a.index - b.index)
-    if (!profiles.length) profiles.push({ index: 1, name: null, color: null, usesPrimaryAddons: false })
-    const np = require('../utils/nuvioProfiles')
-    const [siblings, routes] = await Promise.all([
-      np.loadSiblings(prisma, accountId, user.nuvioUserId),
-      np.loadRoutes(prisma, accountId, user.nuvioUserId),
-    ])
-    return { accountId, user, profiles, siblings, routes, np }
-  }
-
-  async function profilesView(ctx) {
-    const { accountId, user, profiles, siblings, routes, np } = ctx
-    const merges = await prisma.profileMerge.findMany({
-      where: { accountId, nuvioUserId: user.nuvioUserId, undoneAt: null },
-      orderBy: { createdAt: 'desc' },
-    })
-    const historyCount = async (where) => {
-      const [movies, episodes] = await Promise.all([
-        prisma.movieWatchHistory.count({ where: { accountId, ...where } }),
-        prisma.episodeWatchHistory.count({ where: { accountId, ...where } }),
-      ])
-      return { movies, episodes }
-    }
-    const persons = await Promise.all(siblings.map(async (s) => ({
-      id: s.id,
-      username: s.username,
-      profileIndex: np.profileOf(s),
-      isActive: s.isActive !== false,
-      colorIndex: s.colorIndex ?? 0,
-      avatarUrl: s.avatarUrl || null,
-      useGravatar: !!s.useGravatar,
-      email: s.email || null,
-      ...(await historyCount({ userId: s.id })),
-    })))
-    const rows = await Promise.all(profiles.map(async (p) => {
-      const ownerId = np.ownerOf(p.index, siblings, routes)
-      const own = siblings.find((s) => np.profileOf(s) === p.index) || null
-      const merge = !own ? merges.find((m) => m.profileIndex === p.index) || null : null
-      return {
-        ...p,
-        ownerId,
-        ownPersonId: own?.id || null,
-        skipped: !own && !!routes.get(p.index)?.skip,
-        titles: ownerId && p.name ? await historyCount({ userId: ownerId, profileLabel: p.name }) : { movies: 0, episodes: 0 },
-        merged: merge ? { id: merge.id, donorUsername: merge.donorUsername, createdAt: merge.createdAt } : null,
-        // Whose limits its Limits pill opens: its own person's, or its own as a
-        // profile merged into someone (utils/screenSubjects.js).
-        limitId: own ? own.id : require('../utils/screenSubjects').nuvioProfileSubject(user.nuvioUserId, p.index),
-      }
-    }))
-    const misplaced = await np.findMisplaced(prisma, accountId, siblings, routes, profiles.map((p) => ({ profile_index: p.index, name: p.name })))
-    const misplacedTitles = misplaced.reduce((n, m) => n + m.movies + m.episodes, 0)
-    return { persons, profiles: rows, misplaced: misplacedTitles ? { titles: misplacedTitles } : null }
-  }
-
-  function afterProfileChange(accountId) {
-    try { require('../utils/continueWatching').invalidateContinueWatching(accountId) } catch { /* optional */ }
-    try { require('../utils/metricsCache').clearMetricsForAccount(accountId) } catch { /* optional */ }
-    try { require('../utils/liveEvents').emitLive(accountId, 'sync') } catch { /* optional */ }
-  }
-
-  // A person for one profile of a Nuvio account someone here is already
-  // connected to. The login is reused - every person on the account shares it.
-  async function createProfilePerson(req, baseUser, profileIndex, profileName) {
-    const accountId = getAccountId(req)
-    const plainToken = decrypt(baseUser.nuvioRefreshToken, req)
-    if (!plainToken) throw Object.assign(new Error('Could not read the stored Nuvio credential'), { status: 400 })
-    let username = (profileName || `Profile ${profileIndex}`).trim().slice(0, 40)
-    const base = username
-    let attempt = 0
-    while (await prisma.user.findFirst({ where: { accountId, username } })) {
-      attempt++
-      if (attempt > 100) throw Object.assign(new Error('Could not pick a free username for that profile'), { status: 409 })
-      username = `${base} ${attempt + 1}`
-    }
-    return prisma.user.create({
-      data: {
-        avatarUrl: createDefaultAvatar(),
-        accountId,
-        username,
-        email: baseUser.email,
-        providerType: 'nuvio',
-        nuvioRefreshToken: encrypt(plainToken, req),
-        nuvioUserId: baseUser.nuvioUserId,
-        nuvioProfileId: profileIndex,
-        isActive: true,
-        // The picker wraps whatever it is given, so this just nudges each
-        // profile onto a different colour from the one it came from.
-        colorIndex: (baseUser.colorIndex || 0) + profileIndex,
-      },
-    })
-  }
-
-  router.get('/:id/profiles', async (req, res) => {
-    try {
-      const ctx = await profileContext(req, req.params.id)
-      if (ctx.status) return res.status(ctx.status).json({ message: ctx.message })
-      res.json(await profilesView(ctx))
-    } catch (error) {
-      console.error('Error reading profiles:', error)
-      res.status(500).json({ message: 'Failed to read profiles', error: publicMessage(error, 'Failed to read profiles') })
-    }
-  })
-
-  // Where a profile's viewing goes: into someone on the same Nuvio account
-  // ('merge into'), nowhere ('skip', not tracked), or back to the default.
-  // Merging takes the history it already recorded with it, and a profile
-  // that has its own person is merged as a whole person.
-  router.put('/:id/profiles/:index', async (req, res) => {
-    try {
-      const ctx = await profileContext(req, req.params.id)
-      if (ctx.status) return res.status(ctx.status).json({ message: ctx.message })
-      const { accountId, user, profiles, siblings, routes, np } = ctx
-      const index = Number(req.params.index)
-      const profile = profiles.find((p) => p.index === index)
-      if (!profile) return res.status(404).json({ message: 'That profile is not on this Nuvio account' })
-      const target = req.body?.target
-      const own = siblings.find((s) => np.profileOf(s) === index) || null
-      const currentOwner = np.ownerOf(index, siblings, routes)
-      const routeKey = { accountId_nuvioUserId_profileIndex: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index } }
-      let removedUserId = null
-
-      if (target === 'default') {
-        // Back to the default: its own person if it has one, otherwise the
-        // main profile's person. Nothing was recorded while it was not
-        // tracked, so there is nothing to move.
-        await prisma.nuvioProfileRoute.deleteMany({ where: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index } })
-      } else if (target === 'skip') {
-        if (own) return res.status(400).json({ message: `This profile is ${own.username}. Turn them off or delete them instead.` })
-        await prisma.nuvioProfileRoute.upsert({
-          where: routeKey,
-          create: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index, skip: true, targetUserId: null },
-          update: { skip: true, targetUserId: null },
-        })
-      } else {
-        const person = siblings.find((s) => s.id === target)
-        if (!person) return res.status(400).json({ message: 'Choose someone on this Nuvio account' })
-        if (person.id !== currentOwner) {
-          if (own) {
-            if (own.id === siblings[0]?.id) {
-              return res.status(400).json({ message: "The main profile's person stays. Merge the other profiles into them instead." })
-            }
-            await np.mergeProfilePerson(prisma, { accountId, survivorId: person.id, donorId: own.id, profileName: profile.name })
-            removedUserId = own.id
-          } else {
-            await require('../utils/userMerge').runLongTransaction(prisma, async (tx) => {
-              await tx.nuvioProfileRoute.upsert({
-                where: routeKey,
-                create: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index, skip: false, targetUserId: person.id },
-                update: { skip: false, targetUserId: person.id },
-              })
-              if (currentOwner) {
-                await np.moveProfileHistory(tx, { accountId, fromUserId: currentOwner, toUserId: person.id, profileLabel: profile.name })
-              }
-            })
-          }
-        }
-      }
-
-      afterProfileChange(accountId)
-      // The page's own person may just have been merged away.
-      const anchorId = removedUserId === user.id ? target : user.id
-      const next = await profileContext(req, anchorId)
-      if (next.status) return res.status(next.status).json({ message: next.message })
-      res.json({ ...(await profilesView(next)), removedUserId })
-    } catch (error) {
-      console.error('Error changing a profile:', error)
-      res.status(error.status || 500).json({ message: publicMessage(error, 'Failed to change that profile') })
-    }
-  })
-
-  // Give a profile its own person. One that used to have one gets the very
-  // same person back, history and all; otherwise a new one is made and the
-  // profile's history moves over to them.
-  router.post('/:id/profiles/:index/own-person', async (req, res) => {
-    try {
-      const ctx = await profileContext(req, req.params.id)
-      if (ctx.status) return res.status(ctx.status).json({ message: ctx.message })
-      const { accountId, user, profiles, siblings, routes, np } = ctx
-      const index = Number(req.params.index)
-      const profile = profiles.find((p) => p.index === index)
-      if (!profile) return res.status(404).json({ message: 'That profile is not on this Nuvio account' })
-      const own = siblings.find((s) => np.profileOf(s) === index)
-      if (own) return res.status(409).json({ message: `That profile already is ${own.username}` })
-
-      const merge = await prisma.profileMerge.findFirst({
-        where: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index, undoneAt: null },
-        orderBy: { createdAt: 'desc' },
-      })
-      let person
-      if (merge) {
-        const result = await np.unmergeProfilePerson(prisma, { accountId, mergeId: merge.id })
-        person = { id: result.donorId, username: result.donorUsername }
-      } else {
-        const currentOwner = np.ownerOf(index, siblings, routes)
-        const created = await createProfilePerson(req, user, index, profile.name)
-        await require('../utils/userMerge').runLongTransaction(prisma, async (tx) => {
-          await tx.nuvioProfileRoute.deleteMany({ where: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index } })
-          if (currentOwner) {
-            await np.moveProfileHistory(tx, { accountId, fromUserId: currentOwner, toUserId: created.id, profileLabel: profile.name })
-          }
-        })
-        person = { id: created.id, username: created.username }
-      }
-
-      afterProfileChange(accountId)
-      const next = await profileContext(req, user.id)
-      if (next.status) return res.status(next.status).json({ message: next.message })
-      res.status(201).json({ ...(await profilesView(next)), person })
-    } catch (error) {
-      console.error('Error giving a profile its own person:', error)
-      res.status(error.status || 500).json({ message: publicMessage(error, 'Failed to give that profile its own person') })
-    }
-  })
-
-  // History an older version recorded on the wrong person: every person on a
-  // Nuvio account used to record every profile.
-  router.post('/:id/profiles/tidy', async (req, res) => {
-    try {
-      const ctx = await profileContext(req, req.params.id)
-      if (ctx.status) return res.status(ctx.status).json({ message: ctx.message })
-      const { accountId, profiles, siblings, routes, np } = ctx
-      const misplaced = await np.findMisplaced(prisma, accountId, siblings, routes, profiles.map((p) => ({ profile_index: p.index, name: p.name })))
-      const moved = await np.tidyMisplaced(prisma, accountId, misplaced)
-      afterProfileChange(accountId)
-      res.json({ ...(await profilesView(ctx)), moved })
-    } catch (error) {
-      console.error('Error tidying profile history:', error)
-      res.status(500).json({ message: 'Failed to tidy that history', error: publicMessage(error, 'Failed to tidy that history') })
-    }
-  })
-
-  // Get a profile's Collections.
-  router.get('/:id/nuvio-collections/:profileId', async (req, res) => {
-    try {
-      const { id, profileId } = req.params
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      if (user.providerType !== 'nuvio') {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const collections = await provider.getCollections(Number(profileId))
-      res.json({ collections })
-    } catch (error) {
-      console.error('Error fetching Nuvio collections:', error)
-      res.status(500).json({ message: 'Failed to fetch Nuvio collections', error: publicMessage(error, 'Failed to fetch Nuvio collections') })
-    }
-  });
-
-  // Replace a profile's Collections - full overwrite, matches
-  // sync_push_collections' own semantics (no partial-update RPC exists).
-  router.put('/:id/nuvio-collections/:profileId', async (req, res) => {
-    try {
-      const { id, profileId } = req.params
-      const { collections } = req.body || {}
-      if (!Array.isArray(collections)) {
-        return res.status(400).json({ message: 'collections array is required' })
-      }
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      if (user.providerType !== 'nuvio') {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      await provider.setCollections(Number(profileId), collections)
-      // Our own write is the Collections Guard's new baseline - a deliberate
-      // edit made here (deletions included) must never read as a foreign
-      // overwrite on the guard's next pass.
-      require('../utils/collectionsGuard')
-        .recordOwnWrite(prisma, getAccountId(req), id, Number(profileId), collections)
-        .catch(() => {})
-      res.json({ success: true, collections })
-    } catch (error) {
-      console.error('Error saving Nuvio collections:', error)
-      res.status(500).json({ message: 'Failed to save Nuvio collections', error: publicMessage(error, 'Failed to save Nuvio collections') })
-    }
-  });
-
-  const { loopbackTraxUrl } = require('../utils/localTraxManifest')
-
-  // --- Cinemeta patching (utils/cinemetaPatch.js) ---
-  //
-  // Reads and writes the account's OWN Cinemeta entry rather than anything in
-  // SlickSync's addon list. Sync leaves it alone in safe mode (Cinemeta is a
-  // protected default), so a patch written here stays put.
-
-  // GET /users/:id/cinemeta - is it installed, and what has been removed.
-  router.get('/:id/cinemeta', async (req, res) => {
-    try {
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) return res.status(400).json({ message: 'User is not connected to a provider' })
-
-      // Stremio only, and not as a policy choice: Nuvio stores just {url,
-      // name} per addon and fetches each manifest from the addon's own
-      // address at read time, so a manifest edited here is never read. Worse,
-      // the stub Nuvio returns - empty catalogs, empty resources - is
-      // indistinguishable from a Cinemeta with its catalogs and metadata
-      // removed, so answering from it would badge every Nuvio account as
-      // patched when nothing has been touched.
-      if ((user.providerType || 'stremio') !== 'stremio') {
-        return res.json({ supported: false, installed: false, removeSearch: false, removeCatalogs: false, removeMeta: false, canReset: false })
-      }
-
-      const { findCinemeta } = require('../utils/cinemetaPatch')
-      const current = await provider.getAddons()
-      const { addon } = findCinemeta(current)
-      let state = null
-      try { state = user.cinemetaPatchJson ? JSON.parse(user.cinemetaPatchJson) : null } catch { state = null }
-
-      return res.json({
-        supported: true,
-        installed: !!addon,
-        // Read from the manifest actually on the account, so the answer
-        // reflects reality even if something else edited it.
-        removeSearch: !!(addon && Array.isArray(addon.manifest?.catalogs) && addon.manifest.catalogs.length > 0
-          && !addon.manifest.catalogs.some((c) => (c?.extra || []).some((e) => (e?.name || e) === 'search'))),
-        removeCatalogs: !!(addon && Array.isArray(addon.manifest?.catalogs) && addon.manifest.catalogs.length === 0),
-        removeMeta: !!(addon && Array.isArray(addon.manifest?.resources)
-          && !addon.manifest.resources.some((r) => (typeof r === 'string' ? r : (r?.name || r?.type)) === 'meta')),
-        canReset: !!(state && state.original),
-      })
-    } catch (e) {
-      res.status(500).json({ message: publicMessage(e, 'Failed to read Cinemeta state') })
-    }
-  })
-
-  // POST /users/:id/cinemeta - apply (or update) the patch.
-  router.post('/:id/cinemeta', async (req, res) => {
-    try {
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      if (!user.isActive) return res.status(400).json({ message: 'User is disabled' })
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) return res.status(400).json({ message: 'User is not connected to a provider' })
-
-      if ((user.providerType || 'stremio') !== 'stremio') {
-        return res.status(400).json({ message: 'Patching Cinemeta works on Stremio accounts. Nuvio reads each addon manifest from the addon itself, so an edit stored on the account would never reach the app.' })
-      }
-
-      const { findCinemeta, applyPatch, describePatch } = require('../utils/cinemetaPatch')
-      const currentRaw = await provider.getAddons()
-      const { list, index, addon } = findCinemeta(currentRaw)
-      if (!addon) return res.status(404).json({ message: 'Cinemeta is not installed on this account' })
-
-      const patch = {
-        removeSearch: !!req.body?.removeSearch,
-        removeCatalogs: !!req.body?.removeCatalogs,
-        removeMeta: !!req.body?.removeMeta,
-      }
-
-      // Keep the original exactly once. Patching an already-patched manifest
-      // would bake each removal in permanently and make Reset a lie.
-      let state = null
-      try { state = user.cinemetaPatchJson ? JSON.parse(user.cinemetaPatchJson) : null } catch { state = null }
-      const original = (state && state.original) ? state.original : JSON.parse(JSON.stringify(addon.manifest || {}))
-
-      const patched = applyPatch(original, patch)
-      const next = [...list]
-      next[index] = { ...addon, manifest: patched }
-      await provider.setAddons(next)
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { cinemetaPatchJson: JSON.stringify({ original, patch, at: new Date().toISOString() }) },
-      })
-
-      return res.json({ success: true, applied: patch, summary: describePatch(patch) })
-    } catch (e) {
-      console.error('Cinemeta patch failed:', e)
-      res.status(500).json({ message: publicMessage(e, 'Failed to patch Cinemeta') })
-    }
-  })
-
-  // DELETE /users/:id/cinemeta - put the original manifest back.
-  router.delete('/:id/cinemeta', async (req, res) => {
-    try {
-      const user = await prisma.user.findFirst({ where: { id: req.params.id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) return res.status(400).json({ message: 'User is not connected to a provider' })
-
-      if ((user.providerType || 'stremio') !== 'stremio') {
-        return res.status(400).json({ message: 'Patching Cinemeta works on Stremio accounts.' })
-      }
-
-      let state = null
-      try { state = user.cinemetaPatchJson ? JSON.parse(user.cinemetaPatchJson) : null } catch { state = null }
-      if (!state || !state.original) return res.status(400).json({ message: 'Nothing to reset - Cinemeta has not been patched from here' })
-
-      const { findCinemeta } = require('../utils/cinemetaPatch')
-      const currentRaw = await provider.getAddons()
-      const { list, index, addon } = findCinemeta(currentRaw)
-      if (!addon) return res.status(404).json({ message: 'Cinemeta is not installed on this account' })
-
-      const next = [...list]
-      next[index] = { ...addon, manifest: state.original }
-      await provider.setAddons(next)
-      await prisma.user.update({ where: { id: user.id }, data: { cinemetaPatchJson: null } })
-      return res.json({ success: true })
-    } catch (e) {
-      console.error('Cinemeta reset failed:', e)
-      res.status(500).json({ message: publicMessage(e, 'Failed to reset Cinemeta') })
-    }
-  })
-
-  // --- Collections Guard (utils/collectionsGuard.js) ---
-
-  // Active alarms: profiles whose collections look externally overwritten.
-  router.get('/collections-guard/alarms', async (req, res) => {
-    try {
-      const { getAlarms } = require('../utils/collectionsGuard')
-      const alarms = await getAlarms(prisma, getAccountId(req))
-      // Names make the banner readable without a second lookup.
-      const users = alarms.length > 0 ? await prisma.user.findMany({
-        where: { id: { in: [...new Set(alarms.map((a) => a.userId))] } },
-        select: { id: true, username: true },
-      }) : []
-      const nameById = new Map(users.map((u) => [u.id, u.username]))
-      // Profile names live on the Nuvio account, not in the snapshot rows,
-      // so they are resolved here - one profile list per alarmed user, and
-      // only when there is an alarm to label. A banner naming the profile
-      // the way the profile picker does ("Kids") is what makes it
-      // actionable; "profile 3" means nothing to whoever reads it. If the
-      // account can't be reached the index is still shown, since a banner
-      // with a duller label beats no banner at all.
-      const profileNameByKey = new Map()
-      for (const userId of new Set(alarms.map((a) => a.userId))) {
-        try {
-          const r = await resolveNuvioForGuard(req, userId)
-          if (r.error) continue
-          const list = await r.provider.getProfiles()
-          for (const p of Array.isArray(list) ? list : []) {
-            if (Number.isInteger(p?.profile_index) && p?.name) profileNameByKey.set(`${userId}:${p.profile_index}`, p.name)
-          }
-        } catch { /* label only - never a reason to hide the alarm */ }
-      }
-      res.json({ alarms: alarms.map((a) => ({
-        ...a,
-        username: nameById.get(a.userId) || null,
-        profileName: profileNameByKey.get(`${a.userId}:${a.profileId}`) || null,
-      })) })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to read guard state') })
-    }
-  })
-
-  // Shared resolver for guard actions: scoped Nuvio user + provider.
-  const resolveNuvioForGuard = async (req, userId) => {
-    const user = await prisma.user.findFirst({ where: { id: userId, accountId: getAccountId(req) } })
-    if (!user || user.providerType !== 'nuvio') return { error: 'Nuvio user not found', status: 404 }
-    const provider = createProvider(user, { decrypt, req })
-    if (!provider) return { error: 'User is not connected to Nuvio', status: 400 }
-    return { user, provider }
-  }
-
-  // One-click restore of the newest good snapshot. kind 'collections'
-  // (default) restores the collections themselves; 'layout' restores the
-  // home-row arrangement blobs.
-  router.post('/collections-guard/restore', async (req, res) => {
-    try {
-      const { userId, profileId, kind } = req.body || {}
-      if (!userId || !Number.isInteger(Number(profileId))) return res.status(400).json({ error: 'userId and profileId are required' })
-      const r = await resolveNuvioForGuard(req, userId)
-      if (r.error) return res.status(r.status).json({ error: r.error })
-      const { restoreSnapshot, restoreLayoutSnapshot } = require('../utils/collectionsGuard')
-      const result = kind === 'layout'
-        ? await restoreLayoutSnapshot(prisma, getAccountId(req), userId, Number(profileId), r.provider)
-        : await restoreSnapshot(prisma, getAccountId(req), userId, Number(profileId), r.provider)
-      res.json({ success: true, ...result })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Restore failed') })
-    }
-  })
-
-  // Adopt the current on-account state as the new baseline.
-  router.post('/collections-guard/accept', async (req, res) => {
-    try {
-      const { userId, profileId, kind } = req.body || {}
-      if (!userId || !Number.isInteger(Number(profileId))) return res.status(400).json({ error: 'userId and profileId are required' })
-      const r = await resolveNuvioForGuard(req, userId)
-      if (r.error) return res.status(r.status).json({ error: r.error })
-      const { acceptCurrent, acceptLayoutCurrent } = require('../utils/collectionsGuard')
-      const result = kind === 'layout'
-        ? await acceptLayoutCurrent(prisma, getAccountId(req), userId, Number(profileId), r.provider)
-        : await acceptCurrent(prisma, getAccountId(req), userId, Number(profileId), r.provider)
-      res.json({ success: true, ...result })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Accept failed') })
-    }
-  })
-
-  // --- Nuvio home-row editor (utils/nuvioHomeLayout.js) ---
-  //
-  // Reads a profile's home-screen arrangement and labels each row with the
-  // addon and catalog it actually came from, so the editor shows "Torrentio
-  // - Movies" rather than a pair of ids. Rows the arrangement doesn't
-  // mention yet are appended as "not yet arranged" - the client only writes
-  // a preference once a row has been touched, so a fresh profile has
-  // catalogs on screen that the blob has never heard of.
-  router.get('/:id/home-layout/:profileId', async (req, res) => {
-    try {
-      const { id, profileId } = req.params
-      const r = await resolveNuvioForGuard(req, id)
-      if (r.error) return res.status(r.status).json({ error: r.error })
-      const { readLayoutForEdit } = require('../utils/nuvioHomeLayout')
-      const { getUserAddons } = require('../utils/sync')
-      const live = await getUserAddons(r.user, req, { decrypt, StremioAPIClient, createProvider }).catch(() => ({ addons: [] }))
-      const result = await readLayoutForEdit(r.provider, Number(profileId), live?.addons, { prisma })
-      res.json(result)
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to read the home layout') })
-    }
-  })
-
-  // Writes the edited arrangement back to every platform bucket, so the
-  // change lands whichever bucket that device reads.
-  router.put('/:id/home-layout/:profileId', async (req, res) => {
-    try {
-      const { id, profileId } = req.params
-      const items = req.body?.items
-      if (!Array.isArray(items)) return res.status(400).json({ error: 'items array is required' })
-      const r = await resolveNuvioForGuard(req, id)
-      if (r.error) return res.status(r.status).json({ error: r.error })
-      const { writeLayout } = require('../utils/nuvioHomeLayout')
-      const result = await writeLayout(r.provider, Number(profileId), items)
-      // Our own write is the layout guard's new baseline, exactly like the
-      // collections editor's save.
-      require('../utils/collectionsGuard')
-        .recordOwnLayoutWrite(prisma, getAccountId(req), id, Number(profileId), r.provider)
-        .catch(() => {})
-      res.json({ success: true, ...result })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Failed to save the home layout') })
-    }
-  })
-
-  // Copy one profile's whole home-row arrangement onto another profile -
-  // overwrites the target's arrangement (the UI confirms first).
-  router.post('/home-layout/copy', async (req, res) => {
-    try {
-      const { userId, fromProfileId, toProfileId } = req.body || {}
-      if (!userId || !Number.isInteger(Number(fromProfileId)) || !Number.isInteger(Number(toProfileId))) {
-        return res.status(400).json({ error: 'userId, fromProfileId and toProfileId are required' })
-      }
-      if (Number(fromProfileId) === Number(toProfileId)) return res.status(400).json({ error: 'Source and target are the same profile' })
-      const r = await resolveNuvioForGuard(req, userId)
-      if (r.error) return res.status(r.status).json({ error: r.error })
-      const { copyLayout } = require('../utils/collectionsGuard')
-      const result = await copyLayout(prisma, getAccountId(req), userId, Number(fromProfileId), Number(toProfileId), r.provider)
-      res.json({ success: true, ...result })
-    } catch (e) {
-      res.status(500).json({ error: publicMessage(e, 'Copy failed') })
-    }
-  })
-
-  // Browse nuvio.tv's own public "Community Covers" gallery, for picking a
-  // Collection/folder cover directly instead of hunting down a URL
-  // elsewhere first. Read-only passthrough - see getCommunityCovers's own
-  // comment in providers/nuvio.js for the real endpoint/params this proxies.
-  router.get('/:id/nuvio-covers', async (req, res) => {
-    try {
-      const { id } = req.params
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-      if (user.providerType !== 'nuvio') {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider || !provider.getCommunityCovers) {
-        return res.status(400).json({ message: 'User is not connected to Nuvio' })
-      }
-      const { sort, orientation, format, page, limit, search } = req.query
-      const data = await provider.getCommunityCovers({
-        sort: typeof sort === 'string' ? sort : undefined,
-        orientation: typeof orientation === 'string' ? orientation : undefined,
-        format: typeof format === 'string' ? format : undefined,
-        page: page ? Number(page) : undefined,
-        limit: limit ? Math.min(Number(limit), 48) : undefined,
-        search: typeof search === 'string' ? search : undefined,
-      })
-      res.json(data)
-    } catch (error) {
-      console.error('Error fetching Nuvio community covers:', error)
-      res.status(500).json({ message: 'Failed to fetch Nuvio community covers', error: publicMessage(error, 'Failed to fetch Nuvio community covers') })
-    }
-  });
-
-  // Live preview of what a catalog actually contains, for the Collections
-  // source picker - a thin proxy over the addon's own standard
-  // {transportUrl}/catalog/{type}/{catalogId}.json endpoint. Doesn't need
-  // createProvider/auth at all: addon catalogs are public data, and this
-  // isn't scoped to any specific user's account. addonUrl must be one of
-  // this user's own installed addons' transportUrl (not validated against
-  // that list server-side - same trust level as the addon URLs already
-  // stored for this user, which the admin who added them controls).
-  router.get('/:id/nuvio-catalog-preview', async (req, res) => {
-    try {
-      const { addonUrl, type, catalogId, genre } = req.query
-      if (!addonUrl || !type || !catalogId) {
-        return res.status(400).json({ message: 'addonUrl, type, and catalogId are required' })
-      }
-      // Our own SlickTrax catalogs are read over loopback rather than via the
-      // public hostname: an instance behind an auth gate answers its own
-      // request with a login page, which is why a preview of a linked
-      // SlickTrax catalog came back empty. See utils/localTraxManifest.js.
-      const loopback = await loopbackTraxUrl(prisma, addonUrl)
-      const base = String(loopback || addonUrl).replace(/\/manifest\.json$/, '').replace(/\/$/, '')
-      // Stremio addon protocol: extra properties (genre, skip, ...) go in
-      // their own URL segment as key=value, e.g. .../genre=Family.json - NOT
-      // a query string. Without this, a genre-filtered catalog source (the
-      // whole point of the Genres template - see matchGenreSources) fetched
-      // its addon's default/unfiltered listing instead, so every genre
-      // folder sharing a catalog (e.g. Cinemeta Popular) showed the exact
-      // same top result as its hero poster, regardless of genre.
-      const extraSegment = genre && genre !== 'none' ? `/genre=${encodeURIComponent(String(genre))}` : ''
-      const url = `${base}/catalog/${encodeURIComponent(type)}/${encodeURIComponent(catalogId)}${extraSegment}.json`
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 8000)
-      let data
-      try {
-        // The address is whatever the caller typed, so it goes through the
-        // same check as every other address the server fetches for someone:
-        // an instance serving strangers refuses its own network, a household
-        // install may reach its own, and neither may reach link-local (where
-        // a cloud host keeps its credentials). Redirects are checked hop by
-        // hop. The loopback address built above from a verified SlickTrax
-        // token is ours, not the caller's, and is read as it always was.
-        let resp
-        try {
-          resp = loopback
-            ? await fetch(url, { signal: controller.signal })
-            : await safeFetch(url, { signal: controller.signal }, instancePolicy())
-        } catch (fetchError) {
-          if (['blocked host', 'unsupported protocol', 'invalid url'].includes(fetchError.message)) {
-            return res.status(400).json({ message: "That address can't be used" })
-          }
-          if (fetchError.message === 'unresolvable host') {
-            return res.status(400).json({ message: "That address couldn't be found" })
-          }
-          throw fetchError
-        }
-        if (!resp.ok) return res.status(502).json({ message: `Addon returned ${resp.status}` })
-        data = await resp.json()
-      } finally {
-        clearTimeout(timeout)
-      }
-      const metas = Array.isArray(data?.metas) ? data.metas : []
-      // SlickTrax builds its poster URLs from the address the request arrived
-      // on, and this one arrived on loopback - so they come back pointing at
-      // 127.0.0.1, which is this container, not the viewer's machine. The
-      // browser rendering this preview is on our own origin, so dropping the
-      // origin and leaving the path is both correct and portable: it works on
-      // a public hostname, a LAN address, and behind any proxy.
-      const loopbackOrigin = loopback ? (() => { try { return new URL(loopback).origin } catch { return null } })() : null
-      const viewable = (u) => (loopbackOrigin && typeof u === 'string' && u.startsWith(loopbackOrigin))
-        ? u.slice(loopbackOrigin.length)
-        : (u || null)
-      res.json({
-        items: metas.slice(0, 25).map((m) => ({
-          id: m.id, type: m.type, name: m.name, poster: viewable(m.poster)
-        }))
-      })
-    } catch (error) {
-      console.error('Error fetching Nuvio catalog preview:', error)
-      res.status(500).json({ message: 'Failed to fetch catalog preview', error: publicMessage(error, 'Failed to fetch catalog preview') })
-    }
-  });
-
-  // Get user's desired addons (group addons + protected addons)
-  router.get('/:id/desired-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      // Fetch the user
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        select: {
-          id: true,
-          stremioAuthKey: true,
-          excludedAddons: true,
-          protectedAddons: true,
-          providerType: true,
-          nuvioRefreshToken: true,
-          nuvioUserId: true,
-          traxAddonEnabled: true,
-          traxToken: true
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Import the getDesiredAddons function
-      const { getDesiredAddons } = require('../utils/sync')
-
-      // Get unsafe mode from query parameter
-      const unsafe = req.query.unsafe === 'true'
-
-      // Call getDesiredAddons with all required dependencies
-      const result = await getDesiredAddons(user, req, {
-        prisma,
-        getAccountId,
-        decrypt,
-        parseAddonIds,
-        parseProtectedAddons,
-        canonicalizeManifestUrl,
-        StremioAPIClient,
-        createProvider,
-        unsafeMode: unsafe
-      })
-
-      if (!result.success) {
-        return res.status(500).json({ message: result.error })
-      }
-
-      res.json({ addons: result.addons })
-    } catch (error) {
-      console.error('❌ Error fetching desired addons:', error)
-      res.status(500).json({ message: 'Failed to fetch desired addons', error: publicMessage(error, 'Failed to fetch desired addons') })
-    }
-  });
-
-  // Get user's group addons
-  router.get('/:id/group-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      // Get user's groups
-      const groups = await prisma.group.findMany({
-        where: {
-          accountId: getAccountId(req),
-          userIds: {
-            contains: id
-          }
-        }
-      })
-
-      if (groups.length === 0) {
-        return res.json({ addons: [] })
-      }
-
-      // Use the primary group (first one)
-      const primaryGroup = groups[0]
-
-      // Import the getGroupAddons function
-      const { getGroupAddons } = require('../utils/helpers')
-
-      // Get group addons with proper ordering, decryption, and backup resolution
-      const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req)
-
-      res.json({ addons: groupAddons })
-    } catch (error) {
-      console.error('❌ Error fetching group addons:', error)
-      res.status(500).json({ message: 'Failed to fetch group addons', error: publicMessage(error, 'Failed to fetch group addons') })
-    }
-  });
-
-  // Update excluded addons
-  router.put('/:id/excluded-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { excludedAddons } = req.body
-
-      const user = await prisma.user.findFirst({
-        where: { id, accountId: getAccountId(req) }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: { id, accountId: getAccountId(req) },
-        data: { excludedAddons: JSON.stringify(excludedAddons || []) }
-      })
-      // What this user should have just changed - status badges re-check.
-      try { require('../utils/liveEvents').emitLive(getAccountId(req), 'sync') } catch { /* optional */ }
-
-      res.json({
-        message: 'Excluded addons updated successfully',
-        excludedAddons: parseAddonIds(updatedUser.excludedAddons)
-      })
-    } catch (error) {
-      console.error('Error updating excluded addons:', error)
-      res.status(500).json({ message: 'Failed to update excluded addons' })
-    }
-  });
-
-  // Update protected addons
-  router.put('/:id/protected-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { protectedAddons } = req.body
-
-      const user = await prisma.user.findFirst({
-        where: { id, accountId: getAccountId(req) }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: { id, accountId: getAccountId(req) },
-        data: { protectedAddons: JSON.stringify(protectedAddons || []) }
-      })
-      try { require('../utils/liveEvents').emitLive(getAccountId(req), 'sync') } catch { /* optional */ }
-
-      res.json({
-        message: 'Protected addons updated successfully',
-        protectedAddons: parseProtectedAddons(updatedUser.protectedAddons, req)
-      })
-    } catch (error) {
-      console.error('Error updating protected addons:', error)
-      res.status(500).json({ message: 'Failed to update protected addons' })
-    }
-  });
-
-  // Sync user addons - delegate to shared syncUserAddons to keep behavior consistent everywhere
-  router.post('/:id/sync', async (req, res) => {
-    try {
-      const { id } = req.params
-      // Read account-backed sync settings; fallback to query/body only if unavailable
-      let unsafeMode = false
-      let useCustomFields = true
-      try {
-        const acct = await prisma.appAccount.findFirst({ where: { id: getAccountId(req) }, select: { sync: true } })
-        let cfg = acct?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object') {
-          if (typeof cfg.safe === 'boolean') {
-            unsafeMode = !cfg.safe
-          }
-          if (typeof cfg.useCustomFields === 'boolean') {
-            useCustomFields = cfg.useCustomFields
-          } else if (typeof cfg.useCustomNames === 'boolean') {
-            // Backward compatibility: migrate old useCustomNames to useCustomFields
-            useCustomFields = cfg.useCustomNames
-          } else {
-            // Default to true if not set (backward compatibility)
-            useCustomFields = true
-          }
-        } else {
-          unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
-        }
-      } catch {
-        unsafeMode = req.query?.unsafe === 'true' || req.body?.unsafe === true
-      }
-
-      // Individual user sync - no reload needed, just sync
-      const result = await syncUserAddons(prisma, id, [], unsafeMode, req, decrypt, getAccountId, useCustomFields)
-
-      if (!result.success) {
-        return res.status(400).json({ message: result.error || 'Failed to sync user' })
-      }
-
-      return res.json({
-        message: 'User synced successfully',
-        // syncUserAddons resolves to syncCredentialsAddons' shape, which
-        // reports the addon count as `total`. This used to read `totalAddons`
-        // and `addonsCount` - neither of which that result has ever carried -
-        // so the count silently fell through to 0 on every successful sync.
-        addonsCount: result.total ?? 0,
-        totalAddons: result.total ?? 0,
-        ...(result.alreadySynced ? { alreadySynced: true } : {}),
-        ...(result.reloadedCount !== undefined ? { reloadedCount: result.reloadedCount } : {})
-      })
-    } catch (error) {
-      console.error('Error in sync endpoint:', error)
-      return res.status(500).json({ message: 'Failed to sync user', error: publicMessage(error, 'Failed to sync user') })
-    }
-  });
-
-  // Sync all users
-  router.post('/sync-all', async (req, res) => {
-    try {
-      debug.log('🚀 Sync all users endpoint called')
-
-      // Read account-backed sync settings
-      let unsafeMode = false
-      let useCustomFields = true
-      try {
-        const acct = await prisma.appAccount.findFirst({ where: { id: getAccountId(req) }, select: { sync: true } })
-        let cfg = acct?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-        if (cfg && typeof cfg === 'object') {
-          if (typeof cfg.safe === 'boolean') {
-            unsafeMode = !cfg.safe
-          }
-          if (typeof cfg.useCustomFields === 'boolean') {
-            useCustomFields = cfg.useCustomFields
-          } else if (typeof cfg.useCustomNames === 'boolean') {
-            // Backward compatibility: migrate old useCustomNames to useCustomFields
-            useCustomFields = cfg.useCustomNames
-          } else {
-            useCustomFields = true
-          }
-        }
-      } catch { }
-
-      // Get all enabled users
-      const users = await prisma.user.findMany({
-        where: { isActive: true }
-      })
-
-      if (users.length === 0) {
-        return res.json({
-          message: 'No enabled users found to sync',
-          syncedCount: 0,
-          totalUsers: 0
-        })
-      }
-
-      let syncedCount = 0
-      let totalAddons = 0
-      const errors = []
-
-      debug.log(`🔄 Starting sync for ${users.length} enabled users`)
-
-      // Sync users a few at a time rather than strictly one-by-one. The pool
-      // is deliberately SMALL: each sync talks to a provider backend, and
-      // Nuvio's rides Supabase, which answers 429 under bursts (a real
-      // incident here - see the escalating-backoff fix). Three keeps a large
-      // household meaningfully faster without turning Sync All into a
-      // thundering herd; per-user failures stay isolated exactly as before.
-      const SYNC_CONCURRENCY = 3
-      const queue = [...users]
-      const runWorker = async () => {
-        while (queue.length > 0) {
-          const user = queue.shift()
-          if (!user) return
-          try {
-            debug.log(`🔄 Syncing user: ${user.username || user.email}`)
-
-            // Use the reusable sync function
-            const syncResult = await syncUserAddons(prisma, user.id, [], unsafeMode, req, decrypt, getAccountId, useCustomFields)
-
-            if (syncResult.success) {
-              syncedCount++
-              debug.log(`✅ Successfully synced user: ${user.username || user.email}`)
-
-              // Same field-name mismatch as the single-user route above: this
-              // guard required two properties the sync result has never had, so
-              // totalAddons stayed 0 and the "N total addons processed" line -
-              // which is gated on `totalAddons > 0` - never once appeared in the
-              // Sync All summary.
-              if (typeof syncResult.total === 'number') {
-                totalAddons += syncResult.total
-              }
-            } else {
-              errors.push(`${user.username || user.email}: ${syncResult.error}`)
-            }
-          } catch (error) {
-            errors.push(`${user.username || user.email}: ${error.message}`)
-            console.error(`❌ Error syncing user ${user.id}:`, error)
-          }
-        }
-      }
-      await Promise.all(Array.from({ length: Math.min(SYNC_CONCURRENCY, users.length) }, runWorker))
-
-      let message = `All users sync completed.\n${syncedCount}/${users.length} users synced`
-      if (totalAddons > 0) {
-        message += `\n${totalAddons} total addons processed`
-      }
-      if (errors.length > 0) {
-        message += `\n\nErrors:\n${errors.join('\n')}`
-      }
-
-      res.json({
-        message,
-        syncedCount,
-        totalUsers: users.length,
-        totalAddons,
-        errors: errors.length > 0 ? errors : undefined
-      })
-    } catch (error) {
-      console.error('Error syncing all users:', error)
-      res.status(500).json({ message: 'Failed to sync all users', error: publicMessage(error, 'Failed to sync all users') })
-    }
-  });
-
-  // Patch user (partial update)
-  // PATCH /api/users/:id/health-ignore - hide this user's Sync Guardian
-  // drift alert from the Health page's Attention list, same treatment as
-  // Addon/VaultEntry's own healthIgnored (see addons.js's /:id/health-ignore
-  // for the identical pattern). Sync Guardian re-derives drift on its own
-  // schedule regardless of this flag - it only controls whether Health
-  // surfaces it as Attention, not whether the underlying drift gets fixed.
-  router.patch('/:id/health-ignore', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { healthIgnored } = req.body
-
-      const user = await dbUtils.findEntity(prisma, 'user', id, getAccountId(req))
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      const updated = await dbUtils.updateEntity(prisma, 'user', id, { healthIgnored: !!healthIgnored }, getAccountId(req))
-      return responseUtils.success(res, { id: updated.id, healthIgnored: updated.healthIgnored })
-    } catch (error) {
-      console.error('Error updating user health-ignore state:', error)
-      return responseUtils.internalError(res, error.message)
-    }
-  })
-
-  router.patch('/:id', async (req, res) => {
-    try {
-      const { id } = req.params
-      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}
-
-      // Only a person's two notification settings are written here. Which
-      // server a person is, and the sign-in that proves it, are set by
-      // signing in to that server and never by a request that names them:
-      // a household that could write them could point a person at someone
-      // else's server account and be handed that account's next sign-in.
-      const allowed = new Set(['discordWebhookUrl', 'notifyOnWatch'])
-      const unknown = Object.keys(body).filter((key) => !allowed.has(key))
-      if (unknown.length > 0) {
-        return res.status(400).json({ message: `These cannot be changed here: ${unknown.join(', ')}` })
-      }
-
-      const updateData = {}
-      if (body.discordWebhookUrl !== undefined) {
-        if (body.discordWebhookUrl !== null && typeof body.discordWebhookUrl !== 'string') {
-          return res.status(400).json({ message: 'discordWebhookUrl must be text or empty' })
-        }
-        const webhook = typeof body.discordWebhookUrl === 'string' ? body.discordWebhookUrl.trim() : ''
-        if (webhook.length > 2048) {
-          return res.status(400).json({ message: 'That webhook address is too long' })
-        }
-        updateData.discordWebhookUrl = webhook || null
-      }
-      if (body.notifyOnWatch !== undefined) {
-        if (typeof body.notifyOnWatch !== 'boolean') {
-          return res.status(400).json({ message: 'notifyOnWatch must be true or false' })
-        }
-        updateData.notifyOnWatch = body.notifyOnWatch
-      }
-      if (Object.keys(updateData).length === 0) {
-        return res.status(400).json({ message: 'Nothing to change' })
-      }
-
-      const existing = await prisma.user.findFirst({
-        where: { id, accountId: getAccountId(req) },
-        select: { id: true }
-      })
-      if (!existing) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      const user = await prisma.user.update({
-        where: { id },
-        data: updateData
-      })
-
-      res.json({
-        id: user.id,
-        username: user.username,
-        discordWebhookUrl: user.discordWebhookUrl || null,
-        notifyOnWatch: user.notifyOnWatch !== false
-      })
-    } catch (error) {
-      console.error('Error patching user:', error)
-      res.status(500).json({ message: 'Failed to patch user' })
-    }
-  })
-
-  // Toggle user status
-  router.patch('/:id/toggle-status', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { isActive } = req.body
-
-      const user = await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: { isActive }
-      })
-
-      res.json({
-        message: `User ${isActive ? 'enabled' : 'disabled'} successfully`,
-        isActive: user.isActive
-      })
-    } catch (error) {
-      console.error('Error toggling user status:', error)
-      res.status(500).json({ message: 'Failed to toggle user status' })
-    }
-  })
-
-  // Toggle protect status for a single addon (BY NAME ONLY)
-  router.post('/:id/protect-addon', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { name } = req.body
-      const { unsafe } = req.query
-
-      // Default Stremio addons (name-based) in safe mode
-      const defaultAddons = { names: ['Cinemeta', 'Local Files', 'Local Files (without catalog support)'] }
-
-      // Check if this is a default addon in safe mode (match by name)
-      const isDefaultAddon = typeof name === 'string' && defaultAddons.names.some((n) => (name || '').includes(n))
-
-      if (isDefaultAddon && unsafe !== 'true') {
-        return res.status(403).json({
-          error: 'This addon is protected by default and cannot be unprotected in safe mode',
-          isDefaultAddon: true
-        })
-      }
-
-      // Get current user with protected addons
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        select: { protectedAddons: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Parse current protected addons (encrypted strings of names)
-      let currentEncrypted = []
-      try {
-        currentEncrypted = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-      } catch (e) {
-        console.warn('Failed to parse protected addons:', e)
-        currentEncrypted = []
-      }
-      // Read current list of plaintext names from DB (already plaintext as of latest changes)
-      const currentList = Array.isArray(user.protectedAddons) ? user.protectedAddons : (user.protectedAddons ? (() => { try { return JSON.parse(user.protectedAddons) } catch { return [] } })() : [])
-
-      if (!name || typeof name !== 'string' || !name.trim()) {
-        return res.status(400).json({ error: 'name is required' })
-      }
-
-      const targetName = name.trim()
-      const targetNorm = targetName.toLowerCase()
-      const nextList = Array.isArray(currentList) ? [...currentList] : []
-      const idx = nextList.findIndex((n) => typeof n === 'string' && n.trim().toLowerCase() === targetNorm)
-      if (idx >= 0) {
-        nextList.splice(idx, 1)
-      } else {
-        nextList.push(targetName)
-      }
-      const nextPlain = nextList
-
-      // Update user (store plaintext names)
-      await prisma.user.update({
-        where: { id },
-        data: {
-          protectedAddons: JSON.stringify(nextPlain)
-        }
-      })
-
-      res.json({
-        message: `Addon protected list updated`,
-        protectedAddons: nextPlain,
-        isProtected: nextList.findIndex((n) => typeof n === 'string' && n.trim().toLowerCase() === targetNorm) >= 0
-      })
-    } catch (error) {
-      console.error('Error toggling protect addon:', error)
-      res.status(500).json({ error: 'Failed to toggle protect addon' })
-    }
-  })
-
-  // Reload all group addons for a user (fetch fresh manifests and update database)
-  router.post('/:id/reload-addons', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        select: {
-          isActive: true
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      // Get user's group
-      const userGroup = await prisma.group.findFirst({
-        where: {
-          accountId: getAccountId(req),
-          userIds: {
-            contains: user.id
-          }
-        }
-      })
-
-      if (!userGroup) {
-        return res.json({
-          message: 'User not in any group, no addons to reload',
-          reloadedCount: 0,
-          failedCount: 0,
-          total: 0
-        })
-      }
-
-      // Call reloadGroupAddons on the user's group
-      const reloadResult = await reloadGroupAddons(prisma, getAccountId, userGroup.id, req, decrypt)
-
-      res.json({
-        message: 'Group addons reloaded successfully',
-        reloadedCount: reloadResult.reloadedCount,
-        failedCount: reloadResult.failedCount,
-        total: reloadResult.total
-      })
-    } catch (error) {
-      console.error('Error in reload addons endpoint:', error)
-      res.status(500).json({ message: 'Failed to reload user addons', error: publicMessage(error, 'Failed to reload user addons') })
-    }
-  })
-
-  // Add specific addons to user's Stremio account
-  router.post('/:id/stremio-addons/add', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { addonUrls } = req.body
-
-      if (!Array.isArray(addonUrls) || addonUrls.length === 0) {
-        return res.status(400).json({ message: 'addonUrls must be a non-empty array' })
-      }
-
-      // Full row rather than a Stremio-only select: createProvider needs
-      // whichever provider's credentials this user actually has. Both the
-      // Stremio and Nuvio providers implement addAddon, so there is no
-      // reason for this route to be Stremio-only - it just never got
-      // converted, and told Nuvio users they were "not connected to
-      // Stremio", which is true and useless.
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      const hasAddCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
-      if (!hasAddCreds) {
-        return res.status(400).json({ message: 'User is not connected to Stremio or Nuvio' })
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      try {
-        const provider = createProvider(user, { decrypt, req })
-        if (!provider) {
-          return res.status(400).json({ message: 'User is not connected to a provider' })
-        }
-
-        let addedCount = 0
-        const results = []
-
-        for (const addonUrl of addonUrls) {
-          try {
-            // Fetch addon manifest
-            const manifestResponse = await safeFetch(addonUrl, {}, instancePolicy())
-            if (!manifestResponse.ok) {
-              throw new Error(`Failed to fetch manifest: ${manifestResponse.status}`)
-            }
-            const manifest = await manifestResponse.json()
-
-            await provider.addAddon(addonUrl, manifest)
-
-            addedCount++
-            results.push({
-              url: addonUrl,
-              status: 'success',
-              name: manifest.name || 'Unknown'
-            })
-          } catch (error) {
-            console.error(`Error adding addon ${addonUrl}:`, error)
-            results.push({
-              url: addonUrl,
-              status: 'error',
-              error: addonAddressProblem(error) || error.message
-            })
-          }
-        }
-
-        res.json({
-          message: 'Addons added successfully',
-          addedCount,
-          totalRequested: addonUrls.length,
-          results
-        })
-      } catch (error) {
-        console.error('Error adding addons:', error)
-        res.status(500).json({ message: 'Failed to add addons', error: publicMessage(error, 'Failed to add addons') })
-      }
-    } catch (error) {
-      console.error('Error in add Stremio addons endpoint:', error)
-      res.status(500).json({ message: 'Failed to add addons', error: publicMessage(error, 'Failed to add addons') })
-    }
-  })
-
-  // Get combined library/watch history from all users (for Activity page)
-  // Loads all cached library files for active users
-  router.get('/activity/library', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      // Get all active users
-      // For admin view, show all users regardless of visibility
-      // For user-facing views, filter by activityVisibility (handled in frontend/user endpoints)
-      const users = await prisma.user.findMany({
-        where: {
-          accountId: accountId,
-          isActive: true
-        },
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          stremioAuthKey: true,
-          colorIndex: true,
-          activityVisibility: true
-        }
-      })
-
-      if (users.length === 0) {
-        return res.json({
-          library: [],
-          count: 0
-        })
-      }
-
-      // Load all cached library files at once (only from this account's folder)
-      // Pass full user objects so helper can use email for filenames
-      const { getAllCachedLibraries, setCachedLibrary } = require('../utils/libraryCache')
-      const cachedLibraries = getAllCachedLibraries(accountId, users)
-
-      const allLibraryItems = []
-      const userMap = new Map() // Map user ID to user info for adding to items
-
-      // Process each user's cached library
-      // Note: This is an admin endpoint, so we include all users
-      // Frontend will filter by visibility for user-facing views
-      for (const user of users) {
-        try {
-          let library = cachedLibraries.get(user.id)
-
-          // Check if cache only has removed items (stale cache) - if so, refresh from Stremio
-          // Active items: removed === false (or missing/undefined, treated as in library)
-          const hasActiveItems = library && Array.isArray(library) && library.some(item => {
-            return item.removed === false || item.removed === undefined || item.removed === null;
-          })
-
-          // If no cache file exists or cache only has removed items, fetch from Stremio and cache it
-          if ((!library || !Array.isArray(library) || library.length === 0 || !hasActiveItems) && user.stremioAuthKey) {
-            const authKeyPlain = decrypt(user.stremioAuthKey, req)
-            const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-
-            const libraryItems = await apiClient.request('datastoreGet', {
-              collection: 'libraryItem',
-              ids: [],
-              all: true
-            })
-
-            library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
-
-            // Cache the library data for future requests
-            if (Array.isArray(library) && library.length > 0) {
-              setCachedLibrary(accountId, user, library)
-            }
-          }
-
-          if (!library || !Array.isArray(library)) continue;
-
-          // Add user info to each item
-          library = library.map(item => ({
-            ...item,
-            _userId: user.id,
-            _username: user.username || user.email,
-            _userColorIndex: user.colorIndex || 0
-          }))
-
-          allLibraryItems.push(...library)
-          userMap.set(user.id, { username: user.username, email: user.email })
-        } catch (error) {
-          console.error(`Error loading library for user ${user.id}:`, error)
-          // Continue with other users
-        }
-      }
-
-      // Process and expand items
-      // For episode history, we want to show ALL episodes, not just the latest
-      const expandedLibrary = []
-
-      for (const item of allLibraryItems) {
-        if (item.type === 'movie') {
-          expandedLibrary.push(item)
-          continue
-        }
-
-        const isEpisodeItem = item._id && item._id.includes(':') && item._id.split(':').length >= 3
-
-        if (isEpisodeItem) {
-          // This is already an episode item (format: "tt123:season:episode")
-          // Add it directly - we want all episodes, not just the latest
-          expandedLibrary.push(item)
-          continue
-        }
-
-        // For series items without episode info in _id, check if we can extract episode info
-        // from state.video_id or state.watched
-        if (item.type === 'series' && item.state) {
-          // If video_id exists, create an episode entry
-          if (item.state.video_id && item.state.video_id.trim() !== '') {
-            const videoIdParts = item.state.video_id.split(':')
-            if (videoIdParts.length >= 3) {
-              const season = parseInt(videoIdParts[1], 10)
-              const episode = parseInt(videoIdParts[2], 10)
-
-              const episodeItem = {
-                ...item,
-                _id: `${item._id}:${season}:${episode}`,
-                state: {
-                  ...item.state,
-                  season: season,
-                  episode: episode,
-                  video_id: item.state.video_id
-                }
-              }
-              expandedLibrary.push(episodeItem)
-              continue
-            }
-          }
-
-          // If watched field exists, try to extract episode info
-          // Format: "tt123:season:episode:..." or bitfield
-          if (item.state.watched && item.state.watched.trim() !== '') {
-            const watchedParts = item.state.watched.split(':')
-            if (watchedParts.length >= 3) {
-              // Check if it's a video_id format (not a bitfield)
-              const potentialSeason = parseInt(watchedParts[1], 10)
-              const potentialEpisode = parseInt(watchedParts[2], 10)
-
-              // If both are valid numbers, treat as video_id format
-              if (!isNaN(potentialSeason) && !isNaN(potentialEpisode)) {
-                const episodeItem = {
-                  ...item,
-                  _id: `${item._id}:${potentialSeason}:${potentialEpisode}`,
-                  state: {
-                    ...item.state,
-                    season: potentialSeason,
-                    episode: potentialEpisode,
-                    video_id: `${watchedParts[0]}:${potentialSeason}:${potentialEpisode}`
-                  }
-                }
-                expandedLibrary.push(episodeItem)
-                continue
-              }
-            }
-          }
-        }
-
-        // Just add the item as-is (no expansion possible)
-        expandedLibrary.push(item)
-      }
-
-      // Sort by watch date in descending order (most recent first), using lastWatched only
-      expandedLibrary.sort((a, b) => {
-        const getWatchDate = (item) => {
-          if (item.state?.lastWatched) {
-            const date = new Date(item.state.lastWatched)
-            if (!isNaN(date.getTime())) return date.getTime()
-          }
-          return 0
-        }
-
-        const dateA = getWatchDate(a)
-        const dateB = getWatchDate(b)
-
-        if (dateB === dateA) return 0
-        return dateB - dateA
-      })
-
-      // Return all items (both removed and non-removed)
-      // Frontend will filter based on viewType:
-      // - Library mode: shows only non-removed items (removed: false)
-      // - History mode: shows all watched items (based on _ctime) regardless of removed status
-
-      res.json({
-        library: expandedLibrary,
-        count: expandedLibrary.length
-      })
-    } catch (error) {
-      console.error('Error fetching combined library:', error)
-      res.status(500).json({ message: 'Failed to fetch combined library', error: publicMessage(error, 'Failed to fetch combined library') })
-    }
-  })
-
-  // NEW: Get activity from WatchSession and EpisodeWatchHistory tables (source of truth)
-  router.get('/activity/sessions', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      const { limit = 100, offset = 0, userId, includeActive = 'true' } = req.query
-
-      // Get all active users with their info
-      const users = await prisma.user.findMany({
-        where: {
-          accountId: accountId,
-          isActive: true
-        },
-        select: {
-          id: true,
-          username: true,
-          email: true,
-          colorIndex: true,
-          activityVisibility: true
-        }
-      })
-
-      if (users.length === 0) {
-        return res.json({ sessions: [], count: 0 })
-      }
-
-      // Build user map for easy lookup
-      const userMap = new Map(users.map(u => [u.id, u]))
-
-      // Build where clause for sessions
-      const whereClause = {
-        accountId: accountId || 'default'
-      }
-
-      // If filtering by specific user
-      if (userId) {
-        whereClause.userId = userId
-      }
-
-      // Include active sessions if requested
-      if (includeActive === 'false') {
-        whereClause.isActive = false
-      }
-
-      // Fetch watch sessions
-      const activities = await prisma.watchActivity.findMany({
-        where: whereClause,
-        orderBy: { date: 'desc' },
-        take: parseInt(limit) || 100,
-        skip: parseInt(offset) || 0
-      })
-
-      // Fetch episode watch history for additional detail
-      const episodeHistory = await prisma.episodeWatchHistory.findMany({
-        where: {
-          accountId: accountId || 'default',
-          ...(userId && { userId })
-        },
-        orderBy: { watchedAt: 'desc' },
-        take: parseInt(limit) || 100
-      })
-
-      // Transform watch activity into activity items
-      const activityItems = activities.map(activity => {
-        const user = userMap.get(activity.userId)
-        return {
-          id: activity.id,
-          type: 'activity',
-          userId: activity.userId,
-          username: user?.username || user?.email || 'Unknown',
-          userEmail: user?.email,
-          userColorIndex: user?.colorIndex || 0,
-          itemId: activity.itemId,
-          videoId: activity.itemId,
-          itemName: activity.itemId, // Use itemId as name for export
-          itemType: activity.itemType,
-          season: null,
-          episode: null,
-          poster: null,
-          startTime: activity.date,
-          endTime: new Date(activity.date.getTime() + (activity.watchTimeSeconds * 1000)),
-          durationSeconds: activity.watchTimeSeconds,
-          isActive: false,
-          watchedAt: activity.date
-        }
-      })
-
-      // Transform episode history into activity items
-      const episodeItems = episodeHistory.map(history => {
-        const user = userMap.get(history.userId)
-        return {
-          id: history.id,
-          type: 'episode',
-          userId: history.userId,
-          username: user?.username || user?.email || 'Unknown',
-          userEmail: user?.email,
-          userColorIndex: user?.colorIndex || 0,
-          itemId: history.itemId,
-          videoId: history.videoId,
-          itemName: history.itemName,
-          itemType: 'series',
-          season: history.season,
-          episode: history.episode,
-          poster: history.poster,
-          startTime: history.watchedAt,
-          endTime: history.watchedAt,
-          durationSeconds: history.durationSeconds || 0,
-          isActive: false,
-          watchedAt: history.watchedAt
-        }
-      })
-
-      // Combine and sort by watch time (most recent first)
-      const allActivities = [...activityItems, ...episodeItems].sort((a, b) => {
-        return new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime()
-      })
-
-      // Get total count
-      const totalActivities = await prisma.watchActivity.count({ where: whereClause })
-      const totalEpisodes = await prisma.episodeWatchHistory.count({
-        where: {
-          accountId: accountId || 'default',
-          ...(userId && { userId })
-        }
-      })
-
-      res.json({
-        sessions: allActivities,
-        count: allActivities.length,
-        totalActivities,
-        totalEpisodes
-      })
-    } catch (error) {
-      console.error('Error fetching activity sessions:', error)
-      res.status(500).json({ message: 'Failed to fetch activity sessions', error: publicMessage(error, 'Failed to fetch activity sessions') })
-    }
-  })
-
-  // Export history for a specific user or all users
-  router.get('/history/export', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      const { userId } = req.query
-      const whereClause = { accountId }
-
-      if (userId && userId !== 'all') {
-        whereClause.userId = userId
-      }
-
-      // Get watch sessions
-      const watchSessions = await prisma.watchSession.findMany({
-        where: whereClause,
-        orderBy: { startTime: 'desc' }
-      })
-
-      // Get episode watch history
-      const episodeHistory = await prisma.episodeWatchHistory.findMany({
-        where: whereClause,
-        orderBy: { watchedAt: 'desc' }
-      })
-
-      // Get watch activity
-      const watchActivity = await prisma.watchActivity.findMany({
-        where: whereClause,
-        orderBy: { date: 'desc' }
-      })
-
-      // Get watch snapshots
-      const watchSnapshots = await prisma.watchSnapshot.findMany({
-        where: whereClause,
-        orderBy: { date: 'desc' }
-      })
-
-      // Build export data
-      const exportData = {
-        exportedAt: new Date().toISOString(),
-        userId: userId || 'all',
-        watchSessions: watchSessions.map(s => ({
-          ...s,
-          accountId: undefined // Don't export accountId
-        })),
-        episodeWatchHistory: episodeHistory.map(h => ({
-          ...h,
-          accountId: undefined
-        })),
-        watchActivity: watchActivity.map(a => ({
-          ...a,
-          accountId: undefined
-        })),
-        watchSnapshots: watchSnapshots.map(s => ({
-          ...s,
-          accountId: undefined,
-          overallTimeWatched: s.overallTimeWatched !== null && s.overallTimeWatched !== undefined ? String(s.overallTimeWatched) : undefined,
-          timeOffset: s.timeOffset !== null && s.timeOffset !== undefined ? String(s.timeOffset) : undefined
-        })),
-        counts: {
-          watchSessions: watchSessions.length,
-          episodeWatchHistory: episodeHistory.length,
-          watchActivity: watchActivity.length,
-          watchSnapshots: watchSnapshots.length
-        }
-      }
-
-      res.json(exportData)
-    } catch (error) {
-      console.error('Error exporting history:', error)
-      res.status(500).json({ message: 'Failed to export history', error: publicMessage(error, 'Failed to export history') })
-    }
-  })
-
-  // Import history data
-  router.post('/history/import', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      const { watchSessions, episodeWatchHistory, watchActivity, watchSnapshots, targetUserId } = req.body
-
-      if (!watchSessions && !episodeWatchHistory && !watchActivity && !watchSnapshots) {
-        return res.status(400).json({ message: 'No history data provided' })
-      }
-
-      const results = {
-        watchSessions: { imported: 0, skipped: 0 },
-        episodeWatchHistory: { imported: 0, skipped: 0 },
-        watchActivity: { imported: 0, skipped: 0 },
-        watchSnapshots: { imported: 0, skipped: 0 }
-      }
-
-      // Helper to determine user ID for import
-      const getUserId = (record) => targetUserId || record.userId
-
-      // Import watch sessions
-      if (watchSessions && Array.isArray(watchSessions)) {
-        for (const session of watchSessions) {
-          try {
-            const userId = getUserId(session)
-            // Check if user exists
-            const user = await prisma.user.findFirst({
-              where: { id: userId, accountId }
-            })
-            if (!user) {
-              results.watchSessions.skipped++
-              continue
-            }
-
-            await prisma.watchSession.create({
-              data: {
-                accountId,
-                userId,
-                itemId: session.itemId,
-                videoId: session.videoId,
-                itemName: session.itemName,
-                itemType: session.itemType,
-                season: session.season,
-                episode: session.episode,
-                poster: session.poster,
-                startTime: new Date(session.startTime),
-                endTime: session.endTime ? new Date(session.endTime) : null,
-                durationSeconds: session.durationSeconds || 0,
-                isActive: false // Imported sessions are not active
-              }
-            })
-            results.watchSessions.imported++
-          } catch (e) {
-            results.watchSessions.skipped++
-          }
-        }
-      }
-
-      // Import episode watch history
-      if (episodeWatchHistory && Array.isArray(episodeWatchHistory)) {
-        for (const history of episodeWatchHistory) {
-          try {
-            const userId = getUserId(history)
-            const user = await prisma.user.findFirst({
-              where: { id: userId, accountId }
-            })
-            if (!user) {
-              results.episodeWatchHistory.skipped++
-              continue
-            }
-
-            await prisma.episodeWatchHistory.upsert({
-              where: {
-                accountId_userId_videoId: {
-                  accountId,
-                  userId,
-                  videoId: history.videoId
-                }
-              },
-              create: {
-                accountId,
-                userId,
-                showId: history.showId,
-                showName: history.showName,
-                videoId: history.videoId,
-                season: history.season,
-                episode: history.episode,
-                poster: history.poster,
-                watchedAt: new Date(history.watchedAt)
-              },
-              update: {
-                showName: history.showName,
-                season: history.season,
-                episode: history.episode,
-                poster: history.poster,
-                watchedAt: new Date(history.watchedAt)
-              }
-            })
-            results.episodeWatchHistory.imported++
-          } catch (e) {
-            results.episodeWatchHistory.skipped++
-          }
-        }
-      }
-
-      // Import watch activity
-      if (watchActivity && Array.isArray(watchActivity)) {
-        for (const activity of watchActivity) {
-          try {
-            const userId = getUserId(activity)
-            const user = await prisma.user.findFirst({
-              where: { id: userId, accountId }
-            })
-            if (!user) {
-              results.watchActivity.skipped++
-              continue
-            }
-
-            await prisma.watchActivity.create({
-              data: {
-                accountId,
-                userId,
-                itemId: activity.itemId,
-                date: new Date(activity.date),
-                watchTimeSeconds: activity.watchTimeSeconds,
-                itemType: activity.itemType
-              }
-            })
-            results.watchActivity.imported++
-          } catch (e) {
-            results.watchActivity.skipped++
-          }
-        }
-      }
-
-      // Import watch snapshots
-      if (watchSnapshots && Array.isArray(watchSnapshots)) {
-        for (const snapshot of watchSnapshots) {
-          try {
-            const userId = getUserId(snapshot)
-            const user = await prisma.user.findFirst({
-              where: { id: userId, accountId }
-            })
-            if (!user) {
-              results.watchSnapshots.skipped++
-              continue
-            }
-
-            await prisma.watchSnapshot.upsert({
-              where: {
-                accountId_userId_itemId_date: {
-                  accountId,
-                  userId,
-                  itemId: snapshot.itemId,
-                  date: new Date(snapshot.date)
-                }
-              },
-              create: {
-                accountId,
-                userId,
-                itemId: snapshot.itemId,
-                date: new Date(snapshot.date),
-                overallTimeWatched: snapshot.overallTimeWatched,
-                timeOffset: snapshot.timeOffset,
-                lastWatched: snapshot.lastWatched ? new Date(snapshot.lastWatched) : null,
-                mtime: snapshot.mtime ? new Date(snapshot.mtime) : null
-              },
-              update: {
-                overallTimeWatched: snapshot.overallTimeWatched,
-                timeOffset: snapshot.timeOffset,
-                lastWatched: snapshot.lastWatched ? new Date(snapshot.lastWatched) : null,
-                mtime: snapshot.mtime ? new Date(snapshot.mtime) : null
-              }
-            })
-            results.watchSnapshots.imported++
-          } catch (e) {
-            results.watchSnapshots.skipped++
-          }
-        }
-      }
-
-      res.json({
-        message: 'History import completed',
-        results
-      })
-    } catch (error) {
-      console.error('Error importing history:', error)
-      res.status(500).json({ message: 'Failed to import history', error: publicMessage(error, 'Failed to import history') })
-    }
-  })
-
-  // Clear all history for a specific user
-  router.delete('/:userId/history', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      // Verify user exists
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountId
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' })
-      }
-
-      const whereClause = { accountId, userId }
-
-      // Delete all history records
-      const deletedSessions = await prisma.watchSession.deleteMany({ where: whereClause })
-      const deletedEpisodes = await prisma.episodeWatchHistory.deleteMany({ where: whereClause })
-      const deletedActivity = await prisma.watchActivity.deleteMany({ where: whereClause })
-      const deletedSnapshots = await prisma.watchSnapshot.deleteMany({ where: whereClause })
-      // An AIOStreams viewing still in progress would otherwise land in the wiped history.
-      await prisma.watchStateCursor.deleteMany({ where: whereClause })
-
-      res.json({
-        message: 'History cleared successfully',
-        deleted: {
-          watchSessions: deletedSessions.count,
-          episodeWatchHistory: deletedEpisodes.count,
-          watchActivity: deletedActivity.count,
-          watchSnapshots: deletedSnapshots.count
-        }
-      })
-    } catch (error) {
-      console.error('Error clearing history:', error)
-      res.status(500).json({ message: 'Failed to clear history', error: publicMessage(error, 'Failed to clear history') })
-    }
-  })
-
-  // Clear user's Stremio library (mark all items as removed)
-  router.delete('/:userId/library', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountId
-        },
-        select: {
-          stremioAuthKey: true,
-          isActive: true
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ message: 'User not found' })
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
-      }
-
-      // Decrypt auth key
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-
-      const { StremioAPIClient } = require('stremio-api-client')
-      const apiClient = new StremioAPIClient({
-        endpoint: 'https://api.strem.io',
-        authKey: authKeyPlain
-      })
-
-      // Get all library items
-      const libraryItems = await apiClient.request('datastoreGet', {
-        collection: 'libraryItem',
-        ids: [],
-        all: true
-      })
-
-      let allItems = []
-      if (Array.isArray(libraryItems)) {
-        allItems = libraryItems
-      } else if (libraryItems?.result) {
-        allItems = Array.isArray(libraryItems.result) ? libraryItems.result : [libraryItems.result]
-      } else if (libraryItems?.library) {
-        allItems = Array.isArray(libraryItems.library) ? libraryItems.library : [libraryItems.library]
-      } else if (libraryItems && typeof libraryItems === 'object') {
-        allItems = Object.values(libraryItems).filter(item => item && (item._id || item.id))
-      }
-
-      // Filter out already removed items
-      const activeItems = allItems.filter(item => !item.removed)
-
-      if (activeItems.length === 0) {
-        return res.json({
-          message: 'Library is already empty',
-          deleted: 0
-        })
-      }
-
-      // Mark all items as removed
-      const changes = activeItems.map(item => ({
-        _id: item._id || item.id,
-        name: item.name || 'Unknown',
-        type: item.type || 'unknown',
-        removed: true,
-        _mtime: new Date().toISOString()
-      }))
-
-      await apiClient.request('datastorePut', {
-        collection: 'libraryItem',
-        changes
-      })
-
-      // Clear the cache for this user
-      const { clearCache } = require('../utils/libraryCache')
-      clearCache(accountId, userId)
-
-      res.json({
-        message: 'Library cleared successfully',
-        deleted: activeItems.length
-      })
-    } catch (error) {
-      console.error('Error clearing library:', error)
-      res.status(500).json({ message: 'Failed to clear library', error: publicMessage(error, 'Failed to clear library') })
-    }
-  })
-
-  // Get like/love status for a media item in Stremio
-  router.get('/:userId/status', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const { mediaId, mediaType } = req.query
-      const accountId = getAccountId(req)
-
-      if (!mediaId || !mediaType) {
-        return res.status(400).json({ message: 'mediaId and mediaType are required' })
-      }
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountId
-        },
-        select: {
-          stremioAuthKey: true,
-          isActive: true
-        }
-      })
-
-      if (!user || !user.isActive) {
-        return res.status(404).json({ message: 'User not found or inactive' })
-      }
-
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
-      }
-
-      // Decrypt auth key
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-
-      // Call Stremio likes API to get status
-      const response = await fetch(`https://likes.stremio.com/api/get_status?authToken=${encodeURIComponent(authKeyPlain)}&mediaId=${encodeURIComponent(mediaId)}&mediaType=${encodeURIComponent(mediaType)}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`[Get Status] Stremio API error: ${response.status} - ${errorText}`)
-        return res.status(response.status).json({
-          message: 'Failed to get like/love status',
-          error: errorText
-        })
-      }
-
-      const data = await response.json().catch(() => ({}))
-      // Stremio returns { status: 'liked' | 'loved' | null }
-      res.json({ status: data.status || null })
-    } catch (error) {
-      console.error('Error getting like/love status:', error)
-      res.status(500).json({ message: 'Failed to get like/love status', error: publicMessage(error, 'Failed to get like/love status') })
-    }
-  })
-
-  // Update like/love status for a media item in Stremio
-  router.post('/:userId/statusUpdate', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const { mediaId, mediaType, status } = req.body // status: 'liked', 'loved', or null
-      const accountId = getAccountId(req)
-
-      if (!mediaId || !mediaType) {
-        return res.status(400).json({ message: 'mediaId and mediaType are required' })
-      }
-
-      if (status !== null && status !== undefined && !['liked', 'loved'].includes(status)) {
-        return res.status(400).json({ message: 'status must be "liked", "loved", or null' })
-      }
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountId
-        },
-        select: {
-          stremioAuthKey: true,
-          isActive: true
-        }
-      })
-
-      if (!user || !user.isActive) {
-        return res.status(404).json({ message: 'User not found or inactive' })
-      }
-
-      if (!user.stremioAuthKey) {
-        return res.status(400).json({ message: 'User not connected to Stremio' })
-      }
-
-      // Decrypt auth key
-      const authKeyPlain = decrypt(user.stremioAuthKey, req)
-
-      // Call Stremio likes API
-      const response = await fetch('https://likes.stremio.com/api/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          authToken: authKeyPlain,
-          mediaId: mediaId,
-          mediaType: mediaType, // 'series' or 'movie'
-          status: status // 'liked', 'loved', or null to unlike/unlove
-        })
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`[Like/Love] Stremio API error: ${response.status} - ${errorText}`)
-        return res.status(response.status).json({
-          message: 'Failed to update like/love status',
-          error: errorText
-        })
-      }
-
-      const data = await response.json().catch(() => ({}))
-      res.json({ success: true, data })
-    } catch (error) {
-      console.error('Error updating like/love status:', error)
-      res.status(500).json({ message: 'Failed to update like/love status', error: publicMessage(error, 'Failed to update like/love status') })
-    }
-  })
-
-  // Toggle library status (add/remove) for selected items
-  router.post('/:userId/library/toggle', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const { items } = req.body // Array of { itemId, itemType, itemName, poster, addToLibrary }
-      const accountId = getAccountId(req)
-
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ message: 'items array is required' })
-      }
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountId
-        },
-        select: {
-          id: true,
-          isActive: true,
-          ...PROVIDER_SELECT,
-          traxAddonEnabled: true,
-          traxToken: true
-        }
-      })
-
-      if (!user || !user.isActive) {
-        return res.status(404).json({ message: 'User not found or inactive' })
-      }
-
-      if (!isProviderConnected(user)) {
-        return res.status(400).json({ message: 'User not connected to a provider' })
-      }
-
-      // Build provider for this user (Stremio, Nuvio or Jellyfin)
-      const providerInstance = createProvider(user, { decrypt, req })
-      if (!providerInstance) {
-        return res.status(400).json({ message: 'Failed to initialize provider for user' })
-      }
-      if (providerInstance.supportsLibraryWrite === false) {
-        return res.status(400).json({ message: 'Library modification is not supported for this provider' })
-      }
-
-      const { toggleLibraryItemsBatch } = require('../utils/libraryToggle')
-      const { clearCache, setCachedLibrary } = require('../utils/libraryCache')
-
-      // Process all items in a single batch call (1 API call per user)
-      let batchResult
-      try {
-        batchResult = await toggleLibraryItemsBatch({
-          provider: providerInstance,
-          items: items,
-          logPrefix: `[LibraryToggle] User ${userId}`
-        })
-      } catch (error) {
-        console.error(`[LibraryToggle] Failed to toggle library items for user ${userId}:`, error)
-        console.error(`[LibraryToggle] Error stack:`, error?.stack)
-        clearCache(accountId, userId)
-        return res.status(500).json({
-          error: 'Failed to toggle library items',
-          message: publicMessage(error, 'Something went wrong'),
-          success: false,
-          successCount: 0,
-          errorCount: items.length,
-          results: items.map(item => ({ itemId: item.itemId, success: false, error: publicMessage(error, 'Something went wrong') }))
-        })
-      }
-
-      // Wait a moment for Stremio to process the changes before refreshing cache
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      // Refresh the cached library through the user's own provider. This used
-      // to build a Stremio client from an auth key that belongs to a different
-      // route's scope, so it threw every time and the catch below quietly
-      // cleared the cache instead - the refresh never once ran. Going through
-      // the provider also means it now works for Nuvio users, which the
-      // hard-coded Stremio client never could.
-      try {
-        const libraryItems = await providerInstance.getLibrary()
-
-        let library = []
-        if (Array.isArray(libraryItems)) {
-          library = libraryItems
-        } else if (libraryItems?.result) {
-          library = Array.isArray(libraryItems.result) ? libraryItems.result : [libraryItems.result]
-        } else if (libraryItems?.library) {
-          library = Array.isArray(libraryItems.library) ? libraryItems.library : [libraryItems.library]
-        }
-
-        if (Array.isArray(library) && library.length > 0) {
-          setCachedLibrary(accountId, userId, library)
-          console.log(`[LibraryToggle] Updated cache for user ${userId} with ${library.length} items`)
-        }
-      } catch (cacheError) {
-        console.error(`[LibraryToggle] Failed to refresh cache for user ${userId}:`, cacheError)
-        // Clear cache as fallback so it will be refreshed on next request
-        clearCache(accountId, userId)
-      }
-
-      const successCount = batchResult?.processedCount || 0
-      const errorCount = items.length - successCount
-
-      // Build results array for response
-      const results = items.map((item, index) => ({
-        itemId: item.itemId,
-        success: index < successCount,
-        error: index < successCount ? undefined : 'Item was skipped or failed'
-      }))
-
-      res.json({
-        success: errorCount === 0,
-        results,
-        successCount,
-        errorCount
-      })
-    } catch (error) {
-      console.error('Error toggling library items:', error)
-      res.status(500).json({ error: 'Failed to toggle library items', message: publicMessage(error, 'Failed to toggle library items') })
-    }
-  })
-
-  // Delete a library item from a user's library (via their provider)
-  router.delete('/:userId/library/:itemId', async (req, res) => {
-    try {
-      const { userId, itemId } = req.params
-      const accountId = getAccountId(req)
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: accountId
-        },
-        select: {
-          id: true,
-          isActive: true,
-          ...PROVIDER_SELECT,
-          traxAddonEnabled: true,
-          traxToken: true
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ error: 'User is disabled' })
-      }
-
-      if (!isProviderConnected(user)) {
-        return res.status(400).json({ error: 'User not connected to a provider' })
-      }
-
-      // Build provider for this user (Stremio, Nuvio or Jellyfin)
-      const providerInstance = createProvider(user, { decrypt, req })
-      if (!providerInstance) {
-        return res.status(400).json({ error: 'Failed to initialize provider for user' })
-      }
-
-      const { markLibraryItemRemoved } = require('../utils/libraryDelete')
-
-      try {
-        await markLibraryItemRemoved({
-          provider: providerInstance,
-          itemId,
-          logPrefix: '[users/delete-library-item]'
-        })
-      } catch (deleteError) {
-        if (deleteError.code === 'NOT_FOUND') {
-          return res.status(404).json({ error: 'Library item not found', itemId: deleteError.meta?.itemId })
-        }
-        if (deleteError.code === 'NOT_SUPPORTED') {
-          return res.status(400).json({ error: 'Library modification is not supported for this provider' })
-        }
-        console.error('[users] Error deleting library item via helper:', deleteError)
-        return res.status(500).json({ error: 'Failed to delete library item', message: deleteError?.message })
-      }
-
-      // Clear the cache for this user so it refreshes on next request
-      const { clearCache } = require('../utils/libraryCache')
-      clearCache(accountId, userId)
-
-      res.json({
-        success: true,
-        message: 'Library item deleted successfully'
-      })
-    } catch (error) {
-      console.error('Error deleting library item:', error)
-      res.status(500).json({ error: 'Failed to delete library item', message: publicMessage(error, 'Failed to delete library item') })
-    }
-  })
-
-  // Backup user's library (download as JSON)
-  router.get('/:id/library/backup', async (req, res) => {
-    try {
-      const { id } = req.params
-      const accountId = getAccountId(req)
-
-      // Get user
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: accountId
-        },
-        select: {
-          id: true,
-          isActive: true,
-          username: true,
-          email: true,
-          ...PROVIDER_SELECT,
-          traxAddonEnabled: true,
-          traxToken: true
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ error: 'User is disabled' })
-      }
-
-      if (!isProviderConnected(user)) {
-        return res.status(400).json({ error: 'User not connected to a provider' })
-      }
-
-      // Fetch via the user's provider (Stremio, Nuvio or Jellyfin)
-      const providerInstance = createProvider(user, { decrypt, req })
-      if (!providerInstance) {
-        return res.status(400).json({ error: 'Failed to initialize provider for user' })
-      }
-
-      // Get all library items
-      const libraryItems = await providerInstance.getLibrary()
-
-      let library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
-
-      // Find the latest modification time for filename
-      let lastModified = 0
-      for (const item of library) {
-        const mtime = item._mtime || item.mtime || 0
-        if (mtime > lastModified) {
-          lastModified = mtime
-        }
-      }
-
-      // Generate filename: {Provider}-Library-{email/username}-{timestamp}.json
-      const userIdentifier = user.email || user.username || 'user'
-      const timestamp = lastModified || Date.now()
-      const providerLabel = require('../utils/providerInfo').providerLabel(user)
-      const filename = `${providerLabel}-Library-${userIdentifier}-${timestamp}.json`
-
-      // Set headers for file download
-      res.setHeader('Content-Type', 'application/json')
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-
-      // Send JSON response
-      res.json(library)
-    } catch (error) {
-      console.error('Error backing up library:', error)
-      res.status(500).json({ error: 'Failed to backup library', message: publicMessage(error, 'Failed to backup library') })
-    }
-  })
-
-  // Get user's library/watch history
-  router.get('/:id/library', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        select: {
-          id: true,
-          email: true,
-          isActive: true,
-          ...PROVIDER_SELECT,
-          traxAddonEnabled: true,
-          traxToken: true
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      try {
-        // Use cached library data (updated every 5 minutes by activity monitor)
-        const accountId = getAccountId(req)
-        const { getCachedLibrary, setCachedLibrary } = require('../utils/libraryCache')
-        let library = getCachedLibrary(accountId, user)
-
-        // If no cache, fetch from the user's provider and cache it
-        if (!library || !Array.isArray(library) || library.length === 0) {
-          const providerInstance = createProvider(user, { decrypt, req })
-          if (!providerInstance) {
-            return res.status(400).json({ message: 'User not connected to a provider and no cached library found' })
-          }
-
-          const libraryItems = await providerInstance.getLibrary()
-
-          // The response might be wrapped or direct array
-          library = Array.isArray(libraryItems) ? libraryItems : (libraryItems?.result || libraryItems?.library || [])
-
-          // Cache the library data
-          if (Array.isArray(library) && library.length > 0) {
-            setCachedLibrary(accountId, user, library)
-          }
-        }
-
-        // Expand series into individual episodes
-        // Stremio stores one library item per show with a watched bitfield
-        // We only want to show the latest episode per show (since we only have show-level watch dates)
-        const expandedLibrary = []
-        const episodeItemsByShow = new Map() // Track episode items by show ID
-
-        // First pass: collect all items
-        for (const item of library) {
-          // Movies: add as-is
-          if (item.type === 'movie') {
-            expandedLibrary.push(item)
-            continue
-          }
-
-          // Series: Check if Stremio already returned per-episode items
-          // If the _id contains episode info (format: "tt1234567:season:episode"), it's already an episode item
-          const isEpisodeItem = item._id && item._id.includes(':') && item._id.split(':').length >= 3
-
-          if (isEpisodeItem) {
-            // Stremio already returned this as a separate episode item
-            // Group by show ID to find the latest episode per show
-            const showId = item._id.split(':')[0] // Get base show ID (e.g., "tt0096697" from "tt0096697:0:1")
-            if (!episodeItemsByShow.has(showId)) {
-              episodeItemsByShow.set(showId, [])
-            }
-            episodeItemsByShow.get(showId).push(item)
-            continue
-          }
-
-          // Just add the item as-is (no cinemeta expansion)
-          expandedLibrary.push(item)
-        }
-
-        // Process episode items: only keep the latest episode per show
-        episodeItemsByShow.forEach((episodes, showId) => {
-          const latestEpisode = findLatestEpisode(episodes, { inheritPoster: true })
-          if (latestEpisode) {
-            expandedLibrary.push(latestEpisode)
-          }
-        })
-
-        // Enrich items with missing posters from Cinemeta
-        await enrichPostersFromCinemeta(expandedLibrary)
-
-        // Sort by watch date in descending order (most recent first)
-        // IMPORTANT: Only use state.lastWatched - this is the actual watch timestamp
-        // Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
-        expandedLibrary.sort((a, b) => {
-          const getWatchDate = (item) => {
-            if (item.state?.lastWatched) {
-              const d = new Date(item.state.lastWatched)
-              if (!isNaN(d.getTime())) return d.getTime()
-            }
-            return 0
-          }
-
-          const dateA = getWatchDate(a)
-          const dateB = getWatchDate(b)
-
-          // Descending order (most recent first) - higher timestamp comes first
-          // If dates are equal, maintain original order
-          if (dateB === dateA) return 0
-          return dateB - dateA
-        })
-
-        // Debug: log first few items to verify sorting
-        if (expandedLibrary.length > 0) {
-          console.log('Library sorted by date (first 5 items, using lastWatched):')
-          expandedLibrary.slice(0, 5).forEach((item, idx) => {
-            const date = item.state?.lastWatched ? new Date(item.state.lastWatched).getTime() : null
-            console.log(`${idx + 1}. ${item.name} - ${date}`)
-          })
-        }
-
-        res.json({
-          library: expandedLibrary,
-          count: expandedLibrary.length
-        })
-      } catch (error) {
-        console.error('Error fetching library items:', error)
-        res.status(500).json({ message: 'Failed to fetch library items', error: publicMessage(error, 'Failed to fetch library items') })
-      }
-    } catch (error) {
-      console.error('Error in get library endpoint:', error)
-      res.status(500).json({ message: 'Failed to fetch library items', error: publicMessage(error, 'Failed to fetch library items') })
-    }
-  })
-
-  // Clear all Stremio addons from user's account
-  router.post('/:id/stremio-addons/clear', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      // Full row, not a narrow select: createProvider needs the provider
-      // credentials, and the guard record below needs id + providerType (a
-      // prior narrow select silently passed undefined as the user id there).
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Provider-agnostic: was Stremio-only, so Clear All on a Nuvio user's
-      // Account Addons failed - same fix as the reorder/delete routes.
-      const hasClearCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
-      if (!hasClearCreds) {
-        return res.status(400).json({ message: 'User is not connected to a provider' })
-      }
-
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      try {
-        const provider = createProvider(user, { decrypt, req })
-        if (!provider) {
-          return res.status(400).json({ message: 'Provider credentials are invalid' })
-        }
-        await provider.clearAddons()
-        await require('../utils/accountGuard').recordAssertedState(prisma, user.id, user.providerType, [])
-
-        res.json({
-          message: 'All addons cleared successfully',
-          clearedCount: 0
-        })
-      } catch (error) {
-        console.error('Error clearing Stremio addons:', error)
-        res.status(500).json({ message: 'Failed to clear addons', error: publicMessage(error, 'Failed to clear addons') })
-      }
-    } catch (error) {
-      console.error('Error in clear Stremio addons endpoint:', error)
-      res.status(500).json({ message: 'Failed to clear addons', error: publicMessage(error, 'Failed to clear addons') })
-    }
-  })
-
-  // Delete Stremio addon from user's account
-  router.delete('/:id/stremio-addons/:addonName', async (req, res) => {
-    try {
-      const { id, addonName } = req.params
-      const { unsafe } = req.query
-
-      // Full row: createProvider needs whichever provider's credentials this
-      // user actually has (the old narrow Stremio-only select is why removal
-      // failed for Nuvio users).
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // No Stremio-key check here on purpose. Removal runs through
-      // createProvider and works for Nuvio too - the credential check that
-      // matters is hasDeleteCreds further down, which accepts either
-      // provider. This guard rejected every Nuvio user before any of that
-      // ran, with an error naming a service they are not even using, which
-      // is why removing an addon from a Nuvio account failed.
-      if (!user.isActive) {
-        return res.status(400).json({ message: 'User is disabled' })
-      }
-
-      // Protected addons logic (name-based):
-      // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
-      // 2. User-defined protected addons: ALWAYS protected regardless of mode
-      const { defaultAddons } = require('../utils/config')
-      const normalizeName = (n) => String(n || '').trim().toLowerCase()
-      const targetNameNormalized = normalizeName(addonName)
-
-      // Default protected addon names (only in safe mode)
-      const defaultProtectedNames = unsafe === 'true' ? [] : (defaultAddons.names || [])
-      const defaultProtectedNameSet = new Set(defaultProtectedNames.map(normalizeName))
-
-      // Parse user-defined protected addons (ALWAYS protected regardless of mode) - stored as plaintext names
-      let userProtectedNames = []
-      try {
-        const parsed = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-        if (Array.isArray(parsed)) {
-          userProtectedNames = parsed.map(n => normalizeName(n)).filter(Boolean)
-        }
-      } catch (e) {
-        console.warn('Failed to parse user protected addons in delete:', e)
-        userProtectedNames = []
-      }
-
-      const userProtectedNameSet = new Set(userProtectedNames)
-      const allProtectedNameSet = new Set([...defaultProtectedNameSet, ...userProtectedNameSet])
-
-      // Check if the addon being deleted is protected (by name)
-      const isProtected = allProtectedNameSet.has(targetNameNormalized)
-
-      // In unsafe mode, allow deletion of default Stremio addons but not user-defined protected addons
-      if (isProtected && (unsafe !== 'true' || userProtectedNameSet.has(targetNameNormalized))) {
-        return res.status(403).json({ message: 'This addon is protected and cannot be deleted' })
-      }
-
-      // Provider-agnostic: same fix as the reorder route above - this was
-      // Stremio-only, so removing a single Account Addon failed for Nuvio.
-      const hasDeleteCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
-      if (!hasDeleteCreds) {
-        return res.status(400).json({ message: 'User is not connected to a provider' })
-      }
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) {
-        return res.status(400).json({ message: 'Provider credentials are invalid' })
-      }
-
-      // 1) Pull current collection
-      const { addons: currentAddonsRaw } = await provider.getAddons()
-      const currentAddons = Array.isArray(currentAddonsRaw)
-        ? currentAddonsRaw
-        : (currentAddonsRaw && typeof currentAddonsRaw === 'object' ? Object.values(currentAddonsRaw) : [])
-
-      // The page identifies an account addon by its address, which is
-      // exact; a name is accepted too (the clear-all path sends names).
-      // Matching only the stored manifest's name was why removal silently
-      // did nothing for an addon known here under a custom name, or when
-      // the address arrived instead of a name - the filter matched nothing,
-      // the account was rewritten unchanged, and the reply still said
-      // "removed".
-      const { canonicalizeManifestUrl: canonicalUrl } = require('../utils/validation')
-      const looksLikeUrl = /^https?:\/\//i.test(String(addonName || ''))
-      const canon = (u) => { try { return canonicalUrl(u) } catch { return String(u || '').trim().toLowerCase() } }
-      const targetUrl = looksLikeUrl ? canon(addonName) : null
-      const matchesTarget = (a) => {
-        if (targetUrl) return canon(a?.transportUrl || a?.manifestUrl || a?.url || '') === targetUrl
-        return [a?.manifest?.name, a?.transportName, a?.name].some((n) => n && normalizeName(n) === targetNameNormalized)
-      }
-      const targets = currentAddons.filter(matchesTarget)
-      if (targets.length === 0) {
-        return res.status(404).json({ message: 'That addon is not on the account' })
-      }
-      // An addon addressed by URL still gets the protected-name check.
-      if (targetUrl) {
-        const protectedHit = targets.some((a) => {
-          const n = normalizeName(a?.manifest?.name || a?.transportName || a?.name)
-          return n && allProtectedNameSet.has(n) && (unsafe !== 'true' || userProtectedNameSet.has(n))
-        })
-        if (protectedHit) return res.status(403).json({ message: 'This addon is protected and cannot be deleted' })
-      }
-
-      let filteredAddons = currentAddons
-      try {
-        filteredAddons = currentAddons.filter((a) => !matchesTarget(a))
-
-        // Set the filtered addons using the proper format
-        await provider.setAddons(filteredAddons)
-        await require('../utils/accountGuard').recordAssertedState(prisma, id, user.providerType, filteredAddons)
-        try { require('../utils/liveEvents').emitLive(getAccountId(req), 'sync') } catch { /* optional */ }
-      } catch (e) {
-        console.error(`❌ Failed to remove addon:`, e.message)
-        throw e
-      }
-
-      return res.json({ message: 'Addon removed from their account' })
-    } catch (error) {
-      console.error('Error removing Stremio addon:', error)
-      // When the provider could not write the list back, its own message says
-      // the list may now be empty and to run a sync; a generic line hides that.
-      const message = error?.code === 'ADDON_LIST_NOT_RESTORED' ? error.message : 'Failed to remove addon from Stremio'
-      return res.status(502).json({ message, error: publicMessage(error, 'Something went wrong') })
-    }
-  })
-
-  // Connect user with auth key
-  router.post('/:id/connect-stremio-authkey', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { authKey } = req.body
-
-      if (!authKey) {
-        return res.status(400).json({ message: 'Auth key is required' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Encrypt and store the auth key
-      const encryptedAuthKey = encrypt(authKey, req)
-
-      await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: {
-          stremioAuthKey: encryptedAuthKey,
-          isActive: true
-        }
-      })
-
-      res.json({ message: 'Stremio connection established successfully' })
-    } catch (error) {
-      console.error('Error connecting user with auth key:', error)
-      res.status(500).json({ message: 'Failed to connect user', error: publicMessage(error, 'Failed to connect user') })
-    }
-  })
-
-  // Clear Stremio credentials
-  router.post('/:id/clear-stremio-credentials', async (req, res) => {
-    try {
-      const { id } = req.params
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Clear Stremio credentials
-      await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: {
-          stremioAuthKey: null,
-          isActive: false // Disconnect user since Stremio credentials are cleared
-        }
-      })
-
-      res.json({ message: 'Stremio credentials cleared successfully' })
-    } catch (error) {
-      console.error('Error clearing Stremio credentials:', error)
-      res.status(500).json({ message: 'Failed to clear Stremio credentials', error: publicMessage(error, 'Failed to clear Stremio credentials') })
-    }
-  })
-
-  // SIMKL link (optional, supplementary to whichever provider this user is
-  // actually created under) - see the schema comment on User.simklAccessToken
-  // for why this isn't a peer of providerType. PIN flow: /simkl/start shows
-  // the user a code, the client polls /simkl/poll until Simkl reports it
-  // authorized (or the user gives up and navigates away - nothing server-side
-  // needs cleaning up either way, Simkl expires the pending PIN on its own).
-  router.post('/:id/simkl/start', async (req, res) => {
-    try {
-      const { id } = req.params
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-
-      const clientId = await resolveSimklClientId(prisma, getAccountId, req)
-      const pin = await startSimklPin(clientId)
-      res.json(pin)
-    } catch (error) {
-      console.error('Error starting SIMKL authorization:', error)
-      res.status(error?.status || 500).json({ message: publicMessage(error, 'Failed to start SIMKL authorization') })
-    }
-  })
-
-  router.post('/:id/simkl/poll', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { userCode } = req.body
-      if (!userCode) return res.status(400).json({ message: 'userCode is required' })
-
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-
-      const clientId = await resolveSimklClientId(prisma, getAccountId, req)
-      const result = await pollSimklPin(clientId, userCode)
-      if (result.status !== 'authorized') {
-        return res.json({ status: 'pending' })
-      }
-
-      const encryptedToken = encrypt(result.accessToken, req)
-      await prisma.user.update({
-        where: { id, accountId: getAccountId(req) },
-        data: { simklAccessToken: encryptedToken, simklConnectedAt: new Date(), simklSyncState: null, simklLastPullAt: null, simklLastPushAt: null },
-      })
-
-      const username = await getSimklAccountInfo(clientId, result.accessToken).catch(() => null)
-      res.json({ status: 'authorized', username })
-    } catch (error) {
-      console.error('Error polling SIMKL authorization:', error)
-      res.status(error?.status || 500).json({ message: publicMessage(error, 'Failed to poll SIMKL authorization') })
-    }
-  })
-
-  router.post('/:id/simkl/disconnect', async (req, res) => {
-    try {
-      const { id } = req.params
-      const user = await prisma.user.findFirst({ where: { id, accountId: getAccountId(req) } })
-      if (!user) return responseUtils.notFound(res, 'User')
-
-      // Deliberately leaves any watch history already pulled from Simkl in
-      // place (it's real, already-merged data now) - only stops the link
-      // itself, same as disconnecting Stremio doesn't retroactively erase
-      // that user's watch history either.
-      await prisma.user.update({
-        where: { id, accountId: getAccountId(req) },
-        data: { simklAccessToken: null, simklConnectedAt: null, simklSyncState: null, simklLastPullAt: null, simklLastPushAt: null },
-      })
-      res.json({ message: 'SIMKL disconnected' })
-    } catch (error) {
-      console.error('Error disconnecting SIMKL:', error)
-      res.status(500).json({ message: 'Failed to disconnect SIMKL', error: publicMessage(error, 'Failed to disconnect SIMKL') })
-    }
-  })
-
-  // Connect existing user to Stremio
-  router.post('/:id/connect-stremio', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { password, authKey } = req.body
-
-      if (!password || !authKey) {
-        return res.status(400).json({ message: 'Password and authKey are required' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Encrypt and store the auth key
-      const encryptedAuthKey = encrypt(authKey, req)
-
-      await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: {
-          stremioAuthKey: encryptedAuthKey,
-          isActive: true
-        }
-      })
-
-      res.json({ message: 'Stremio connection established successfully' })
-    } catch (error) {
-      console.error('Error connecting user to Stremio:', error)
-      res.status(500).json({ message: 'Failed to connect user to Stremio', error: publicMessage(error, 'Failed to connect user to Stremio') })
-    }
-  })
-
-  // Import addons from a user
-  router.post('/:id/import-addons', async (req, res, next) => {
-    try {
-      // Compatibility shim: if payload already contains addons array (new flow), or addonUrls (legacy),
-      // normalize and forward to the enhanced handler declared later in this file.
-      if (Array.isArray(req.body?.addons) || Array.isArray(req.body?.addonUrls)) {
-        if (!Array.isArray(req.body.addons) && Array.isArray(req.body.addonUrls)) {
-          req.body.addons = req.body.addonUrls.map((url) => ({ url, manifestUrl: url }))
-        }
-        // SlickTrax is SlickSync's own per-person addon, added to each
-        // person by sync - never something to copy into a group. Importing
-        // it (here, or another instance's copy on a shared account) put a
-        // second SlickTrax on everyone in the group.
-        const isSlickTrax = (a) => {
-          const id = String(a?.manifest?.id || a?.id || '')
-          const url = String(a?.manifestUrl || a?.transportUrl || a?.url || '')
-          return id.startsWith('vip.slicksync.trax') || /\/trax\/[^/]+\/(?:v[\d.]+\/)?(?:aio\/)?manifest\.json$/i.test(url)
-        }
-        req.body.addons = req.body.addons.filter((a) => !isSlickTrax(a))
-        // A stream addon on someone with a pause set up is installed through
-        // their gate (utils/streamGate.js) - it is one of SlickSync's own
-        // addons, so it comes in at its real address, never their gate's.
-        const { parseGateUrl } = require('../utils/streamGate')
-        const listed = req.body.addons
-        const kept = (await Promise.all(listed.map(async (a) => {
-          const gated = parseGateUrl(a?.manifestUrl || a?.transportUrl || a?.url)
-          if (!gated) return a
-          const row = await prisma.addon.findFirst({ where: { id: gated.addonId, accountId: getAccountId(req) }, select: { manifestUrl: true } })
-          let real = null
-          try { real = row?.manifestUrl ? decrypt(row.manifestUrl, req) : null } catch { real = null }
-          return real && !real.includes('{{vault:') ? { ...a, url: real, manifestUrl: real, transportUrl: real } : null
-        }))).filter(Boolean)
-        Object.assign(req.body, { addons: kept })
-        if (req.body.addons.length === 0) {
-          return res.status(400).json({ message: 'Nothing to import - their only addon is SlickTrax, which SlickSync adds to each person itself' })
-        }
-        return next()
-      }
-      const { id } = req.params
-      const { addonUrls } = req.body
-
-      if (!Array.isArray(addonUrls) || addonUrls.length === 0) {
-        return res.status(400).json({ message: 'addonUrls must be a non-empty array' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Find groups that contain this user
-      const groups = await prisma.group.findMany({
-        where: {
-          accountId: getAccountId(req),
-          userIds: {
-            contains: user.id
-          }
-        }
-      })
-
-      if (groups.length === 0) {
-        return res.status(400).json({ message: 'User is not in any groups' })
-      }
-
-      const group = groups[0] // Use first group
-      let importedCount = 0
-      const results = []
-
-      for (const addonUrl of addonUrls) {
-        try {
-          // Fetch addon manifest
-          const manifestResponse = await safeFetch(addonUrl, {}, instancePolicy())
-          if (!manifestResponse.ok) {
-            throw new Error(`Failed to fetch manifest: ${manifestResponse.status}`)
-          }
-          const manifest = await manifestResponse.json()
-
-          // Check if addon already exists
-          const existingAddon = await prisma.addon.findFirst({
-            where: {
-              accountId: getAccountId(req),
-              manifestUrlHash: manifestUrlHmac(req, addonUrl)
-            }
-          })
-
-          if (existingAddon) {
-            // Check if addon is already in the group
-            const existingGroupAddon = await prisma.groupAddon.findFirst({
-              where: {
-                groupId: group.id,
-                addonId: existingAddon.id
-              }
-            })
-
-            if (!existingGroupAddon) {
-              // Add existing addon to group
-              await prisma.groupAddon.create({
-                data: {
-                  groupId: group.id,
-                  addonId: existingAddon.id,
-                  isEnabled: true
-                }
-              })
-              importedCount++
-            }
-            results.push({
-              url: addonUrl,
-              status: 'added_to_group',
-              name: manifest.name || 'Unknown'
-            })
-          } else {
-            // Create new addon
-            // Derive resources and catalogs from manifest
-            const resourcesNames = Array.isArray(manifest.resources)
-              ? manifest.resources.map(r => typeof r === 'string' ? r : (r && (r.name || r.type))).filter(Boolean)
-              : []
-            const catalogsData = Array.isArray(manifest.catalogs)
-              ? manifest.catalogs.filter(c => c && c.type && c.id).map(c => ({
-                type: c.type,
-                id: c.id,
-                search: c.extra ? c.extra.some(e => e.name === 'search') : false
-              }))
-              : []
-
-            const newAddon = await prisma.addon.create({
-              data: {
-                accountId: getAccountId(req),
-                name: manifest.name || 'Unknown',
-                description: manifest.description || '',
-                version: manifest.version || null,
-                iconUrl: manifest.logo || null,
-                stremioAddonId: manifest.id || null,
-                isActive: true,
-                manifestUrl: encrypt(addonUrl, req),
-                manifestUrlHash: manifestUrlHmac(req, addonUrl),
-                originalManifest: encrypt(JSON.stringify(manifest), req),
-                manifest: encrypt(JSON.stringify(manifest), req),
-                manifestHash: manifestHash(manifest),
-                resources: JSON.stringify(resourcesNames),
-                catalogs: JSON.stringify(catalogsData)
-              }
-            })
-
-            // Add to group
-            await prisma.groupAddon.create({
-              data: {
-                groupId: group.id,
-                addonId: newAddon.id,
-                isEnabled: true
-              }
-            })
-
-            importedCount++
-            results.push({
-              url: addonUrl,
-              status: 'created_and_added',
-              name: manifest.name || 'Unknown'
-            })
-          }
-        } catch (error) {
-          console.error(`Error importing addon ${addonUrl}:`, error)
-          results.push({
-            url: addonUrl,
-            status: 'error',
-            error: addonAddressProblem(error) || error.message
-          })
-        }
-      }
-
-      if (importedCount === 0) {
-        return res.status(400).json({
-          message: 'No new addons were imported. All addons already exist in the group.',
-          importedCount: 0,
-          results
-        })
-      }
-
-      res.json({
-        message: `Successfully imported ${importedCount} addons to group "${group.name}"`,
-        importedCount,
-        totalRequested: addonUrls.length,
-        results
-      })
-    } catch (error) {
-      console.error('Error importing addons:', error)
-      res.status(500).json({ message: 'Failed to import addons', error: publicMessage(error, 'Failed to import addons') })
-    }
-  })
-
-  // Reorder Stremio addons for a user (by manifest.name ONLY)
-  router.post('/:id/stremio-addons/reorder', async (req, res) => {
-    try {
-      const { id: userId } = req.params
-      const { orderedNames } = req.body || {}
-
-      // Require orderedNames strictly
-      if (!Array.isArray(orderedNames) || orderedNames.length === 0) {
-        return res.status(400).json({ message: 'orderedNames array is required' })
-      }
-
-      // Get the user
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: getAccountId(req)
-        }
-      })
-
-      if (!user) {
-        return responseUtils.notFound(res, 'User')
-      }
-
-      // Provider-agnostic: this route was hard-wired to StremioAPIClient, so
-      // dragging Account Addons on a Nuvio user errored "User is not
-      // connected to Stremio" (confirmed live 2026-09-02). Both providers
-      // implement getAddons()/setAddons() with the same {addons:[...]} shape.
-      const hasReorderCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
-      if (!hasReorderCreds) {
-        return res.status(400).json({ message: 'User is not connected to a provider' })
-      }
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) {
-        return res.status(400).json({ message: 'Provider credentials are invalid' })
-      }
-      const { addons: currentRaw } = await provider.getAddons()
-      const currentAddons = Array.isArray(currentRaw) ? currentRaw : []
-
-      // Build a map name -> queue of addons with that name to handle duplicates
-      const nameToAddons = new Map()
-      for (const addon of currentAddons) {
-        const name = addon?.manifest?.name || addon?.transportName || addon?.name || 'Addon'
-        if (!nameToAddons.has(name)) nameToAddons.set(name, [])
-        nameToAddons.get(name).push(addon)
-      }
-
-      // Validate all names exist
-      const invalidNames = orderedNames.filter((n) => !nameToAddons.has(n))
-      if (invalidNames.length > 0) {
-        return res.status(400).json({ message: 'Some addon names not found in current collection', invalidNames })
-      }
-
-      // Build reordered list by consuming from queues to preserve duplicates order
-      const reorderedAddons = []
-      for (const n of orderedNames) {
-        const q = nameToAddons.get(n)
-        if (q && q.length > 0) {
-          reorderedAddons.push(q.shift())
-        }
-      }
-
-      // Append any remaining addons (names not specified) after the ordered ones, preserving original order
-      for (const [_, q] of nameToAddons.entries()) {
-        while (q.length > 0) reorderedAddons.push(q.shift())
-      }
-
-      // Set the reordered collection
-      await provider.setAddons(reorderedAddons)
-
-      res.json({
-        message: 'Addons reordered successfully (by name)',
-        reorderedCount: reorderedAddons.length
-      })
-    } catch (error) {
-      console.error('Error reordering Stremio addons:', error)
-      const message = error?.code === 'ADDON_LIST_NOT_RESTORED' ? error.message : 'Failed to reorder addons'
-      res.status(500).json({ message, error: publicMessage(error, 'Something went wrong') })
-    }
-  });
-
-  // Protect addon
-  router.post('/:id/protect-addon', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { addonId, manifestUrl } = req.body
-      const { unsafe } = req.query
-
-
-      // Resolve target URL to protect/unprotect
-      let targetUrl = null
-      try {
-        if (typeof manifestUrl === 'string' && manifestUrl.trim()) {
-          targetUrl = manifestUrl.trim()
-        } else if (typeof addonId === 'string' && /^https?:\/\//i.test(addonId)) {
-          targetUrl = addonId.trim()
-        } else if (typeof addonId === 'string' && addonId.trim()) {
-          const found = await prisma.addon.findFirst({
-            where: { id: addonId.trim(), accountId: getAccountId(req) }
-          })
-          if (found && found.manifestUrl) {
-            try { targetUrl = decrypt(found.manifestUrl, req) } catch { targetUrl = found.manifestUrl }
-          }
-        }
-      } catch { }
-
-      // Check if this is a default addon in safe mode (match by ID or URL)
-      const isDefaultAddon = (typeof addonId === 'string' && defaultAddons.ids.includes(addonId)) ||
-        (typeof targetUrl === 'string' && defaultAddons.manifestUrls.includes(targetUrl)) ||
-        (typeof addonId === 'string' && defaultAddons.names.some(name => addonId.includes(name)))
-
-      if (isDefaultAddon && unsafe !== 'true') {
-        return res.status(403).json({
-          error: 'This addon is protected by default and cannot be unprotected in safe mode',
-          isDefaultAddon: true
-        })
-      }
-
-      // Get current user with protected addons
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        select: { protectedAddons: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Parse current protected addons (stored as encrypted manifest URLs)
-      let currentEncrypted = []
-      try {
-        currentEncrypted = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-      } catch (e) {
-        console.warn('Failed to parse protected addons:', e)
-        currentEncrypted = []
-      }
-      // Decrypt existing to URLs for comparison
-      const currentUrls = currentEncrypted.map((enc) => { try { return decrypt(enc, req) } catch { return null } }).filter((u) => typeof u === 'string' && u.trim())
-
-      if (!targetUrl || !/^https?:\/\//i.test(String(targetUrl))) {
-        return res.status(400).json({ error: 'manifestUrl required or resolvable' })
-      }
-
-      const isCurrentlyProtected = currentUrls.includes(targetUrl)
-      const nextUrls = isCurrentlyProtected ? currentUrls.filter((u) => u !== targetUrl) : [...currentUrls, targetUrl]
-      const nextEncrypted = nextUrls.map((u) => { try { return encrypt(u, req) } catch { return null } }).filter(Boolean)
-
-      // Update user (store encrypted URLs)
-      await prisma.user.update({
-        where: { id },
-        data: {
-          protectedAddons: JSON.stringify(nextEncrypted)
-        }
-      })
-
-      res.json({
-        message: `Addon ${isCurrentlyProtected ? 'unprotected' : 'protected'} successfully`,
-        isProtected: !isCurrentlyProtected,
-        protectedAddons: nextUrls
-      })
-    } catch (error) {
-      console.error('Error toggling protect addon:', error)
-      res.status(500).json({ error: 'Failed to toggle protect addon' })
-    }
-  });
-
-  // Connect user with Stremio auth key
-  router.post('/:id/connect-stremio-authkey', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { authKey } = req.body
-      if (!authKey) return res.status(400).json({ message: 'authKey is required' })
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        }
-      })
-      if (!user) return res.status(404).json({ message: 'User not found' })
-
-      // Validate auth key
-      let addonsData = {}
-      let verifiedUser = null
-      try {
-        const validation = await validateStremioAuthKey(authKey)
-        addonsData = (validation && validation.addons) || {}
-        verifiedUser = validation && validation.user ? validation.user : null
-      } catch (e) {
-        const msg = (e && (e.message || e.error || '')) || ''
-        const code = (e && e.code) || 0
-        if (code === 1 || /session does not exist/i.test(String(msg))) {
-          return res.status(401).json({ message: 'Invalid or expired Stremio auth key' })
-        }
-        return res.status(400).json({ message: 'Could not validate auth key' })
-      }
-
-      const encryptedAuthKey = encrypt(authKey, req)
-
-      const updated = await prisma.user.update({
-        where: { id },
-        data: {
-          stremioAuthKey: encryptedAuthKey,
-          stremioAddons: JSON.stringify(addonsData || {}),
-          email: verifiedUser?.email ? verifiedUser.email.toLowerCase() : undefined,
-          isActive: true, // Reconnect user since they now have valid Stremio connection
-        },
-      })
-
-      delete updated.password
-      delete updated.stremioAuthKey
-      return res.json(updated)
-    } catch (e) {
-      console.error('connect-stremio-authkey failed:', e)
-      return res.status(500).json({ message: 'Failed to connect existing user with authKey' })
-    }
-  });
-
-  // Clear Stremio credentials
-  router.post('/:id/clear-stremio-credentials', async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      // Use the middleware-protected user (ensures account isolation)
-      const existingUser = await prisma.user.findFirst({
-        where: { id, accountId: getAccountId(req) }
-      });
-
-      if (!existingUser) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-
-      // Clear Stremio credentials
-      const updatedUser = await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: {
-          stremioAuthKey: null,
-          stremioAddons: null,
-          isActive: false, // Disconnect user since Stremio credentials are cleared
-        },
-      });
-
-      res.json({ message: 'Stremio credentials cleared successfully', userId: updatedUser.id });
-    } catch (error) {
-      console.error('Error clearing Stremio credentials:', error);
-      res.status(500).json({ message: 'Failed to clear Stremio credentials', error: publicMessage(error, 'Failed to clear Stremio credentials') });
-    }
-  });
-
-  // Connect existing user to Stremio
-  router.post('/:id/connect-stremio', async (req, res) => {
-    try {
-      const safe = (() => { const { password: _pw, authKey: _ak, ...rest } = (req.body || {}); return rest })()
-      console.log('🚀 Connect Stremio endpoint called with:', req.params.id, safe);
-    } catch {
-      console.log('🚀 Connect Stremio endpoint called with:', req.params.id, '{redacted}')
-    }
-    try {
-      const { id } = req.params;
-      const { email, password, username } = req.body;
-
-      if (!email || !password) {
-        return res.status(400).json({ message: 'Email and password are required' });
-      }
-
-      // Use the middleware-protected user (ensures account isolation)
-      const existingUser = await prisma.user.findFirst({
-        where: { id, accountId: getAccountId(req) }
-      });
-
-      if (!existingUser) {
-        return res.status(404).json({ message: 'User not found' });
-      }
-
-      // Check if user already has Stremio credentials
-      // Allow reconnection - we'll update the stremioAuthKey with new credentials
-
-      // Create a temporary storage object for this authentication session
-      const tempStorage = {};
-
-      // Create Stremio API store for this user
-      const apiStore = new StremioAPIStore({
-        endpoint: 'https://api.strem.io',
-        storage: {
-          getJSON: (key) => {
-            if (tempStorage[key] !== undefined) {
-              return tempStorage[key];
-            }
-            switch (key) {
-              case 'addons':
-                return [];
-              case 'user':
-                return null;
-              case 'auth':
-                return null;
-              default:
-                return null;
-            }
-          },
-          setJSON: (key, value) => {
-            tempStorage[key] = value;
-          }
-        }
-      });
-
-      // Create Stremio API client
-      const apiClient = new StremioAPIClient(apiStore);
-
-      // Authenticate with Stremio using the same method as new user creation
-      const loginEmailOnly = async () => {
-        let lastErr
-        for (const attempt of [
-          () => apiStore.login({ email, password }),
-          () => apiStore.login(email, password),
-        ]) {
-          try {
-            await attempt()
-            return
-          } catch (e) {
-            lastErr = e
-          }
-        }
-        throw lastErr
-      }
-
-      try {
-        await loginEmailOnly()
-      } catch (e) {
-        console.error('Stremio connection error:', e);
-
-        // Use centralized Stremio error handling
-        return handleStremioError(e, res);
-      }
-
-      // Pull user's addon collection from Stremio
-      await apiStore.pullAddonCollection();
-
-      // Get authentication data from the API store (support both possible keys)
-      const authKey = apiStore.authKey || tempStorage.auth || tempStorage.authKey;
-      const userData = apiStore.user || tempStorage.user;
-
-
-      if (!authKey || !userData) {
-        console.error('🔍 Missing auth data - authKey:', !!authKey, 'userData:', !!userData);
-        return res.status(401).json({ message: 'Failed to get Stremio authentication data' });
-      }
-
-      // Get user's addons using the same logic as stremio-addons endpoint
-      let addonsData = [];
-      try {
-        const collection = await apiClient.request('addonCollectionGet', {});
-        const rawAddons = collection?.addons || collection || {};
-        const addonsNormalized = Array.isArray(rawAddons)
-          ? rawAddons
-          : (typeof rawAddons === 'object' ? Object.values(rawAddons) : []);
-
-        // Process addons to get the actual count (same as stremio-addons endpoint)
-        addonsData = await Promise.all(addonsNormalized.map(async (a) => {
-          let manifestData = null;
-
-          // Always try to fetch manifest if we have a URL and no proper manifest data
-          if ((a?.manifestUrl || a?.transportUrl || a?.url) && (!a?.manifest || !a?.name || a.name === 'Unknown')) {
-            try {
-              const manifestUrl = a?.manifestUrl || a?.transportUrl || a?.url;
-              // An address from the person's own Stremio account, checked
-              // like any other: a refused one reads as an addon that did not answer.
-              const response = await safeFetch(manifestUrl, {}, instancePolicy());
-              if (response.ok) {
-                manifestData = await response.json();
-              }
-            } catch (e) {
-              // Ignore manifest fetch errors for counting
-            }
-          }
-
-          return {
-            id: a?.id || a?.manifest?.id || manifestData?.id || 'unknown',
-            name: a?.name || a?.manifest?.name || manifestData?.name || 'Unknown',
-            manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
-            version: a?.version || a?.manifest?.version || manifestData?.version || null,
-            description: a?.description || a?.manifest?.description || manifestData?.description || '',
-            manifest: manifestData || a?.manifest || {
-              id: manifestData?.id || a?.manifest?.id || a?.id || 'unknown',
-              name: manifestData?.name || a?.manifest?.name || a?.name || 'Unknown',
-              version: manifestData?.version || a?.manifest?.version || a?.version || null,
-              description: manifestData?.description || a?.manifest?.description || a?.description || '',
-              types: manifestData?.types || a?.manifest?.types || ['other'],
-              resources: manifestData?.resources || a?.manifest?.resources || [],
-              catalogs: manifestData?.catalogs || a?.manifest?.catalogs || []
-            }
-          };
-        }));
-
-      } catch (e) {
-        console.log('Could not fetch addons:', e.message);
-      }
-
-      // Encrypt the auth key for secure storage
-      const encryptedAuthKey = encrypt(authKey, req);
-
-      // Update user with Stremio credentials
-      const updatedUser = await prisma.user.update({
-        where: {
-          id,
-          accountId: getAccountId(req)
-        },
-        data: {
-          email: email,
-          username: username || userData?.username || email.split('@')[0],
-          stremioAuthKey: encryptedAuthKey,
-          stremioAddons: JSON.stringify(addonsData || {}),
-          isActive: true, // Re-enable the user after successful reconnection
-        }
-      });
-
-      return res.json({
-        message: 'Successfully connected to Stremio',
-        addonsCount: addonsData.length,
-        user: {
-          id: updatedUser.id,
-          username: updatedUser.username,
-          email: updatedUser.email
-        }
-      });
-
-    } catch (error) {
-      console.error('Stremio connection error:', error);
-      return res.status(500).json({
-        message: 'Failed to connect to Stremio',
-        error: publicMessage(error, 'Unknown error')
-      });
-    }
-  });
-
-  // Import user addons endpoint
-  router.post('/:id/import-addons', async (req, res) => {
-    try {
-      const { id: userId } = req.params
-      const { addons } = req.body || {}
-
-      if (!Array.isArray(addons) || addons.length === 0) {
-        return res.status(400).json({ message: 'addons array is required' })
-      }
-
-      // Validate user exists
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          accountId: getAccountId(req)
-        }
-      })
-      if (!user) return res.status(404).json({ message: 'User not found' })
-
-      // Create import group with unique name
-      const baseGroupName = `${user.username} Imports`
-      let groupName = baseGroupName
-      let group = await prisma.group.findFirst({
-        where: { name: groupName, accountId: getAccountId(req) }
-      })
-
-      // Find unique name if group exists (Copy, Copy #2, etc.)
-      if (group) {
-        let copyNumber = 1
-        while (group) {
-          groupName = copyNumber === 1 ? `${baseGroupName} Copy` : `${baseGroupName} Copy #${copyNumber}`
-          group = await prisma.group.findFirst({
-            where: { name: groupName, accountId: getAccountId(req) }
-          })
-          copyNumber++
-        }
-      }
-
-      // Create the group
-      group = await prisma.group.create({
-        data: {
-          name: groupName,
-          description: `Imported addons from ${user.username}`,
-          colorIndex: 0,
-          isActive: true,
-          accountId: getAccountId(req)
-        }
-      })
-
-      // Process each addon
-      const processedAddons = []
-      const newlyImportedAddons = []
-      const existingAddons = []
-      const skippedAddons = []
-
-      for (const addonData of addons) {
-        const addonUrl = addonData.manifestUrl || addonData.transportUrl || addonData.url
-        if (!addonUrl) {
-          console.log(`⚠️ Skipping addon with no URL:`, addonData)
-          continue
-        }
-
-        // Every later reload and sync fetches this address, so one this
-        // server will not connect to is left out whether or not the manifest
-        // came with it - the same rule as adding an addon by hand. The rest
-        // of the list is still imported.
-        if (await isRefusedAddonAddress(addonUrl)) {
-          console.log(`⚠️ Skipping addon at an address this server does not connect to: ${addonUrl}`)
-          skippedAddons.push({ url: addonUrl, reason: addonAddressProblem({ message: 'blocked host' }) })
-          continue
-        }
-
-        // Get manifest data first
-        let manifestData = addonData.manifest
-        if (!manifestData) {
-          try {
-            const resp = await safeFetch(addonUrl, {}, instancePolicy())
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-            manifestData = await resp.json()
-          } catch (e) {
-            manifestData = {
-              id: addonData.id || 'unknown',
-              name: addonData.name || 'Unknown Addon',
-              version: addonData.version || '1.0.0',
-              description: addonData.description || '',
-              resources: addonData.manifest?.resources || [],
-              types: addonData.manifest?.types || ['other'],
-              catalogs: addonData.manifest?.catalogs || []
-            }
-          }
-        }
-
-        // Check if addon exists by manifest content hash
-        let addon = null
-        try {
-          const existingAddon = await prisma.addon.findFirst({
-            where: {
-              manifestHash: manifestHash(manifestData),
-              accountId: getAccountId(req)
-            },
-            select: { id: true, name: true, manifestUrl: true, accountId: true }
-          })
-          if (existingAddon) {
-            console.log(`♻️ Found existing addon with same manifest: ${existingAddon.name}`)
-            processedAddons.push(existingAddon)
-            existingAddons.push(existingAddon)
-            addon = existingAddon
-          }
+            const base = await watchStateBase(req, accountId);
+            const result = await require("../utils/aioSlickTrax").installSlickTrax(
+                prisma,
+                decrypt,
+                user,
+                base
+            );
+            return { install: result.added ? "added" : "already" };
         } catch (e) {
-          console.log(`⚠️ Manifest check failed for ${addonUrl}:`, e?.message || e)
+            return {
+                install: "failed",
+                installError: e?.message || "AIOStreams refused the change",
+            };
         }
+    }
 
-        // Create new addon if not found
-        if (!addon) {
-          console.log(`🔨 Creating new addon for: ${addonUrl}`)
-
-          // Check if addon name exists and find unique name
-          // Prefix with username: "addonname (username)"
-          const baseAddonName = manifestData?.name || addonData.name || 'Unknown Addon'
-          const username = user.username || user.email || 'user'
-          let addonName = `${baseAddonName} (${username})`
-          let finalAddonName = addonName
-          let copyNumber = 1
-
-          while (true) {
-            const nameExists = await prisma.addon.findFirst({
-              where: {
-                name: finalAddonName,
-                accountId: getAccountId(req)
-              }
-            })
-
-            if (!nameExists) break
-
-            finalAddonName = copyNumber === 1 ? `${addonName} Copy` : `${addonName} Copy #${copyNumber}`
-            copyNumber++
-          }
-
-          if (finalAddonName !== addonName) {
-            console.log(`📝 Addon name exists, using: ${finalAddonName}`)
-          }
-
-          // Fetch original manifest for full capabilities - always try to fetch from transportUrl first
-          let originalManifestObj = null
-          try {
-            const resp = await safeFetch(addonUrl, {}, instancePolicy())
-            if (resp.ok) {
-              originalManifestObj = await resp.json()
+    router.get("/:id/watch-state", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
             }
-          } catch { }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            res.json(await watchStateView(req, accountId, user));
+        } catch (error) {
+            console.error("Error reading Watch State:", error);
+            res.status(500).json({ error: "Failed to read Watch State" });
+        }
+    });
 
-          // If fetch failed, use the same manifest that goes into the manifest field
-          if (!originalManifestObj) {
-            originalManifestObj = manifestData
-          }
+    router.post("/:id/watch-state", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            const enabled = !!req.body?.enabled;
+            // Reuses the SlickTrax token as the credential, made on first need and
+            // then kept stable so a link already pasted into AIOStreams keeps working.
+            const traxToken =
+                user.traxToken ||
+                (enabled ? require("node:crypto").randomBytes(24).toString("hex") : null);
+            const updated = await prisma.user.update({
+                data: { traxToken, watchStateEnabled: enabled },
+                where: { id: user.id },
+            });
+            // Turning it on for someone whose configuration SlickSync can write to
+            // adds the link there too, instead of handing it over to paste.
+            const canInstall =
+                enabled &&
+                updated.providerType === "jellyfin" &&
+                updated.jellyfinServerKind === "aiostreams" &&
+                updated.aioConfigId &&
+                updated.aioConfigPassword;
+            res.json(
+                await watchStateView(
+                    req,
+                    accountId,
+                    updated,
+                    canInstall ? await installIntoAio(req, accountId, updated) : {}
+                )
+            );
+        } catch (error) {
+            console.error("Error toggling Watch State:", error);
+            res.status(500).json({ error: "Failed to update Watch State" });
+        }
+    });
 
-          // Create addon
-          try {
-            const resourcesNames = JSON.stringify(
-              Array.isArray(manifestData?.resources)
-                ? manifestData.resources.map(r => typeof r === 'string' ? r : (r?.name || r?.type)).filter(Boolean)
-                : []
-            )
+    // "Caught up to here" (utils/catchUp.js): mark an episode and every aired
+    // one before it watched - History only, never watch time - and on their
+    // Jellyfin or AIOStreams server.
+    const catchUpError = (res, error, fallback) =>
+        res.status(error.status || 500).json({ message: error.status ? error.message : fallback });
 
-            // Process catalogs with search detection logic
-            const processedCatalogs = []
-            if (Array.isArray(manifestData?.catalogs)) {
-              for (const catalog of manifestData.catalogs) {
-                if (!catalog?.type || !catalog?.id) continue
+    router.get("/:id/catch-up/shows", async (req, res) => {
+        try {
+            res.json({
+                shows: await require("../utils/catchUp").showsFor(
+                    prisma,
+                    getAccountId(req),
+                    String(req.params.id)
+                ),
+            });
+        } catch (error) {
+            catchUpError(res, error, "Could not read their shows");
+        }
+    });
 
-                // Check if catalog has search functionality
-                const hasSearch = catalog?.extra?.some((extra) => extra.name === 'search')
-                const hasOtherExtras = catalog?.extra?.some((extra) => extra.name !== 'search')
-                const isEmbeddedSearch = hasSearch && hasOtherExtras
-                const isStandaloneSearch = hasSearch && !hasOtherExtras
+    router.get("/:id/catch-up/episodes", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/catchUp").episodesFor(
+                    prisma,
+                    decrypt,
+                    getAccountId(req),
+                    String(req.params.id),
+                    String(req.query.showId || "")
+                )
+            );
+        } catch (error) {
+            catchUpError(res, error, "Could not read the episodes");
+        }
+    });
 
-                if (isStandaloneSearch) {
-                  // Standalone search catalog: add with original ID (no suffix)
-                  processedCatalogs.push({
-                    type: catalog.type,
-                    id: catalog.id
-                  })
-                } else if (isEmbeddedSearch) {
-                  // Embedded search catalog: add both original and search versions
-                  processedCatalogs.push({
-                    type: catalog.type,
-                    id: catalog.id
-                  })
-                  processedCatalogs.push({
-                    type: catalog.type,
-                    id: `${catalog.id}-embed-search`
-                  })
+    router.post("/:id/catch-up", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            const exists = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: req.params.id },
+            });
+            if (!exists) {
+                return res.status(404).json({ message: "User not found" });
+            }
+            res.json(
+                await require("../utils/catchUp").start(
+                    prisma,
+                    decrypt,
+                    accountId,
+                    String(req.params.id),
+                    {
+                        episode: req.body?.episode,
+                        season: req.body?.season,
+                        showId: req.body?.showId,
+                    }
+                )
+            );
+        } catch (error) {
+            catchUpError(res, error, "Could not mark them caught up");
+        }
+    });
+
+    router.get("/:id/catch-up/status", async (req, res) => {
+        const accountId = getAccountId(req);
+        const exists = await prisma.user
+            .findFirst({ select: { id: true }, where: { accountId, id: req.params.id } })
+            .catch(() => null);
+        if (!exists) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        res.json({ job: require("../utils/catchUp").status(String(req.params.id)) });
+    });
+
+    // Take back the last run (personFor scopes the person to this account).
+    router.post("/:id/catch-up/undo", async (req, res) => {
+        try {
+            res.json({
+                job: await require("../utils/catchUp").undo(
+                    prisma,
+                    decrypt,
+                    getAccountId(req),
+                    String(req.params.id)
+                ),
+            });
+        } catch (error) {
+            catchUpError(res, error, "Could not undo that");
+        }
+    });
+
+    // Clear a finished run's card (and its Undo).
+    router.post("/:id/catch-up/dismiss", async (req, res) => {
+        const accountId = getAccountId(req);
+        const exists = await prisma.user
+            .findFirst({ select: { id: true }, where: { accountId, id: req.params.id } })
+            .catch(() => null);
+        if (!exists) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        res.json({ job: require("../utils/catchUp").dismiss(String(req.params.id)) });
+    });
+
+    // One episode back to not watched.
+    router.post("/:id/catch-up/unmark", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/catchUp").unmark(
+                    prisma,
+                    decrypt,
+                    getAccountId(req),
+                    String(req.params.id),
+                    {
+                        episode: req.body?.episode,
+                        season: req.body?.season,
+                        showId: String(req.body?.showId || ""),
+                    }
+                )
+            );
+        } catch (error) {
+            catchUpError(res, error, "Could not mark it not watched");
+        }
+    });
+
+    // Copy watch history (utils/watchCopy): watched titles and resume points
+    // from one of a person's sign-ins or profiles to another, undoable 7 days.
+    const watchCopyDeps = (req) => ({
+        createProvider: (row) => createProvider(row, { decrypt, req }),
+        decrypt: (text, opts) => decrypt(text, opts || req),
+    });
+    const watchCopyError = (res, error, fallback) => {
+        const status = error?.status && error.status < 500 ? error.status : 502;
+        res.status(status).json({
+            message:
+                error?.status && error.status < 500
+                    ? error.message
+                    : publicMessage(error, fallback),
+        });
+    };
+    router.get("/:id/watch-copy/sides", async (req, res) => {
+        try {
+            const watchCopy = require("../utils/watchCopy");
+            const id = String(req.params.id);
+            const [sides, last, person, others] = await Promise.all([
+                watchCopy.sides(prisma, watchCopyDeps(req), getAccountId(req), id),
+                watchCopy.lastRun(prisma, getAccountId(req), id),
+                watchCopy.personOf(prisma, getAccountId(req), id),
+                req.query.others === "1" ? watchCopy.others(prisma, getAccountId(req), id) : [],
+            ]);
+            res.json({ job: watchCopy.status(id), lastRun: last, others, person, sides });
+        } catch (error) {
+            watchCopyError(res, error, "Could not read their sign-ins");
+        }
+    });
+    router.post("/:id/watch-copy/preview", async (req, res) => {
+        try {
+            const { _ctx, ...result } = await require("../utils/watchCopy").preview(
+                prisma,
+                watchCopyDeps(req),
+                getAccountId(req),
+                String(req.params.id),
+                req.body || {}
+            );
+            res.json(result);
+        } catch (error) {
+            watchCopyError(res, error, "Could not read their watch history");
+        }
+    });
+    router.post("/:id/watch-copy/run", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/watchCopy").run(
+                    prisma,
+                    watchCopyDeps(req),
+                    getAccountId(req),
+                    String(req.params.id),
+                    req.body || {}
+                )
+            );
+        } catch (error) {
+            watchCopyError(res, error, "Could not copy their watch history");
+        }
+    });
+    router.get("/:id/watch-copy/status", async (req, res) => {
+        const watchCopy = require("../utils/watchCopy");
+        const id = String(req.params.id);
+        const person = await prisma.user
+            .findFirst({ select: { id: true }, where: { accountId: getAccountId(req), id } })
+            .catch(() => null);
+        if (!person) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        res.json({
+            job: watchCopy.status(id),
+            lastRun: await watchCopy.lastRun(prisma, getAccountId(req), id).catch(() => null),
+        });
+    });
+    router.post("/:id/watch-copy/undo", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/watchCopy").undo(
+                    prisma,
+                    watchCopyDeps(req),
+                    getAccountId(req),
+                    String(req.params.id),
+                    req.body?.runId
+                )
+            );
+        } catch (error) {
+            watchCopyError(res, error, "Could not undo that copy");
+        }
+    });
+    // Keep in step (utils/watchCopy/keepInStep.js): per person, off by default.
+    router.get("/:id/keep-in-step", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/watchCopy/keepInStep").describe(
+                    prisma,
+                    watchCopyDeps(req),
+                    getAccountId(req),
+                    String(req.params.id)
+                )
+            );
+        } catch (error) {
+            watchCopyError(res, error, "Could not read Keep in step");
+        }
+    });
+    router.put("/:id/keep-in-step", async (req, res) => {
+        try {
+            const id = String(req.params.id);
+            const person = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!person) {
+                return res.status(404).json({ message: "User not found" });
+            }
+            res.json(
+                await require("../utils/watchCopy/keepInStep").save(
+                    prisma,
+                    watchCopyDeps(req),
+                    getAccountId(req),
+                    id,
+                    { enabled: req.body?.enabled, members: req.body?.members }
+                )
+            );
+        } catch (error) {
+            watchCopyError(res, error, "Could not change Keep in step");
+        }
+    });
+    // "Just added a sign-in - bring their history over?" (utils/watchCopy/offer.js)
+    router.get("/:id/watch-copy/offer", async (req, res) => {
+        try {
+            res.json({
+                offer: await require("../utils/watchCopy/offer").offerFor(
+                    prisma,
+                    watchCopyDeps(req),
+                    getAccountId(req),
+                    String(req.params.id)
+                ),
+            });
+        } catch {
+            res.json({ offer: null });
+        }
+    });
+    router.post("/:id/watch-copy/offer/dismiss", async (req, res) => {
+        try {
+            const id = String(req.params.id);
+            const person = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!person) {
+                return res.status(404).json({ message: "User not found" });
+            }
+            await require("../utils/watchCopy/offer").dismiss(
+                prisma,
+                getAccountId(req),
+                id,
+                req.body?.provider
+            );
+            res.json({ success: true });
+        } catch (error) {
+            watchCopyError(res, error, "Could not hide that");
+        }
+    });
+    router.get("/:id/watch-copy/candidates", async (req, res) => {
+        res.json({
+            candidates: await require("../utils/watchCopy").candidates(
+                String(req.query.name || ""),
+                String(req.query.type || "")
+            ),
+        });
+    });
+
+    // "Remove from Activity": one viewing out of the page and the person's
+    // watch time and history, into the Trash (utils/removeViewing.js).
+    router.post("/:id/activity/remove", async (req, res) => {
+        try {
+            const r = await require("../utils/removeViewing").removeViewing(
+                prisma,
+                getAccountId(req),
+                String(req.params.id),
+                req.body || {}
+            );
+            res.json(r);
+        } catch (error) {
+            const status = error?.status && error.status < 500 ? error.status : 500;
+            res.status(status).json({
+                message:
+                    status < 500
+                        ? error.message
+                        : publicMessage(error, "Could not remove that viewing"),
+            });
+        }
+    });
+
+    // Who is kept in step with what, for the AIOSync card on Tasks: per person,
+    // the names of their sign-ins and profiles that take part.
+    router.get("/watch-sync/overview", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            const rows = await prisma.watchSyncSetting.findMany({
+                select: { userId: true },
+                where: { accountId, enabled: true },
+            });
+            const kis = require("../utils/watchCopy/keepInStep");
+            const synced = [];
+            for (const r of rows) {
+                const person = await prisma.user.findFirst({
+                    select: { username: true },
+                    where: { accountId, id: r.userId },
+                });
+                if (!person) {
+                    continue;
+                }
+                const info = await kis
+                    .describe(prisma, watchCopyDeps(req), accountId, r.userId)
+                    .catch(() => null);
+                const places = (info?.places || [])
+                    .filter((p) => p.mode !== "off")
+                    .map((p) => p.profile || p.name);
+                if (places.length >= 2) {
+                    synced.push({ name: person.username, places, userId: r.userId });
+                }
+            }
+            res.json({ keepInStep: rows.map((r) => r.userId), synced });
+        } catch {
+            res.json({ keepInStep: [], synced: [] });
+        }
+    });
+
+    // Who has a limit or a pause, for the Limits pills on the Users page.
+    router.get("/screen-time/overview", async (req, res) => {
+        try {
+            res.json(await require("../utils/screenTime").overview(prisma, getAccountId(req)));
+        } catch {
+            res.status(500).json({ message: "Could not read the limits" });
+        }
+    });
+
+    // An age limit (utils/ageLimits.js): a real Jellyfin server's own, or the
+    // one SlickSync holds Stremio, Nuvio, a Nuvio profile and AIOMetadata to.
+    router.get("/:id/age-limit", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/ageLimits").getAgeLimit(
+                    prisma,
+                    decrypt,
+                    getAccountId(req),
+                    String(req.params.id)
+                )
+            );
+        } catch (error) {
+            res.status(error.status || 500).json({
+                message: error.status ? error.message : "Could not read the age limit",
+            });
+        }
+    });
+
+    router.put("/:id/age-limit", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/ageLimits").setAgeLimit(
+                    prisma,
+                    decrypt,
+                    getAccountId(req),
+                    String(req.params.id),
+                    { blockUnrated: req.body?.blockUnrated, value: req.body?.value ?? null }
+                )
+            );
+        } catch (error) {
+            res.status(error.status || 500).json({
+                message: error.status ? error.message : "Could not set the age limit",
+            });
+        }
+    });
+
+    // A daily screen-time limit (utils/screenTime.js) - counted across every app.
+    // The id can be a person's, or a merged profile's (utils/screenSubjects.js).
+    router.get("/:id/screen-time", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/screenTime").getLimit(
+                    prisma,
+                    getAccountId(req),
+                    String(req.params.id),
+                    { decrypt }
+                )
+            );
+        } catch (error) {
+            res.status(error.status || 500).json({
+                message: error.status ? error.message : "Could not read the daily limit",
+            });
+        }
+    });
+
+    router.put("/:id/screen-time", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/screenTime").setLimit(
+                    prisma,
+                    getAccountId(req),
+                    String(req.params.id),
+                    req.body?.limit ?? null,
+                    { decrypt }
+                )
+            );
+        } catch (error) {
+            res.status(error.status || 500).json({
+                message: error.status ? error.message : "Could not set the daily limit",
+            });
+        }
+    });
+
+    // "Resume now" on a paused person - streaming back for the rest of today.
+    router.post("/:id/screen-time/resume", async (req, res) => {
+        try {
+            res.json(
+                await require("../utils/screenTime").resume(
+                    prisma,
+                    getAccountId(req),
+                    String(req.params.id),
+                    { decrypt }
+                )
+            );
+        } catch (error) {
+            res.status(error.status || 500).json({
+                message: error.status ? error.message : "Could not resume them",
+            });
+        }
+    });
+
+    // Try adding it to their AIOStreams configuration again (after fixing what stopped it).
+    router.post("/:id/watch-state/install", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            res.json(
+                await watchStateView(
+                    req,
+                    accountId,
+                    user,
+                    await installIntoAio(req, accountId, user)
+                )
+            );
+        } catch (error) {
+            console.error("Error adding SlickTrax to AIOStreams:", error);
+            res.status(500).json({ error: "Failed to add it to AIOStreams" });
+        }
+    });
+
+    // "Keep SlickSync's collections first" in their AIOStreams catalog order -
+    // the household's choice, off by default (utils/aioSlickTrax.js).
+    router.put("/:id/watch-state/collections-first", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            let moveError = null;
+            try {
+                await require("../utils/aioSlickTrax").setCollectionsFirst(
+                    prisma,
+                    decrypt,
+                    user,
+                    !!req.body?.enabled
+                );
+            } catch (e) {
+                // The choice is kept either way; the 30-minute check tries again.
+                moveError = e?.message || "AIOStreams refused the change";
+            }
+            res.json(
+                await watchStateView(
+                    req,
+                    accountId,
+                    user,
+                    moveError ? { firstError: moveError } : {}
+                )
+            );
+        } catch (error) {
+            console.error("Error changing collections first:", error);
+            res.status(500).json({ error: "Failed to change that" });
+        }
+    });
+
+    // Link one AIOStreams profile to a SlickSync user, or unlink it (null).
+    router.put("/:id/watch-state/viewers", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            const { readViewerMap, viewerSlug } = require("../utils/watchState");
+            const viewer = viewerSlug(req.body?.viewer);
+            if (!viewer) {
+                return res.status(400).json({ error: "viewer is required" });
+            }
+            const target = req.body?.userId || null;
+            if (target && target !== "skip") {
+                const exists = await prisma.user.findFirst({
+                    select: { id: true },
+                    where: { accountId, id: target },
+                });
+                if (!exists) {
+                    return res.status(400).json({ error: "That user is not in this account" });
+                }
+            }
+            const map = readViewerMap(user);
+            map[viewer] = target;
+            const updated = await prisma.user.update({
+                data: { watchStateViewers: JSON.stringify(map) },
+                where: { id: user.id },
+            });
+            res.json(await watchStateView(req, accountId, updated));
+        } catch (error) {
+            console.error("Error linking a Watch State viewer:", error);
+            res.status(500).json({ error: "Failed to link that profile" });
+        }
+    });
+
+    // GET /users/:id/export-history.csv - Letterboxd-import-compatible CSV
+    // (Title,Year,imdbID,WatchedDate,Rating10 - the exact column names
+    // Letterboxd's own importer accepts, confirmed against
+    // letterboxd.com/about/importing-data/). Must be before /:id route.
+    router.get("/:id/export-history.csv", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const user = await prisma.user.findFirst({ where: { accountId, id: req.params.id } });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const movies = await prisma.movieWatchHistory.findMany({
+                orderBy: { watchedAt: "desc" },
+                where: { accountId, userId: user.id },
+            });
+            const ratings = await prisma.titleRating.findMany({
+                where: { accountId, itemId: { in: movies.map((m) => m.itemId) } },
+            });
+            const ratingByItemId = new Map(ratings.map((r) => [r.itemId, r.rating]));
+
+            const escapeCsv = (v) => {
+                const s = String(v ?? "");
+                return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+            };
+            const lines = ["Title,Year,imdbID,WatchedDate,Rating10"];
+            for (const m of movies) {
+                const year = ""; // MovieWatchHistory doesn't store release year separately
+                const watchedDate = m.watchedAt
+                    ? new Date(m.watchedAt).toISOString().split("T")[0]
+                    : "";
+                const rating = ratingByItemId.get(m.itemId) || "";
+                lines.push([escapeCsv(m.itemName), year, m.itemId, watchedDate, rating].join(","));
+            }
+
+            res.setHeader("Content-Type", "text/csv; charset=utf-8");
+            res.setHeader(
+                "Content-Disposition",
+                `attachment; filename="${user.username || "watch-history"}.csv"`
+            );
+            res.send(lines.join("\n"));
+        } catch (error) {
+            console.error("Error exporting history CSV:", error);
+            res.status(500).json({ error: "Failed to export history" });
+        }
+    });
+
+    // GET /users/media-episodes - a series' full episode list, grouped by
+    // season, with what the household has already watched marked.
+    //
+    // Deliberately its own endpoint rather than part of /media-details: that
+    // response strips the episode list precisely because it can run to
+    // hundreds of entries for a long-running show, and paying for that on
+    // every poster tap would slow the modal for the majority of opens that
+    // never look at the season list. This is fetched only when someone
+    // expands it.
+    router.get("/media-episodes", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { itemId } = req.query;
+            if (!(itemId && /^tt\d+$/.test(String(itemId)))) {
+                return res.status(400).json({ error: "A valid itemId is required" });
+            }
+
+            const { coalesce } = require("../utils/singleFlight");
+            const metadata = await coalesce(`media-episodes:${itemId}`, 300_000, async () => {
+                const { resolveOmdbKey } = require("../utils/listImport");
+                const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+                return fetchMetadata(String(itemId), "series", null, omdbApiKey);
+            });
+            const all = Array.isArray(metadata?.allEpisodes) ? metadata.allEpisodes : [];
+            if (all.length === 0) {
+                return res.json({ seasons: [] });
+            }
+
+            // Which episodes anyone here has already watched - the reason to show
+            // this list at all is usually "where am I up to".
+            const watched = await prisma.episodeWatchHistory
+                .findMany({
+                    select: { episode: true, season: true },
+                    where: { accountId, showId: String(itemId) },
+                })
+                .catch(() => []);
+            const seen = new Set(watched.map((w) => `${w.season}:${w.episode}`));
+
+            const bySeason = new Map();
+            for (const e of all) {
+                if (!bySeason.has(e.season)) {
+                    bySeason.set(e.season, []);
+                }
+                bySeason.get(e.season).push({
+                    episode: e.episode,
+                    released: e.released,
+                    season: e.season,
+                    title: e.title,
+                    watched: seen.has(`${e.season}:${e.episode}`),
+                });
+            }
+            const seasons = [...bySeason.entries()]
+                .sort((a, b) => a[0] - b[0])
+                .map(([season, episodes]) => ({
+                    episodes,
+                    season,
+                    watchedCount: episodes.filter((e) => e.watched).length,
+                }));
+            res.json({ seasons });
+        } catch (error) {
+            console.error("Error fetching episodes:", error);
+            res.status(500).json({ error: "Failed to fetch episodes" });
+        }
+    });
+
+    // GET /users/media-details - Cinemeta detail lookup for the Activity page's
+    // poster-click modal (cast, rating, genres, etc). Must be before /:id route.
+    router.get("/media-details", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { itemId, type, videoId } = req.query;
+            if (!(itemId && type)) {
+                return res.status(400).json({ error: "itemId and type are required" });
+            }
+
+            // Movie night makes this endpoint bursty: several people open the same
+            // title within a minute and each open used to mean its own Cinemeta +
+            // TMDb + OMDb round-trips (and its own OMDb quota). Coalescing by
+            // (account, item, type, video) collapses a burst into one upstream
+            // fetch, and holds the result briefly so an open arriving just after
+            // one completes is served from it too. Account-scoped because the
+            // per-account keys below change what comes back.
+            const { coalesce } = require("../utils/singleFlight");
+            const flightKey = `media-details:${accountId}:${itemId}:${type}:${videoId || ""}`;
+            const payload = await coalesce(flightKey, 60_000, async () => {
+                const { resolveOmdbKey, resolveMdblistKey } = require("../utils/listImport");
+                const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+                const metadata = await fetchMetadata(itemId, type, videoId || null, omdbApiKey);
+                if (!metadata) {
+                    return null;
+                }
+
+                // allEpisodes (every episode of the whole series - can be hundreds of
+                // entries for long-running shows) only exists for Continue Watching's
+                // "find the next episode" logic. This modal only ever renders the one
+                // current episode (already in `episode`), so shipping the full list
+                // here is pure wasted payload/parse time competing with the modal's
+                // opening animation on mobile. Stripped at the response boundary only -
+                // fetchMetadata's cache entry (shared with Continue Watching) still has it.
+                const { allEpisodes, ...detailsForClient } = metadata;
+                const mdblistKey = await resolveMdblistKey(prisma, getAccountId, req);
+                const [backdrop, collection, watchProviders, mdblistScore] = await Promise.all([
+                    fetchTmdbBackdrop(itemId, req),
+                    fetchTmdbCollection(itemId, type, req),
+                    fetchTmdbWatchProviders(itemId, type, req),
+                    fetchMdblistScore(itemId, type, mdblistKey),
+                ]);
+                return { ...detailsForClient, backdrop, collection, mdblistScore, watchProviders };
+            });
+            if (!payload) {
+                return res.status(404).json({ error: "No metadata found for this item" });
+            }
+            res.json(payload);
+        } catch (error) {
+            console.error("Error fetching media details:", error);
+            res.status(500).json({ error: "Failed to fetch media details" });
+        }
+    });
+
+    // POST /users/ratings-batch - Rotten Tomatoes/Metacritic/IMDb ratings for a
+    // batch of IMDb IDs, for grid views (Discover, Activity) that render many
+    // poster cards at once and can't afford a full fetchMetadata() round trip
+    // (Cinemeta + OMDb) per item the way the detail modal and Continue
+    // Watching do. Callers are expected to pass only the IMDb IDs of items
+    // actually rendered on screen, deduplicated - fetchOmdbRatings's own
+    // 7-day cache absorbs repeat calls across page loads, but a single
+    // request here is still capped to keep one grid render from firing an
+    // unbounded number of concurrent external requests.
+    const RATINGS_BATCH_MAX = 60;
+    router.post("/ratings-batch", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { imdbIds } = req.body || {};
+            if (!Array.isArray(imdbIds)) {
+                return res.status(400).json({ error: "imdbIds must be an array" });
+            }
+
+            const uniqueIds = [...new Set(imdbIds)]
+                .filter((id) => typeof id === "string" && /^tt\d+$/.test(id))
+                .slice(0, RATINGS_BATCH_MAX);
+
+            const { resolveOmdbKey } = require("../utils/listImport");
+            const omdbApiKey = await resolveOmdbKey(prisma, getAccountId, req);
+            const results = await Promise.all(
+                uniqueIds.map(async (id) => {
+                    const ratings = await fetchOmdbRatings(id, omdbApiKey);
+                    return [id, ratings];
+                })
+            );
+
+            const ratingsById = {};
+            for (const [id, ratings] of results) {
+                if (ratings) {
+                    ratingsById[id] = ratings;
+                }
+            }
+
+            res.json({ ratings: ratingsById });
+        } catch (error) {
+            console.error("Error fetching ratings batch:", error);
+            res.status(500).json({ error: "Failed to fetch ratings batch" });
+        }
+    });
+
+    // GET /users/continue-watching - next unwatched episode per in-progress
+    // show, across all users on the account. Must be before /:id route.
+    router.get("/continue-watching", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { getContinueWatching } = require("../utils/continueWatching");
+            const items = await getContinueWatching(prisma, accountId);
+            res.json(items);
+            // The dashboard's first row - its pictures are requested the instant
+            // this response lands, so start producing them now: the one each card
+            // shows (episode still, then backdrop, then poster), at the card's size.
+            try {
+                const shown = items
+                    .map((i) => i?.nextEpisode?.thumbnail || i?.background || i?.poster)
+                    .filter(Boolean);
+                require("../utils/posterWarm").warmPosters(shown, { urgent: true, widths: [342] });
+            } catch {
+                /* optimisation only */
+            }
+        } catch (error) {
+            console.error("Error fetching continue watching:", error);
+            res.status(500).json({ error: "Failed to fetch continue watching" });
+        }
+    });
+
+    // GET /users/abandoned-shows - shows started and then dropped long enough
+    // ago that Continue Watching's own 120-day window has stopped showing them
+    // at all. See getAbandonedShows. Must be before /:id route.
+    router.get("/abandoned-shows", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { getAbandonedShows } = require("../utils/continueWatching");
+            res.json(await getAbandonedShows(prisma, accountId));
+        } catch (error) {
+            console.error("Error fetching abandoned shows:", error);
+            res.status(500).json({ error: "Failed to fetch abandoned shows" });
+        }
+    });
+
+    // GET /users/graveyard - every buried show (see getBuriedShows for why
+    // Continue Watching dismissals rest here too). Must be before /:id.
+    router.get("/graveyard", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { getBuriedShows } = require("../utils/continueWatching");
+            res.json(await getBuriedShows(prisma, accountId));
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to load the graveyard") });
+        }
+    });
+
+    // POST /users/graveyard/unbury - dig a show back up. It reappears in
+    // Continue Watching (if recent) or the abandoned list (if not).
+    router.post("/graveyard/unbury", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { userId, showId } = req.body || {};
+            if (!(userId && showId)) {
+                return res.status(400).json({ error: "Missing userId or showId" });
+            }
+            const { unburyShow } = require("../utils/continueWatching");
+            await unburyShow(prisma, accountId, userId, showId);
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to unbury") });
+        }
+    });
+
+    // POST /users/graveyard/wipe - the permanent exit. Deletes every episode
+    // watch-history row for that user+show plus the burial itself. Watch time
+    // and metrics stop counting it; nothing brings it back. The client's
+    // confirmation names the episode count before this ever runs.
+    // Finish the Saga - franchises the household is mid-way through. For each
+    // recently-watched movie, resolve its TMDb collection (fetchTmdbCollection
+    // above, 24h-cached) and keep collections with at least one watched and at
+    // least one unwatched member. Watched-ness uses the same account-level
+    // semantics as /watchlist/watched-status: history rows, with manual
+    // overrides winning in either direction. The whole answer is cached for
+    // 6h per account - franchise membership and watch history both move
+    // slowly, and a cold run can cost a few dozen TMDb calls.
+    const sagaCache = new Map();
+    const SAGA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+    const SAGA_CANDIDATES = 40;
+    router.get("/finish-the-saga", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const cached = sagaCache.get(accountId);
+            if (cached && Date.now() - cached.at < SAGA_CACHE_TTL_MS) {
+                return res.json(cached.value);
+            }
+
+            const [historyRows, overrides] = await Promise.all([
+                prisma.movieWatchHistory.findMany({
+                    orderBy: { watchedAt: "desc" },
+                    select: { itemId: true },
+                    where: { accountId },
+                }),
+                prisma.manualWatchOverride.findMany({
+                    select: { itemId: true, watched: true },
+                    where: { accountId },
+                }),
+            ]);
+            const overrideMap = new Map(overrides.map((o) => [o.itemId, o.watched]));
+            const watchedSet = new Set();
+            const ordered = [];
+            for (const r of historyRows) {
+                if (overrideMap.get(r.itemId) === false) {
+                    continue;
+                }
+                if (!watchedSet.has(r.itemId)) {
+                    watchedSet.add(r.itemId);
+                    ordered.push(r.itemId);
+                }
+            }
+            for (const [id, w] of overrideMap.entries()) {
+                if (w === true) {
+                    watchedSet.add(id);
+                }
+            }
+
+            const seenCollections = new Set();
+            const sagas = [];
+            // Forty lookups, each its own call to TMDb. Asked for one at a time
+            // they ran end to end - measured at four seconds even when every one
+            // of them missed. Eight at a time is quick without being a burst the
+            // upstream would object to. Dedupe still happens in the original
+            // order below, so the result is unchanged.
+            const { mapLimit } = require("../utils/mapLimit");
+            const collections = await mapLimit(ordered.slice(0, SAGA_CANDIDATES), 8, (imdbId) =>
+                fetchTmdbCollection(imdbId, "movie", req).catch(() => null)
+            );
+            for (const coll of collections) {
+                if (!coll || seenCollections.has(coll.id)) {
+                    continue;
+                }
+                seenCollections.add(coll.id);
+                // fetchTmdbCollection's parts exclude the seed - membership is
+                // seed + parts, and the seed is watched by construction.
+                // Unreleased entries (no release year, or a year still in the
+                // future) can't be watched - counting "Untitled Sequel" as the one
+                // film keeping a saga incomplete is a treadmill, not an itch
+                // (confirmed live: 'Untitled Michael Sequel' ranked as one-to-go).
+                const currentYear = new Date().getFullYear();
+                const released = (p) => p.releaseYear && Number(p.releaseYear) <= currentYear;
+                const unwatched = coll.parts.filter(
+                    (p) => p.id && !watchedSet.has(p.id) && released(p)
+                );
+                if (unwatched.length === 0) {
+                    continue;
+                }
+                const total =
+                    coll.parts.filter((p) => released(p) || watchedSet.has(p.id)).length + 1;
+                const watchedCount = total - unwatched.length;
+                sagas.push({
+                    collectionId: coll.id,
+                    name: coll.name,
+                    total,
+                    unwatched,
+                    watchedCount,
+                });
+            }
+            // Closest-to-finished first - "one film left" is the itch worth
+            // scratching, a 1-of-9 franchise barely counts as started.
+            sagas.sort((a, b) => b.watchedCount / b.total - a.watchedCount / a.total);
+            const value = sagas.slice(0, 8);
+            sagaCache.set(accountId, { at: Date.now(), value });
+            res.json(value);
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to compute sagas") });
+        }
+    });
+
+    // Device claims - per-person attribution on a shared provider login.
+    // GET lists every client IP the AIOStreams proxy has seen recently, with
+    // what it was last carrying, who the guesser currently thinks it is, and
+    // any standing claim; POST/DELETE manage the claims themselves. Claims
+    // beat learned affinity in proxyNowPlaying's disambiguation.
+    router.get("/device-claims", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const since = new Date(Date.now() - 30 * 86_400_000);
+            const [sessions, claims, affinity, accountUsers] = await Promise.all([
+                prisma.proxyStreamSession.findMany({
+                    orderBy: { lastSeenAt: "desc" },
+                    select: { clientIp: true, displayName: true, lastSeenAt: true },
+                    take: 500,
+                    where: { accountId, lastSeenAt: { gte: since } },
+                }),
+                prisma.proxyDeviceClaim.findMany({ where: { accountId } }),
+                prisma.proxyUserIpAffinity.findMany({ where: { accountId } }),
+                prisma.user.findMany({
+                    select: { id: true, username: true },
+                    where: { accountId },
+                }),
+            ]);
+            const nameOf = (id) => accountUsers.find((u) => u.id === id)?.username || null;
+            const byIp = new Map();
+            for (const sess of sessions) {
+                if (!sess.clientIp) {
+                    continue;
+                }
+                const cur = byIp.get(sess.clientIp);
+                if (cur) {
+                    cur.streams++;
+                    if (!cur.lastTitle && sess.displayName) {
+                        cur.lastTitle = sess.displayName;
+                    }
                 } else {
-                  // Regular catalog: add as-is
-                  processedCatalogs.push({
-                    type: catalog.type,
-                    id: catalog.id
-                  })
+                    byIp.set(sess.clientIp, {
+                        clientIp: sess.clientIp,
+                        lastSeenAt: sess.lastSeenAt,
+                        lastTitle: sess.displayName || null,
+                        streams: 1,
+                    });
                 }
-              }
             }
-
-            const catalogsData = JSON.stringify(processedCatalogs.map(c => ({
-              type: c.type,
-              id: c.id,
-              search: false // Default to false for imported catalogs
-            })))
-
-            const createdAddon = await prisma.addon.create({
-              data: {
-                accountId: getAccountId(req),
-                name: finalAddonName,
-                description: manifestData?.description || addonData.description || '',
-                version: manifestData?.version || addonData.version || null,
-                iconUrl: manifestData?.logo || addonData.iconUrl || null,
-                stremioAddonId: manifestData?.id || addonData.stremioAddonId || null,
-                isActive: true,
-                manifestUrl: encrypt(addonUrl, req),
-                manifestUrlHash: manifestUrlHmac(req, addonUrl),
-                originalManifest: originalManifestObj ? encrypt(JSON.stringify(originalManifestObj), req) : null,
-                manifest: manifestData ? encrypt(JSON.stringify(manifestData), req) : null,
-                manifestHash: manifestData ? manifestHash(manifestData) : null,
-                resources: resourcesNames,
-                catalogs: catalogsData
-              }
-            })
-
-            addon = createdAddon
-            processedAddons.push(addon)
-            newlyImportedAddons.push(addon)
-          } catch (error) {
-            console.error(`❌ Failed to create addon:`, error?.message || error)
-            continue
-          }
+            // Claimed IPs always appear, even quiet ones - a claim you can't see
+            // is a claim you can't remove.
+            for (const c of claims) {
+                if (!byIp.has(c.clientIp)) {
+                    byIp.set(c.clientIp, {
+                        clientIp: c.clientIp,
+                        lastSeenAt: null,
+                        lastTitle: null,
+                        streams: 0,
+                    });
+                }
+            }
+            const claimByIp = new Map(claims.map((c) => [c.clientIp, c]));
+            const affinityByIp = new Map(affinity.map((a) => [a.clientIp, a.userId]));
+            const devices = [...byIp.values()]
+                .map((d) => {
+                    const claim = claimByIp.get(d.clientIp) || null;
+                    const guessId = affinityByIp.get(d.clientIp) || null;
+                    return {
+                        ...d,
+                        claim: claim
+                            ? {
+                                  label: claim.label || null,
+                                  userId: claim.userId,
+                                  username: nameOf(claim.userId),
+                              }
+                            : null,
+                        guess:
+                            !claim && guessId
+                                ? { userId: guessId, username: nameOf(guessId) }
+                                : null,
+                    };
+                })
+                .sort(
+                    (a, b) =>
+                        new Date(b.lastSeenAt || 0).getTime() -
+                        new Date(a.lastSeenAt || 0).getTime()
+                );
+            res.json({ devices, users: accountUsers });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to list devices") });
         }
-      }
+    });
 
-      // Get the starting position for new addons in this group
-      const maxPositionResult = await prisma.groupAddon.aggregate({
-        where: {
-          groupId: group.id,
-          position: { not: null }
-        },
-        _max: { position: true }
-      })
-      let nextPosition = (maxPositionResult._max.position ?? -1) + 1
-
-      // Attach all processed addons to the group
-      for (let index = 0; index < processedAddons.length; index++) {
-        const addon = processedAddons[index]
+    router.post("/device-claims", async (req, res) => {
         try {
-          // Get the addon URL for comparison
-          const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null
-
-          if (addonUrl) {
-            // Check if addon with same URL already exists in group
-            const existingGroupAddon = await prisma.groupAddon.findFirst({
-              where: {
-                groupId: group.id,
-                addon: {
-                  manifestUrlHash: manifestUrlHmac(req, addonUrl),
-                  accountId: getAccountId(req)
-                }
-              },
-              include: { addon: true }
-            })
-
-            if (existingGroupAddon) {
-              // Remove old addon from group
-              await prisma.groupAddon.delete({
-                where: {
-                  groupId_addonId: {
-                    groupId: group.id,
-                    addonId: existingGroupAddon.addonId
-                  }
-                }
-              })
-              console.log(`🗑️ Removed old addon from group: ${existingGroupAddon.addon.name}`)
+            const accountId = getAccountId(req) || "default";
+            const { clientIp, userId, label } = req.body || {};
+            if (!clientIp || typeof clientIp !== "string") {
+                return res.status(400).json({ error: "clientIp is required" });
             }
-          }
-
-          // Add new addon to group with the current position
-          await prisma.groupAddon.create({
-            data: {
-              groupId: group.id,
-              addonId: addon.id,
-              isEnabled: true,
-              position: nextPosition
+            if (!userId || typeof userId !== "string") {
+                return res.status(400).json({ error: "userId is required" });
             }
-          })
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: userId },
+            });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            await prisma.proxyDeviceClaim.upsert({
+                create: {
+                    accountId,
+                    clientIp,
+                    label:
+                        typeof label === "string" && label.trim()
+                            ? label.trim().slice(0, 60)
+                            : null,
+                    userId,
+                },
+                update: {
+                    label:
+                        typeof label === "string" && label.trim()
+                            ? label.trim().slice(0, 60)
+                            : null,
+                    userId,
+                },
+                where: { accountId_clientIp: { accountId, clientIp } },
+            });
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to save claim") });
+        }
+    });
 
-          // Increment position for next addon
-          nextPosition++
+    router.delete("/device-claims/:clientIp", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            await prisma.proxyDeviceClaim.deleteMany({
+                where: { accountId, clientIp: req.params.clientIp },
+            });
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to remove claim") });
+        }
+    });
+
+    // Account Guard: accept an externally-made change as the new baseline
+    // (the alternative to re-asserting via a normal sync). Must be before /:id.
+    router.post("/guard/accept", async (req, res) => {
+        try {
+            const { userId } = req.body || {};
+            if (!userId) {
+                return res.status(400).json({ error: "userId is required" });
+            }
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: scopedWhere(req, { id: userId }),
+            });
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+            const { acceptExternalState } = require("../utils/accountGuard");
+            const accepted = await acceptExternalState(prisma, userId);
+            if (!accepted) {
+                return res
+                    .status(400)
+                    .json({ error: "No external change is recorded for this user" });
+            }
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to accept change") });
+        }
+    });
+
+    // Account Guard: run a detection pass now instead of waiting for the hourly
+    // sweep - used right after someone suspects a foreign write ("check now").
+    router.post("/guard/sweep", async (req, res) => {
+        try {
+            const { runGuardSweep } = require("../utils/accountGuard");
+            const summary = await runGuardSweep(
+                prisma,
+                { createProvider, decrypt, StremioAPIClient },
+                { onlyAccountId: getAccountId(req) }
+            );
+            res.json({ success: true, ...summary });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Sweep failed") });
+        }
+    });
+
+    router.post("/graveyard/wipe", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { userId, showId, removeFromDevice } = req.body || {};
+            if (!(userId && showId)) {
+                return res.status(400).json({ error: "Missing userId or showId" });
+            }
+            // Even the permanent option gets the 30-day net: the erased rows go
+            // to the Trash first, so "forever" still survives a same-week regret.
+            await require("../utils/trash").archiveGraveyardWipe(prisma, accountId, userId, showId);
+            const { wipeBuriedShow } = require("../utils/continueWatching");
+            const result = await wipeBuriedShow(prisma, accountId, userId, showId);
+            // Optional: also remove the title from the provider account's own
+            // library, so it disappears from the device's home screen too - the
+            // tombstone already stops SlickSync resurrecting it, but without this
+            // the provider still shows it on the device. Best-effort: the wipe
+            // above is already done and correct, a device-removal failure only
+            // gets reported, never rolls anything back.
+            let deviceRemoved = false;
+            if (removeFromDevice) {
+                try {
+                    const wipeUser = await prisma.user.findFirst({
+                        select: {
+                            id: true,
+                            nuvioRefreshToken: true,
+                            nuvioUserId: true,
+                            providerType: true,
+                            stremioAuthKey: true,
+                        },
+                        where: { accountId, id: userId },
+                    });
+                    const providerInstance = wipeUser && createProvider(wipeUser, { decrypt, req });
+                    if (providerInstance && providerInstance.supportsLibraryWrite !== false) {
+                        const { markLibraryItemRemoved } = require("../utils/libraryDelete");
+                        await markLibraryItemRemoved({
+                            itemId: showId,
+                            logPrefix: "[graveyard/wipe]",
+                            provider: providerInstance,
+                        });
+                        require("../utils/libraryCache").clearCache(accountId, userId);
+                        deviceRemoved = true;
+                    }
+                } catch (e) {
+                    console.warn("[graveyard/wipe] device-library removal failed:", e?.message);
+                }
+            }
+            res.json({ success: true, ...result, deviceRemoved });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to wipe") });
+        }
+    });
+
+    // POST /users/continue-watching/dismiss - remove a show from the Continue
+    // Watching row. Must be before /:id route.
+    router.post("/continue-watching/dismiss", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { userId, showId } = req.body;
+            if (!(userId && showId)) {
+                return res.status(400).json({ error: "userId and showId are required" });
+            }
+
+            const { dismissContinueWatching } = require("../utils/continueWatching");
+            await dismissContinueWatching(prisma, accountId, userId, showId);
+            res.json({ success: true });
         } catch (error) {
-          console.error(`❌ Failed to attach ${addon.name}:`, error?.message || error)
+            console.error("Error dismissing continue watching item:", error);
+            res.status(500).json({ error: "Failed to dismiss item" });
         }
-      }
+    });
 
-      // Assign user to group if they don't have any groups
-      const allGroups = await prisma.group.findMany({
-        where: { accountId: getAccountId(req) },
-        select: { id: true, userIds: true }
-      })
-
-      let userInAnyGroup = false
-      for (const g of allGroups) {
-        if (g.userIds) {
-          try {
-            const userIds = JSON.parse(g.userIds)
-            if (Array.isArray(userIds) && userIds.includes(userId)) {
-              userInAnyGroup = true
-              break
+    // GET /users/upcoming-episodes - next upcoming episode per mid-season show,
+    // for the Dashboard "Coming up" calendar. Must be before /:id route.
+    router.get("/upcoming-episodes", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
             }
-          } catch (e) {
-            console.error('Error parsing group userIds:', e)
-          }
+            const { getUpcomingEpisodes } = require("../utils/episodeAlerts");
+            const items = await getUpcomingEpisodes(prisma, accountId);
+            res.json(items);
+        } catch (error) {
+            console.error("Error fetching upcoming episodes:", error);
+            res.status(500).json({ error: "Failed to fetch upcoming episodes" });
         }
-      }
+    });
 
-      if (!userInAnyGroup) {
-        await assignUserToGroup(prisma, userId, group.id, req)
-      }
-
-      const message = (existingAddons.length > 0
-        ? `Successfully imported ${processedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed, ${newlyImportedAddons.length} newly created)`
-        : `Successfully imported ${processedAddons.length} addons to group "${groupName}"`)
-        + (skippedAddons.length > 0 ? `. ${skippedAddons.length} left out: ${skippedAddons[0].reason}` : '')
-
-      res.json({
-        message,
-        groupId: group.id,
-        groupName: group.name,
-        addonCount: processedAddons.length,
-        newlyImported: newlyImportedAddons.length,
-        existing: existingAddons.length,
-        skipped: skippedAddons
-      })
-
-    } catch (error) {
-      console.error('❌ Import addons error:', error)
-      res.status(500).json({ message: 'Failed to import addons', error: publicMessage(error, 'Failed to import addons') })
-    }
-  });
-
-  // POST /users/invite-webhook - Send webhook notification for invites (generation or summary)
-  router.post('/invite-webhook', async (req, res) => {
-    try {
-      const { type, invites, createdUsers, totalInvites, groupName } = req.body
-
-      if (type !== 'generated' && type !== 'summary') {
-        return res.status(400).json({ message: 'Invalid type. Must be "generated" or "summary"' })
-      }
-
-      const accountId = getAccountId(req)
-      const account = await prisma.appAccount.findFirst({
-        where: { id: accountId },
-        select: { sync: true }
-      })
-
-      let syncCfg = account?.sync
-      if (syncCfg && typeof syncCfg === 'string') {
-        try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-      }
-
-      const webhookUrl = syncCfg?.webhookUrl
-      if (!webhookUrl) {
-        return res.json({ message: 'No webhook URL configured', sent: false })
-      }
-
-      // Import notify utilities
-      const { postDiscord } = require('../utils/notify')
-
-      let embed
-
-      if (type === 'generated') {
-        // Webhook for when invites are generated
-        if (!Array.isArray(invites) || typeof totalInvites !== 'number') {
-          return res.status(400).json({ message: 'Invalid request data for generated type' })
+    // POST /users/upcoming-episodes/dismiss - hide a specific upcoming episode
+    // (keyed by (showId, season, episode)) from the "Coming up" panel. Reappears
+    // automatically when the poller advances the show to a new next episode.
+    router.post("/upcoming-episodes/dismiss", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { showId, season, episode } = req.body || {};
+            if (!(showId && Number.isFinite(season) && Number.isFinite(episode))) {
+                return res.status(400).json({ error: "showId, season and episode are required" });
+            }
+            const { dismissUpcomingEpisode } = require("../utils/episodeAlerts");
+            await dismissUpcomingEpisode(prisma, accountId, showId, season, episode);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error dismissing upcoming episode:", error);
+            res.status(500).json({ error: "Failed to dismiss upcoming episode" });
         }
+    });
 
-        const fields = []
-        invites.forEach((invite, index) => {
-          const codeBlock = `Code: ${invite.code}\nLink: ${invite.link}`
-          fields.push({
-            name: `Invite ${index + 1}`,
-            value: '```' + codeBlock + '```',
-            inline: false
-          })
-        })
-
-        embed = {
-          title: `${invites.length} Invite${invites.length > 1 ? 's' : ''} Generated${groupName ? ` for ${groupName}` : ''}`,
-          description: 'Each link expires in 5 minutes.',
-          color: 0x808080, // Gray, similar to sync notifications
-          fields: fields,
-          timestamp: new Date().toISOString()
+    // POST /users/upcoming-episodes/mute - whole-show opt-out. Stops the show
+    // appearing in "Coming up" AND stops new-episode alerts for it entirely,
+    // until unmuted - see utils/episodeAlerts.js's muteShow.
+    router.post("/upcoming-episodes/mute", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { showId, showName, poster } = req.body || {};
+            if (!showId) {
+                return res.status(400).json({ error: "showId is required" });
+            }
+            const { muteShow } = require("../utils/episodeAlerts");
+            await muteShow(prisma, accountId, showId, showName, poster);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error muting show:", error);
+            res.status(500).json({ error: "Failed to mute show" });
         }
-      } else {
-        // Webhook for invite summary (users created)
-        if (!Array.isArray(createdUsers) || typeof totalInvites !== 'number') {
-          return res.status(400).json({ message: 'Invalid request data for summary type' })
+    });
+
+    // POST /users/upcoming-episodes/unmute
+    router.post("/upcoming-episodes/unmute", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { showId } = req.body || {};
+            if (!showId) {
+                return res.status(400).json({ error: "showId is required" });
+            }
+            const { unmuteShow } = require("../utils/episodeAlerts");
+            await unmuteShow(prisma, accountId, showId);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error unmuting show:", error);
+            res.status(500).json({ error: "Failed to unmute show" });
         }
+    });
 
-        if (createdUsers.length === 0) {
-          return res.json({ message: 'No users created, skipping webhook', sent: false })
+    // GET /users/upcoming-episodes/muted - list for the "manage muted shows" UI
+    router.get("/upcoming-episodes/muted", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { getMutedShows } = require("../utils/episodeAlerts");
+            const shows = await getMutedShows(prisma, accountId);
+            res.json(shows);
+        } catch (error) {
+            console.error("Error fetching muted shows:", error);
+            res.status(500).json({ error: "Failed to fetch muted shows" });
         }
+    });
 
-        const fields = []
-        createdUsers.forEach((user, index) => {
-          const valueParts = []
-          if (user.username) {
-            valueParts.push(`User: ${user.username}`)
-          }
-          if (user.code) {
-            valueParts.push(`Code: ${user.code}`)
-          }
-          if (user.link) {
-            valueParts.push(`Link: ${user.link}`)
-          }
-
-          const codeBlock = valueParts.join('\n')
-          fields.push({
-            name: `Invite ${index + 1}`,
-            value: '```' + codeBlock + '```',
-            inline: false
-          })
-        })
-
-        const userWord = createdUsers.length === 1 ? 'User' : 'Users'
-        const allSynced = createdUsers.length > 0 && createdUsers.every((user) => user.synced === true)
-        const syncText = allSynced ? ' and Synced' : ''
-        const title = groupName && groupName !== 'No Group'
-          ? `${createdUsers.length} ${groupName} ${userWord} Created${syncText}`
-          : `${createdUsers.length} ${userWord} Created${syncText}`
-
-        embed = {
-          title: title,
-          description: `${createdUsers.length}/${totalInvites} invite${totalInvites > 1 ? 's' : ''} resulted in new users.`,
-          color: 0x00ff00, // Green
-          fields: fields,
-          timestamp: new Date().toISOString()
-        }
-      }
-
-      // Add footer with SlickSync version (same as sync notifications)
-      let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-      if (!appVersion) {
-        try { appVersion = require('../../package.json')?.version || '' } catch { }
-      }
-      if (appVersion) {
-        embed.footer = { text: `SlickSync v${appVersion}` }
-      }
-
-      await postDiscord(webhookUrl, null, {
-        embeds: [embed],
-        avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-      })
-
-      return res.json({ message: 'Webhook sent successfully', sent: true })
-    } catch (error) {
-      console.error('Failed to send invite webhook:', error)
-      return res.status(500).json({ message: 'Failed to send webhook', error: publicMessage(error, 'Failed to send webhook') })
-    }
-  })
-
-  // ==================== USER ACTIVITY VISIBILITY ====================
-  // Update user's activity visibility
-  router.patch('/:id/activity-visibility', async (req, res) => {
-    try {
-      const { id } = req.params
-      const { activityVisibility } = req.body
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      if (!activityVisibility || !['public', 'private'].includes(activityVisibility)) {
-        return res.status(400).json({ error: 'Invalid activityVisibility value. Must be "public" or "private".' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: {
-          id,
-          accountId
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: {
-          id,
-          accountId
-        },
-        data: { activityVisibility }
-      })
-
-      res.json({
-        message: `Activity visibility set to ${activityVisibility}`,
-        activityVisibility: updatedUser.activityVisibility
-      })
-    } catch (error) {
-      console.error('Error updating user activity visibility:', error)
-      res.status(500).json({ error: 'Failed to update activity visibility', details: publicMessage(error, 'Failed to update activity visibility') })
-    }
-  })
-
-  // ==================== SHARES ENDPOINTS ====================
-  const { getShares, addShare, removeShare, markShareAsViewed, getGroupMembers } = require('../utils/sharesManager')
-  const { getCachedLibrary } = require('../utils/libraryCache')
-
-  // Get all shares for a user (sent + received)
-  router.get('/:userId/shares', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      // Verify user exists and belongs to account
-      const user = await prisma.user.findFirst({
-        where: { id: userId, accountId },
-        select: { id: true, username: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const shares = getShares(accountId, userId)
-      res.json(shares)
-    } catch (error) {
-      console.error(`Failed to get shares for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to get shares', message: publicMessage(error, 'Failed to get shares') })
-    }
-  })
-
-  // Get received shares only
-  router.get('/:userId/shares/received', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: { id: userId, accountId },
-        select: { id: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const shares = getShares(accountId, userId)
-      res.json({ received: shares.received })
-    } catch (error) {
-      console.error(`Failed to get received shares for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to get received shares', message: publicMessage(error, 'Failed to get received shares') })
-    }
-  })
-
-  // Get group members (users in same group)
-  router.get('/:userId/shares/group-members', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: { id: userId, accountId },
-        select: { id: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const groupMembers = await getGroupMembers(prisma, accountId, userId)
-      res.json({ members: groupMembers })
-    } catch (error) {
-      console.error(`Failed to get group members for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to get group members', message: publicMessage(error, 'Failed to get group members') })
-    }
-  })
-
-  // Share item(s) with user(s)
-  router.post('/:userId/shares', async (req, res) => {
-    try {
-      const { userId } = req.params
-      const { items, targetUserIds } = req.body
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      if (!Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ error: 'Items array is required' })
-      }
-
-      if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) {
-        return res.status(400).json({ error: 'Target user IDs array is required' })
-      }
-
-      // Verify sender exists and get info for notification
-      const sender = await prisma.user.findFirst({
-        where: { id: userId, accountId },
-        select: { id: true, username: true, email: true, colorIndex: true }
-      })
-
-      if (!sender) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      // Get target users with their Discord webhook URLs for notifications
-      const targetUsers = await prisma.user.findMany({
-        where: { id: { in: targetUserIds }, accountId },
-        select: { id: true, username: true, discordWebhookUrl: true }
-      })
-      const targetUserMap = new Map(targetUsers.map(u => [u.id, u]))
-
-      // Get account sync config for account-level webhook
-      let accountWebhookUrl = null
-      try {
-        const account = await prisma.appAccount.findUnique({
-          where: { id: accountId },
-          select: { sync: true }
-        })
-        let syncCfg = account?.sync
-        if (typeof syncCfg === 'string') {
-          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-        }
-        if (syncCfg && typeof syncCfg === 'object' && syncCfg.notifyOnActivity === true && syncCfg.webhookUrl) {
-          accountWebhookUrl = syncCfg.webhookUrl
-        }
-      } catch {}
-
-      // Verify all target users exist and are in the same group
-      const groupMembers = await getGroupMembers(prisma, accountId, userId)
-      const groupMemberIds = new Set(groupMembers.map(u => u.id))
-
-      const invalidTargets = targetUserIds.filter(id => !groupMemberIds.has(id))
-      if (invalidTargets.length > 0) {
-        return res.status(400).json({
-          error: 'Some target users are not in your group',
-          invalidTargets
-        })
-      }
-
-      // Get sender's library to verify items exist
-      const senderLibrary = getCachedLibrary(accountId, userId) || []
-      const libraryItemMap = new Map()
-      const baseIdMap = new Map() // Map base IDs (tt...) to any matching library item
-
-      senderLibrary.forEach(item => {
-        const itemId = item._id || item.id
-        if (itemId) {
-          libraryItemMap.set(itemId, item)
-          // Also index by base ID (everything before the first colon)
-          const baseId = itemId.split(':')[0]
-          if (baseId && !baseIdMap.has(baseId)) {
-            baseIdMap.set(baseId, item)
-          }
-        }
-      })
-
-      // Helper to find item in library (exact match first, then base ID match)
-      const findLibraryItem = (searchId) => {
-        // Try exact match first
-        let found = libraryItemMap.get(searchId)
-        if (found) return found
-
-        // Try base ID match (for shows where we might have episode IDs)
-        const baseId = searchId.split(':')[0]
-        found = baseIdMap.get(baseId)
-        if (found) return found
-
-        return null
-      }
-
-      // Build valid items - use library data when available, fall back to frontend data
-      const validItems = []
-      for (const item of items) {
-        const itemId = item.itemId || item._id || item.id
-        const libraryItem = findLibraryItem(itemId)
-
-        // Accept item if found in library OR if frontend provided enough data
-        if (libraryItem || (item.itemName && item.itemType)) {
-          validItems.push({
-            itemId,
-            itemName: libraryItem?.name || item.itemName || 'Unknown',
-            itemType: libraryItem?.type || item.itemType || 'movie',
-            poster: libraryItem?.poster || item.poster || ''
-          })
-        }
-      }
-
-      if (validItems.length === 0) {
-        return res.status(400).json({
-          error: 'No valid items to share'
-        })
-      }
-
-      // Share each item with each target user
-      const results = []
-      const errors = []
-
-      // Track which users received shares for notifications
-      const notificationsToSend = []
-
-      for (const item of validItems) {
-        for (const targetUserId of targetUserIds) {
-          try {
-            const targetUser = groupMembers.find(u => u.id === targetUserId)
-            if (!targetUser) continue
-
-            const share = addShare(
-              accountId,
-              userId,
-              targetUserId,
-              item,
-              sender.username,
-              targetUser.username
-            )
-            results.push(share)
-
-            // Queue notification if target user has a Discord webhook
-            const targetUserData = targetUserMap.get(targetUserId)
-            if (targetUserData?.discordWebhookUrl) {
-              notificationsToSend.push({
-                webhookUrl: targetUserData.discordWebhookUrl,
-                item
-              })
+    // GET /users/episode-alerts - recent new-episode alerts (fired by
+    // utils/episodeAlerts.js's poller) for the notification bell. Must be
+    // before /:id route.
+    router.get("/episode-alerts", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
             }
 
-            // Also queue account-level notification if enabled
-            if (accountWebhookUrl) {
-              notificationsToSend.push({
-                webhookUrl: accountWebhookUrl,
-                item,
-                isAccountNotification: true
-              })
-            }
-          } catch (error) {
-            if (error.message.includes('already shared')) {
-              // Skip duplicates silently
-              continue
-            }
-            errors.push({ itemId: item.itemId, targetUserId, error: publicMessage(error, 'Something went wrong') })
-          }
+            const days = Math.min(90, Math.max(1, Number.parseInt(req.query.days, 10) || 14));
+            const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+            const alerts = await prisma.episodeAlert.findMany({
+                orderBy: { createdAt: "desc" },
+                take: 50,
+                where: { accountId, createdAt: { gte: since } },
+            });
+            res.json(alerts);
+        } catch (error) {
+            console.error("Error fetching episode alerts:", error);
+            res.status(500).json({ error: "Failed to fetch episode alerts" });
         }
-      }
+    });
 
-      // Send Discord notifications to target users (don't block the response)
-      if (notificationsToSend.length > 0) {
-        // Fire and forget - send notifications in the background
-        setImmediate(async () => {
-          for (const notification of notificationsToSend) {
+    // GET /users/notifications - persistent in-app bell notifications (written
+    // by notificationStore.js from the same dispatch path as push/Discord).
+    // Must be before the /:id route. Returns newest-first with server-side read
+    // state, so the bell is consistent across devices (unlike the old
+    // localStorage-only read tracking).
+    router.get("/notifications", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const days = Math.min(90, Math.max(1, Number.parseInt(req.query.days, 10) || 14));
+            const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+            const notifications = await prisma.notification.findMany({
+                orderBy: { createdAt: "desc" },
+                take: 100,
+                where: { accountId, createdAt: { gte: since } },
+            });
+            res.json(notifications);
+        } catch (error) {
+            console.error("Error fetching notifications:", error);
+            res.status(500).json({ error: "Failed to fetch notifications" });
+        }
+    });
+
+    // POST /users/notifications/mark-read - mark specific ids read, or all when
+    // no ids are given (the bell's "Mark all read").
+    router.post("/notifications/mark-read", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+            await prisma.notification.updateMany({
+                data: { read: true, readAt: new Date() },
+                where: { accountId, read: false, ...(ids ? { id: { in: ids } } : {}) },
+            });
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error marking notifications read:", error);
+            res.status(500).json({ error: "Failed to mark notifications read" });
+        }
+    });
+
+    // POST /users/notifications/dismiss - delete specific ids, or all when no
+    // ids are given (the bell's "Clear"). Deletion (not a hidden flag) matches
+    // the bell's existing Clear semantics and keeps the table from growing
+    // unbounded on a long-lived instance.
+    router.post("/notifications/dismiss", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+            await prisma.notification.deleteMany({
+                where: { accountId, ...(ids ? { id: { in: ids } } : {}) },
+            });
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Error dismissing notifications:", error);
+            res.status(500).json({ error: "Failed to dismiss notifications" });
+        }
+    });
+
+    // GET /users/metrics - Get metrics data for dashboard (must be before /:id route)
+    // The Activity feed asks for the posters of the newest sessions the moment
+    // this response lands; have them ready. Newest-first, capped - the feed
+    // shows the first screenful, not the whole period.
+    const warmedMetrics = new WeakSet(); // cached builds whose posters were warmed
+    const warmActivityPosters = (metrics) => {
+        try {
+            const sessions = Array.isArray(metrics?.watchSessions)
+                ? metrics.watchSessions.slice(0, 60)
+                : [];
+            const playing = Array.isArray(metrics?.nowPlaying) ? metrics.nowPlaying : [];
+            // A session carries its title as `item`; the poster is on that.
+            const posters = [...sessions, ...playing]
+                .map((x) => x?.item?.poster || x?.poster)
+                .filter(Boolean);
+            require("../utils/posterWarm").warmPosters(posters);
+        } catch {
+            /* optimisation only */
+        }
+    };
+
+    router.get("/metrics", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            console.log(`[API] GET /metrics called for account ${accountId}`);
+
+            const { period = "30d", nocache } = req.query; // '7d', '30d', '90d', '1y', 'all'
+            // The Activity page asks for this once its reader reaches the end of the
+            // capped feed. It is a deliberately heavier build, so it neither reads
+            // from nor writes to the shared cache - the dashboard has to keep being
+            // handed the small, fast payload it was built for.
+            const deepActivity = req.query.deep === "1" || req.query.deep === "true";
+
+            const {
+                getCachedMetrics,
+                setCachedMetrics,
+                buildOnce,
+            } = require("../utils/metricsCache");
+            const { buildMetricsForAccount } = require("../utils/metricsBuilder");
+
+            // Try in-memory metrics cache first (populated by activityMonitor every 5 minutes)
+            // Skip cache if nocache query param is set (useful for debugging)
+            const cached = nocache || deepActivity ? null : getCachedMetrics(accountId, period);
+            if (cached) {
+                console.log(`[API] Returning cached metrics for ${period}`);
+                // Everything in the cached object can be a few minutes old except
+                // who is watching right now - that is read live on every request.
+                let answer = cached;
+                try {
+                    const { liveNowPlaying } = require("../utils/metricsBuilder");
+                    answer = { ...cached, nowPlaying: await liveNowPlaying(prisma, accountId) };
+                } catch (e) {
+                    console.warn(
+                        "[API] Live Now Playing failed, sending the cached list:",
+                        e?.message
+                    );
+                }
+                res.json(answer);
+                // Posters are warmed once per cached build, not on every visit.
+                if (!warmedMetrics.has(cached)) {
+                    warmedMetrics.add(cached);
+                    warmActivityPosters(answer);
+                }
+                return;
+            }
+
+            console.log(`[API] Building metrics for ${period}...`);
+            // Build on demand (also used on first boot or if scheduler hasn't run yet)
+            const build = () =>
+                buildMetricsForAccount({ accountId, decrypt, deepActivity, period, prisma });
+            const metrics = deepActivity
+                ? await build()
+                : await buildOnce(accountId, period, build);
+
+            console.log(
+                `[API] Metrics built. Sessions: ${metrics.watchSessions?.length}, Episodes: ${metrics.recentEpisodes?.length}`
+            );
+
+            if (!deepActivity) {
+                setCachedMetrics(accountId, period, metrics);
+            }
+            res.json(metrics);
+            warmActivityPosters(metrics);
+        } catch (error) {
+            console.error("Error fetching metrics:", error);
+            res.status(500).json({ error: "Failed to fetch metrics" });
+        }
+    });
+
+    // GET /users/year-in-review?year=YYYY - a read-only "Wrapped"-style yearly
+    // summary aggregated from the metrics tables. Defaults to the current year.
+    // Must be before /:id route.
+    router.get("/year-in-review", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const year = req.query.year ? Number(req.query.year) : new Date().getFullYear();
+            const users = await prisma.user.findMany({
+                select: { email: true, id: true, username: true },
+                where: { accountId },
+            });
+            const { buildYearInReview } = require("../utils/yearInReview");
+            const data = await buildYearInReview(prisma, accountId, year, users);
+            res.json(data);
+        } catch (error) {
+            console.error("Error building year in review:", error);
+            res.status(500).json({ error: "Failed to build year in review" });
+        }
+    });
+
+    // GET /users/parity - side-by-side view of Stremio vs Nuvio users: provider,
+    // assigned addon count (fast, DB-only), and optionally live addon count.
+    // Must be before /:id route. Pass ?live=true to also fetch each user's actual
+    // live addon count from their provider (slower — one API call per user).
+    router.get("/parity", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const live = req.query.live === "true";
+
+            const users = await prisma.user.findMany({
+                orderBy: [{ providerType: "asc" }, { username: "asc" }],
+                select: {
+                    createdAt: true,
+                    email: true,
+                    expiresAt: true,
+                    id: true,
+                    isActive: true,
+                    providerType: true,
+                    username: true,
+                },
+                where: { accountId },
+            });
+
+            const groups = await prisma.group.findMany({
+                select: {
+                    addons: { select: { id: true }, where: { isEnabled: true } },
+                    id: true,
+                    name: true,
+                    userIds: true,
+                },
+                where: { accountId },
+            });
+
+            function groupsForUser(userId) {
+                return groups.filter((g) => {
+                    let ids = [];
+                    try {
+                        ids = Array.isArray(g.userIds) ? g.userIds : JSON.parse(g.userIds || "[]");
+                    } catch {
+                        // Malformed optional data leaves the existing fallback in place.
+                    }
+                    return ids.includes(userId);
+                });
+            }
+
+            const rows = [];
+            for (const u of users) {
+                const memberGroups = groupsForUser(u.id);
+                const assignedAddonCount = memberGroups.reduce(
+                    (sum, g) => sum + (g.addons?.length || 0),
+                    0
+                );
+
+                let liveAddonCount = null;
+                if (live) {
+                    try {
+                        const fullUser = await prisma.user.findUnique({ where: { id: u.id } });
+                        const provider = createProvider(fullUser, { decrypt, req });
+                        if (provider) {
+                            const result = await provider.getAddons();
+                            liveAddonCount = (result?.addons || []).length;
+                        } else {
+                            liveAddonCount = "not-connected";
+                        }
+                    } catch {
+                        liveAddonCount = "error";
+                    }
+                }
+
+                rows.push({
+                    assignedAddonCount,
+                    email: u.email,
+                    expiresAt: u.expiresAt,
+                    groups: memberGroups.map((g) => g.name),
+                    id: u.id,
+                    isActive: u.isActive,
+                    liveAddonCount,
+                    provider: u.providerType,
+                    username: u.username,
+                });
+            }
+
+            const summary = {
+                nuvio: rows.filter((r) => r.provider === "nuvio").length,
+                stremio: rows.filter((r) => r.provider === "stremio").length,
+                total: rows.length,
+            };
+
+            res.json({ summary, users: rows });
+        } catch (error) {
+            console.error("Error building parity view:", error);
+            res.status(500).json({ error: "Failed to build parity view" });
+        }
+    });
+
+    // GET /users/metrics-migration-preview - Preview what would be migrated
+    router.get("/metrics-migration-preview", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const accountIdValue = accountId || "default";
+
+            // Check current migration status
+            const [sessionCount, episodeCount, activityCount] = await Promise.all([
+                prisma.watchSession.count({ where: { accountId: accountIdValue } }),
+                prisma.episodeWatchHistory.count({ where: { accountId: accountIdValue } }),
+                prisma.watchActivity.count({ where: { accountId: accountIdValue } }),
+            ]);
+
+            // Get watch activity grouped by user
+            const activities = await prisma.watchActivity.findMany({
+                orderBy: { date: "asc" },
+                select: {
+                    date: true,
+                    itemId: true,
+                    itemType: true,
+                    userId: true,
+                    watchTimeSeconds: true,
+                },
+                where: { accountId: accountIdValue },
+            });
+
+            // Group by user
+            const userActivityMap = {};
+            for (const activity of activities) {
+                if (!userActivityMap[activity.userId]) {
+                    userActivityMap[activity.userId] = {
+                        dates: [],
+                        movies: 0,
+                        shows: 0,
+                        userId: activity.userId,
+                        watchTime: 0,
+                    };
+                }
+                if (activity.itemType === "movie") {
+                    userActivityMap[activity.userId].movies++;
+                } else if (activity.itemType === "series") {
+                    userActivityMap[activity.userId].shows++;
+                }
+                userActivityMap[activity.userId].watchTime += activity.watchTimeSeconds || 0;
+                userActivityMap[activity.userId].dates.push(activity.date);
+            }
+
+            // Get user info
+            const userIds = Object.keys(userActivityMap);
+            const users = await prisma.user.findMany({
+                select: { email: true, id: true, username: true },
+                where: { id: { in: userIds } },
+            });
+
+            // Build user preview data
+            const userPreviews = users.map((user) => {
+                const activity = userActivityMap[user.id];
+                const dates = activity.dates.map((d) => new Date(d)).sort((a, b) => a - b);
+                return {
+                    dateRange:
+                        dates.length > 0
+                            ? {
+                                  earliest: dates[0].toISOString().split("T")[0],
+                                  latest: dates.at(-1).toISOString().split("T")[0],
+                              }
+                            : null,
+                    movies: activity.movies,
+                    shows: activity.shows,
+                    userId: user.id,
+                    username: user.username || user.email,
+                    watchTimeHours: Math.round((activity.watchTime / 3600) * 100) / 100,
+                    watchTimeSeconds: activity.watchTime,
+                };
+            });
+
+            const totalMovies = Object.values(userActivityMap).reduce(
+                (sum, u) => sum + u.movies,
+                0
+            );
+            const totalShows = Object.values(userActivityMap).reduce((sum, u) => sum + u.shows, 0);
+            const totalWatchTime = Object.values(userActivityMap).reduce(
+                (sum, u) => sum + u.watchTime,
+                0
+            );
+
+            return res.json({
+                migrationStatus: {
+                    activitiesCount: activityCount,
+                    alreadyMigrated: sessionCount > 0,
+                    episodesCount: episodeCount,
+                    hasExistingData: sessionCount > 0 || episodeCount > 0,
+                    sessionsCount: sessionCount,
+                },
+                totals: {
+                    movies: totalMovies,
+                    pendingMigration: activityCount > 0 && sessionCount === 0,
+                    shows: totalShows,
+                    users: userPreviews.length,
+                    watchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100,
+                    watchTimeSeconds: totalWatchTime,
+                },
+                users: userPreviews,
+            });
+        } catch (error) {
+            console.error("Error fetching migration preview:", error);
+            res.status(500).json({ error: "Failed to fetch migration preview" });
+        }
+    });
+
+    // POST /users/metrics-migration - Execute the migration
+    router.post("/metrics-migration", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { migrateAccountMetrics } = require("../utils/metricsMigration");
+            const result = await migrateAccountMetrics(prisma, accountId);
+
+            return res.json({
+                success: true,
+                ...result,
+            });
+        } catch (error) {
+            console.error("Error executing migration:", error);
+            res.status(500).json({ error: "Failed to execute migration" });
+        }
+    });
+
+    // GET /users/:id/watch-time - Get watch time for a specific user
+    router.get("/:id/watch-time", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { id: userId } = req.params;
+            const {
+                startDate,
+                endDate,
+                itemId, // Optional: filter by specific item
+                itemType, // Optional: 'movie' or 'series'
+                groupBy = "day", // 'day' or 'week'
+            } = req.query;
+
+            const accountIdValue = accountId || "default";
+
+            // If user API key is used, restrict to own data only
+            if (req.appUserId && req.appUserId !== userId) {
+                return res
+                    .status(403)
+                    .json({ error: "Forbidden: You can only access your own data" });
+            }
+
+            // Verify user belongs to account
+            const user = await prisma.user.findFirst({
+                select: { email: true, id: true, username: true },
+                where: {
+                    accountId: accountIdValue,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Build date range
+            const start = startDate ? new Date(startDate) : new Date();
+            start.setDate(start.getDate() - 7); // Default: last 7 days
+            const end = endDate ? new Date(endDate) : new Date();
+
+            // Build query
+            const where = {
+                accountId: accountIdValue,
+                date: {
+                    gte: start,
+                    lte: end,
+                },
+                userId,
+            };
+
+            if (itemId) {
+                where.itemId = itemId;
+            }
+
+            if (itemType) {
+                where.itemType = itemType;
+            }
+
+            // Cross-user library-sync dedup: fetch ALL account-wide activity in
+            // the date window (not just this user's), run the shared-email dedup
+            // to strip phantoms, then narrow back to this user. Same rationale as
+            // getUser's totalWatchTimeMinutes above.
+            const [allWindowActivities, siblings] = await Promise.all([
+                prisma.watchActivity.findMany({
+                    orderBy: { date: "asc" },
+                    select: {
+                        date: true,
+                        itemId: true,
+                        itemType: true,
+                        profileLabel: true,
+                        userId: true,
+                        watchTimeSeconds: true,
+                    },
+                    where: {
+                        accountId: accountIdValue,
+                        date: { gte: start, lte: end },
+                        ...(itemId ? { itemId } : {}),
+                        ...(itemType ? { itemType } : {}),
+                    },
+                }),
+                prisma.user.findMany({
+                    select: { email: true, id: true, nuvioProfileId: true },
+                    where: { accountId: accountIdValue },
+                }),
+            ]);
+            const {
+                findSharedEmailUserIds,
+                dedupWatchActivityBySharedEmail,
+            } = require("../utils/watchDedup");
+            const shared = findSharedEmailUserIds(siblings);
+            const cleaned = dedupWatchActivityBySharedEmail(allWindowActivities, shared);
+            const activities = cleaned.filter((a) => a.userId === userId);
+
+            // Group by day or week
+            const grouped = {};
+            let totalSeconds = 0;
+
+            for (const activity of activities) {
+                const date = new Date(activity.date);
+                let key;
+
+                if (groupBy === "week") {
+                    // Get week start (Monday)
+                    const weekStart = new Date(date);
+                    const day = date.getDay();
+                    const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Adjust to Monday
+                    weekStart.setDate(diff);
+                    key = weekStart.toISOString().split("T")[0];
+                } else {
+                    key = date.toISOString().split("T")[0];
+                }
+
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        date: key,
+                        items: new Set(),
+                        movies: 0,
+                        shows: 0,
+                        watchTimeHours: 0,
+                        watchTimeSeconds: 0,
+                    };
+                }
+
+                const duration = activity.watchTimeSeconds || 0;
+                grouped[key].watchTimeSeconds += duration;
+                grouped[key].items.add(activity.itemId);
+                totalSeconds += duration;
+
+                if (activity.itemType === "movie") {
+                    grouped[key].movies += 1;
+                } else if (activity.itemType === "series") {
+                    grouped[key].shows += 1;
+                }
+            }
+
+            // Convert to array and format
+            const result = Object.values(grouped).map((entry) => ({
+                date: entry.date,
+                itemsCount: entry.items.size,
+                movies: entry.movies,
+                shows: entry.shows,
+                watchTimeHours: Math.round((entry.watchTimeSeconds / 3600) * 100) / 100,
+                watchTimeSeconds: entry.watchTimeSeconds,
+            }));
+
+            // If itemId specified, also return per-item breakdown
+            let itemBreakdown = null;
+            if (itemId) {
+                itemBreakdown = {
+                    days: result.length,
+                    itemId,
+                    totalWatchTimeHours: Math.round((totalSeconds / 3600) * 100) / 100,
+                    totalWatchTimeSeconds: totalSeconds,
+                };
+            }
+
+            // start/end default to a real "N days ago from right now" timestamp
+            // (not pre-bucketed like WatchActivity.date), so their day string needs
+            // the account's timezone too - purely informational here (unconsumed by
+            // the client, which only reads byDate), but kept consistent with
+            // everything else fixed this session rather than left as a stray UTC one.
+            const accountTimeZone = await resolveAccountTimezone(prisma, accountIdValue);
+            res.json({
+                byDate: result,
+                endDate: getAccountDateString(end, accountTimeZone),
+                itemBreakdown,
+                startDate: getAccountDateString(start, accountTimeZone),
+                totalWatchTimeHours: Math.round((totalSeconds / 3600) * 100) / 100,
+                totalWatchTimeSeconds: totalSeconds,
+                userId: user.id,
+                username: user.username || user.email,
+            });
+        } catch (error) {
+            console.error("Error fetching watch time:", error);
+            res.status(500).json({
+                error: "Failed to fetch watch time",
+                message: publicMessage(error, "Failed to fetch watch time"),
+            });
+        }
+    });
+
+    // GET /users/:id/top-items - Get top shows/movies by watch time
+    router.get("/:id/top-items", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { id: userId } = req.params;
+            const {
+                period = "30d", // '1h', '12h', '1d', '3d', '7d', '30d', '90d', '1y', 'all'
+                itemType, // 'movie' or 'series' (optional)
+                limit = 10, // Number of items to return
+            } = req.query;
+
+            const accountIdValue = accountId || "default";
+
+            // If user API key is used, restrict to own data only
+            if (req.appUserId && req.appUserId !== userId) {
+                return res
+                    .status(403)
+                    .json({ error: "Forbidden: You can only access your own data" });
+            }
+
+            // Verify user belongs to account
+            const user = await prisma.user.findFirst({
+                select: { email: true, id: true, username: true },
+                where: {
+                    accountId: accountIdValue,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Calculate date range
+            let startDate = new Date();
+            switch (period) {
+                case "1h":
+                    startDate.setHours(startDate.getHours() - 1);
+                    break;
+                case "12h":
+                    startDate.setHours(startDate.getHours() - 12);
+                    break;
+                case "1d":
+                    startDate.setDate(startDate.getDate() - 1);
+                    break;
+                case "3d":
+                    startDate.setDate(startDate.getDate() - 3);
+                    break;
+                case "7d":
+                    startDate.setDate(startDate.getDate() - 7);
+                    break;
+                case "30d":
+                    startDate.setDate(startDate.getDate() - 30);
+                    break;
+                case "90d":
+                    startDate.setDate(startDate.getDate() - 90);
+                    break;
+                case "1y":
+                    startDate.setFullYear(startDate.getFullYear() - 1);
+                    break;
+                case "all":
+                    startDate = new Date(0);
+                    break;
+                default:
+                    startDate.setDate(startDate.getDate() - 30);
+            }
+
+            // Build query
+            const where = {
+                accountId: accountIdValue,
+                date: {
+                    gte: startDate,
+                },
+                userId,
+            };
+
+            if (itemType) {
+                where.itemType = itemType;
+            }
+
+            // Aggregate watch time by item using watch activity
+            const activities = await prisma.watchActivity.findMany({
+                select: {
+                    date: true,
+                    itemId: true,
+                    itemType: true,
+                    watchTimeSeconds: true,
+                },
+                where,
+            });
+
+            // Group by itemId
+            const itemStats = {};
+            for (const activity of activities) {
+                if (!itemStats[activity.itemId]) {
+                    itemStats[activity.itemId] = {
+                        daysWatched: new Set(),
+                        firstWatched: activity.date,
+                        itemId: activity.itemId,
+                        itemType: activity.itemType,
+                        lastWatched: activity.date,
+                        totalWatchTimeSeconds: 0,
+                    };
+                }
+
+                const duration = activity.watchTimeSeconds || 0;
+                itemStats[activity.itemId].totalWatchTimeSeconds += duration;
+                itemStats[activity.itemId].daysWatched.add(
+                    activity.date.toISOString().split("T")[0]
+                );
+
+                if (activity.date < itemStats[activity.itemId].firstWatched) {
+                    itemStats[activity.itemId].firstWatched = activity.date;
+                }
+                if (activity.date > itemStats[activity.itemId].lastWatched) {
+                    itemStats[activity.itemId].lastWatched = activity.date;
+                }
+            }
+
+            // Convert to array and sort
+            const topItems = Object.values(itemStats)
+                .map((item) => ({
+                    daysWatched: item.daysWatched.size,
+                    firstWatched: item.firstWatched.toISOString().split("T")[0],
+                    itemId: item.itemId,
+                    itemType: item.itemType,
+                    lastWatched: item.lastWatched.toISOString().split("T")[0],
+                    totalWatchTimeHours:
+                        Math.round((item.totalWatchTimeSeconds / 3600) * 100) / 100,
+                    totalWatchTimeSeconds: item.totalWatchTimeSeconds,
+                }))
+                .sort((a, b) => b.totalWatchTimeSeconds - a.totalWatchTimeSeconds)
+                .slice(0, Number.parseInt(limit, 10) || 10);
+
+            res.json({
+                itemType: itemType || "all",
+                period,
+                topItems,
+                totalItems: Object.keys(itemStats).length,
+                userId: user.id,
+                username: user.username || user.email,
+            });
+        } catch (error) {
+            console.error("Error fetching top items:", error);
+            res.status(500).json({
+                error: "Failed to fetch top items",
+                message: publicMessage(error, "Failed to fetch top items"),
+            });
+        }
+    });
+
+    // GET /users/:id/streaks - Get watch streaks
+    router.get("/:id/streaks", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { id: userId } = req.params;
+            const accountIdValue = accountId || "default";
+
+            // If user API key is used, restrict to own data only
+            if (req.appUserId && req.appUserId !== userId) {
+                return res
+                    .status(403)
+                    .json({ error: "Forbidden: You can only access your own data" });
+            }
+
+            // Verify user belongs to account
+            const user = await prisma.user.findFirst({
+                select: { email: true, id: true, username: true },
+                where: {
+                    accountId: accountIdValue,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Get all watch activity dates
+            const activities = await prisma.watchActivity.findMany({
+                orderBy: {
+                    date: "desc",
+                },
+                select: {
+                    date: true,
+                },
+                where: {
+                    accountId: accountIdValue,
+                    userId,
+                },
+            });
+
+            if (activities.length === 0) {
+                return res.json({
+                    currentStreak: 0,
+                    longestStreak: 0,
+                    longestStreakEndDate: null,
+                    longestStreakStartDate: null,
+                    streakStartDate: null,
+                    totalDaysWatched: 0,
+                    userId: user.id,
+                    username: user.username || user.email,
+                });
+            }
+
+            // Get unique date strings (YYYY-MM-DD) from watch activity and sort
+            const dateStrings = [
+                ...new Set(
+                    activities.map((a) => {
+                        const d = new Date(a.date);
+                        // Normalize to UTC date string to avoid timezone issues
+                        const year = d.getUTCFullYear();
+                        const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+                        const day = String(d.getUTCDate()).padStart(2, "0");
+                        return `${year}-${month}-${day}`;
+                    })
+                ),
+            ].sort((a, b) => b.localeCompare(a)); // Most recent first
+
+            // Calculate current streak
+            let currentStreak = 0;
+            let streakStartDate = null;
+            const today = new Date();
+            // Normalize today to UTC date string
+            const todayYear = today.getUTCFullYear();
+            const todayMonth = String(today.getUTCMonth() + 1).padStart(2, "0");
+            const todayDay = String(today.getUTCDate()).padStart(2, "0");
+            const todayStr = `${todayYear}-${todayMonth}-${todayDay}`;
+
+            const checkDate = new Date(today);
+            checkDate.setUTCHours(0, 0, 0, 0);
+            let isFirstCheck = true;
+
+            // Keep checking consecutive days until we find a gap
+            while (true) {
+                const year = checkDate.getUTCFullYear();
+                const month = String(checkDate.getUTCMonth() + 1).padStart(2, "0");
+                const day = String(checkDate.getUTCDate()).padStart(2, "0");
+                const dateStr = `${year}-${month}-${day}`;
+                const hasActivity = dateStrings.includes(dateStr);
+
+                if (hasActivity) {
+                    if (currentStreak === 0) {
+                        streakStartDate = new Date(checkDate);
+                    }
+                    currentStreak++;
+                    checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+                    isFirstCheck = false;
+                } else {
+                    // Allow 1 day gap (yesterday) for current streak only on first check (if today has no activity)
+                    if (isFirstCheck && dateStr === todayStr) {
+                        checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+                        isFirstCheck = false;
+                        continue;
+                    }
+                    break;
+                }
+            }
+
+            // Calculate longest streak
+            let longestStreak = 0;
+            let longestStreakStartDate = null;
+            let longestStreakEndDate = null;
+            let currentStreakLength = 1;
+            let currentStreakStart = dateStrings[0];
+
+            for (let i = 1; i < dateStrings.length; i++) {
+                const prevDateStr = dateStrings[i - 1];
+                const currDateStr = dateStrings[i];
+                const prevDate = new Date(`${prevDateStr}T00:00:00Z`);
+                const currDate = new Date(`${currDateStr}T00:00:00Z`);
+                const daysDiff = Math.floor((prevDate - currDate) / (1000 * 60 * 60 * 24));
+
+                if (daysDiff === 1) {
+                    // Consecutive day
+                    currentStreakLength++;
+                } else {
+                    // Streak broken
+                    if (currentStreakLength > longestStreak) {
+                        longestStreak = currentStreakLength;
+                        longestStreakStartDate = new Date(`${currDateStr}T00:00:00Z`);
+                        longestStreakEndDate = new Date(`${prevDateStr}T00:00:00Z`);
+                    }
+                    currentStreakLength = 1;
+                    currentStreakStart = dateStrings[i];
+                }
+            }
+
+            // Check if last streak is longest
+            if (currentStreakLength > longestStreak) {
+                longestStreak = currentStreakLength;
+                longestStreakStartDate = new Date(`${currentStreakStart}T00:00:00Z`);
+                longestStreakEndDate = new Date(`${dateStrings[0]}T00:00:00Z`);
+            }
+
+            res.json({
+                currentStreak,
+                longestStreak,
+                longestStreakEndDate: longestStreakEndDate
+                    ? longestStreakEndDate.toISOString().split("T")[0]
+                    : null,
+                longestStreakStartDate: longestStreakStartDate
+                    ? longestStreakStartDate.toISOString().split("T")[0]
+                    : null,
+                streakStartDate: streakStartDate
+                    ? streakStartDate.toISOString().split("T")[0]
+                    : null,
+                totalDaysWatched: dateStrings.length,
+                userId: user.id,
+                username: user.username || user.email,
+            });
+        } catch (error) {
+            console.error("Error fetching streaks:", error);
+            res.status(500).json({
+                error: "Failed to fetch streaks",
+                message: publicMessage(error, "Failed to fetch streaks"),
+            });
+        }
+    });
+
+    // GET /users/:id/velocity - Get watch velocity (episodes per day for shows)
+    router.get("/:id/velocity", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { id: userId } = req.params;
+            const {
+                itemId, // Optional: specific show
+                period = "30d", // '1h', '12h', '1d', '3d', '7d', '30d', '90d', '1y', 'all'
+            } = req.query;
+
+            const accountIdValue = accountId || "default";
+
+            // If user API key is used, restrict to own data only
+            if (req.appUserId && req.appUserId !== userId) {
+                return res
+                    .status(403)
+                    .json({ error: "Forbidden: You can only access your own data" });
+            }
+
+            // Verify user belongs to account
+            const user = await prisma.user.findFirst({
+                select: { email: true, id: true, username: true },
+                where: {
+                    accountId: accountIdValue,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Calculate date range
+            let startDate = new Date();
+            switch (period) {
+                case "1h":
+                    startDate.setHours(startDate.getHours() - 1);
+                    break;
+                case "12h":
+                    startDate.setHours(startDate.getHours() - 12);
+                    break;
+                case "1d":
+                    startDate.setDate(startDate.getDate() - 1);
+                    break;
+                case "3d":
+                    startDate.setDate(startDate.getDate() - 3);
+                    break;
+                case "7d":
+                    startDate.setDate(startDate.getDate() - 7);
+                    break;
+                case "30d":
+                    startDate.setDate(startDate.getDate() - 30);
+                    break;
+                case "90d":
+                    startDate.setDate(startDate.getDate() - 90);
+                    break;
+                case "1y":
+                    startDate.setFullYear(startDate.getFullYear() - 1);
+                    break;
+                case "all":
+                    startDate = new Date(0);
+                    break;
+                default:
+                    startDate.setDate(startDate.getDate() - 30);
+            }
+
+            // Get watch snapshots to track episode progress
+            const snapshotWhere = {
+                accountId: accountIdValue,
+                date: {
+                    gte: startDate,
+                },
+                userId,
+            };
+
+            if (itemId) {
+                snapshotWhere.itemId = itemId;
+            }
+
+            // Get snapshots for series only
+            const snapshots = await prisma.watchSnapshot.findMany({
+                orderBy: {
+                    date: "asc",
+                },
+                select: {
+                    date: true,
+                    itemId: true,
+                    overallTimeWatched: true,
+                },
+                where: snapshotWhere,
+            });
+
+            // Get watch activities to see daily changes
+            const activities = await prisma.watchActivity.findMany({
+                orderBy: {
+                    date: "asc",
+                },
+                select: {
+                    date: true,
+                    itemId: true,
+                    watchTimeSeconds: true,
+                },
+                where: {
+                    accountId: accountIdValue,
+                    date: {
+                        gte: startDate,
+                    },
+                    itemType: "series",
+                    userId,
+                    ...(itemId ? { itemId } : {}),
+                },
+            });
+
+            // Group by itemId and calculate velocity
+            const velocityByItem = {};
+
+            // Process activities to estimate episodes watched
+            // Assume average episode is ~45 minutes (2700 seconds)
+            const avgEpisodeSeconds = 45 * 60;
+
+            for (const activity of activities) {
+                if (!velocityByItem[activity.itemId]) {
+                    velocityByItem[activity.itemId] = {
+                        daysActive: new Set(),
+                        estimatedEpisodes: 0,
+                        firstWatched: activity.date,
+                        itemId: activity.itemId,
+                        lastWatched: activity.date,
+                        totalWatchTimeSeconds: 0,
+                        watchDays: [],
+                    };
+                }
+
+                const item = velocityByItem[activity.itemId];
+                item.totalWatchTimeSeconds += activity.watchTimeSeconds || 0;
+                item.daysActive.add(activity.date.toISOString().split("T")[0]);
+                item.watchDays.push({
+                    date: activity.date.toISOString().split("T")[0],
+                    watchTimeSeconds: activity.watchTimeSeconds,
+                });
+
+                if (activity.date < item.firstWatched) {
+                    item.firstWatched = activity.date;
+                }
+                if (activity.date > item.lastWatched) {
+                    item.lastWatched = activity.date;
+                }
+            }
+
+            // Calculate velocity metrics
+            const velocityResults = Object.values(velocityByItem)
+                .map((item) => {
+                    const daysActive = item.daysActive.size;
+                    const totalDays = Math.max(
+                        1,
+                        Math.ceil((item.lastWatched - item.firstWatched) / (1000 * 60 * 60 * 24)) +
+                            1
+                    );
+                    const estimatedEpisodes = Math.round(
+                        item.totalWatchTimeSeconds / avgEpisodeSeconds
+                    );
+                    const episodesPerDay = daysActive > 0 ? estimatedEpisodes / daysActive : 0;
+                    const episodesPerWeek = episodesPerDay * 7;
+
+                    // Estimate completion date (if we have current progress)
+                    const _estimatedCompletion = null;
+                    if (itemId && snapshots.length > 0) {
+                        const _latestSnapshot = snapshots.at(-1);
+                        // This is a rough estimate - would need total episodes from metadata
+                        // For now, just show velocity
+                    }
+
+                    return {
+                        daysActive,
+                        episodesPerDay: Math.round(episodesPerDay * 100) / 100,
+                        episodesPerWeek: Math.round(episodesPerWeek * 100) / 100,
+                        estimatedEpisodes,
+                        firstWatched: item.firstWatched.toISOString().split("T")[0],
+                        itemId: item.itemId,
+                        lastWatched: item.lastWatched.toISOString().split("T")[0],
+                        totalDays,
+                        totalWatchTimeHours:
+                            Math.round((item.totalWatchTimeSeconds / 3600) * 100) / 100,
+                        totalWatchTimeSeconds: item.totalWatchTimeSeconds,
+                        watchDays: item.watchDays.slice(-7), // Last 7 days of activity
+                    };
+                })
+                .sort((a, b) => b.episodesPerDay - a.episodesPerDay);
+
+            res.json({
+                averageEpisodeLength: avgEpisodeSeconds,
+                itemId: itemId || null,
+                items: velocityResults,
+                period,
+                userId: user.id,
+                username: user.username || user.email,
+            });
+        } catch (error) {
+            console.error("Error fetching velocity:", error);
+            res.status(500).json({
+                error: "Failed to fetch velocity",
+                message: publicMessage(error, "Failed to fetch velocity"),
+            });
+        }
+    });
+
+    // Get single user with detailed information
+    router.get("/:id", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { basic } = req.query;
+
+            const user = await findUserById(prisma, id, getAccountId(req), {});
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Find groups that contain this user
+            const groups = await prisma.group.findMany({
+                include: {
+                    addons: {
+                        include: {
+                            addon: true,
+                        },
+                    },
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    userIds: {
+                        contains: user.id,
+                    },
+                },
+            });
+
+            // Group addons come from the user's primary group assignment
+            const primaryGroup = groups[0];
+            const currentAccountId = getAccountId(req);
+            // Resolve ordered addons via shared helper
+            const { getGroupAddons } = require("../utils/helpers");
+            const orderedAddons = primaryGroup
+                ? await getGroupAddons(prisma, primaryGroup.id, req)
+                : [];
+
+            // Get all groups the user belongs to
+            const userGroups = groups.map((g) => ({ id: g.id, name: g.name }));
+
+            // Note: stremioAddons field was removed from User schema
+            // Stremio addons are now fetched live when needed
+            const stremioAddonsCount = 0;
+            const stremioAddons = [];
+
+            // Parse excluded and protected addons from database
+            let excludedAddons = [];
+            let protectedAddons = [];
+
+            excludedAddons = parseAddonIds(user.excludedAddons);
+
+            // protectedAddons are stored as plaintext names (JSON array)
             try {
-              const isAccount = notification.isAccountNotification
-              const username = isAccount
-                ? `${sender.username} shared with ${targetUserMap.get(notification.item.targetUserId)?.username || 'a user'}`
-                : sender.username
-              const email = isAccount ? sender.email : sender.email
-              await sendShareNotification(
-                notification.webhookUrl,
-                username,
-                email,
-                sender.colorIndex,
-                notification.item
-              )
-            } catch (err) {
-              // Silently fail - notifications are best effort
+                protectedAddons = user.protectedAddons ? JSON.parse(user.protectedAddons) : [];
+            } catch {
+                protectedAddons = [];
             }
-          }
-        })
-      }
 
-      res.json({
-        success: errors.length === 0,
-        shared: results.length,
-        results,
-        errors: errors.length > 0 ? errors : undefined
-      })
-    } catch (error) {
-      console.error(`Failed to share items for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to share items', message: publicMessage(error, 'Failed to share items') })
+            // Calculate total watch time from completed sessions
+            let totalWatchTimeMinutes = 0;
+            try {
+                const activities = await prisma.watchActivity.findMany({
+                    select: {
+                        watchTimeSeconds: true,
+                    },
+                    where: {
+                        accountId: currentAccountId || "default",
+                        userId: id,
+                    },
+                });
+                const totalSeconds = activities.reduce(
+                    (sum, a) => sum + (a.watchTimeSeconds || 0),
+                    0
+                );
+                totalWatchTimeMinutes = Math.round(totalSeconds / 60);
+            } catch (error) {
+                console.warn(`Error fetching watch time for user ${id}:`, error.message);
+            }
+
+            let lastActive = null;
+            try {
+                lastActive =
+                    (
+                        await require("../utils/lastSeen").lastSeenFor(
+                            prisma,
+                            currentAccountId || "default",
+                            id
+                        )
+                    )?.toISOString() || null;
+            } catch (error) {
+                console.warn(`[users] last seen failed for ${id}:`, error.message);
+            }
+
+            // Transform for frontend
+            // The address sync itself uses (utils/ownAddress.js).
+            const traxBase = await require("../utils/ownAddress")
+                .publicBase(prisma, getAccountId(req))
+                .catch(() => "");
+
+            const transformedUser = {
+                email: user.email,
+                id: user.id,
+                nuvioProfileId: user.nuvioProfileId ?? 1,
+                providerType: user.providerType || "stremio",
+                username: user.username,
+                ...jellyfinSummary(user),
+                addons: orderedAddons,
+                avatarUrl: user.avatarUrl,
+                colorIndex: user.colorIndex,
+                createdAt: user.createdAt,
+                discordWebhookUrl: user.discordWebhookUrl || null,
+                excludedAddons,
+                excludeFromHouseholdStats: !!user.excludeFromHouseholdStats,
+                expiresAt: user.expiresAt,
+                groupId: groups[0]?.id || null,
+                groupName: groups[0]?.name || null,
+                groups: userGroups,
+                hasStremioConnection: !!user.stremioAuthKey,
+                inviteCode: user.inviteCode,
+                lastActive,
+                notifyOnWatch: user.notifyOnWatch !== false,
+                protectedAddons,
+                providerConnectionError: user.providerConnectionError || null,
+                providerConnectionErrorAt: user.providerConnectionErrorAt || null,
+                simklConnected: !!user.simklAccessToken,
+                simklConnectedAt: user.simklConnectedAt || null,
+                status: user.isActive ? "active" : "inactive",
+                stremioAddons,
+                stremioAddonsCount,
+                // SlickTrax Addon state. The token is a bearer credential, but this
+                // response is admin-session-only and the admin can already read it
+                // from the manifest URL the toggle returns - it is needed here so a
+                // page reload can still display/copy that URL.
+                traxAddonEnabled: !!user.traxAddonEnabled,
+                // Whether SYNC can actually install it, and the url it would use.
+                // The page used to build this url from the browser's own address,
+                // which looks right and proves nothing: with no public address
+                // configured, sync skips SlickTrax entirely while the row still
+                // shows a link. Answering from the server is the only honest way.
+                traxBaseKnown: !!traxBase,
+                traxManifestUrl:
+                    traxBase && user.traxToken
+                        ? traxBase +
+                          "/trax/" +
+                          user.traxToken +
+                          "/v" +
+                          require("./traxAddon").traxPathVersion(user) +
+                          "/manifest.json"
+                        : null,
+                traxToken: user.traxToken || null,
+                useGravatar: user.useGravatar === true,
+                watchTime: totalWatchTimeMinutes,
+            };
+
+            res.json(transformedUser);
+        } catch (error) {
+            console.error("Error fetching user details:", error);
+            res.status(500).json({ error: "Failed to fetch user details" });
+        }
+    });
+
+    // Account merge (Stremio<->Nuvio, same real person) - see
+    // server/utils/userMerge.js for the full design/reasoning.
+    router.get("/:id/merge-preview", async (req, res) => {
+        try {
+            const { donorId } = req.query;
+            if (!donorId) {
+                return res.status(400).json({ error: "donorId is required" });
+            }
+            const { getMergePreview } = require("../utils/userMerge");
+            const preview = await getMergePreview(prisma, req.params.id, donorId);
+            res.json(preview);
+        } catch (error) {
+            console.error("Error building merge preview:", error);
+            res.status(400).json({ error: publicMessage(error, "Failed to build merge preview") });
+        }
+    });
+
+    router.post("/:id/merge", async (req, res) => {
+        try {
+            const { donorId } = req.body || {};
+            if (!donorId) {
+                return res.status(400).json({ error: "donorId is required" });
+            }
+            const { mergeUsers } = require("../utils/userMerge");
+            const result = await mergeUsers(prisma, req.params.id, donorId);
+            res.json({ success: true, ...result });
+        } catch (error) {
+            console.error("Error merging users:", error);
+            res.status(400).json({ error: publicMessage(error, "Failed to merge users") });
+        }
+    });
+
+    router.get("/:id/merge-info", async (req, res) => {
+        try {
+            const { getUndoInfo } = require("../utils/userMerge");
+            const info = await getUndoInfo(prisma, req.params.id);
+            res.json({ info });
+        } catch (error) {
+            console.error("Error checking merge info:", error);
+            res.status(500).json({ error: "Failed to check merge info" });
+        }
+    });
+
+    router.post("/:id/undo-merge", async (req, res) => {
+        try {
+            const { undoMerge } = require("../utils/userMerge");
+            const result = await undoMerge(prisma, req.params.id);
+            res.json({ success: true, ...result });
+        } catch (error) {
+            console.error("Error undoing merge:", error);
+            res.status(400).json({ error: publicMessage(error, "Failed to undo merge") });
+        }
+    });
+
+    // Update user (including Discord settings for public users)
+    router.put("/:id", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { username, email, groupId, colorIndex, avatarUrl, expiresAt } = req.body;
+
+            // Check if user exists
+            const existingUser = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!existingUser) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Prepare update data
+            const updateData = {};
+
+            if (username !== undefined) {
+                updateData.username = username;
+            }
+
+            if (email !== undefined) {
+                // Check if email is already taken by another user of the SAME provider type
+                // (a Stremio user and a Nuvio user are allowed to share an email by design)
+                const emailExists = await prisma.user.findFirst({
+                    where: {
+                        AND: [
+                            { email },
+                            { id: { not: id } },
+                            { providerType: existingUser.providerType || "stremio" },
+                            ...(INSTANCE_TYPE === "public" && req.appAccountId
+                                ? [{ accountId: req.appAccountId }]
+                                : []),
+                        ],
+                    },
+                });
+
+                if (emailExists) {
+                    return res.status(400).json({ error: "Email already exists" });
+                }
+
+                updateData.email = email;
+            }
+
+            if (colorIndex !== undefined) {
+                updateData.colorIndex = colorIndex;
+            }
+
+            if (avatarUrl !== undefined) {
+                updateData.avatarUrl = avatarUrl || null; // allow clearing back to the generated/color avatar
+            }
+
+            if (expiresAt !== undefined) {
+                updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
+            }
+
+            // Handle Discord settings (for public users)
+            if (req.body.discordWebhookUrl !== undefined) {
+                updateData.discordWebhookUrl = req.body.discordWebhookUrl || null;
+            }
+            if (req.body.discordUserId !== undefined) {
+                updateData.discordUserId = req.body.discordUserId || null;
+            }
+            if (req.body.notifyOnWatch !== undefined) {
+                updateData.notifyOnWatch = req.body.notifyOnWatch !== false;
+            }
+
+            // Update user
+            const _updatedUser = await prisma.user.update({
+                data: updateData,
+                where: { id },
+            });
+
+            // Handle group assignment
+            if (groupId !== undefined) {
+                // Treat empty string as null (remove from all groups)
+                if (groupId === null || groupId === "") {
+                    // Remove user from all groups
+                    await require("../utils/helpers/database").removeUserFromAllGroups(
+                        prisma,
+                        id,
+                        getAccountId(req)
+                    );
+                } else {
+                    // Validate groupId is a valid string before calling assignUserToGroup
+                    if (typeof groupId === "string" && groupId.trim() !== "") {
+                        // First verify the group exists for this account
+                        const accountId = getAccountId(req);
+                        const groupExists = await prisma.group.findFirst({
+                            select: { id: true },
+                            where: {
+                                accountId,
+                                id: groupId,
+                            },
+                        });
+
+                        if (!groupExists) {
+                            return res.status(404).json({
+                                error: `Group not found: ${groupId} (accountId: ${accountId})`,
+                            });
+                        }
+
+                        await assignUserToGroup(prisma, id, groupId, req);
+                    }
+                }
+            }
+
+            // Fetch updated user for response
+            const userWithGroups = await prisma.user.findFirst({
+                // Scoped to the account - see the note in routes/addons.js. Without
+                // it, an id from another account resolves and is then written to.
+                where: { accountId: getAccountId(req), id },
+            });
+
+            // Find groups that contain this user using userIds JSON array
+            const userGroups = await prisma.group.findMany({
+                where: {
+                    userIds: {
+                        contains: id,
+                    },
+                },
+            });
+
+            // Transform for frontend response
+            const userGroup = userGroups[0]; // Get first group if any
+            const transformedUser = {
+                addons: userWithGroups.stremioAddons
+                    ? Array.isArray(userWithGroups.stremioAddons)
+                        ? userWithGroups.stremioAddons.length
+                        : Object.keys(userWithGroups.stremioAddons).length
+                    : 0,
+                email: userWithGroups.email,
+                groupId: userGroup?.id || null,
+                groupName: userGroup?.name || null,
+                groups: userGroups.length,
+                id: userWithGroups.id,
+                lastActive: null,
+                status: userWithGroups.isActive ? "active" : "inactive",
+                username: userWithGroups.username,
+            };
+            try {
+                transformedUser.lastActive =
+                    (
+                        await require("../utils/lastSeen").lastSeenFor(
+                            prisma,
+                            getAccountId(req) || "default",
+                            id
+                        )
+                    )?.toISOString() || null;
+            } catch (error) {
+                console.warn(`[users] last seen failed for ${id}:`, error.message);
+            }
+
+            // Log activity (temporarily disabled for debugging)
+            // try {
+            //   await prisma.activityLog.create({
+            //     data: {
+            //       userId: id,
+            //       action: 'user_updated',
+            //       details: JSON.stringify({ updatedFields: Object.keys(updateData) }),
+            //       accountId: getAccountId(req)
+            //     }
+            //   })
+            // } catch (logError) {
+            //   console.warn('Failed to log user update activity:', logError.message)
+            // }
+
+            res.json(transformedUser);
+        } catch (error) {
+            console.error("Error updating user:", error);
+            res.status(500).json({
+                details: publicMessage(error, "Failed to update user"),
+                error: "Failed to update user",
+            });
+        }
+    });
+
+    // Test user's Discord webhook
+    router.post("/:id/test-webhook", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            // Get user's webhook URL
+            const user = await prisma.user.findFirst({
+                select: { discordWebhookUrl: true, id: true, username: true },
+                where: { accountId, id },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Use provided URL or user's stored URL
+            const providedUrl =
+                typeof req.body?.webhookUrl === "string" ? req.body.webhookUrl.trim() : "";
+            const targetUrl = providedUrl || user.discordWebhookUrl;
+
+            if (!targetUrl) {
+                return res.status(400).json({ message: "No webhook URL configured" });
+            }
+
+            await postDiscord(targetUrl, `🔬 SlickSync test webhook message for ${user.username}`);
+            return res.json({ message: "Test message sent" });
+        } catch (error) {
+            console.error("Failed to send user webhook test:", error);
+            return res.status(500).json({
+                error: publicMessage(error, "Failed to send test message"),
+                message: "Failed to send test message",
+            });
+        }
+    });
+
+    // Enable user
+    router.put("/:id/enable", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Update user status to active
+            const updatedUser = await prisma.user.update({
+                data: { isActive: true },
+                include: {},
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            // Remove sensitive data
+            delete updatedUser.password;
+            delete updatedUser.stremioAuthKey;
+
+            res.json(updatedUser);
+        } catch (error) {
+            console.error("Error enabling user:", error);
+            res.status(500).json({
+                details: publicMessage(error, "Failed to enable user"),
+                error: "Failed to enable user",
+            });
+        }
+    });
+
+    // Disable user
+    router.put("/:id/disable", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Update user status to inactive
+            const updatedUser = await prisma.user.update({
+                data: { isActive: false },
+                include: {},
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            // Remove sensitive data
+            delete updatedUser.password;
+            delete updatedUser.stremioAuthKey;
+
+            res.json(updatedUser);
+        } catch (error) {
+            console.error("Error disabling user:", error);
+            res.status(500).json({
+                details: publicMessage(error, "Failed to disable user"),
+                error: "Failed to disable user",
+            });
+        }
+    });
+
+    // Delete user
+    router.delete("/:id", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Ensure user exists
+            const existingUser = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+            if (!existingUser) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Into the Trash first (30-day undo) - archived BEFORE anything is
+            // removed, so a failed archive aborts the delete, never the reverse.
+            await require("../utils/trash").archiveUserDelete(prisma, getAccountId(req), id);
+
+            // Remove user from all groups first (update userIds arrays)
+            await require("../utils/helpers/database").removeUserFromAllGroups(
+                prisma,
+                id,
+                getAccountId(req)
+            );
+
+            // Delete related records first to avoid FK constraint errors
+            await prisma.$transaction([
+                // ActivityLog model removed
+                prisma.user.delete({
+                    where: {
+                        accountId: getAccountId(req),
+                        id,
+                    },
+                }),
+            ]);
+            await require("../utils/jellyfinProfiles").forgetPersonHousehold(prisma, id);
+
+            res.json({ message: "User deleted successfully" });
+        } catch (error) {
+            console.error("Error deleting user:", error);
+            res.status(500).json({ message: "Failed to delete user" });
+        }
+    });
+
+    // Get user sync status (delegates to shared util)
+    router.get("/:id/sync-status", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { groupId } = req.query;
+
+            // Read account-backed sync settings; fallback to query param only if unavailable
+            let unsafeMode = false;
+            try {
+                const acct = await prisma.appAccount.findFirst({
+                    select: { sync: true },
+                    where: { id: getAccountId(req) },
+                });
+                let cfg = acct?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object" && typeof cfg.safe === "boolean") {
+                    unsafeMode = !cfg.safe;
+                } else {
+                    unsafeMode = req.query?.unsafe === "true" || req.body?.unsafe === true;
+                }
+            } catch {
+                unsafeMode = req.query?.unsafe === "true" || req.body?.unsafe === true;
+            }
+
+            const { createGetUserSyncStatus } = require("../utils/sync");
+            const getUserSyncStatus = createGetUserSyncStatus({
+                canonicalizeManifestUrl,
+                createProvider,
+                decrypt,
+                getAccountId,
+                getDecryptedManifestUrl,
+                parseAddonIds,
+                parseProtectedAddons,
+                prisma,
+                StremioAPIClient,
+            });
+
+            const result = await getUserSyncStatus(id, { groupId, unsafe: unsafeMode }, req);
+            return res.json(result);
+        } catch (error) {
+            console.error("Error getting sync status:", error);
+            res.status(500).json({ message: "Failed to get sync status" });
+        }
+    });
+
+    // Get user's sync plan (current vs desired addons for debugging)
+    router.get("/:id/sync-plan", async (req, res) => {
+        try {
+            const { id } = req.params;
+            console.log("[sync-plan] Request for user:", id);
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    accountId: true,
+                    excludedAddons: true,
+                    id: true,
+                    isActive: true,
+                    nuvioRefreshToken: true,
+                    nuvioUserId: true,
+                    protectedAddons: true,
+                    providerType: true,
+                    stremioAuthKey: true,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: { accountId: getAccountId(req), id },
+            });
+            console.log("[sync-plan] User found:", user ? user.id : "null");
+            if (!user) {
+                return res.status(404).json({ message: "User not found" });
+            }
+            const hasCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId);
+            if (!hasCreds) {
+                return res.status(400).json({ message: "User not connected to a provider" });
+            }
+
+            // Read account-backed sync settings
+            let unsafeMode = false;
+            let useCustomFields = true;
+            try {
+                const acct = await prisma.appAccount.findFirst({
+                    select: { sync: true },
+                    where: { id: getAccountId(req) },
+                });
+                let cfg = acct?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object") {
+                    if (typeof cfg.safe === "boolean") {
+                        unsafeMode = !cfg.safe;
+                    }
+                    if (typeof cfg.useCustomFields === "boolean") {
+                        useCustomFields = cfg.useCustomFields;
+                    }
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
+
+            // Compute sync plan
+            console.log("[sync-plan] Computing sync plan...");
+            const { computeUserSyncPlan } = require("../utils/sync");
+            const plan = await computeUserSyncPlan(user, req, {
+                canonicalizeManifestUrl,
+                createProvider,
+                decrypt,
+                getAccountId,
+                parseAddonIds,
+                parseProtectedAddons,
+                prisma,
+                StremioAPIClient,
+                unsafeMode,
+                useCustomFields,
+            });
+            console.log("[sync-plan] Plan computed, success:", plan.success, "error:", plan.error);
+
+            if (!plan.success) {
+                return res
+                    .status(500)
+                    .json({ message: plan.error || "Failed to compute sync plan" });
+            }
+
+            // Debug: show actual comparison (same urlOnly mode the plan itself uses)
+            const { createManifestFingerprint } = require("../utils/sync");
+            const urlOnly = (user.providerType || "stremio") !== "stremio";
+            const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly });
+            const currentKeys = (plan.current || []).map(fingerprint);
+            const desiredKeys = (plan.desired || []).map(fingerprint);
+            const debugComparison = {
+                allMatch:
+                    currentKeys.length === desiredKeys.length &&
+                    currentKeys.every((k, i) => k === desiredKeys[i]),
+                currentKeys,
+                currentLength: currentKeys.length,
+                desiredKeys,
+                desiredLength: desiredKeys.length,
+                lengthsMatch: currentKeys.length === desiredKeys.length,
+            };
+            console.log("[sync-plan] Comparison:", JSON.stringify(debugComparison));
+
+            const currentWithFingerprint = (plan.current || []).map((addon) => ({
+                fingerprint: fingerprint(addon),
+                name: addon?.manifest?.name || addon?.transportName || "Unknown",
+                transportUrl: addon?.transportUrl || addon?.manifestUrl || "",
+            }));
+
+            const desiredWithFingerprint = (plan.desired || []).map((addon) => ({
+                fingerprint: fingerprint(addon),
+                name: addon?.manifest?.name || addon?.transportName || "Unknown",
+                transportUrl: addon?.transportUrl || addon?.manifestUrl || "",
+            }));
+
+            const alreadySynced = plan.alreadySynced;
+            console.log(
+                "[sync-plan] Sending response, current:",
+                currentWithFingerprint.length,
+                "desired:",
+                desiredWithFingerprint.length
+            );
+            console.log("[sync-plan] Already synced:", alreadySynced);
+            console.log(
+                "[sync-plan] Current fingerprints:",
+                currentWithFingerprint.map((f) => f.fingerprint)
+            );
+            console.log(
+                "[sync-plan] Desired fingerprints:",
+                desiredWithFingerprint.map((f) => f.fingerprint)
+            );
+            res.json({
+                alreadySynced,
+                current: currentWithFingerprint,
+                currentCount: currentWithFingerprint.length,
+                debug: {
+                    allMatch: debugComparison.allMatch,
+                    lengthsMatch: debugComparison.lengthsMatch,
+                },
+                desired: desiredWithFingerprint,
+                desiredCount: desiredWithFingerprint.length,
+            });
+        } catch (error) {
+            console.error("[sync-plan] Error:", error.message, error.stack);
+            res.status(500).json({ message: publicMessage(error, "Failed to get sync plan") });
+        }
+    });
+
+    // Get user's raw Stremio addons (getUserAddons function)
+    router.get("/:id/user-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    id: true,
+                    isActive: true,
+                    nuvioRefreshToken: true,
+                    nuvioUserId: true,
+                    providerType: true,
+                    stremioAuthKey: true,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            if (!(user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId))) {
+                return res.status(400).json({ message: "User not connected to a provider" });
+            }
+
+            // Import the getUserAddons function
+            const { getUserAddons } = require("../utils/sync");
+
+            // Get raw addons from the user's provider
+            const result = await getUserAddons(user, req, {
+                createProvider,
+                decrypt,
+                StremioAPIClient,
+            });
+
+            if (!result.success) {
+                console.error("❌ getUserAddons failed:", result.error);
+                return res
+                    .status(500)
+                    .json({ error: result.error, message: "Failed to fetch Stremio addons" });
+            }
+
+            // Nuvio stores only {url, name} per addon, so the manifest that comes
+            // back with each entry is a stub: no catalogs, no resources. Anything
+            // that has to answer "does this addon still serve this catalog" - the
+            // Nuvio Collections editor validating a folder's sources, most
+            // obviously - reads those empty arrays and concludes every source is
+            // broken, which is exactly how a perfectly good linked catalog ends up
+            // labelled "addon removed or catalog no longer exists". Fetching each
+            // addon's own manifest (cached, best-effort, shared with the home-row
+            // editor) is what makes those checks mean anything on Nuvio.
+            let addonsOut = result.addons;
+            if (user.providerType === "nuvio") {
+                try {
+                    const { fetchManifest } = require("../utils/nuvioHomeLayout");
+                    const { localTraxManifest } = require("../utils/localTraxManifest");
+                    const list = Array.isArray(addonsOut) ? addonsOut : addonsOut?.addons || [];
+                    const enriched = await Promise.all(
+                        list.map(async (a) => {
+                            // Our own SlickTrax manifest is built here rather than fetched:
+                            // see utils/localTraxManifest.js. It is authoritative, instant,
+                            // and works on instances whose hostname sits behind a login.
+                            const real =
+                                (await localTraxManifest(prisma, a?.transportUrl)) ||
+                                (await fetchManifest(a?.transportUrl));
+                            // The stub's own fields stay as a floor: a dead addon keeps its
+                            // name rather than becoming nameless.
+                            return real
+                                ? { ...a, manifest: { ...(a?.manifest || {}), ...real } }
+                                : a;
+                        })
+                    );
+                    addonsOut = Array.isArray(addonsOut)
+                        ? enriched
+                        : { ...addonsOut, addons: enriched };
+                } catch {
+                    /* stubs are still better than an error */
+                }
+            }
+            res.json(addonsOut);
+        } catch (error) {
+            console.error("❌ Error fetching raw Stremio addons:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch raw Stremio addons"),
+                message: "Failed to fetch raw Stremio addons",
+            });
+        }
+    });
+
+    // Get user's Stremio addons
+    router.get("/:id/stremio-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+            // Fetch the full user record - need providerType to know which
+            // provider's addon fetch to use, not just Stremio's
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Non-Stremio providers (e.g. Nuvio) don't have a stremioAuthKey at
+            // all - they were previously always rejected here with "not
+            // connected to Stremio" even though the account has its own addon
+            // list. Route those through the provider-agnostic getAddons()
+            // instead, same as the live addon count on the Users list.
+            if (user.providerType && user.providerType !== "stremio") {
+                try {
+                    const provider = createProvider(user, { decrypt, req });
+                    if (!provider) {
+                        return res
+                            .status(400)
+                            .json({ message: `User is not connected to ${user.providerType}` });
+                    }
+                    const result = await provider.getAddons();
+                    const rawAddons = Array.isArray(result?.addons) ? result.addons : [];
+
+                    // Nuvio only stores {url, name} per addon ("urlOnly" sync mode) -
+                    // no logo/version/description, unlike Stremio's account API which
+                    // returns full manifests directly. Fetch each addon's own
+                    // manifest.json to get real icon/version data, same as what a
+                    // user would see in Nuvio/Stremio itself. Best-effort per addon -
+                    // a slow or dead addon server shouldn't fail the whole import.
+                    async function fetchManifest(transportUrl) {
+                        if (!transportUrl) {
+                            return null;
+                        }
+                        const manifestUrl = transportUrl.endsWith(".json")
+                            ? transportUrl
+                            : `${transportUrl.replace(/\/$/, "")}/manifest.json`;
+                        try {
+                            const controller = new AbortController();
+                            const timeout = setTimeout(() => controller.abort(), 5000);
+                            // The address comes from the person's own provider account, so
+                            // it is checked like any other address typed in somewhere. A
+                            // refused one reads as an addon that did not answer.
+                            const resp = await safeFetch(
+                                manifestUrl,
+                                { signal: controller.signal },
+                                instancePolicy()
+                            );
+                            clearTimeout(timeout);
+                            if (!resp.ok) {
+                                return null;
+                            }
+                            return await resp.json();
+                        } catch {
+                            return null;
+                        }
+                    }
+
+                    const { localTraxManifest } = require("../utils/localTraxManifest");
+                    const enriched = await Promise.all(
+                        rawAddons.map(async (a) => {
+                            const fetched =
+                                (await localTraxManifest(prisma, a?.transportUrl)) ||
+                                (await fetchManifest(a?.transportUrl));
+                            return {
+                                ...a,
+                                manifest: { ...(a?.manifest || {}), ...(fetched || {}) },
+                            };
+                        })
+                    );
+
+                    const addons = enriched.map((a) => ({
+                        description: a?.manifest?.description || "",
+                        iconUrl: a?.manifest?.logo || null,
+                        id: a?.manifest?.id || a?.transportUrl || "unknown",
+                        manifest: {
+                            catalogs: a?.manifest?.catalogs || [],
+                            description: a?.manifest?.description || "",
+                            id: a?.manifest?.id || "unknown",
+                            logo: a?.manifest?.logo || null,
+                            name: a?.manifest?.name || "Unknown",
+                            resources: a?.manifest?.resources || [],
+                            types: a?.manifest?.types || ["other"],
+                            version: a?.manifest?.version || null,
+                        },
+                        manifestUrl: a?.transportUrl || null,
+                        name: a?.manifest?.name || a?.transportName || "Unknown",
+                        version: a?.manifest?.version || null,
+                    }));
+                    return res.json({ addons, count: addons.length, userId: id });
+                } catch (error) {
+                    console.error(`Error fetching ${user.providerType} addons:`, error);
+                    // An expired sign-in says so, with what to do - not a bare "failed".
+                    if (
+                        /session does not exist|unauthorized|invalid auth| 401|authentication expired/i.test(
+                            String(error?.message || "")
+                        )
+                    ) {
+                        const app =
+                            user.providerType === "nuvio"
+                                ? "Nuvio"
+                                : user.providerType === "jellyfin"
+                                  ? "server"
+                                  : "Stremio";
+                        return res.status(409).json({
+                            message: `${user.username || "This person"}'s ${app} sign-in has expired - reconnect them first (Reconnect, next to their name)`,
+                            reconnect: true,
+                        });
+                    }
+                    const appName =
+                        user.providerType === "nuvio"
+                            ? "Nuvio"
+                            : user.providerType === "jellyfin"
+                              ? "their server"
+                              : "Stremio";
+                    return res.status(500).json({
+                        error: publicMessage(error, `Couldn't read their addons from ${appName}`),
+                        message: `Couldn't read their addons from ${appName}`,
+                    });
+                }
+            }
+
+            if (!user.stremioAuthKey) {
+                return res.status(400).json({ message: "User is not connected to Stremio" });
+            }
+
+            // Decrypt stored auth key
+            let authKeyPlain;
+            try {
+                authKeyPlain = decrypt(user.stremioAuthKey, req);
+            } catch (e) {
+                console.error("Decryption failed:", e.message);
+                return res.status(500).json({ message: "Failed to decrypt Stremio credentials" });
+            }
+
+            // Use stateless client with authKey to fetch addon collection directly
+            try {
+                const apiClient = new StremioAPIClient({
+                    authKey: authKeyPlain,
+                    endpoint: "https://api.strem.io",
+                });
+                const collection = await apiClient.request("addonCollectionGet", {});
+
+                const rawAddons = collection?.addons || collection || {};
+                const addonsNormalized = Array.isArray(rawAddons)
+                    ? rawAddons
+                    : typeof rawAddons === "object"
+                      ? Object.values(rawAddons)
+                      : [];
+
+                // Keep only safe serializable fields (skip manifest fetching for performance)
+                const allAddons = addonsNormalized.map((a) => {
+                    return {
+                        description: a?.description || a?.manifest?.description || "",
+                        iconUrl: a?.iconUrl || a?.manifest?.logo || null, // Add iconUrl field
+                        id: a?.id || a?.manifest?.id || "unknown",
+                        // Include manifest object for frontend compatibility - ensure it's never null
+                        manifest: a?.manifest || {
+                            catalogs: a?.manifest?.catalogs || [],
+                            description: a?.manifest?.description || a?.description || "",
+                            id: a?.manifest?.id || a?.id || "unknown",
+                            logo: a?.iconUrl || a?.manifest?.logo || null, // Add logo to manifest
+                            name: a?.manifest?.name || a?.name || "Unknown",
+                            resources: a?.manifest?.resources || [],
+                            // Include other essential manifest fields to prevent null errors
+                            types: a?.manifest?.types || ["other"],
+                            version: a?.manifest?.version || a?.version || "unknown",
+                        },
+                        manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
+                        name: a?.name || a?.manifest?.name || "Unknown",
+                        version: a?.version || a?.manifest?.version || "unknown",
+                    };
+                });
+
+                // Keep all addons for display (don't filter default addons in the main endpoint)
+                const addons = allAddons;
+
+                return res.json({
+                    addons,
+                    count: addons.length,
+                    userId: id,
+                });
+            } catch (error) {
+                console.error("Error fetching Stremio addons:", error);
+                if (
+                    /session does not exist|unauthorized|invalid auth| 401/i.test(
+                        String(error?.message || "")
+                    )
+                ) {
+                    return res.status(409).json({
+                        message: `${user.username || "This person"}'s Stremio sign-in has expired - reconnect them first (Reconnect, next to their name)`,
+                        reconnect: true,
+                    });
+                }
+                return res.status(500).json({
+                    error: publicMessage(error, "Couldn't read their addons from Stremio"),
+                    message: "Couldn't read their addons from Stremio",
+                });
+            }
+        } catch (error) {
+            console.error("Error getting Stremio addons:", error);
+            res.status(500).json({ message: "Failed to get Stremio addons" });
+        }
+    });
+
+    // --- Nuvio Collections (admin) - the home-screen folder/catalog-source
+    // organizer in the real Nuvio app, not to be confused with this app's own
+    // local "Catalogs" lists. Lives here alongside stremio-addons above since
+    // it's the same "look up a managed User, get a provider, call a method"
+    // shape as every other per-user provider passthrough in this file.
+
+    // List a Nuvio account's profiles (Netflix-style sub-profiles on one login).
+    router.get("/:id/nuvio-profiles", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            if (user.providerType !== "nuvio") {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const profiles = await provider.getProfiles();
+
+            // Say which profiles are actually worth pointing a user at. A profile
+            // set to use the primary's addons has no list of its own, and one that
+            // is already managed by another user here should not be offered twice.
+            const siblings = await prisma.user.findMany({
+                select: { id: true, nuvioProfileId: true, username: true },
+                where: { accountId: getAccountId(req), email: user.email, providerType: "nuvio" },
+            });
+            const byProfile = new Map(siblings.map((u) => [u.nuvioProfileId ?? 1, u]));
+
+            const annotated = (profiles || []).map((p) => {
+                const index = Number(p.profile_index ?? p.profileIndex);
+                const owner = byProfile.get(index) || null;
+                return {
+                    ...p,
+                    // Addable when it keeps its own addons and nothing here manages it
+                    // yet. The primary is always managed by whoever was imported first.
+                    canAdd: p.uses_primary_addons !== true && !owner,
+                    isThisUser: owner ? owner.id === user.id : false,
+                    managedBy: owner ? { id: owner.id, username: owner.username } : null,
+                    profileIndex: index,
+                    usesPrimaryAddons: p.uses_primary_addons === true,
+                };
+            });
+
+            res.json({ profiles: annotated });
+        } catch (error) {
+            console.error("Error fetching Nuvio profiles:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch Nuvio profiles"),
+                message: "Failed to fetch Nuvio profiles",
+            });
+        }
+    });
+
+    // Add one of this account's other profiles as its own user, so that
+    // profile's addon list can be managed and synced like anyone else's. The
+    // account is already connected, so this reuses the credential already
+    // stored rather than asking for the password a second time.
+    router.post("/:id/nuvio-profiles/:profileId/add-user", async (req, res) => {
+        try {
+            const { id, profileId } = req.params;
+            const accountId = getAccountId(req);
+            const profileIndex = Number(profileId);
+            if (!Number.isInteger(profileIndex) || profileIndex < 1) {
+                return res.status(400).json({ message: "Invalid profile" });
+            }
+            if (profileIndex === 1) {
+                return res
+                    .status(400)
+                    .json({ message: "The primary profile is already managed by this user" });
+            }
+
+            const user = await prisma.user.findFirst({ where: { accountId, id } });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            if (user.providerType !== "nuvio") {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            if (!(user.nuvioRefreshToken && user.nuvioUserId)) {
+                return res
+                    .status(400)
+                    .json({ message: "This user has no stored Nuvio credential to reuse" });
+            }
+
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+
+            const profiles = await provider.getProfiles();
+            const match = (profiles || []).find(
+                (pr) => Number(pr.profile_index ?? pr.profileIndex) === profileIndex
+            );
+            if (!match) {
+                return res
+                    .status(404)
+                    .json({ message: "That profile no longer exists on this Nuvio account" });
+            }
+            if (match.uses_primary_addons === true) {
+                return res.status(400).json({
+                    message: `"${match.name || `Profile ${profileIndex}`}" is set to use the primary profile's addons, so it has no list of its own to manage.`,
+                });
+            }
+
+            const already = await prisma.user.findFirst({
+                select: { id: true, username: true },
+                where: {
+                    accountId,
+                    email: user.email,
+                    nuvioProfileId: profileIndex,
+                    providerType: "nuvio",
+                },
+            });
+            if (already) {
+                return res
+                    .status(409)
+                    .json({ message: `That profile is already managed by ${already.username}` });
+            }
+
+            // Same credential, re-encrypted rather than copied, so the new row is
+            // written exactly the way every other credential here is.
+            const plainToken = decrypt(user.nuvioRefreshToken, req);
+            if (!plainToken) {
+                return res
+                    .status(400)
+                    .json({ message: "Could not read the stored Nuvio credential" });
+            }
+
+            let username = (match.name || `Profile ${profileIndex}`).trim().slice(0, 40);
+            const base = username;
+            let attempt = 0;
+            while (await prisma.user.findFirst({ where: { accountId, username } })) {
+                attempt++;
+                if (attempt > 100) {
+                    return res
+                        .status(409)
+                        .json({ message: "Could not pick a free username for that profile" });
+                }
+                username = `${base} ${attempt + 1}`;
+            }
+
+            const created = await prisma.user.create({
+                data: {
+                    accountId,
+                    avatarUrl: createDefaultAvatar(),
+                    // The picker wraps whatever it is given, so this just nudges each
+                    // profile onto a different colour from the one it came from.
+                    colorIndex: (user.colorIndex || 0) + profileIndex,
+                    email: user.email,
+                    isActive: true,
+                    nuvioProfileId: profileIndex,
+                    nuvioRefreshToken: encrypt(plainToken, req),
+                    nuvioUserId: user.nuvioUserId,
+                    providerType: "nuvio",
+                    username,
+                },
+            });
+
+            res.status(201).json({
+                message: `${username} now manages that profile's addons`,
+                user: { id: created.id, nuvioProfileId: profileIndex, username: created.username },
+            });
+        } catch (error) {
+            console.error("Error adding a Nuvio profile as a user:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to add that profile"),
+                message: "Failed to add that profile",
+            });
+        }
+    });
+
+    // --- Profiles: whose viewing each of a Nuvio account's profiles is ------
+    // The rules live in utils/nuvioProfiles.js; these routes are the Profiles
+    // card on a Nuvio person's page.
+
+    // Everything about one Nuvio account the card needs, read once.
+    async function profileContext(req, id) {
+        const accountId = getAccountId(req);
+        const user = await prisma.user.findFirst({ where: { accountId, id } });
+        if (!user) {
+            return { message: "User not found", status: 404 };
+        }
+        if (user.providerType !== "nuvio" || !user.nuvioUserId) {
+            return { message: "User is not connected to Nuvio", status: 400 };
+        }
+        const provider = createProvider(user, { decrypt, req });
+        if (!provider) {
+            return { message: "User is not connected to Nuvio", status: 400 };
+        }
+        let raw = [];
+        try {
+            raw = await provider.getProfiles();
+        } catch (e) {
+            // An expired sign-in won't fix itself on a retry - say what to do.
+            if (
+                /authentication expired|session does not exist|unauthori[sz]ed|invalid auth| 401/i.test(
+                    e?.message || ""
+                )
+            ) {
+                return {
+                    message: `${user.username || "This person"}'s Nuvio sign-in has expired - reconnect them to see their profiles`,
+                    status: 502,
+                };
+            }
+            return {
+                message: "Could not read this account's profiles from Nuvio just now",
+                status: 502,
+            };
+        }
+        const profiles = (raw || [])
+            .map((p) => ({
+                color: p.avatar_color_hex || null,
+                index: Number(p.profile_index ?? p.profileIndex),
+                name: p.name || null,
+                usesPrimaryAddons: p.uses_primary_addons === true,
+            }))
+            .filter((p) => Number.isInteger(p.index) && p.index > 0)
+            .sort((a, b) => a.index - b.index);
+        if (!profiles.length) {
+            profiles.push({ color: null, index: 1, name: null, usesPrimaryAddons: false });
+        }
+        const np = require("../utils/nuvioProfiles");
+        const [siblings, routes] = await Promise.all([
+            np.loadSiblings(prisma, accountId, user.nuvioUserId),
+            np.loadRoutes(prisma, accountId, user.nuvioUserId),
+        ]);
+        return { accountId, np, profiles, routes, siblings, user };
     }
-  })
 
-  // Remove a share
-  router.delete('/:userId/shares/:shareId', async (req, res) => {
-    try {
-      const { userId, shareId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: { id: userId, accountId },
-        select: { id: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const removed = removeShare(accountId, userId, shareId)
-      if (!removed) {
-        return res.status(404).json({ error: 'Share not found' })
-      }
-
-      res.json({ success: true, message: 'Share removed' })
-    } catch (error) {
-      console.error(`Failed to remove share ${req.params.shareId} for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to remove share', message: publicMessage(error, 'Failed to remove share') })
+    async function profilesView(ctx) {
+        const { accountId, user, profiles, siblings, routes, np } = ctx;
+        const merges = await prisma.profileMerge.findMany({
+            orderBy: { createdAt: "desc" },
+            where: { accountId, nuvioUserId: user.nuvioUserId, undoneAt: null },
+        });
+        const historyCount = async (where) => {
+            const [movies, episodes] = await Promise.all([
+                prisma.movieWatchHistory.count({ where: { accountId, ...where } }),
+                prisma.episodeWatchHistory.count({ where: { accountId, ...where } }),
+            ]);
+            return { episodes, movies };
+        };
+        const persons = await Promise.all(
+            siblings.map(async (s) => ({
+                avatarUrl: s.avatarUrl || null,
+                colorIndex: s.colorIndex ?? 0,
+                email: s.email || null,
+                id: s.id,
+                isActive: s.isActive !== false,
+                profileIndex: np.profileOf(s),
+                useGravatar: !!s.useGravatar,
+                username: s.username,
+                ...(await historyCount({ userId: s.id })),
+            }))
+        );
+        const rows = await Promise.all(
+            profiles.map(async (p) => {
+                const ownerId = np.ownerOf(p.index, siblings, routes);
+                const own = siblings.find((s) => np.profileOf(s) === p.index) || null;
+                const merge = own ? null : merges.find((m) => m.profileIndex === p.index) || null;
+                return {
+                    ...p,
+                    // Whose limits its Limits pill opens: its own person's, or its own as a
+                    // profile merged into someone (utils/screenSubjects.js).
+                    limitId: own
+                        ? own.id
+                        : require("../utils/screenSubjects").nuvioProfileSubject(
+                              user.nuvioUserId,
+                              p.index
+                          ),
+                    merged: merge
+                        ? {
+                              createdAt: merge.createdAt,
+                              donorUsername: merge.donorUsername,
+                              id: merge.id,
+                          }
+                        : null,
+                    ownerId,
+                    ownPersonId: own?.id || null,
+                    skipped: !own && !!routes.get(p.index)?.skip,
+                    titles:
+                        ownerId && p.name
+                            ? await historyCount({ profileLabel: p.name, userId: ownerId })
+                            : { episodes: 0, movies: 0 },
+                };
+            })
+        );
+        const misplaced = await np.findMisplaced(
+            prisma,
+            accountId,
+            siblings,
+            routes,
+            profiles.map((p) => ({ name: p.name, profile_index: p.index }))
+        );
+        const misplacedTitles = misplaced.reduce((n, m) => n + m.movies + m.episodes, 0);
+        return {
+            misplaced: misplacedTitles ? { titles: misplacedTitles } : null,
+            persons,
+            profiles: rows,
+        };
     }
-  })
 
-  // Mark share as viewed
-  router.put('/:userId/shares/:shareId/viewed', async (req, res) => {
-    try {
-      const { userId, shareId } = req.params
-      const accountId = getAccountId(req)
-
-      if (!accountId) {
-        return res.status(401).json({ error: 'Unauthorized' })
-      }
-
-      const user = await prisma.user.findFirst({
-        where: { id: userId, accountId },
-        select: { id: true }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const marked = markShareAsViewed(accountId, userId, shareId)
-      if (!marked) {
-        return res.status(404).json({ error: 'Share not found' })
-      }
-
-      res.json({ success: true, message: 'Share marked as viewed' })
-    } catch (error) {
-      console.error(`Failed to mark share ${req.params.shareId} as viewed for user ${req.params.userId}:`, error)
-      res.status(500).json({ error: 'Failed to mark share as viewed', message: publicMessage(error, 'Failed to mark share as viewed') })
+    function afterProfileChange(accountId) {
+        try {
+            require("../utils/continueWatching").invalidateContinueWatching(accountId);
+        } catch {
+            /* optional */
+        }
+        try {
+            require("../utils/metricsCache").clearMetricsForAccount(accountId);
+        } catch {
+            /* optional */
+        }
+        try {
+            require("../utils/liveEvents").emitLive(accountId, "sync");
+        } catch {
+            /* optional */
+        }
     }
-  })
 
-  // Decode Stremio watched bitfield
-  router.post('/decode-watched', async (req, res) => {
-    try {
-      const { watched } = req.body
-
-      if (!watched || typeof watched !== 'string') {
-        return res.status(400).json({ error: 'watched field is required' })
-      }
-
-      const { decodeWatchedBitfield } = require('../utils/stremioWatchedDecoder')
-      const decoded = decodeWatchedBitfield(watched)
-
-      if (!decoded) {
-        return res.status(400).json({ error: 'Failed to decode watched field' })
-      }
-
-      res.json(decoded)
-    } catch (error) {
-      console.error('Error decoding watched bitfield:', error)
-      res.status(500).json({ error: 'Failed to decode watched field', message: publicMessage(error, 'Failed to decode watched field') })
+    // A person for one profile of a Nuvio account someone here is already
+    // connected to. The login is reused - every person on the account shares it.
+    async function createProfilePerson(req, baseUser, profileIndex, profileName) {
+        const accountId = getAccountId(req);
+        const plainToken = decrypt(baseUser.nuvioRefreshToken, req);
+        if (!plainToken) {
+            throw Object.assign(new Error("Could not read the stored Nuvio credential"), {
+                status: 400,
+            });
+        }
+        let username = (profileName || `Profile ${profileIndex}`).trim().slice(0, 40);
+        const base = username;
+        let attempt = 0;
+        while (await prisma.user.findFirst({ where: { accountId, username } })) {
+            attempt++;
+            if (attempt > 100) {
+                throw Object.assign(new Error("Could not pick a free username for that profile"), {
+                    status: 409,
+                });
+            }
+            username = `${base} ${attempt + 1}`;
+        }
+        return prisma.user.create({
+            data: {
+                accountId,
+                avatarUrl: createDefaultAvatar(),
+                // The picker wraps whatever it is given, so this just nudges each
+                // profile onto a different colour from the one it came from.
+                colorIndex: (baseUser.colorIndex || 0) + profileIndex,
+                email: baseUser.email,
+                isActive: true,
+                nuvioProfileId: profileIndex,
+                nuvioRefreshToken: encrypt(plainToken, req),
+                nuvioUserId: baseUser.nuvioUserId,
+                providerType: "nuvio",
+                username,
+            },
+        });
     }
-  })
 
-  return router;
+    router.get("/:id/profiles", async (req, res) => {
+        try {
+            const ctx = await profileContext(req, req.params.id);
+            if (ctx.status) {
+                return res.status(ctx.status).json({ message: ctx.message });
+            }
+            res.json(await profilesView(ctx));
+        } catch (error) {
+            console.error("Error reading profiles:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to read profiles"),
+                message: "Failed to read profiles",
+            });
+        }
+    });
+
+    // Where a profile's viewing goes: into someone on the same Nuvio account
+    // ('merge into'), nowhere ('skip', not tracked), or back to the default.
+    // Merging takes the history it already recorded with it, and a profile
+    // that has its own person is merged as a whole person.
+    router.put("/:id/profiles/:index", async (req, res) => {
+        try {
+            const ctx = await profileContext(req, req.params.id);
+            if (ctx.status) {
+                return res.status(ctx.status).json({ message: ctx.message });
+            }
+            const { accountId, user, profiles, siblings, routes, np } = ctx;
+            const index = Number(req.params.index);
+            const profile = profiles.find((p) => p.index === index);
+            if (!profile) {
+                return res
+                    .status(404)
+                    .json({ message: "That profile is not on this Nuvio account" });
+            }
+            const target = req.body?.target;
+            const own = siblings.find((s) => np.profileOf(s) === index) || null;
+            const currentOwner = np.ownerOf(index, siblings, routes);
+            const routeKey = {
+                accountId_nuvioUserId_profileIndex: {
+                    accountId,
+                    nuvioUserId: user.nuvioUserId,
+                    profileIndex: index,
+                },
+            };
+            let removedUserId = null;
+
+            if (target === "default") {
+                // Back to the default: its own person if it has one, otherwise the
+                // main profile's person. Nothing was recorded while it was not
+                // tracked, so there is nothing to move.
+                await prisma.nuvioProfileRoute.deleteMany({
+                    where: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index },
+                });
+            } else if (target === "skip") {
+                if (own) {
+                    return res.status(400).json({
+                        message: `This profile is ${own.username}. Turn them off or delete them instead.`,
+                    });
+                }
+                await prisma.nuvioProfileRoute.upsert({
+                    create: {
+                        accountId,
+                        nuvioUserId: user.nuvioUserId,
+                        profileIndex: index,
+                        skip: true,
+                        targetUserId: null,
+                    },
+                    update: { skip: true, targetUserId: null },
+                    where: routeKey,
+                });
+            } else {
+                const person = siblings.find((s) => s.id === target);
+                if (!person) {
+                    return res
+                        .status(400)
+                        .json({ message: "Choose someone on this Nuvio account" });
+                }
+                if (person.id !== currentOwner) {
+                    if (own) {
+                        if (own.id === siblings[0]?.id) {
+                            return res.status(400).json({
+                                message:
+                                    "The main profile's person stays. Merge the other profiles into them instead.",
+                            });
+                        }
+                        await np.mergeProfilePerson(prisma, {
+                            accountId,
+                            donorId: own.id,
+                            profileName: profile.name,
+                            survivorId: person.id,
+                        });
+                        removedUserId = own.id;
+                    } else {
+                        await require("../utils/userMerge").runLongTransaction(
+                            prisma,
+                            async (tx) => {
+                                await tx.nuvioProfileRoute.upsert({
+                                    create: {
+                                        accountId,
+                                        nuvioUserId: user.nuvioUserId,
+                                        profileIndex: index,
+                                        skip: false,
+                                        targetUserId: person.id,
+                                    },
+                                    update: { skip: false, targetUserId: person.id },
+                                    where: routeKey,
+                                });
+                                if (currentOwner) {
+                                    await np.moveProfileHistory(tx, {
+                                        accountId,
+                                        fromUserId: currentOwner,
+                                        profileLabel: profile.name,
+                                        toUserId: person.id,
+                                    });
+                                }
+                            }
+                        );
+                    }
+                }
+            }
+
+            afterProfileChange(accountId);
+            // The page's own person may just have been merged away.
+            const anchorId = removedUserId === user.id ? target : user.id;
+            const next = await profileContext(req, anchorId);
+            if (next.status) {
+                return res.status(next.status).json({ message: next.message });
+            }
+            res.json({ ...(await profilesView(next)), removedUserId });
+        } catch (error) {
+            console.error("Error changing a profile:", error);
+            res.status(error.status || 500).json({
+                message: publicMessage(error, "Failed to change that profile"),
+            });
+        }
+    });
+
+    // Give a profile its own person. One that used to have one gets the very
+    // same person back, history and all; otherwise a new one is made and the
+    // profile's history moves over to them.
+    router.post("/:id/profiles/:index/own-person", async (req, res) => {
+        try {
+            const ctx = await profileContext(req, req.params.id);
+            if (ctx.status) {
+                return res.status(ctx.status).json({ message: ctx.message });
+            }
+            const { accountId, user, profiles, siblings, routes, np } = ctx;
+            const index = Number(req.params.index);
+            const profile = profiles.find((p) => p.index === index);
+            if (!profile) {
+                return res
+                    .status(404)
+                    .json({ message: "That profile is not on this Nuvio account" });
+            }
+            const own = siblings.find((s) => np.profileOf(s) === index);
+            if (own) {
+                return res.status(409).json({ message: `That profile already is ${own.username}` });
+            }
+
+            const merge = await prisma.profileMerge.findFirst({
+                orderBy: { createdAt: "desc" },
+                where: {
+                    accountId,
+                    nuvioUserId: user.nuvioUserId,
+                    profileIndex: index,
+                    undoneAt: null,
+                },
+            });
+            let person;
+            if (merge) {
+                const result = await np.unmergeProfilePerson(prisma, {
+                    accountId,
+                    mergeId: merge.id,
+                });
+                person = { id: result.donorId, username: result.donorUsername };
+            } else {
+                const currentOwner = np.ownerOf(index, siblings, routes);
+                const created = await createProfilePerson(req, user, index, profile.name);
+                await require("../utils/userMerge").runLongTransaction(prisma, async (tx) => {
+                    await tx.nuvioProfileRoute.deleteMany({
+                        where: { accountId, nuvioUserId: user.nuvioUserId, profileIndex: index },
+                    });
+                    if (currentOwner) {
+                        await np.moveProfileHistory(tx, {
+                            accountId,
+                            fromUserId: currentOwner,
+                            profileLabel: profile.name,
+                            toUserId: created.id,
+                        });
+                    }
+                });
+                person = { id: created.id, username: created.username };
+            }
+
+            afterProfileChange(accountId);
+            const next = await profileContext(req, user.id);
+            if (next.status) {
+                return res.status(next.status).json({ message: next.message });
+            }
+            res.status(201).json({ ...(await profilesView(next)), person });
+        } catch (error) {
+            console.error("Error giving a profile its own person:", error);
+            res.status(error.status || 500).json({
+                message: publicMessage(error, "Failed to give that profile its own person"),
+            });
+        }
+    });
+
+    // History an older version recorded on the wrong person: every person on a
+    // Nuvio account used to record every profile.
+    router.post("/:id/profiles/tidy", async (req, res) => {
+        try {
+            const ctx = await profileContext(req, req.params.id);
+            if (ctx.status) {
+                return res.status(ctx.status).json({ message: ctx.message });
+            }
+            const { accountId, profiles, siblings, routes, np } = ctx;
+            const misplaced = await np.findMisplaced(
+                prisma,
+                accountId,
+                siblings,
+                routes,
+                profiles.map((p) => ({ name: p.name, profile_index: p.index }))
+            );
+            const moved = await np.tidyMisplaced(prisma, accountId, misplaced);
+            afterProfileChange(accountId);
+            res.json({ ...(await profilesView(ctx)), moved });
+        } catch (error) {
+            console.error("Error tidying profile history:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to tidy that history"),
+                message: "Failed to tidy that history",
+            });
+        }
+    });
+
+    // Get a profile's Collections.
+    router.get("/:id/nuvio-collections/:profileId", async (req, res) => {
+        try {
+            const { id, profileId } = req.params;
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            if (user.providerType !== "nuvio") {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const collections = await provider.getCollections(Number(profileId));
+            res.json({ collections });
+        } catch (error) {
+            console.error("Error fetching Nuvio collections:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch Nuvio collections"),
+                message: "Failed to fetch Nuvio collections",
+            });
+        }
+    });
+
+    // Replace a profile's Collections - full overwrite, matches
+    // sync_push_collections' own semantics (no partial-update RPC exists).
+    router.put("/:id/nuvio-collections/:profileId", async (req, res) => {
+        try {
+            const { id, profileId } = req.params;
+            const { collections } = req.body || {};
+            if (!Array.isArray(collections)) {
+                return res.status(400).json({ message: "collections array is required" });
+            }
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            if (user.providerType !== "nuvio") {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            await provider.setCollections(Number(profileId), collections);
+            // Our own write is the Collections Guard's new baseline - a deliberate
+            // edit made here (deletions included) must never read as a foreign
+            // overwrite on the guard's next pass.
+            require("../utils/collectionsGuard")
+                .recordOwnWrite(prisma, getAccountId(req), id, Number(profileId), collections)
+                .catch(() => undefined);
+            res.json({ collections, success: true });
+        } catch (error) {
+            console.error("Error saving Nuvio collections:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to save Nuvio collections"),
+                message: "Failed to save Nuvio collections",
+            });
+        }
+    });
+
+    const { loopbackTraxUrl } = require("../utils/localTraxManifest");
+
+    // --- Cinemeta patching (utils/cinemetaPatch.js) ---
+    //
+    // Reads and writes the account's OWN Cinemeta entry rather than anything in
+    // SlickSync's addon list. Sync leaves it alone in safe mode (Cinemeta is a
+    // protected default), so a patch written here stays put.
+
+    // GET /users/:id/cinemeta - is it installed, and what has been removed.
+    router.get("/:id/cinemeta", async (req, res) => {
+        try {
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id: req.params.id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to a provider" });
+            }
+
+            // Stremio only, and not as a policy choice: Nuvio stores just {url,
+            // name} per addon and fetches each manifest from the addon's own
+            // address at read time, so a manifest edited here is never read. Worse,
+            // the stub Nuvio returns - empty catalogs, empty resources - is
+            // indistinguishable from a Cinemeta with its catalogs and metadata
+            // removed, so answering from it would badge every Nuvio account as
+            // patched when nothing has been touched.
+            if ((user.providerType || "stremio") !== "stremio") {
+                return res.json({
+                    canReset: false,
+                    installed: false,
+                    removeCatalogs: false,
+                    removeMeta: false,
+                    removeSearch: false,
+                    supported: false,
+                });
+            }
+
+            const { findCinemeta } = require("../utils/cinemetaPatch");
+            const current = await provider.getAddons();
+            const { addon } = findCinemeta(current);
+            let state = null;
+            try {
+                state = user.cinemetaPatchJson ? JSON.parse(user.cinemetaPatchJson) : null;
+            } catch {
+                state = null;
+            }
+
+            return res.json({
+                canReset: !!state?.original,
+                installed: !!addon,
+                removeCatalogs: !!(
+                    addon &&
+                    Array.isArray(addon.manifest?.catalogs) &&
+                    addon.manifest.catalogs.length === 0
+                ),
+                removeMeta: !!(
+                    addon &&
+                    Array.isArray(addon.manifest?.resources) &&
+                    !addon.manifest.resources.some(
+                        (r) => (typeof r === "string" ? r : r?.name || r?.type) === "meta"
+                    )
+                ),
+                // Read from the manifest actually on the account, so the answer
+                // reflects reality even if something else edited it.
+                removeSearch: !!(
+                    addon &&
+                    Array.isArray(addon.manifest?.catalogs) &&
+                    addon.manifest.catalogs.length > 0 &&
+                    !addon.manifest.catalogs.some((c) =>
+                        (c?.extra || []).some((e) => (e?.name || e) === "search")
+                    )
+                ),
+                supported: true,
+            });
+        } catch (e) {
+            res.status(500).json({ message: publicMessage(e, "Failed to read Cinemeta state") });
+        }
+    });
+
+    // POST /users/:id/cinemeta - apply (or update) the patch.
+    router.post("/:id/cinemeta", async (req, res) => {
+        try {
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id: req.params.id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to a provider" });
+            }
+
+            if ((user.providerType || "stremio") !== "stremio") {
+                return res.status(400).json({
+                    message:
+                        "Patching Cinemeta works on Stremio accounts. Nuvio reads each addon manifest from the addon itself, so an edit stored on the account would never reach the app.",
+                });
+            }
+
+            const { findCinemeta, applyPatch, describePatch } = require("../utils/cinemetaPatch");
+            const currentRaw = await provider.getAddons();
+            const { list, index, addon } = findCinemeta(currentRaw);
+            if (!addon) {
+                return res
+                    .status(404)
+                    .json({ message: "Cinemeta is not installed on this account" });
+            }
+
+            const patch = {
+                removeCatalogs: !!req.body?.removeCatalogs,
+                removeMeta: !!req.body?.removeMeta,
+                removeSearch: !!req.body?.removeSearch,
+            };
+
+            // Keep the original exactly once. Patching an already-patched manifest
+            // would bake each removal in permanently and make Reset a lie.
+            let state = null;
+            try {
+                state = user.cinemetaPatchJson ? JSON.parse(user.cinemetaPatchJson) : null;
+            } catch {
+                state = null;
+            }
+            const original = state?.original
+                ? state.original
+                : JSON.parse(JSON.stringify(addon.manifest || {}));
+
+            const patched = applyPatch(original, patch);
+            const next = [...list];
+            next[index] = { ...addon, manifest: patched };
+            await provider.setAddons(next);
+
+            await prisma.user.update({
+                data: {
+                    cinemetaPatchJson: JSON.stringify({
+                        at: new Date().toISOString(),
+                        original,
+                        patch,
+                    }),
+                },
+                where: { id: user.id },
+            });
+
+            return res.json({ applied: patch, success: true, summary: describePatch(patch) });
+        } catch (e) {
+            console.error("Cinemeta patch failed:", e);
+            res.status(500).json({ message: publicMessage(e, "Failed to patch Cinemeta") });
+        }
+    });
+
+    // DELETE /users/:id/cinemeta - put the original manifest back.
+    router.delete("/:id/cinemeta", async (req, res) => {
+        try {
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id: req.params.id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "User is not connected to a provider" });
+            }
+
+            if ((user.providerType || "stremio") !== "stremio") {
+                return res
+                    .status(400)
+                    .json({ message: "Patching Cinemeta works on Stremio accounts." });
+            }
+
+            let state = null;
+            try {
+                state = user.cinemetaPatchJson ? JSON.parse(user.cinemetaPatchJson) : null;
+            } catch {
+                state = null;
+            }
+            if (!state?.original) {
+                return res.status(400).json({
+                    message: "Nothing to reset - Cinemeta has not been patched from here",
+                });
+            }
+
+            const { findCinemeta } = require("../utils/cinemetaPatch");
+            const currentRaw = await provider.getAddons();
+            const { list, index, addon } = findCinemeta(currentRaw);
+            if (!addon) {
+                return res
+                    .status(404)
+                    .json({ message: "Cinemeta is not installed on this account" });
+            }
+
+            const next = [...list];
+            next[index] = { ...addon, manifest: state.original };
+            await provider.setAddons(next);
+            await prisma.user.update({ data: { cinemetaPatchJson: null }, where: { id: user.id } });
+            return res.json({ success: true });
+        } catch (e) {
+            console.error("Cinemeta reset failed:", e);
+            res.status(500).json({ message: publicMessage(e, "Failed to reset Cinemeta") });
+        }
+    });
+
+    // --- Collections Guard (utils/collectionsGuard.js) ---
+
+    // Active alarms: profiles whose collections look externally overwritten.
+    router.get("/collections-guard/alarms", async (req, res) => {
+        try {
+            const { getAlarms } = require("../utils/collectionsGuard");
+            const alarms = await getAlarms(prisma, getAccountId(req));
+            // Names make the banner readable without a second lookup.
+            const users =
+                alarms.length > 0
+                    ? await prisma.user.findMany({
+                          select: { id: true, username: true },
+                          where: { id: { in: [...new Set(alarms.map((a) => a.userId))] } },
+                      })
+                    : [];
+            const nameById = new Map(users.map((u) => [u.id, u.username]));
+            // Profile names live on the Nuvio account, not in the snapshot rows,
+            // so they are resolved here - one profile list per alarmed user, and
+            // only when there is an alarm to label. A banner naming the profile
+            // the way the profile picker does ("Kids") is what makes it
+            // actionable; "profile 3" means nothing to whoever reads it. If the
+            // account can't be reached the index is still shown, since a banner
+            // with a duller label beats no banner at all.
+            const profileNameByKey = new Map();
+            for (const userId of new Set(alarms.map((a) => a.userId))) {
+                try {
+                    const r = await resolveNuvioForGuard(req, userId);
+                    if (r.error) {
+                        continue;
+                    }
+                    const list = await r.provider.getProfiles();
+                    for (const p of Array.isArray(list) ? list : []) {
+                        if (Number.isInteger(p?.profile_index) && p?.name) {
+                            profileNameByKey.set(`${userId}:${p.profile_index}`, p.name);
+                        }
+                    }
+                } catch {
+                    /* label only - never a reason to hide the alarm */
+                }
+            }
+            res.json({
+                alarms: alarms.map((a) => ({
+                    ...a,
+                    profileName: profileNameByKey.get(`${a.userId}:${a.profileId}`) || null,
+                    username: nameById.get(a.userId) || null,
+                })),
+            });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to read guard state") });
+        }
+    });
+
+    // Shared resolver for guard actions: scoped Nuvio user + provider.
+    const resolveNuvioForGuard = async (req, userId) => {
+        const user = await prisma.user.findFirst({
+            where: { accountId: getAccountId(req), id: userId },
+        });
+        if (user?.providerType !== "nuvio") {
+            return { error: "Nuvio user not found", status: 404 };
+        }
+        const provider = createProvider(user, { decrypt, req });
+        if (!provider) {
+            return { error: "User is not connected to Nuvio", status: 400 };
+        }
+        return { provider, user };
+    };
+
+    // One-click restore of the newest good snapshot. kind 'collections'
+    // (default) restores the collections themselves; 'layout' restores the
+    // home-row arrangement blobs.
+    router.post("/collections-guard/restore", async (req, res) => {
+        try {
+            const { userId, profileId, kind } = req.body || {};
+            if (!(userId && Number.isInteger(Number(profileId)))) {
+                return res.status(400).json({ error: "userId and profileId are required" });
+            }
+            const r = await resolveNuvioForGuard(req, userId);
+            if (r.error) {
+                return res.status(r.status).json({ error: r.error });
+            }
+            const { restoreSnapshot, restoreLayoutSnapshot } = require("../utils/collectionsGuard");
+            const result =
+                kind === "layout"
+                    ? await restoreLayoutSnapshot(
+                          prisma,
+                          getAccountId(req),
+                          userId,
+                          Number(profileId),
+                          r.provider
+                      )
+                    : await restoreSnapshot(
+                          prisma,
+                          getAccountId(req),
+                          userId,
+                          Number(profileId),
+                          r.provider
+                      );
+            res.json({ success: true, ...result });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Restore failed") });
+        }
+    });
+
+    // Adopt the current on-account state as the new baseline.
+    router.post("/collections-guard/accept", async (req, res) => {
+        try {
+            const { userId, profileId, kind } = req.body || {};
+            if (!(userId && Number.isInteger(Number(profileId)))) {
+                return res.status(400).json({ error: "userId and profileId are required" });
+            }
+            const r = await resolveNuvioForGuard(req, userId);
+            if (r.error) {
+                return res.status(r.status).json({ error: r.error });
+            }
+            const { acceptCurrent, acceptLayoutCurrent } = require("../utils/collectionsGuard");
+            const result =
+                kind === "layout"
+                    ? await acceptLayoutCurrent(
+                          prisma,
+                          getAccountId(req),
+                          userId,
+                          Number(profileId),
+                          r.provider
+                      )
+                    : await acceptCurrent(
+                          prisma,
+                          getAccountId(req),
+                          userId,
+                          Number(profileId),
+                          r.provider
+                      );
+            res.json({ success: true, ...result });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Accept failed") });
+        }
+    });
+
+    // --- Nuvio home-row editor (utils/nuvioHomeLayout.js) ---
+    //
+    // Reads a profile's home-screen arrangement and labels each row with the
+    // addon and catalog it actually came from, so the editor shows "Torrentio
+    // - Movies" rather than a pair of ids. Rows the arrangement doesn't
+    // mention yet are appended as "not yet arranged" - the client only writes
+    // a preference once a row has been touched, so a fresh profile has
+    // catalogs on screen that the blob has never heard of.
+    router.get("/:id/home-layout/:profileId", async (req, res) => {
+        try {
+            const { id, profileId } = req.params;
+            const r = await resolveNuvioForGuard(req, id);
+            if (r.error) {
+                return res.status(r.status).json({ error: r.error });
+            }
+            const { readLayoutForEdit } = require("../utils/nuvioHomeLayout");
+            const { getUserAddons } = require("../utils/sync");
+            const live = await getUserAddons(r.user, req, {
+                createProvider,
+                decrypt,
+                StremioAPIClient,
+            }).catch(() => ({ addons: [] }));
+            const result = await readLayoutForEdit(r.provider, Number(profileId), live?.addons, {
+                prisma,
+            });
+            res.json(result);
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to read the home layout") });
+        }
+    });
+
+    // Writes the edited arrangement back to every platform bucket, so the
+    // change lands whichever bucket that device reads.
+    router.put("/:id/home-layout/:profileId", async (req, res) => {
+        try {
+            const { id, profileId } = req.params;
+            const items = req.body?.items;
+            if (!Array.isArray(items)) {
+                return res.status(400).json({ error: "items array is required" });
+            }
+            const r = await resolveNuvioForGuard(req, id);
+            if (r.error) {
+                return res.status(r.status).json({ error: r.error });
+            }
+            const { writeLayout } = require("../utils/nuvioHomeLayout");
+            const result = await writeLayout(r.provider, Number(profileId), items);
+            // Our own write is the layout guard's new baseline, exactly like the
+            // collections editor's save.
+            require("../utils/collectionsGuard")
+                .recordOwnLayoutWrite(prisma, getAccountId(req), id, Number(profileId), r.provider)
+                .catch(() => undefined);
+            res.json({ success: true, ...result });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Failed to save the home layout") });
+        }
+    });
+
+    // Copy one profile's whole home-row arrangement onto another profile -
+    // overwrites the target's arrangement (the UI confirms first).
+    router.post("/home-layout/copy", async (req, res) => {
+        try {
+            const { userId, fromProfileId, toProfileId } = req.body || {};
+            if (
+                !(
+                    userId &&
+                    Number.isInteger(Number(fromProfileId)) &&
+                    Number.isInteger(Number(toProfileId))
+                )
+            ) {
+                return res
+                    .status(400)
+                    .json({ error: "userId, fromProfileId and toProfileId are required" });
+            }
+            if (Number(fromProfileId) === Number(toProfileId)) {
+                return res.status(400).json({ error: "Source and target are the same profile" });
+            }
+            const r = await resolveNuvioForGuard(req, userId);
+            if (r.error) {
+                return res.status(r.status).json({ error: r.error });
+            }
+            const { copyLayout } = require("../utils/collectionsGuard");
+            const result = await copyLayout(
+                prisma,
+                getAccountId(req),
+                userId,
+                Number(fromProfileId),
+                Number(toProfileId),
+                r.provider
+            );
+            res.json({ success: true, ...result });
+        } catch (e) {
+            res.status(500).json({ error: publicMessage(e, "Copy failed") });
+        }
+    });
+
+    // Browse nuvio.tv's own public "Community Covers" gallery, for picking a
+    // Collection/folder cover directly instead of hunting down a URL
+    // elsewhere first. Read-only passthrough - see getCommunityCovers's own
+    // comment in providers/nuvio.js for the real endpoint/params this proxies.
+    router.get("/:id/nuvio-covers", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+            if (user.providerType !== "nuvio") {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider?.getCommunityCovers) {
+                return res.status(400).json({ message: "User is not connected to Nuvio" });
+            }
+            const { sort, orientation, format, page, limit, search } = req.query;
+            const data = await provider.getCommunityCovers({
+                format: typeof format === "string" ? format : undefined,
+                limit: limit ? Math.min(Number(limit), 48) : undefined,
+                orientation: typeof orientation === "string" ? orientation : undefined,
+                page: page ? Number(page) : undefined,
+                search: typeof search === "string" ? search : undefined,
+                sort: typeof sort === "string" ? sort : undefined,
+            });
+            res.json(data);
+        } catch (error) {
+            console.error("Error fetching Nuvio community covers:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch Nuvio community covers"),
+                message: "Failed to fetch Nuvio community covers",
+            });
+        }
+    });
+
+    // Live preview of what a catalog actually contains, for the Collections
+    // source picker - a thin proxy over the addon's own standard
+    // {transportUrl}/catalog/{type}/{catalogId}.json endpoint. Doesn't need
+    // createProvider/auth at all: addon catalogs are public data, and this
+    // isn't scoped to any specific user's account. addonUrl must be one of
+    // this user's own installed addons' transportUrl (not validated against
+    // that list server-side - same trust level as the addon URLs already
+    // stored for this user, which the admin who added them controls).
+    router.get("/:id/nuvio-catalog-preview", async (req, res) => {
+        try {
+            const { addonUrl, type, catalogId, genre } = req.query;
+            if (!(addonUrl && type && catalogId)) {
+                return res
+                    .status(400)
+                    .json({ message: "addonUrl, type, and catalogId are required" });
+            }
+            // Our own SlickTrax catalogs are read over loopback rather than via the
+            // public hostname: an instance behind an auth gate answers its own
+            // request with a login page, which is why a preview of a linked
+            // SlickTrax catalog came back empty. See utils/localTraxManifest.js.
+            const loopback = await loopbackTraxUrl(prisma, addonUrl);
+            const base = String(loopback || addonUrl)
+                .replace(/\/manifest\.json$/, "")
+                .replace(/\/$/, "");
+            // Stremio addon protocol: extra properties (genre, skip, ...) go in
+            // their own URL segment as key=value, e.g. .../genre=Family.json - NOT
+            // a query string. Without this, a genre-filtered catalog source (the
+            // whole point of the Genres template - see matchGenreSources) fetched
+            // its addon's default/unfiltered listing instead, so every genre
+            // folder sharing a catalog (e.g. Cinemeta Popular) showed the exact
+            // same top result as its hero poster, regardless of genre.
+            const extraSegment =
+                genre && genre !== "none" ? `/genre=${encodeURIComponent(String(genre))}` : "";
+            const url = `${base}/catalog/${encodeURIComponent(type)}/${encodeURIComponent(catalogId)}${extraSegment}.json`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            let data;
+            try {
+                // The address is whatever the caller typed, so it goes through the
+                // same check as every other address the server fetches for someone:
+                // an instance serving strangers refuses its own network, a household
+                // install may reach its own, and neither may reach link-local (where
+                // a cloud host keeps its credentials). Redirects are checked hop by
+                // hop. The loopback address built above from a verified SlickTrax
+                // token is ours, not the caller's, and is read as it always was.
+                let resp;
+                try {
+                    resp = loopback
+                        ? await fetch(url, { signal: controller.signal })
+                        : await safeFetch(url, { signal: controller.signal }, instancePolicy());
+                } catch (fetchError) {
+                    if (
+                        ["blocked host", "unsupported protocol", "invalid url"].includes(
+                            fetchError.message
+                        )
+                    ) {
+                        return res.status(400).json({ message: "That address can't be used" });
+                    }
+                    if (fetchError.message === "unresolvable host") {
+                        return res.status(400).json({ message: "That address couldn't be found" });
+                    }
+                    throw fetchError;
+                }
+                if (!resp.ok) {
+                    return res.status(502).json({ message: `Addon returned ${resp.status}` });
+                }
+                data = await resp.json();
+            } finally {
+                clearTimeout(timeout);
+            }
+            const metas = Array.isArray(data?.metas) ? data.metas : [];
+            // SlickTrax builds its poster URLs from the address the request arrived
+            // on, and this one arrived on loopback - so they come back pointing at
+            // 127.0.0.1, which is this container, not the viewer's machine. The
+            // browser rendering this preview is on our own origin, so dropping the
+            // origin and leaving the path is both correct and portable: it works on
+            // a public hostname, a LAN address, and behind any proxy.
+            const loopbackOrigin = loopback
+                ? (() => {
+                      try {
+                          return new URL(loopback).origin;
+                      } catch {
+                          return null;
+                      }
+                  })()
+                : null;
+            const viewable = (u) =>
+                loopbackOrigin && typeof u === "string" && u.startsWith(loopbackOrigin)
+                    ? u.slice(loopbackOrigin.length)
+                    : u || null;
+            res.json({
+                items: metas.slice(0, 25).map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    poster: viewable(m.poster),
+                    type: m.type,
+                })),
+            });
+        } catch (error) {
+            console.error("Error fetching Nuvio catalog preview:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch catalog preview"),
+                message: "Failed to fetch catalog preview",
+            });
+        }
+    });
+
+    // Get user's desired addons (group addons + protected addons)
+    router.get("/:id/desired-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Fetch the user
+            const user = await prisma.user.findFirst({
+                select: {
+                    excludedAddons: true,
+                    id: true,
+                    nuvioRefreshToken: true,
+                    nuvioUserId: true,
+                    protectedAddons: true,
+                    providerType: true,
+                    stremioAuthKey: true,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Import the getDesiredAddons function
+            const { getDesiredAddons } = require("../utils/sync");
+
+            // Get unsafe mode from query parameter
+            const unsafe = req.query.unsafe === "true";
+
+            // Call getDesiredAddons with all required dependencies
+            const result = await getDesiredAddons(user, req, {
+                canonicalizeManifestUrl,
+                createProvider,
+                decrypt,
+                getAccountId,
+                parseAddonIds,
+                parseProtectedAddons,
+                prisma,
+                StremioAPIClient,
+                unsafeMode: unsafe,
+            });
+
+            if (!result.success) {
+                return res.status(500).json({ message: result.error });
+            }
+
+            res.json({ addons: result.addons });
+        } catch (error) {
+            console.error("❌ Error fetching desired addons:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch desired addons"),
+                message: "Failed to fetch desired addons",
+            });
+        }
+    });
+
+    // Get user's group addons
+    router.get("/:id/group-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Get user's groups
+            const groups = await prisma.group.findMany({
+                where: {
+                    accountId: getAccountId(req),
+                    userIds: {
+                        contains: id,
+                    },
+                },
+            });
+
+            if (groups.length === 0) {
+                return res.json({ addons: [] });
+            }
+
+            // Use the primary group (first one)
+            const primaryGroup = groups[0];
+
+            // Import the getGroupAddons function
+            const { getGroupAddons } = require("../utils/helpers");
+
+            // Get group addons with proper ordering, decryption, and backup resolution
+            const groupAddons = await getGroupAddons(prisma, primaryGroup.id, req);
+
+            res.json({ addons: groupAddons });
+        } catch (error) {
+            console.error("❌ Error fetching group addons:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch group addons"),
+                message: "Failed to fetch group addons",
+            });
+        }
+    });
+
+    // Update excluded addons
+    router.put("/:id/excluded-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { excludedAddons } = req.body;
+
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const updatedUser = await prisma.user.update({
+                data: { excludedAddons: JSON.stringify(excludedAddons || []) },
+                where: { accountId: getAccountId(req), id },
+            });
+            // What this user should have just changed - status badges re-check.
+            try {
+                require("../utils/liveEvents").emitLive(getAccountId(req), "sync");
+            } catch {
+                /* optional */
+            }
+
+            res.json({
+                excludedAddons: parseAddonIds(updatedUser.excludedAddons),
+                message: "Excluded addons updated successfully",
+            });
+        } catch (error) {
+            console.error("Error updating excluded addons:", error);
+            res.status(500).json({ message: "Failed to update excluded addons" });
+        }
+    });
+
+    // Update protected addons
+    router.put("/:id/protected-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { protectedAddons } = req.body;
+
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const updatedUser = await prisma.user.update({
+                data: { protectedAddons: JSON.stringify(protectedAddons || []) },
+                where: { accountId: getAccountId(req), id },
+            });
+            try {
+                require("../utils/liveEvents").emitLive(getAccountId(req), "sync");
+            } catch {
+                /* optional */
+            }
+
+            res.json({
+                message: "Protected addons updated successfully",
+                protectedAddons: parseProtectedAddons(updatedUser.protectedAddons, req),
+            });
+        } catch (error) {
+            console.error("Error updating protected addons:", error);
+            res.status(500).json({ message: "Failed to update protected addons" });
+        }
+    });
+
+    // Sync user addons - delegate to shared syncUserAddons to keep behavior consistent everywhere
+    router.post("/:id/sync", async (req, res) => {
+        try {
+            const { id } = req.params;
+            // Read account-backed sync settings; fallback to query/body only if unavailable
+            let unsafeMode = false;
+            let useCustomFields = true;
+            try {
+                const acct = await prisma.appAccount.findFirst({
+                    select: { sync: true },
+                    where: { id: getAccountId(req) },
+                });
+                let cfg = acct?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object") {
+                    if (typeof cfg.safe === "boolean") {
+                        unsafeMode = !cfg.safe;
+                    }
+                    if (typeof cfg.useCustomFields === "boolean") {
+                        useCustomFields = cfg.useCustomFields;
+                    } else if (typeof cfg.useCustomNames === "boolean") {
+                        // Backward compatibility: migrate old useCustomNames to useCustomFields
+                        useCustomFields = cfg.useCustomNames;
+                    } else {
+                        // Default to true if not set (backward compatibility)
+                        useCustomFields = true;
+                    }
+                } else {
+                    unsafeMode = req.query?.unsafe === "true" || req.body?.unsafe === true;
+                }
+            } catch {
+                unsafeMode = req.query?.unsafe === "true" || req.body?.unsafe === true;
+            }
+
+            // Individual user sync - no reload needed, just sync
+            const result = await syncUserAddons(
+                prisma,
+                id,
+                [],
+                unsafeMode,
+                req,
+                decrypt,
+                getAccountId,
+                useCustomFields
+            );
+
+            if (!result.success) {
+                return res.status(400).json({ message: result.error || "Failed to sync user" });
+            }
+
+            return res.json({
+                // syncUserAddons resolves to syncCredentialsAddons' shape, which
+                // reports the addon count as `total`. This used to read `totalAddons`
+                // and `addonsCount` - neither of which that result has ever carried -
+                // so the count silently fell through to 0 on every successful sync.
+                addonsCount: result.total ?? 0,
+                message: "User synced successfully",
+                totalAddons: result.total ?? 0,
+                ...(result.alreadySynced ? { alreadySynced: true } : {}),
+                ...(result.reloadedCount === undefined
+                    ? {}
+                    : { reloadedCount: result.reloadedCount }),
+            });
+        } catch (error) {
+            console.error("Error in sync endpoint:", error);
+            return res.status(500).json({
+                error: publicMessage(error, "Failed to sync user"),
+                message: "Failed to sync user",
+            });
+        }
+    });
+
+    // Sync all users
+    router.post("/sync-all", async (req, res) => {
+        try {
+            debug.log("🚀 Sync all users endpoint called");
+
+            // Read account-backed sync settings
+            let unsafeMode = false;
+            let useCustomFields = true;
+            try {
+                const acct = await prisma.appAccount.findFirst({
+                    select: { sync: true },
+                    where: { id: getAccountId(req) },
+                });
+                let cfg = acct?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = null;
+                    }
+                }
+                if (cfg && typeof cfg === "object") {
+                    if (typeof cfg.safe === "boolean") {
+                        unsafeMode = !cfg.safe;
+                    }
+                    if (typeof cfg.useCustomFields === "boolean") {
+                        useCustomFields = cfg.useCustomFields;
+                    } else if (typeof cfg.useCustomNames === "boolean") {
+                        // Backward compatibility: migrate old useCustomNames to useCustomFields
+                        useCustomFields = cfg.useCustomNames;
+                    } else {
+                        useCustomFields = true;
+                    }
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
+
+            // Get all enabled users
+            const users = await prisma.user.findMany({
+                where: { isActive: true },
+            });
+
+            if (users.length === 0) {
+                return res.json({
+                    message: "No enabled users found to sync",
+                    syncedCount: 0,
+                    totalUsers: 0,
+                });
+            }
+
+            let syncedCount = 0;
+            let totalAddons = 0;
+            const errors = [];
+
+            debug.log(`🔄 Starting sync for ${users.length} enabled users`);
+
+            // Sync users a few at a time rather than strictly one-by-one. The pool
+            // is deliberately SMALL: each sync talks to a provider backend, and
+            // Nuvio's rides Supabase, which answers 429 under bursts (a real
+            // incident here - see the escalating-backoff fix). Three keeps a large
+            // household meaningfully faster without turning Sync All into a
+            // thundering herd; per-user failures stay isolated exactly as before.
+            const SYNC_CONCURRENCY = 3;
+            const queue = [...users];
+            const runWorker = async () => {
+                while (queue.length > 0) {
+                    const user = queue.shift();
+                    if (!user) {
+                        return;
+                    }
+                    try {
+                        debug.log(`🔄 Syncing user: ${user.username || user.email}`);
+
+                        // Use the reusable sync function
+                        const syncResult = await syncUserAddons(
+                            prisma,
+                            user.id,
+                            [],
+                            unsafeMode,
+                            req,
+                            decrypt,
+                            getAccountId,
+                            useCustomFields
+                        );
+
+                        if (syncResult.success) {
+                            syncedCount++;
+                            debug.log(
+                                `✅ Successfully synced user: ${user.username || user.email}`
+                            );
+
+                            // Same field-name mismatch as the single-user route above: this
+                            // guard required two properties the sync result has never had, so
+                            // totalAddons stayed 0 and the "N total addons processed" line -
+                            // which is gated on `totalAddons > 0` - never once appeared in the
+                            // Sync All summary.
+                            if (typeof syncResult.total === "number") {
+                                totalAddons += syncResult.total;
+                            }
+                        } else {
+                            errors.push(`${user.username || user.email}: ${syncResult.error}`);
+                        }
+                    } catch (error) {
+                        errors.push(`${user.username || user.email}: ${error.message}`);
+                        console.error(`❌ Error syncing user ${user.id}:`, error);
+                    }
+                }
+            };
+            await Promise.all(
+                Array.from({ length: Math.min(SYNC_CONCURRENCY, users.length) }, runWorker)
+            );
+
+            let message = `All users sync completed.\n${syncedCount}/${users.length} users synced`;
+            if (totalAddons > 0) {
+                message += `\n${totalAddons} total addons processed`;
+            }
+            if (errors.length > 0) {
+                message += `\n\nErrors:\n${errors.join("\n")}`;
+            }
+
+            res.json({
+                errors: errors.length > 0 ? errors : undefined,
+                message,
+                syncedCount,
+                totalAddons,
+                totalUsers: users.length,
+            });
+        } catch (error) {
+            console.error("Error syncing all users:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to sync all users"),
+                message: "Failed to sync all users",
+            });
+        }
+    });
+
+    // Patch user (partial update)
+    // PATCH /api/users/:id/health-ignore - hide this user's Sync Guardian
+    // drift alert from the Health page's Attention list, same treatment as
+    // Addon/VaultEntry's own healthIgnored (see addons.js's /:id/health-ignore
+    // for the identical pattern). Sync Guardian re-derives drift on its own
+    // schedule regardless of this flag - it only controls whether Health
+    // surfaces it as Attention, not whether the underlying drift gets fixed.
+    router.patch("/:id/health-ignore", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { healthIgnored } = req.body;
+
+            const user = await dbUtils.findEntity(prisma, "user", id, getAccountId(req));
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const updated = await dbUtils.updateEntity(
+                prisma,
+                "user",
+                id,
+                { healthIgnored: !!healthIgnored },
+                getAccountId(req)
+            );
+            return responseUtils.success(res, {
+                healthIgnored: updated.healthIgnored,
+                id: updated.id,
+            });
+        } catch (error) {
+            console.error("Error updating user health-ignore state:", error);
+            return responseUtils.internalError(res, error.message);
+        }
+    });
+
+    router.patch("/:id", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const body =
+                req.body && typeof req.body === "object" && !Array.isArray(req.body)
+                    ? req.body
+                    : {};
+
+            // Only a person's two notification settings are written here. Which
+            // server a person is, and the sign-in that proves it, are set by
+            // signing in to that server and never by a request that names them:
+            // a household that could write them could point a person at someone
+            // else's server account and be handed that account's next sign-in.
+            const allowed = new Set(["discordWebhookUrl", "notifyOnWatch"]);
+            const unknown = Object.keys(body).filter((key) => !allowed.has(key));
+            if (unknown.length > 0) {
+                return res
+                    .status(400)
+                    .json({ message: `These cannot be changed here: ${unknown.join(", ")}` });
+            }
+
+            const updateData = {};
+            if (body.discordWebhookUrl !== undefined) {
+                if (body.discordWebhookUrl !== null && typeof body.discordWebhookUrl !== "string") {
+                    return res
+                        .status(400)
+                        .json({ message: "discordWebhookUrl must be text or empty" });
+                }
+                const webhook =
+                    typeof body.discordWebhookUrl === "string" ? body.discordWebhookUrl.trim() : "";
+                if (webhook.length > 2048) {
+                    return res.status(400).json({ message: "That webhook address is too long" });
+                }
+                updateData.discordWebhookUrl = webhook || null;
+            }
+            if (body.notifyOnWatch !== undefined) {
+                if (typeof body.notifyOnWatch !== "boolean") {
+                    return res.status(400).json({ message: "notifyOnWatch must be true or false" });
+                }
+                updateData.notifyOnWatch = body.notifyOnWatch;
+            }
+            if (Object.keys(updateData).length === 0) {
+                return res.status(400).json({ message: "Nothing to change" });
+            }
+
+            const existing = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!existing) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const user = await prisma.user.update({
+                data: updateData,
+                where: { id },
+            });
+
+            res.json({
+                discordWebhookUrl: user.discordWebhookUrl || null,
+                id: user.id,
+                notifyOnWatch: user.notifyOnWatch !== false,
+                username: user.username,
+            });
+        } catch (error) {
+            console.error("Error patching user:", error);
+            res.status(500).json({ message: "Failed to patch user" });
+        }
+    });
+
+    // Toggle user status
+    router.patch("/:id/toggle-status", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { isActive } = req.body;
+
+            const user = await prisma.user.update({
+                data: { isActive },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            res.json({
+                isActive: user.isActive,
+                message: `User ${isActive ? "enabled" : "disabled"} successfully`,
+            });
+        } catch (error) {
+            console.error("Error toggling user status:", error);
+            res.status(500).json({ message: "Failed to toggle user status" });
+        }
+    });
+
+    // Toggle protect status for a single addon (BY NAME ONLY)
+    router.post("/:id/protect-addon", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { name } = req.body;
+            const { unsafe } = req.query;
+
+            // Default Stremio addons (name-based) in safe mode
+            const defaultAddons = {
+                names: ["Cinemeta", "Local Files", "Local Files (without catalog support)"],
+            };
+
+            // Check if this is a default addon in safe mode (match by name)
+            const isDefaultAddon =
+                typeof name === "string" &&
+                defaultAddons.names.some((n) => (name || "").includes(n));
+
+            if (isDefaultAddon && unsafe !== "true") {
+                return res.status(403).json({
+                    error: "This addon is protected by default and cannot be unprotected in safe mode",
+                    isDefaultAddon: true,
+                });
+            }
+
+            // Get current user with protected addons
+            const user = await prisma.user.findFirst({
+                select: { protectedAddons: true },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Parse current protected addons (encrypted strings of names)
+            let _currentEncrypted = [];
+            try {
+                _currentEncrypted = user.protectedAddons ? JSON.parse(user.protectedAddons) : [];
+            } catch (e) {
+                console.warn("Failed to parse protected addons:", e);
+                _currentEncrypted = [];
+            }
+            // Read current list of plaintext names from DB (already plaintext as of latest changes)
+            const currentList = Array.isArray(user.protectedAddons)
+                ? user.protectedAddons
+                : user.protectedAddons
+                  ? (() => {
+                        try {
+                            return JSON.parse(user.protectedAddons);
+                        } catch {
+                            return [];
+                        }
+                    })()
+                  : [];
+
+            if (!name || typeof name !== "string" || !name.trim()) {
+                return res.status(400).json({ error: "name is required" });
+            }
+
+            const targetName = name.trim();
+            const targetNorm = targetName.toLowerCase();
+            const nextList = Array.isArray(currentList) ? [...currentList] : [];
+            const idx = nextList.findIndex(
+                (n) => typeof n === "string" && n.trim().toLowerCase() === targetNorm
+            );
+            if (idx >= 0) {
+                nextList.splice(idx, 1);
+            } else {
+                nextList.push(targetName);
+            }
+            const nextPlain = nextList;
+
+            // Update user (store plaintext names)
+            await prisma.user.update({
+                data: {
+                    protectedAddons: JSON.stringify(nextPlain),
+                },
+                where: { id },
+            });
+
+            res.json({
+                isProtected:
+                    nextList.findIndex(
+                        (n) => typeof n === "string" && n.trim().toLowerCase() === targetNorm
+                    ) >= 0,
+                message: "Addon protected list updated",
+                protectedAddons: nextPlain,
+            });
+        } catch (error) {
+            console.error("Error toggling protect addon:", error);
+            res.status(500).json({ error: "Failed to toggle protect addon" });
+        }
+    });
+
+    // Reload all group addons for a user (fetch fresh manifests and update database)
+    router.post("/:id/reload-addons", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const user = await prisma.user.findFirst({
+                select: {
+                    isActive: true,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+
+            // Get user's group
+            const userGroup = await prisma.group.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    userIds: {
+                        contains: user.id,
+                    },
+                },
+            });
+
+            if (!userGroup) {
+                return res.json({
+                    failedCount: 0,
+                    message: "User not in any group, no addons to reload",
+                    reloadedCount: 0,
+                    total: 0,
+                });
+            }
+
+            // Call reloadGroupAddons on the user's group
+            const reloadResult = await reloadGroupAddons(
+                prisma,
+                getAccountId,
+                userGroup.id,
+                req,
+                decrypt
+            );
+
+            res.json({
+                failedCount: reloadResult.failedCount,
+                message: "Group addons reloaded successfully",
+                reloadedCount: reloadResult.reloadedCount,
+                total: reloadResult.total,
+            });
+        } catch (error) {
+            console.error("Error in reload addons endpoint:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to reload user addons"),
+                message: "Failed to reload user addons",
+            });
+        }
+    });
+
+    // Add specific addons to user's Stremio account
+    router.post("/:id/stremio-addons/add", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { addonUrls } = req.body;
+
+            if (!Array.isArray(addonUrls) || addonUrls.length === 0) {
+                return res.status(400).json({ message: "addonUrls must be a non-empty array" });
+            }
+
+            // Full row rather than a Stremio-only select: createProvider needs
+            // whichever provider's credentials this user actually has. Both the
+            // Stremio and Nuvio providers implement addAddon, so there is no
+            // reason for this route to be Stremio-only - it just never got
+            // converted, and told Nuvio users they were "not connected to
+            // Stremio", which is true and useless.
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const hasAddCreds = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId);
+            if (!hasAddCreds) {
+                return res
+                    .status(400)
+                    .json({ message: "User is not connected to Stremio or Nuvio" });
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+
+            try {
+                const provider = createProvider(user, { decrypt, req });
+                if (!provider) {
+                    return res.status(400).json({ message: "User is not connected to a provider" });
+                }
+
+                let addedCount = 0;
+                const results = [];
+
+                for (const addonUrl of addonUrls) {
+                    try {
+                        // Fetch addon manifest
+                        const manifestResponse = await safeFetch(addonUrl, {}, instancePolicy());
+                        if (!manifestResponse.ok) {
+                            throw new Error(`Failed to fetch manifest: ${manifestResponse.status}`);
+                        }
+                        const manifest = await manifestResponse.json();
+
+                        await provider.addAddon(addonUrl, manifest);
+
+                        addedCount++;
+                        results.push({
+                            name: manifest.name || "Unknown",
+                            status: "success",
+                            url: addonUrl,
+                        });
+                    } catch (error) {
+                        console.error(`Error adding addon ${addonUrl}:`, error);
+                        results.push({
+                            error: addonAddressProblem(error) || error.message,
+                            status: "error",
+                            url: addonUrl,
+                        });
+                    }
+                }
+
+                res.json({
+                    addedCount,
+                    message: "Addons added successfully",
+                    results,
+                    totalRequested: addonUrls.length,
+                });
+            } catch (error) {
+                console.error("Error adding addons:", error);
+                res.status(500).json({
+                    error: publicMessage(error, "Failed to add addons"),
+                    message: "Failed to add addons",
+                });
+            }
+        } catch (error) {
+            console.error("Error in add Stremio addons endpoint:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to add addons"),
+                message: "Failed to add addons",
+            });
+        }
+    });
+
+    // Get combined library/watch history from all users (for Activity page)
+    // Loads all cached library files for active users
+    router.get("/activity/library", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Get all active users
+            // For admin view, show all users regardless of visibility
+            // For user-facing views, filter by activityVisibility (handled in frontend/user endpoints)
+            const users = await prisma.user.findMany({
+                select: {
+                    activityVisibility: true,
+                    colorIndex: true,
+                    email: true,
+                    id: true,
+                    stremioAuthKey: true,
+                    username: true,
+                },
+                where: {
+                    accountId,
+                    isActive: true,
+                },
+            });
+
+            if (users.length === 0) {
+                return res.json({
+                    count: 0,
+                    library: [],
+                });
+            }
+
+            // Load all cached library files at once (only from this account's folder)
+            // Pass full user objects so helper can use email for filenames
+            const { getAllCachedLibraries, setCachedLibrary } = require("../utils/libraryCache");
+            const cachedLibraries = getAllCachedLibraries(accountId, users);
+
+            const allLibraryItems = [];
+            const userMap = new Map(); // Map user ID to user info for adding to items
+
+            // Process each user's cached library
+            // Note: This is an admin endpoint, so we include all users
+            // Frontend will filter by visibility for user-facing views
+            for (const user of users) {
+                try {
+                    let library = cachedLibraries.get(user.id);
+
+                    // Check if cache only has removed items (stale cache) - if so, refresh from Stremio
+                    // Active items: removed === false (or missing/undefined, treated as in library)
+                    const hasActiveItems =
+                        library &&
+                        Array.isArray(library) &&
+                        library.some(
+                            (item) =>
+                                item.removed === false ||
+                                item.removed === undefined ||
+                                item.removed === null
+                        );
+
+                    // If no cache file exists or cache only has removed items, fetch from Stremio and cache it
+                    if (
+                        (!(library && Array.isArray(library)) ||
+                            library.length === 0 ||
+                            !hasActiveItems) &&
+                        user.stremioAuthKey
+                    ) {
+                        const authKeyPlain = decrypt(user.stremioAuthKey, req);
+                        const apiClient = new StremioAPIClient({
+                            authKey: authKeyPlain,
+                            endpoint: "https://api.strem.io",
+                        });
+
+                        const libraryItems = await apiClient.request("datastoreGet", {
+                            all: true,
+                            collection: "libraryItem",
+                            ids: [],
+                        });
+
+                        library = Array.isArray(libraryItems)
+                            ? libraryItems
+                            : libraryItems?.result || libraryItems?.library || [];
+
+                        // Cache the library data for future requests
+                        if (Array.isArray(library) && library.length > 0) {
+                            setCachedLibrary(accountId, user, library);
+                        }
+                    }
+
+                    if (!(library && Array.isArray(library))) {
+                        continue;
+                    }
+
+                    // Add user info to each item
+                    library = library.map((item) => ({
+                        ...item,
+                        _userColorIndex: user.colorIndex || 0,
+                        _userId: user.id,
+                        _username: user.username || user.email,
+                    }));
+
+                    allLibraryItems.push(...library);
+                    userMap.set(user.id, { email: user.email, username: user.username });
+                } catch (error) {
+                    console.error(`Error loading library for user ${user.id}:`, error);
+                    // Continue with other users
+                }
+            }
+
+            // Process and expand items
+            // For episode history, we want to show ALL episodes, not just the latest
+            const expandedLibrary = [];
+
+            for (const item of allLibraryItems) {
+                if (item.type === "movie") {
+                    expandedLibrary.push(item);
+                    continue;
+                }
+
+                const isEpisodeItem = item._id?.includes(":") && item._id.split(":").length >= 3;
+
+                if (isEpisodeItem) {
+                    // This is already an episode item (format: "tt123:season:episode")
+                    // Add it directly - we want all episodes, not just the latest
+                    expandedLibrary.push(item);
+                    continue;
+                }
+
+                // For series items without episode info in _id, check if we can extract episode info
+                // from state.video_id or state.watched
+                if (item.type === "series" && item.state) {
+                    // If video_id exists, create an episode entry
+                    if (item.state.video_id && item.state.video_id.trim() !== "") {
+                        const videoIdParts = item.state.video_id.split(":");
+                        if (videoIdParts.length >= 3) {
+                            const season = Number.parseInt(videoIdParts[1], 10);
+                            const episode = Number.parseInt(videoIdParts[2], 10);
+
+                            const episodeItem = {
+                                ...item,
+                                _id: `${item._id}:${season}:${episode}`,
+                                state: {
+                                    ...item.state,
+                                    episode,
+                                    season,
+                                    video_id: item.state.video_id,
+                                },
+                            };
+                            expandedLibrary.push(episodeItem);
+                            continue;
+                        }
+                    }
+
+                    // If watched field exists, try to extract episode info
+                    // Format: "tt123:season:episode:..." or bitfield
+                    if (item.state.watched && item.state.watched.trim() !== "") {
+                        const watchedParts = item.state.watched.split(":");
+                        if (watchedParts.length >= 3) {
+                            // Check if it's a video_id format (not a bitfield)
+                            const potentialSeason = Number.parseInt(watchedParts[1], 10);
+                            const potentialEpisode = Number.parseInt(watchedParts[2], 10);
+
+                            // If both are valid numbers, treat as video_id format
+                            if (
+                                !(Number.isNaN(potentialSeason) || Number.isNaN(potentialEpisode))
+                            ) {
+                                const episodeItem = {
+                                    ...item,
+                                    _id: `${item._id}:${potentialSeason}:${potentialEpisode}`,
+                                    state: {
+                                        ...item.state,
+                                        episode: potentialEpisode,
+                                        season: potentialSeason,
+                                        video_id: `${watchedParts[0]}:${potentialSeason}:${potentialEpisode}`,
+                                    },
+                                };
+                                expandedLibrary.push(episodeItem);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // Just add the item as-is (no expansion possible)
+                expandedLibrary.push(item);
+            }
+
+            // Sort by watch date in descending order (most recent first), using lastWatched only
+            expandedLibrary.sort((a, b) => {
+                const getWatchDate = (item) => {
+                    if (item.state?.lastWatched) {
+                        const date = new Date(item.state.lastWatched);
+                        if (!Number.isNaN(date.getTime())) {
+                            return date.getTime();
+                        }
+                    }
+                    return 0;
+                };
+
+                const dateA = getWatchDate(a);
+                const dateB = getWatchDate(b);
+
+                if (dateB === dateA) {
+                    return 0;
+                }
+                return dateB - dateA;
+            });
+
+            // Return all items (both removed and non-removed)
+            // Frontend will filter based on viewType:
+            // - Library mode: shows only non-removed items (removed: false)
+            // - History mode: shows all watched items (based on _ctime) regardless of removed status
+
+            res.json({
+                count: expandedLibrary.length,
+                library: expandedLibrary,
+            });
+        } catch (error) {
+            console.error("Error fetching combined library:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch combined library"),
+                message: "Failed to fetch combined library",
+            });
+        }
+    });
+
+    // NEW: Get activity from WatchSession and EpisodeWatchHistory tables (source of truth)
+    router.get("/activity/sessions", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            const { limit = 100, offset = 0, userId, includeActive = "true" } = req.query;
+
+            // Get all active users with their info
+            const users = await prisma.user.findMany({
+                select: {
+                    activityVisibility: true,
+                    colorIndex: true,
+                    email: true,
+                    id: true,
+                    username: true,
+                },
+                where: {
+                    accountId,
+                    isActive: true,
+                },
+            });
+
+            if (users.length === 0) {
+                return res.json({ count: 0, sessions: [] });
+            }
+
+            // Build user map for easy lookup
+            const userMap = new Map(users.map((u) => [u.id, u]));
+
+            // Build where clause for sessions
+            const whereClause = {
+                accountId: accountId || "default",
+            };
+
+            // If filtering by specific user
+            if (userId) {
+                whereClause.userId = userId;
+            }
+
+            // Include active sessions if requested
+            if (includeActive === "false") {
+                whereClause.isActive = false;
+            }
+
+            // Fetch watch sessions
+            const activities = await prisma.watchActivity.findMany({
+                orderBy: { date: "desc" },
+                skip: Number.parseInt(offset, 10) || 0,
+                take: Number.parseInt(limit, 10) || 100,
+                where: whereClause,
+            });
+
+            // Fetch episode watch history for additional detail
+            const episodeHistory = await prisma.episodeWatchHistory.findMany({
+                orderBy: { watchedAt: "desc" },
+                take: Number.parseInt(limit, 10) || 100,
+                where: {
+                    accountId: accountId || "default",
+                    ...(userId && { userId }),
+                },
+            });
+
+            // Transform watch activity into activity items
+            const activityItems = activities.map((activity) => {
+                const user = userMap.get(activity.userId);
+                return {
+                    durationSeconds: activity.watchTimeSeconds,
+                    endTime: new Date(activity.date.getTime() + activity.watchTimeSeconds * 1000),
+                    episode: null,
+                    id: activity.id,
+                    isActive: false,
+                    itemId: activity.itemId,
+                    itemName: activity.itemId, // Use itemId as name for export
+                    itemType: activity.itemType,
+                    poster: null,
+                    season: null,
+                    startTime: activity.date,
+                    type: "activity",
+                    userColorIndex: user?.colorIndex || 0,
+                    userEmail: user?.email,
+                    userId: activity.userId,
+                    username: user?.username || user?.email || "Unknown",
+                    videoId: activity.itemId,
+                    watchedAt: activity.date,
+                };
+            });
+
+            // Transform episode history into activity items
+            const episodeItems = episodeHistory.map((history) => {
+                const user = userMap.get(history.userId);
+                return {
+                    durationSeconds: history.durationSeconds || 0,
+                    endTime: history.watchedAt,
+                    episode: history.episode,
+                    id: history.id,
+                    isActive: false,
+                    itemId: history.itemId,
+                    itemName: history.itemName,
+                    itemType: "series",
+                    poster: history.poster,
+                    season: history.season,
+                    startTime: history.watchedAt,
+                    type: "episode",
+                    userColorIndex: user?.colorIndex || 0,
+                    userEmail: user?.email,
+                    userId: history.userId,
+                    username: user?.username || user?.email || "Unknown",
+                    videoId: history.videoId,
+                    watchedAt: history.watchedAt,
+                };
+            });
+
+            // Combine and sort by watch time (most recent first)
+            const allActivities = [...activityItems, ...episodeItems].sort(
+                (a, b) => new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime()
+            );
+
+            // Get total count
+            const totalActivities = await prisma.watchActivity.count({ where: whereClause });
+            const totalEpisodes = await prisma.episodeWatchHistory.count({
+                where: {
+                    accountId: accountId || "default",
+                    ...(userId && { userId }),
+                },
+            });
+
+            res.json({
+                count: allActivities.length,
+                sessions: allActivities,
+                totalActivities,
+                totalEpisodes,
+            });
+        } catch (error) {
+            console.error("Error fetching activity sessions:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch activity sessions"),
+                message: "Failed to fetch activity sessions",
+            });
+        }
+    });
+
+    // Export history for a specific user or all users
+    router.get("/history/export", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            const { userId } = req.query;
+            const whereClause = { accountId };
+
+            if (userId && userId !== "all") {
+                whereClause.userId = userId;
+            }
+
+            // Get watch sessions
+            const watchSessions = await prisma.watchSession.findMany({
+                orderBy: { startTime: "desc" },
+                where: whereClause,
+            });
+
+            // Get episode watch history
+            const episodeHistory = await prisma.episodeWatchHistory.findMany({
+                orderBy: { watchedAt: "desc" },
+                where: whereClause,
+            });
+
+            // Get watch activity
+            const watchActivity = await prisma.watchActivity.findMany({
+                orderBy: { date: "desc" },
+                where: whereClause,
+            });
+
+            // Get watch snapshots
+            const watchSnapshots = await prisma.watchSnapshot.findMany({
+                orderBy: { date: "desc" },
+                where: whereClause,
+            });
+
+            // Build export data
+            const exportData = {
+                counts: {
+                    episodeWatchHistory: episodeHistory.length,
+                    watchActivity: watchActivity.length,
+                    watchSessions: watchSessions.length,
+                    watchSnapshots: watchSnapshots.length,
+                },
+                episodeWatchHistory: episodeHistory.map((h) => ({
+                    ...h,
+                    accountId: undefined,
+                })),
+                exportedAt: new Date().toISOString(),
+                userId: userId || "all",
+                watchActivity: watchActivity.map((a) => ({
+                    ...a,
+                    accountId: undefined,
+                })),
+                watchSessions: watchSessions.map((s) => ({
+                    ...s,
+                    accountId: undefined, // Don't export accountId
+                })),
+                watchSnapshots: watchSnapshots.map((s) => ({
+                    ...s,
+                    accountId: undefined,
+                    overallTimeWatched:
+                        s.overallTimeWatched !== null && s.overallTimeWatched !== undefined
+                            ? String(s.overallTimeWatched)
+                            : undefined,
+                    timeOffset:
+                        s.timeOffset !== null && s.timeOffset !== undefined
+                            ? String(s.timeOffset)
+                            : undefined,
+                })),
+            };
+
+            res.json(exportData);
+        } catch (error) {
+            console.error("Error exporting history:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to export history"),
+                message: "Failed to export history",
+            });
+        }
+    });
+
+    // Import history data
+    router.post("/history/import", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            const {
+                watchSessions,
+                episodeWatchHistory,
+                watchActivity,
+                watchSnapshots,
+                targetUserId,
+            } = req.body;
+
+            if (!(watchSessions || episodeWatchHistory || watchActivity || watchSnapshots)) {
+                return res.status(400).json({ message: "No history data provided" });
+            }
+
+            const results = {
+                episodeWatchHistory: { imported: 0, skipped: 0 },
+                watchActivity: { imported: 0, skipped: 0 },
+                watchSessions: { imported: 0, skipped: 0 },
+                watchSnapshots: { imported: 0, skipped: 0 },
+            };
+
+            // Helper to determine user ID for import
+            const getUserId = (record) => targetUserId || record.userId;
+
+            // Import watch sessions
+            if (watchSessions && Array.isArray(watchSessions)) {
+                for (const session of watchSessions) {
+                    try {
+                        const userId = getUserId(session);
+                        // Check if user exists
+                        const user = await prisma.user.findFirst({
+                            where: { accountId, id: userId },
+                        });
+                        if (!user) {
+                            results.watchSessions.skipped++;
+                            continue;
+                        }
+
+                        await prisma.watchSession.create({
+                            data: {
+                                accountId,
+                                durationSeconds: session.durationSeconds || 0,
+                                endTime: session.endTime ? new Date(session.endTime) : null,
+                                episode: session.episode,
+                                isActive: false, // Imported sessions are not active
+                                itemId: session.itemId,
+                                itemName: session.itemName,
+                                itemType: session.itemType,
+                                poster: session.poster,
+                                season: session.season,
+                                startTime: new Date(session.startTime),
+                                userId,
+                                videoId: session.videoId,
+                            },
+                        });
+                        results.watchSessions.imported++;
+                    } catch {
+                        results.watchSessions.skipped++;
+                    }
+                }
+            }
+
+            // Import episode watch history
+            if (episodeWatchHistory && Array.isArray(episodeWatchHistory)) {
+                for (const history of episodeWatchHistory) {
+                    try {
+                        const userId = getUserId(history);
+                        const user = await prisma.user.findFirst({
+                            where: { accountId, id: userId },
+                        });
+                        if (!user) {
+                            results.episodeWatchHistory.skipped++;
+                            continue;
+                        }
+
+                        await prisma.episodeWatchHistory.upsert({
+                            create: {
+                                accountId,
+                                episode: history.episode,
+                                poster: history.poster,
+                                season: history.season,
+                                showId: history.showId,
+                                showName: history.showName,
+                                userId,
+                                videoId: history.videoId,
+                                watchedAt: new Date(history.watchedAt),
+                            },
+                            update: {
+                                episode: history.episode,
+                                poster: history.poster,
+                                season: history.season,
+                                showName: history.showName,
+                                watchedAt: new Date(history.watchedAt),
+                            },
+                            where: {
+                                accountId_userId_videoId: {
+                                    accountId,
+                                    userId,
+                                    videoId: history.videoId,
+                                },
+                            },
+                        });
+                        results.episodeWatchHistory.imported++;
+                    } catch {
+                        results.episodeWatchHistory.skipped++;
+                    }
+                }
+            }
+
+            // Import watch activity
+            if (watchActivity && Array.isArray(watchActivity)) {
+                for (const activity of watchActivity) {
+                    try {
+                        const userId = getUserId(activity);
+                        const user = await prisma.user.findFirst({
+                            where: { accountId, id: userId },
+                        });
+                        if (!user) {
+                            results.watchActivity.skipped++;
+                            continue;
+                        }
+
+                        await prisma.watchActivity.create({
+                            data: {
+                                accountId,
+                                date: new Date(activity.date),
+                                itemId: activity.itemId,
+                                itemType: activity.itemType,
+                                userId,
+                                watchTimeSeconds: activity.watchTimeSeconds,
+                            },
+                        });
+                        results.watchActivity.imported++;
+                    } catch {
+                        results.watchActivity.skipped++;
+                    }
+                }
+            }
+
+            // Import watch snapshots
+            if (watchSnapshots && Array.isArray(watchSnapshots)) {
+                for (const snapshot of watchSnapshots) {
+                    try {
+                        const userId = getUserId(snapshot);
+                        const user = await prisma.user.findFirst({
+                            where: { accountId, id: userId },
+                        });
+                        if (!user) {
+                            results.watchSnapshots.skipped++;
+                            continue;
+                        }
+
+                        await prisma.watchSnapshot.upsert({
+                            create: {
+                                accountId,
+                                date: new Date(snapshot.date),
+                                itemId: snapshot.itemId,
+                                lastWatched: snapshot.lastWatched
+                                    ? new Date(snapshot.lastWatched)
+                                    : null,
+                                mtime: snapshot.mtime ? new Date(snapshot.mtime) : null,
+                                overallTimeWatched: snapshot.overallTimeWatched,
+                                timeOffset: snapshot.timeOffset,
+                                userId,
+                            },
+                            update: {
+                                lastWatched: snapshot.lastWatched
+                                    ? new Date(snapshot.lastWatched)
+                                    : null,
+                                mtime: snapshot.mtime ? new Date(snapshot.mtime) : null,
+                                overallTimeWatched: snapshot.overallTimeWatched,
+                                timeOffset: snapshot.timeOffset,
+                            },
+                            where: {
+                                accountId_userId_itemId_date: {
+                                    accountId,
+                                    date: new Date(snapshot.date),
+                                    itemId: snapshot.itemId,
+                                    userId,
+                                },
+                            },
+                        });
+                        results.watchSnapshots.imported++;
+                    } catch {
+                        results.watchSnapshots.skipped++;
+                    }
+                }
+            }
+
+            res.json({
+                message: "History import completed",
+                results,
+            });
+        } catch (error) {
+            console.error("Error importing history:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to import history"),
+                message: "Failed to import history",
+            });
+        }
+    });
+
+    // Clear all history for a specific user
+    router.delete("/:userId/history", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Verify user exists
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ message: "User not found" });
+            }
+
+            const whereClause = { accountId, userId };
+
+            // Delete all history records
+            const deletedSessions = await prisma.watchSession.deleteMany({ where: whereClause });
+            const deletedEpisodes = await prisma.episodeWatchHistory.deleteMany({
+                where: whereClause,
+            });
+            const deletedActivity = await prisma.watchActivity.deleteMany({ where: whereClause });
+            const deletedSnapshots = await prisma.watchSnapshot.deleteMany({ where: whereClause });
+            // An AIOStreams viewing still in progress would otherwise land in the wiped history.
+            await prisma.watchStateCursor.deleteMany({ where: whereClause });
+
+            res.json({
+                deleted: {
+                    episodeWatchHistory: deletedEpisodes.count,
+                    watchActivity: deletedActivity.count,
+                    watchSessions: deletedSessions.count,
+                    watchSnapshots: deletedSnapshots.count,
+                },
+                message: "History cleared successfully",
+            });
+        } catch (error) {
+            console.error("Error clearing history:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to clear history"),
+                message: "Failed to clear history",
+            });
+        }
+    });
+
+    // Clear user's Stremio library (mark all items as removed)
+    router.delete("/:userId/library", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    isActive: true,
+                    stremioAuthKey: true,
+                },
+                where: {
+                    accountId,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ message: "User not found" });
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+
+            if (!user.stremioAuthKey) {
+                return res.status(400).json({ message: "User not connected to Stremio" });
+            }
+
+            // Decrypt auth key
+            const authKeyPlain = decrypt(user.stremioAuthKey, req);
+
+            const { StremioAPIClient } = require("stremio-api-client");
+            const apiClient = new StremioAPIClient({
+                authKey: authKeyPlain,
+                endpoint: "https://api.strem.io",
+            });
+
+            // Get all library items
+            const libraryItems = await apiClient.request("datastoreGet", {
+                all: true,
+                collection: "libraryItem",
+                ids: [],
+            });
+
+            let allItems = [];
+            if (Array.isArray(libraryItems)) {
+                allItems = libraryItems;
+            } else if (libraryItems?.result) {
+                allItems = Array.isArray(libraryItems.result)
+                    ? libraryItems.result
+                    : [libraryItems.result];
+            } else if (libraryItems?.library) {
+                allItems = Array.isArray(libraryItems.library)
+                    ? libraryItems.library
+                    : [libraryItems.library];
+            } else if (libraryItems && typeof libraryItems === "object") {
+                allItems = Object.values(libraryItems).filter(
+                    (item) => item && (item._id || item.id)
+                );
+            }
+
+            // Filter out already removed items
+            const activeItems = allItems.filter((item) => !item.removed);
+
+            if (activeItems.length === 0) {
+                return res.json({
+                    deleted: 0,
+                    message: "Library is already empty",
+                });
+            }
+
+            // Mark all items as removed
+            const changes = activeItems.map((item) => ({
+                _id: item._id || item.id,
+                _mtime: new Date().toISOString(),
+                name: item.name || "Unknown",
+                removed: true,
+                type: item.type || "unknown",
+            }));
+
+            await apiClient.request("datastorePut", {
+                changes,
+                collection: "libraryItem",
+            });
+
+            // Clear the cache for this user
+            const { clearCache } = require("../utils/libraryCache");
+            clearCache(accountId, userId);
+
+            res.json({
+                deleted: activeItems.length,
+                message: "Library cleared successfully",
+            });
+        } catch (error) {
+            console.error("Error clearing library:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to clear library"),
+                message: "Failed to clear library",
+            });
+        }
+    });
+
+    // Get like/love status for a media item in Stremio
+    router.get("/:userId/status", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const { mediaId, mediaType } = req.query;
+            const accountId = getAccountId(req);
+
+            if (!(mediaId && mediaType)) {
+                return res.status(400).json({ message: "mediaId and mediaType are required" });
+            }
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    isActive: true,
+                    stremioAuthKey: true,
+                },
+                where: {
+                    accountId,
+                    id: userId,
+                },
+            });
+
+            if (!user?.isActive) {
+                return res.status(404).json({ message: "User not found or inactive" });
+            }
+
+            if (!user.stremioAuthKey) {
+                return res.status(400).json({ message: "User not connected to Stremio" });
+            }
+
+            // Decrypt auth key
+            const authKeyPlain = decrypt(user.stremioAuthKey, req);
+
+            // Call Stremio likes API to get status
+            const response = await fetch(
+                `https://likes.stremio.com/api/get_status?authToken=${encodeURIComponent(authKeyPlain)}&mediaId=${encodeURIComponent(mediaId)}&mediaType=${encodeURIComponent(mediaType)}`,
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    method: "GET",
+                }
+            );
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`[Get Status] Stremio API error: ${response.status} - ${errorText}`);
+                return res.status(response.status).json({
+                    error: errorText,
+                    message: "Failed to get like/love status",
+                });
+            }
+
+            const data = await response.json().catch(() => ({}));
+            // Stremio returns { status: 'liked' | 'loved' | null }
+            res.json({ status: data.status || null });
+        } catch (error) {
+            console.error("Error getting like/love status:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to get like/love status"),
+                message: "Failed to get like/love status",
+            });
+        }
+    });
+
+    // Update like/love status for a media item in Stremio
+    router.post("/:userId/statusUpdate", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const { mediaId, mediaType, status } = req.body; // status: 'liked', 'loved', or null
+            const accountId = getAccountId(req);
+
+            if (!(mediaId && mediaType)) {
+                return res.status(400).json({ message: "mediaId and mediaType are required" });
+            }
+
+            if (status !== null && status !== undefined && !["liked", "loved"].includes(status)) {
+                return res
+                    .status(400)
+                    .json({ message: 'status must be "liked", "loved", or null' });
+            }
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    isActive: true,
+                    stremioAuthKey: true,
+                },
+                where: {
+                    accountId,
+                    id: userId,
+                },
+            });
+
+            if (!user?.isActive) {
+                return res.status(404).json({ message: "User not found or inactive" });
+            }
+
+            if (!user.stremioAuthKey) {
+                return res.status(400).json({ message: "User not connected to Stremio" });
+            }
+
+            // Decrypt auth key
+            const authKeyPlain = decrypt(user.stremioAuthKey, req);
+
+            // Call Stremio likes API
+            const response = await fetch("https://likes.stremio.com/api/send", {
+                body: JSON.stringify({
+                    authToken: authKeyPlain,
+                    mediaId,
+                    mediaType, // 'series' or 'movie'
+                    status, // 'liked', 'loved', or null to unlike/unlove
+                }),
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                method: "POST",
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`[Like/Love] Stremio API error: ${response.status} - ${errorText}`);
+                return res.status(response.status).json({
+                    error: errorText,
+                    message: "Failed to update like/love status",
+                });
+            }
+
+            const data = await response.json().catch(() => ({}));
+            res.json({ data, success: true });
+        } catch (error) {
+            console.error("Error updating like/love status:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to update like/love status"),
+                message: "Failed to update like/love status",
+            });
+        }
+    });
+
+    // Toggle library status (add/remove) for selected items
+    router.post("/:userId/library/toggle", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const { items } = req.body; // Array of { itemId, itemType, itemName, poster, addToLibrary }
+            const accountId = getAccountId(req);
+
+            if (!(items && Array.isArray(items)) || items.length === 0) {
+                return res.status(400).json({ message: "items array is required" });
+            }
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    id: true,
+                    isActive: true,
+                    ...PROVIDER_SELECT,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: {
+                    accountId,
+                    id: userId,
+                },
+            });
+
+            if (!user?.isActive) {
+                return res.status(404).json({ message: "User not found or inactive" });
+            }
+
+            if (!isProviderConnected(user)) {
+                return res.status(400).json({ message: "User not connected to a provider" });
+            }
+
+            // Build provider for this user (Stremio, Nuvio or Jellyfin)
+            const providerInstance = createProvider(user, { decrypt, req });
+            if (!providerInstance) {
+                return res.status(400).json({ message: "Failed to initialize provider for user" });
+            }
+            if (providerInstance.supportsLibraryWrite === false) {
+                return res
+                    .status(400)
+                    .json({ message: "Library modification is not supported for this provider" });
+            }
+
+            const { toggleLibraryItemsBatch } = require("../utils/libraryToggle");
+            const { clearCache, setCachedLibrary } = require("../utils/libraryCache");
+
+            // Process all items in a single batch call (1 API call per user)
+            let batchResult;
+            try {
+                batchResult = await toggleLibraryItemsBatch({
+                    items,
+                    logPrefix: `[LibraryToggle] User ${userId}`,
+                    provider: providerInstance,
+                });
+            } catch (error) {
+                console.error(
+                    `[LibraryToggle] Failed to toggle library items for user ${userId}:`,
+                    error
+                );
+                console.error("[LibraryToggle] Error stack:", error?.stack);
+                clearCache(accountId, userId);
+                return res.status(500).json({
+                    error: "Failed to toggle library items",
+                    errorCount: items.length,
+                    message: publicMessage(error, "Something went wrong"),
+                    results: items.map((item) => ({
+                        error: publicMessage(error, "Something went wrong"),
+                        itemId: item.itemId,
+                        success: false,
+                    })),
+                    success: false,
+                    successCount: 0,
+                });
+            }
+
+            // Wait a moment for Stremio to process the changes before refreshing cache
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Refresh the cached library through the user's own provider. This used
+            // to build a Stremio client from an auth key that belongs to a different
+            // route's scope, so it threw every time and the catch below quietly
+            // cleared the cache instead - the refresh never once ran. Going through
+            // the provider also means it now works for Nuvio users, which the
+            // hard-coded Stremio client never could.
+            try {
+                const libraryItems = await providerInstance.getLibrary();
+
+                let library = [];
+                if (Array.isArray(libraryItems)) {
+                    library = libraryItems;
+                } else if (libraryItems?.result) {
+                    library = Array.isArray(libraryItems.result)
+                        ? libraryItems.result
+                        : [libraryItems.result];
+                } else if (libraryItems?.library) {
+                    library = Array.isArray(libraryItems.library)
+                        ? libraryItems.library
+                        : [libraryItems.library];
+                }
+
+                if (Array.isArray(library) && library.length > 0) {
+                    setCachedLibrary(accountId, userId, library);
+                    console.log(
+                        `[LibraryToggle] Updated cache for user ${userId} with ${library.length} items`
+                    );
+                }
+            } catch (cacheError) {
+                console.error(
+                    `[LibraryToggle] Failed to refresh cache for user ${userId}:`,
+                    cacheError
+                );
+                // Clear cache as fallback so it will be refreshed on next request
+                clearCache(accountId, userId);
+            }
+
+            const successCount = batchResult?.processedCount || 0;
+            const errorCount = items.length - successCount;
+
+            // Build results array for response
+            const results = items.map((item, index) => ({
+                error: index < successCount ? undefined : "Item was skipped or failed",
+                itemId: item.itemId,
+                success: index < successCount,
+            }));
+
+            res.json({
+                errorCount,
+                results,
+                success: errorCount === 0,
+                successCount,
+            });
+        } catch (error) {
+            console.error("Error toggling library items:", error);
+            res.status(500).json({
+                error: "Failed to toggle library items",
+                message: publicMessage(error, "Failed to toggle library items"),
+            });
+        }
+    });
+
+    // Delete a library item from a user's library (via their provider)
+    router.delete("/:userId/library/:itemId", async (req, res) => {
+        try {
+            const { userId, itemId } = req.params;
+            const accountId = getAccountId(req);
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    id: true,
+                    isActive: true,
+                    ...PROVIDER_SELECT,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: {
+                    accountId,
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ error: "User is disabled" });
+            }
+
+            if (!isProviderConnected(user)) {
+                return res.status(400).json({ error: "User not connected to a provider" });
+            }
+
+            // Build provider for this user (Stremio, Nuvio or Jellyfin)
+            const providerInstance = createProvider(user, { decrypt, req });
+            if (!providerInstance) {
+                return res.status(400).json({ error: "Failed to initialize provider for user" });
+            }
+
+            const { markLibraryItemRemoved } = require("../utils/libraryDelete");
+
+            try {
+                await markLibraryItemRemoved({
+                    itemId,
+                    logPrefix: "[users/delete-library-item]",
+                    provider: providerInstance,
+                });
+            } catch (deleteError) {
+                if (deleteError.code === "NOT_FOUND") {
+                    return res.status(404).json({
+                        error: "Library item not found",
+                        itemId: deleteError.meta?.itemId,
+                    });
+                }
+                if (deleteError.code === "NOT_SUPPORTED") {
+                    return res
+                        .status(400)
+                        .json({ error: "Library modification is not supported for this provider" });
+                }
+                console.error("[users] Error deleting library item via helper:", deleteError);
+                return res.status(500).json({
+                    error: "Failed to delete library item",
+                    message: deleteError?.message,
+                });
+            }
+
+            // Clear the cache for this user so it refreshes on next request
+            const { clearCache } = require("../utils/libraryCache");
+            clearCache(accountId, userId);
+
+            res.json({
+                message: "Library item deleted successfully",
+                success: true,
+            });
+        } catch (error) {
+            console.error("Error deleting library item:", error);
+            res.status(500).json({
+                error: "Failed to delete library item",
+                message: publicMessage(error, "Failed to delete library item"),
+            });
+        }
+    });
+
+    // Backup user's library (download as JSON)
+    router.get("/:id/library/backup", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const accountId = getAccountId(req);
+
+            // Get user
+            const user = await prisma.user.findFirst({
+                select: {
+                    email: true,
+                    id: true,
+                    isActive: true,
+                    username: true,
+                    ...PROVIDER_SELECT,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: {
+                    accountId,
+                    id,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ error: "User is disabled" });
+            }
+
+            if (!isProviderConnected(user)) {
+                return res.status(400).json({ error: "User not connected to a provider" });
+            }
+
+            // Fetch via the user's provider (Stremio, Nuvio or Jellyfin)
+            const providerInstance = createProvider(user, { decrypt, req });
+            if (!providerInstance) {
+                return res.status(400).json({ error: "Failed to initialize provider for user" });
+            }
+
+            // Get all library items
+            const libraryItems = await providerInstance.getLibrary();
+
+            const library = Array.isArray(libraryItems)
+                ? libraryItems
+                : libraryItems?.result || libraryItems?.library || [];
+
+            // Find the latest modification time for filename
+            let lastModified = 0;
+            for (const item of library) {
+                const mtime = item._mtime || item.mtime || 0;
+                if (mtime > lastModified) {
+                    lastModified = mtime;
+                }
+            }
+
+            // Generate filename: {Provider}-Library-{email/username}-{timestamp}.json
+            const userIdentifier = user.email || user.username || "user";
+            const timestamp = lastModified || Date.now();
+            const providerLabel = require("../utils/providerInfo").providerLabel(user);
+            const filename = `${providerLabel}-Library-${userIdentifier}-${timestamp}.json`;
+
+            // Set headers for file download
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+            // Send JSON response
+            res.json(library);
+        } catch (error) {
+            console.error("Error backing up library:", error);
+            res.status(500).json({
+                error: "Failed to backup library",
+                message: publicMessage(error, "Failed to backup library"),
+            });
+        }
+    });
+
+    // Get user's library/watch history
+    router.get("/:id/library", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const user = await prisma.user.findFirst({
+                select: {
+                    email: true,
+                    id: true,
+                    isActive: true,
+                    ...PROVIDER_SELECT,
+                    traxAddonEnabled: true,
+                    traxToken: true,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+
+            try {
+                // Use cached library data (updated every 5 minutes by activity monitor)
+                const accountId = getAccountId(req);
+                const { getCachedLibrary, setCachedLibrary } = require("../utils/libraryCache");
+                let library = getCachedLibrary(accountId, user);
+
+                // If no cache, fetch from the user's provider and cache it
+                if (!(library && Array.isArray(library)) || library.length === 0) {
+                    const providerInstance = createProvider(user, { decrypt, req });
+                    if (!providerInstance) {
+                        return res.status(400).json({
+                            message: "User not connected to a provider and no cached library found",
+                        });
+                    }
+
+                    const libraryItems = await providerInstance.getLibrary();
+
+                    // The response might be wrapped or direct array
+                    library = Array.isArray(libraryItems)
+                        ? libraryItems
+                        : libraryItems?.result || libraryItems?.library || [];
+
+                    // Cache the library data
+                    if (Array.isArray(library) && library.length > 0) {
+                        setCachedLibrary(accountId, user, library);
+                    }
+                }
+
+                // Expand series into individual episodes
+                // Stremio stores one library item per show with a watched bitfield
+                // We only want to show the latest episode per show (since we only have show-level watch dates)
+                const expandedLibrary = [];
+                const episodeItemsByShow = new Map(); // Track episode items by show ID
+
+                // First pass: collect all items
+                for (const item of library) {
+                    // Movies: add as-is
+                    if (item.type === "movie") {
+                        expandedLibrary.push(item);
+                        continue;
+                    }
+
+                    // Series: Check if Stremio already returned per-episode items
+                    // If the _id contains episode info (format: "tt1234567:season:episode"), it's already an episode item
+                    const isEpisodeItem =
+                        item._id?.includes(":") && item._id.split(":").length >= 3;
+
+                    if (isEpisodeItem) {
+                        // Stremio already returned this as a separate episode item
+                        // Group by show ID to find the latest episode per show
+                        const showId = item._id.split(":")[0]; // Get base show ID (e.g., "tt0096697" from "tt0096697:0:1")
+                        if (!episodeItemsByShow.has(showId)) {
+                            episodeItemsByShow.set(showId, []);
+                        }
+                        episodeItemsByShow.get(showId).push(item);
+                        continue;
+                    }
+
+                    // Just add the item as-is (no cinemeta expansion)
+                    expandedLibrary.push(item);
+                }
+
+                // Process episode items: only keep the latest episode per show
+                episodeItemsByShow.forEach((episodes, _showId) => {
+                    const latestEpisode = findLatestEpisode(episodes, { inheritPoster: true });
+                    if (latestEpisode) {
+                        expandedLibrary.push(latestEpisode);
+                    }
+                });
+
+                // Enrich items with missing posters from Cinemeta
+                await enrichPostersFromCinemeta(expandedLibrary);
+
+                // Sort by watch date in descending order (most recent first)
+                // IMPORTANT: Only use state.lastWatched - this is the actual watch timestamp
+                // Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
+                expandedLibrary.sort((a, b) => {
+                    const getWatchDate = (item) => {
+                        if (item.state?.lastWatched) {
+                            const d = new Date(item.state.lastWatched);
+                            if (!Number.isNaN(d.getTime())) {
+                                return d.getTime();
+                            }
+                        }
+                        return 0;
+                    };
+
+                    const dateA = getWatchDate(a);
+                    const dateB = getWatchDate(b);
+
+                    // Descending order (most recent first) - higher timestamp comes first
+                    // If dates are equal, maintain original order
+                    if (dateB === dateA) {
+                        return 0;
+                    }
+                    return dateB - dateA;
+                });
+
+                // Debug: log first few items to verify sorting
+                if (expandedLibrary.length > 0) {
+                    console.log("Library sorted by date (first 5 items, using lastWatched):");
+                    expandedLibrary.slice(0, 5).forEach((item, idx) => {
+                        const date = item.state?.lastWatched
+                            ? new Date(item.state.lastWatched).getTime()
+                            : null;
+                        console.log(`${idx + 1}. ${item.name} - ${date}`);
+                    });
+                }
+
+                res.json({
+                    count: expandedLibrary.length,
+                    library: expandedLibrary,
+                });
+            } catch (error) {
+                console.error("Error fetching library items:", error);
+                res.status(500).json({
+                    error: publicMessage(error, "Failed to fetch library items"),
+                    message: "Failed to fetch library items",
+                });
+            }
+        } catch (error) {
+            console.error("Error in get library endpoint:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to fetch library items"),
+                message: "Failed to fetch library items",
+            });
+        }
+    });
+
+    // Clear all Stremio addons from user's account
+    router.post("/:id/stremio-addons/clear", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Full row, not a narrow select: createProvider needs the provider
+            // credentials, and the guard record below needs id + providerType (a
+            // prior narrow select silently passed undefined as the user id there).
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Provider-agnostic: was Stremio-only, so Clear All on a Nuvio user's
+            // Account Addons failed - same fix as the reorder/delete routes.
+            const hasClearCreds =
+                user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId);
+            if (!hasClearCreds) {
+                return res.status(400).json({ message: "User is not connected to a provider" });
+            }
+
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+
+            try {
+                const provider = createProvider(user, { decrypt, req });
+                if (!provider) {
+                    return res.status(400).json({ message: "Provider credentials are invalid" });
+                }
+                await provider.clearAddons();
+                await require("../utils/accountGuard").recordAssertedState(
+                    prisma,
+                    user.id,
+                    user.providerType,
+                    []
+                );
+
+                res.json({
+                    clearedCount: 0,
+                    message: "All addons cleared successfully",
+                });
+            } catch (error) {
+                console.error("Error clearing Stremio addons:", error);
+                res.status(500).json({
+                    error: publicMessage(error, "Failed to clear addons"),
+                    message: "Failed to clear addons",
+                });
+            }
+        } catch (error) {
+            console.error("Error in clear Stremio addons endpoint:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to clear addons"),
+                message: "Failed to clear addons",
+            });
+        }
+    });
+
+    // Delete Stremio addon from user's account
+    router.delete("/:id/stremio-addons/:addonName", async (req, res) => {
+        try {
+            const { id, addonName } = req.params;
+            const { unsafe } = req.query;
+
+            // Full row: createProvider needs whichever provider's credentials this
+            // user actually has (the old narrow Stremio-only select is why removal
+            // failed for Nuvio users).
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // No Stremio-key check here on purpose. Removal runs through
+            // createProvider and works for Nuvio too - the credential check that
+            // matters is hasDeleteCreds further down, which accepts either
+            // provider. This guard rejected every Nuvio user before any of that
+            // ran, with an error naming a service they are not even using, which
+            // is why removing an addon from a Nuvio account failed.
+            if (!user.isActive) {
+                return res.status(400).json({ message: "User is disabled" });
+            }
+
+            // Protected addons logic (name-based):
+            // 1. Default Stremio addons: protected in safe mode, not protected in unsafe mode
+            // 2. User-defined protected addons: ALWAYS protected regardless of mode
+            const { defaultAddons } = require("../utils/config");
+            const normalizeName = (n) =>
+                String(n || "")
+                    .trim()
+                    .toLowerCase();
+            const targetNameNormalized = normalizeName(addonName);
+
+            // Default protected addon names (only in safe mode)
+            const defaultProtectedNames = unsafe === "true" ? [] : defaultAddons.names || [];
+            const defaultProtectedNameSet = new Set(defaultProtectedNames.map(normalizeName));
+
+            // Parse user-defined protected addons (ALWAYS protected regardless of mode) - stored as plaintext names
+            let userProtectedNames = [];
+            try {
+                const parsed = user.protectedAddons ? JSON.parse(user.protectedAddons) : [];
+                if (Array.isArray(parsed)) {
+                    userProtectedNames = parsed.map((n) => normalizeName(n)).filter(Boolean);
+                }
+            } catch (e) {
+                console.warn("Failed to parse user protected addons in delete:", e);
+                userProtectedNames = [];
+            }
+
+            const userProtectedNameSet = new Set(userProtectedNames);
+            const allProtectedNameSet = new Set([
+                ...defaultProtectedNameSet,
+                ...userProtectedNameSet,
+            ]);
+
+            // Check if the addon being deleted is protected (by name)
+            const isProtected = allProtectedNameSet.has(targetNameNormalized);
+
+            // In unsafe mode, allow deletion of default Stremio addons but not user-defined protected addons
+            if (
+                isProtected &&
+                (unsafe !== "true" || userProtectedNameSet.has(targetNameNormalized))
+            ) {
+                return res
+                    .status(403)
+                    .json({ message: "This addon is protected and cannot be deleted" });
+            }
+
+            // Provider-agnostic: same fix as the reorder route above - this was
+            // Stremio-only, so removing a single Account Addon failed for Nuvio.
+            const hasDeleteCreds =
+                user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId);
+            if (!hasDeleteCreds) {
+                return res.status(400).json({ message: "User is not connected to a provider" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "Provider credentials are invalid" });
+            }
+
+            // 1) Pull current collection
+            const { addons: currentAddonsRaw } = await provider.getAddons();
+            const currentAddons = Array.isArray(currentAddonsRaw)
+                ? currentAddonsRaw
+                : currentAddonsRaw && typeof currentAddonsRaw === "object"
+                  ? Object.values(currentAddonsRaw)
+                  : [];
+
+            // The page identifies an account addon by its address, which is
+            // exact; a name is accepted too (the clear-all path sends names).
+            // Matching only the stored manifest's name was why removal silently
+            // did nothing for an addon known here under a custom name, or when
+            // the address arrived instead of a name - the filter matched nothing,
+            // the account was rewritten unchanged, and the reply still said
+            // "removed".
+            const { canonicalizeManifestUrl: canonicalUrl } = require("../utils/validation");
+            const looksLikeUrl = /^https?:\/\//i.test(String(addonName || ""));
+            const canon = (u) => {
+                try {
+                    return canonicalUrl(u);
+                } catch {
+                    return String(u || "")
+                        .trim()
+                        .toLowerCase();
+                }
+            };
+            const targetUrl = looksLikeUrl ? canon(addonName) : null;
+            const matchesTarget = (a) => {
+                if (targetUrl) {
+                    return canon(a?.transportUrl || a?.manifestUrl || a?.url || "") === targetUrl;
+                }
+                return [a?.manifest?.name, a?.transportName, a?.name].some(
+                    (n) => n && normalizeName(n) === targetNameNormalized
+                );
+            };
+            const targets = currentAddons.filter(matchesTarget);
+            if (targets.length === 0) {
+                return res.status(404).json({ message: "That addon is not on the account" });
+            }
+            // An addon addressed by URL still gets the protected-name check.
+            if (targetUrl) {
+                const protectedHit = targets.some((a) => {
+                    const n = normalizeName(a?.manifest?.name || a?.transportName || a?.name);
+                    return (
+                        n &&
+                        allProtectedNameSet.has(n) &&
+                        (unsafe !== "true" || userProtectedNameSet.has(n))
+                    );
+                });
+                if (protectedHit) {
+                    return res
+                        .status(403)
+                        .json({ message: "This addon is protected and cannot be deleted" });
+                }
+            }
+
+            let filteredAddons = currentAddons;
+            try {
+                filteredAddons = currentAddons.filter((a) => !matchesTarget(a));
+
+                // Set the filtered addons using the proper format
+                await provider.setAddons(filteredAddons);
+                await require("../utils/accountGuard").recordAssertedState(
+                    prisma,
+                    id,
+                    user.providerType,
+                    filteredAddons
+                );
+                try {
+                    require("../utils/liveEvents").emitLive(getAccountId(req), "sync");
+                } catch {
+                    /* optional */
+                }
+            } catch (e) {
+                console.error("❌ Failed to remove addon:", e.message);
+                throw e;
+            }
+
+            return res.json({ message: "Addon removed from their account" });
+        } catch (error) {
+            console.error("Error removing Stremio addon:", error);
+            // When the provider could not write the list back, its own message says
+            // the list may now be empty and to run a sync; a generic line hides that.
+            const message =
+                error?.code === "ADDON_LIST_NOT_RESTORED"
+                    ? error.message
+                    : "Failed to remove addon from Stremio";
+            return res
+                .status(502)
+                .json({ error: publicMessage(error, "Something went wrong"), message });
+        }
+    });
+
+    // Connect user with auth key
+    router.post("/:id/connect-stremio-authkey", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { authKey } = req.body;
+
+            if (!authKey) {
+                return res.status(400).json({ message: "Auth key is required" });
+            }
+
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Encrypt and store the auth key
+            const encryptedAuthKey = encrypt(authKey, req);
+
+            await prisma.user.update({
+                data: {
+                    isActive: true,
+                    stremioAuthKey: encryptedAuthKey,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            res.json({ message: "Stremio connection established successfully" });
+        } catch (error) {
+            console.error("Error connecting user with auth key:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to connect user"),
+                message: "Failed to connect user",
+            });
+        }
+    });
+
+    // Clear Stremio credentials
+    router.post("/:id/clear-stremio-credentials", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Clear Stremio credentials
+            await prisma.user.update({
+                data: {
+                    isActive: false, // Disconnect user since Stremio credentials are cleared
+                    stremioAuthKey: null,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            res.json({ message: "Stremio credentials cleared successfully" });
+        } catch (error) {
+            console.error("Error clearing Stremio credentials:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to clear Stremio credentials"),
+                message: "Failed to clear Stremio credentials",
+            });
+        }
+    });
+
+    // SIMKL link (optional, supplementary to whichever provider this user is
+    // actually created under) - see the schema comment on User.simklAccessToken
+    // for why this isn't a peer of providerType. PIN flow: /simkl/start shows
+    // the user a code, the client polls /simkl/poll until Simkl reports it
+    // authorized (or the user gives up and navigates away - nothing server-side
+    // needs cleaning up either way, Simkl expires the pending PIN on its own).
+    router.post("/:id/simkl/start", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const clientId = await resolveSimklClientId(prisma, getAccountId, req);
+            const pin = await startSimklPin(clientId);
+            res.json(pin);
+        } catch (error) {
+            console.error("Error starting SIMKL authorization:", error);
+            res.status(error?.status || 500).json({
+                message: publicMessage(error, "Failed to start SIMKL authorization"),
+            });
+        }
+    });
+
+    router.post("/:id/simkl/poll", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { userCode } = req.body;
+            if (!userCode) {
+                return res.status(400).json({ message: "userCode is required" });
+            }
+
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            const clientId = await resolveSimklClientId(prisma, getAccountId, req);
+            const result = await pollSimklPin(clientId, userCode);
+            if (result.status !== "authorized") {
+                return res.json({ status: "pending" });
+            }
+
+            const encryptedToken = encrypt(result.accessToken, req);
+            await prisma.user.update({
+                data: {
+                    simklAccessToken: encryptedToken,
+                    simklConnectedAt: new Date(),
+                    simklLastPullAt: null,
+                    simklLastPushAt: null,
+                    simklSyncState: null,
+                },
+                where: { accountId: getAccountId(req), id },
+            });
+
+            const username = await getSimklAccountInfo(clientId, result.accessToken).catch(
+                () => null
+            );
+            res.json({ status: "authorized", username });
+        } catch (error) {
+            console.error("Error polling SIMKL authorization:", error);
+            res.status(error?.status || 500).json({
+                message: publicMessage(error, "Failed to poll SIMKL authorization"),
+            });
+        }
+    });
+
+    router.post("/:id/simkl/disconnect", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const user = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Deliberately leaves any watch history already pulled from Simkl in
+            // place (it's real, already-merged data now) - only stops the link
+            // itself, same as disconnecting Stremio doesn't retroactively erase
+            // that user's watch history either.
+            await prisma.user.update({
+                data: {
+                    simklAccessToken: null,
+                    simklConnectedAt: null,
+                    simklLastPullAt: null,
+                    simklLastPushAt: null,
+                    simklSyncState: null,
+                },
+                where: { accountId: getAccountId(req), id },
+            });
+            res.json({ message: "SIMKL disconnected" });
+        } catch (error) {
+            console.error("Error disconnecting SIMKL:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to disconnect SIMKL"),
+                message: "Failed to disconnect SIMKL",
+            });
+        }
+    });
+
+    // Connect existing user to Stremio
+    router.post("/:id/connect-stremio", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { password, authKey } = req.body;
+
+            if (!(password && authKey)) {
+                return res.status(400).json({ message: "Password and authKey are required" });
+            }
+
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Encrypt and store the auth key
+            const encryptedAuthKey = encrypt(authKey, req);
+
+            await prisma.user.update({
+                data: {
+                    isActive: true,
+                    stremioAuthKey: encryptedAuthKey,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            res.json({ message: "Stremio connection established successfully" });
+        } catch (error) {
+            console.error("Error connecting user to Stremio:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to connect user to Stremio"),
+                message: "Failed to connect user to Stremio",
+            });
+        }
+    });
+
+    // Import addons from a user
+    router.post("/:id/import-addons", async (req, res, next) => {
+        try {
+            // Compatibility shim: if payload already contains addons array (new flow), or addonUrls (legacy),
+            // normalize and forward to the enhanced handler declared later in this file.
+            if (Array.isArray(req.body?.addons) || Array.isArray(req.body?.addonUrls)) {
+                if (!Array.isArray(req.body.addons) && Array.isArray(req.body.addonUrls)) {
+                    req.body.addons = req.body.addonUrls.map((url) => ({ manifestUrl: url, url }));
+                }
+                // SlickTrax is SlickSync's own per-person addon, added to each
+                // person by sync - never something to copy into a group. Importing
+                // it (here, or another instance's copy on a shared account) put a
+                // second SlickTrax on everyone in the group.
+                const isSlickTrax = (a) => {
+                    const id = String(a?.manifest?.id || a?.id || "");
+                    const url = String(a?.manifestUrl || a?.transportUrl || a?.url || "");
+                    return (
+                        id.startsWith("vip.slicksync.trax") ||
+                        /\/trax\/[^/]+\/(?:v[\d.]+\/)?(?:aio\/)?manifest\.json$/i.test(url)
+                    );
+                };
+                req.body.addons = req.body.addons.filter((a) => !isSlickTrax(a));
+                // A stream addon on someone with a pause set up is installed through
+                // their gate (utils/streamGate.js) - it is one of SlickSync's own
+                // addons, so it comes in at its real address, never their gate's.
+                const { parseGateUrl } = require("../utils/streamGate");
+                const listed = req.body.addons;
+                const kept = (
+                    await Promise.all(
+                        listed.map(async (a) => {
+                            const gated = parseGateUrl(a?.manifestUrl || a?.transportUrl || a?.url);
+                            if (!gated) {
+                                return a;
+                            }
+                            const row = await prisma.addon.findFirst({
+                                select: { manifestUrl: true },
+                                where: { accountId: getAccountId(req), id: gated.addonId },
+                            });
+                            let real = null;
+                            try {
+                                real = row?.manifestUrl ? decrypt(row.manifestUrl, req) : null;
+                            } catch {
+                                real = null;
+                            }
+                            return real && !real.includes("{{vault:")
+                                ? { ...a, manifestUrl: real, transportUrl: real, url: real }
+                                : null;
+                        })
+                    )
+                ).filter(Boolean);
+                Object.assign(req.body, { addons: kept });
+                if (req.body.addons.length === 0) {
+                    return res.status(400).json({
+                        message:
+                            "Nothing to import - their only addon is SlickTrax, which SlickSync adds to each person itself",
+                    });
+                }
+                return next();
+            }
+            const { id } = req.params;
+            const { addonUrls } = req.body;
+
+            if (!Array.isArray(addonUrls) || addonUrls.length === 0) {
+                return res.status(400).json({ message: "addonUrls must be a non-empty array" });
+            }
+
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Find groups that contain this user
+            const groups = await prisma.group.findMany({
+                where: {
+                    accountId: getAccountId(req),
+                    userIds: {
+                        contains: user.id,
+                    },
+                },
+            });
+
+            if (groups.length === 0) {
+                return res.status(400).json({ message: "User is not in any groups" });
+            }
+
+            const group = groups[0]; // Use first group
+            let importedCount = 0;
+            const results = [];
+
+            for (const addonUrl of addonUrls) {
+                try {
+                    // Fetch addon manifest
+                    const manifestResponse = await safeFetch(addonUrl, {}, instancePolicy());
+                    if (!manifestResponse.ok) {
+                        throw new Error(`Failed to fetch manifest: ${manifestResponse.status}`);
+                    }
+                    const manifest = await manifestResponse.json();
+
+                    // Check if addon already exists
+                    const existingAddon = await prisma.addon.findFirst({
+                        where: {
+                            accountId: getAccountId(req),
+                            manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                        },
+                    });
+
+                    if (existingAddon) {
+                        // Check if addon is already in the group
+                        const existingGroupAddon = await prisma.groupAddon.findFirst({
+                            where: {
+                                addonId: existingAddon.id,
+                                groupId: group.id,
+                            },
+                        });
+
+                        if (!existingGroupAddon) {
+                            // Add existing addon to group
+                            await prisma.groupAddon.create({
+                                data: {
+                                    addonId: existingAddon.id,
+                                    groupId: group.id,
+                                    isEnabled: true,
+                                },
+                            });
+                            importedCount++;
+                        }
+                        results.push({
+                            name: manifest.name || "Unknown",
+                            status: "added_to_group",
+                            url: addonUrl,
+                        });
+                    } else {
+                        // Create new addon
+                        // Derive resources and catalogs from manifest
+                        const resourcesNames = Array.isArray(manifest.resources)
+                            ? manifest.resources
+                                  .map((r) => (typeof r === "string" ? r : r && (r.name || r.type)))
+                                  .filter(Boolean)
+                            : [];
+                        const catalogsData = Array.isArray(manifest.catalogs)
+                            ? manifest.catalogs
+                                  .filter((c) => c?.type && c.id)
+                                  .map((c) => ({
+                                      id: c.id,
+                                      search: c.extra
+                                          ? c.extra.some((e) => e.name === "search")
+                                          : false,
+                                      type: c.type,
+                                  }))
+                            : [];
+
+                        const newAddon = await prisma.addon.create({
+                            data: {
+                                accountId: getAccountId(req),
+                                catalogs: JSON.stringify(catalogsData),
+                                description: manifest.description || "",
+                                iconUrl: manifest.logo || null,
+                                isActive: true,
+                                manifest: encrypt(JSON.stringify(manifest), req),
+                                manifestHash: manifestHash(manifest),
+                                manifestUrl: encrypt(addonUrl, req),
+                                manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                                name: manifest.name || "Unknown",
+                                originalManifest: encrypt(JSON.stringify(manifest), req),
+                                resources: JSON.stringify(resourcesNames),
+                                stremioAddonId: manifest.id || null,
+                                version: manifest.version || null,
+                            },
+                        });
+
+                        // Add to group
+                        await prisma.groupAddon.create({
+                            data: {
+                                addonId: newAddon.id,
+                                groupId: group.id,
+                                isEnabled: true,
+                            },
+                        });
+
+                        importedCount++;
+                        results.push({
+                            name: manifest.name || "Unknown",
+                            status: "created_and_added",
+                            url: addonUrl,
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Error importing addon ${addonUrl}:`, error);
+                    results.push({
+                        error: addonAddressProblem(error) || error.message,
+                        status: "error",
+                        url: addonUrl,
+                    });
+                }
+            }
+
+            if (importedCount === 0) {
+                return res.status(400).json({
+                    importedCount: 0,
+                    message: "No new addons were imported. All addons already exist in the group.",
+                    results,
+                });
+            }
+
+            res.json({
+                importedCount,
+                message: `Successfully imported ${importedCount} addons to group "${group.name}"`,
+                results,
+                totalRequested: addonUrls.length,
+            });
+        } catch (error) {
+            console.error("Error importing addons:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to import addons"),
+                message: "Failed to import addons",
+            });
+        }
+    });
+
+    // Reorder Stremio addons for a user (by manifest.name ONLY)
+    router.post("/:id/stremio-addons/reorder", async (req, res) => {
+        try {
+            const { id: userId } = req.params;
+            const { orderedNames } = req.body || {};
+
+            // Require orderedNames strictly
+            if (!Array.isArray(orderedNames) || orderedNames.length === 0) {
+                return res.status(400).json({ message: "orderedNames array is required" });
+            }
+
+            // Get the user
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id: userId,
+                },
+            });
+
+            if (!user) {
+                return responseUtils.notFound(res, "User");
+            }
+
+            // Provider-agnostic: this route was hard-wired to StremioAPIClient, so
+            // dragging Account Addons on a Nuvio user errored "User is not
+            // connected to Stremio" (confirmed live 2026-09-02). Both providers
+            // implement getAddons()/setAddons() with the same {addons:[...]} shape.
+            const hasReorderCreds =
+                user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId);
+            if (!hasReorderCreds) {
+                return res.status(400).json({ message: "User is not connected to a provider" });
+            }
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return res.status(400).json({ message: "Provider credentials are invalid" });
+            }
+            const { addons: currentRaw } = await provider.getAddons();
+            const currentAddons = Array.isArray(currentRaw) ? currentRaw : [];
+
+            // Build a map name -> queue of addons with that name to handle duplicates
+            const nameToAddons = new Map();
+            for (const addon of currentAddons) {
+                const name =
+                    addon?.manifest?.name || addon?.transportName || addon?.name || "Addon";
+                if (!nameToAddons.has(name)) {
+                    nameToAddons.set(name, []);
+                }
+                nameToAddons.get(name).push(addon);
+            }
+
+            // Validate all names exist
+            const invalidNames = orderedNames.filter((n) => !nameToAddons.has(n));
+            if (invalidNames.length > 0) {
+                return res.status(400).json({
+                    invalidNames,
+                    message: "Some addon names not found in current collection",
+                });
+            }
+
+            // Build reordered list by consuming from queues to preserve duplicates order
+            const reorderedAddons = [];
+            for (const n of orderedNames) {
+                const q = nameToAddons.get(n);
+                if (q && q.length > 0) {
+                    reorderedAddons.push(q.shift());
+                }
+            }
+
+            // Append any remaining addons (names not specified) after the ordered ones, preserving original order
+            for (const [_, q] of nameToAddons.entries()) {
+                while (q.length > 0) {
+                    reorderedAddons.push(q.shift());
+                }
+            }
+
+            // Set the reordered collection
+            await provider.setAddons(reorderedAddons);
+
+            res.json({
+                message: "Addons reordered successfully (by name)",
+                reorderedCount: reorderedAddons.length,
+            });
+        } catch (error) {
+            console.error("Error reordering Stremio addons:", error);
+            const message =
+                error?.code === "ADDON_LIST_NOT_RESTORED"
+                    ? error.message
+                    : "Failed to reorder addons";
+            res.status(500).json({ error: publicMessage(error, "Something went wrong"), message });
+        }
+    });
+
+    // Protect addon
+    router.post("/:id/protect-addon", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { addonId, manifestUrl } = req.body;
+            const { unsafe } = req.query;
+
+            // Resolve target URL to protect/unprotect
+            let targetUrl = null;
+            try {
+                if (typeof manifestUrl === "string" && manifestUrl.trim()) {
+                    targetUrl = manifestUrl.trim();
+                } else if (typeof addonId === "string" && /^https?:\/\//i.test(addonId)) {
+                    targetUrl = addonId.trim();
+                } else if (typeof addonId === "string" && addonId.trim()) {
+                    const found = await prisma.addon.findFirst({
+                        where: { accountId: getAccountId(req), id: addonId.trim() },
+                    });
+                    if (found?.manifestUrl) {
+                        try {
+                            targetUrl = decrypt(found.manifestUrl, req);
+                        } catch {
+                            targetUrl = found.manifestUrl;
+                        }
+                    }
+                }
+            } catch {
+                // Unavailable optional records leave the current result in place.
+            }
+
+            // Check if this is a default addon in safe mode (match by ID or URL)
+            const isDefaultAddon =
+                (typeof addonId === "string" && defaultAddons.ids.includes(addonId)) ||
+                (typeof targetUrl === "string" && defaultAddons.manifestUrls.includes(targetUrl)) ||
+                (typeof addonId === "string" &&
+                    defaultAddons.names.some((name) => addonId.includes(name)));
+
+            if (isDefaultAddon && unsafe !== "true") {
+                return res.status(403).json({
+                    error: "This addon is protected by default and cannot be unprotected in safe mode",
+                    isDefaultAddon: true,
+                });
+            }
+
+            // Get current user with protected addons
+            const user = await prisma.user.findFirst({
+                select: { protectedAddons: true },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Parse current protected addons (stored as encrypted manifest URLs)
+            let currentEncrypted = [];
+            try {
+                currentEncrypted = user.protectedAddons ? JSON.parse(user.protectedAddons) : [];
+            } catch (e) {
+                console.warn("Failed to parse protected addons:", e);
+                currentEncrypted = [];
+            }
+            // Decrypt existing to URLs for comparison
+            const currentUrls = currentEncrypted
+                .map((enc) => {
+                    try {
+                        return decrypt(enc, req);
+                    } catch {
+                        return null;
+                    }
+                })
+                .filter((u) => typeof u === "string" && u.trim());
+
+            if (!(targetUrl && /^https?:\/\//i.test(String(targetUrl)))) {
+                return res.status(400).json({ error: "manifestUrl required or resolvable" });
+            }
+
+            const isCurrentlyProtected = currentUrls.includes(targetUrl);
+            const nextUrls = isCurrentlyProtected
+                ? currentUrls.filter((u) => u !== targetUrl)
+                : [...currentUrls, targetUrl];
+            const nextEncrypted = nextUrls
+                .map((u) => {
+                    try {
+                        return encrypt(u, req);
+                    } catch {
+                        return null;
+                    }
+                })
+                .filter(Boolean);
+
+            // Update user (store encrypted URLs)
+            await prisma.user.update({
+                data: {
+                    protectedAddons: JSON.stringify(nextEncrypted),
+                },
+                where: { id },
+            });
+
+            res.json({
+                isProtected: !isCurrentlyProtected,
+                message: `Addon ${isCurrentlyProtected ? "unprotected" : "protected"} successfully`,
+                protectedAddons: nextUrls,
+            });
+        } catch (error) {
+            console.error("Error toggling protect addon:", error);
+            res.status(500).json({ error: "Failed to toggle protect addon" });
+        }
+    });
+
+    // Connect user with Stremio auth key
+    router.post("/:id/connect-stremio-authkey", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { authKey } = req.body;
+            if (!authKey) {
+                return res.status(400).json({ message: "authKey is required" });
+            }
+
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+            if (!user) {
+                return res.status(404).json({ message: "User not found" });
+            }
+
+            // Validate auth key
+            let addonsData = {};
+            let verifiedUser = null;
+            try {
+                const validation = await validateStremioAuthKey(authKey);
+                addonsData = validation?.addons || {};
+                verifiedUser = validation?.user ? validation.user : null;
+            } catch (e) {
+                const msg = (e && (e.message || e.error || "")) || "";
+                const code = e?.code || 0;
+                if (code === 1 || /session does not exist/i.test(String(msg))) {
+                    return res.status(401).json({ message: "Invalid or expired Stremio auth key" });
+                }
+                return res.status(400).json({ message: "Could not validate auth key" });
+            }
+
+            const encryptedAuthKey = encrypt(authKey, req);
+
+            const updated = await prisma.user.update({
+                data: {
+                    email: verifiedUser?.email ? verifiedUser.email.toLowerCase() : undefined,
+                    isActive: true, // Reconnect user since they now have valid Stremio connection
+                    stremioAddons: JSON.stringify(addonsData || {}),
+                    stremioAuthKey: encryptedAuthKey,
+                },
+                where: { id },
+            });
+
+            delete updated.password;
+            delete updated.stremioAuthKey;
+            return res.json(updated);
+        } catch (e) {
+            console.error("connect-stremio-authkey failed:", e);
+            return res
+                .status(500)
+                .json({ message: "Failed to connect existing user with authKey" });
+        }
+    });
+
+    // Clear Stremio credentials
+    router.post("/:id/clear-stremio-credentials", async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            // Use the middleware-protected user (ensures account isolation)
+            const existingUser = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+
+            if (!existingUser) {
+                return res.status(404).json({ message: "User not found" });
+            }
+
+            // Clear Stremio credentials
+            const updatedUser = await prisma.user.update({
+                data: {
+                    isActive: false, // Disconnect user since Stremio credentials are cleared
+                    stremioAddons: null,
+                    stremioAuthKey: null,
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            res.json({
+                message: "Stremio credentials cleared successfully",
+                userId: updatedUser.id,
+            });
+        } catch (error) {
+            console.error("Error clearing Stremio credentials:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to clear Stremio credentials"),
+                message: "Failed to clear Stremio credentials",
+            });
+        }
+    });
+
+    // Connect existing user to Stremio
+    router.post("/:id/connect-stremio", async (req, res) => {
+        try {
+            const safe = (() => {
+                const { password: _pw, authKey: _ak, ...rest } = req.body || {};
+                return rest;
+            })();
+            console.log("🚀 Connect Stremio endpoint called with:", req.params.id, safe);
+        } catch {
+            console.log("🚀 Connect Stremio endpoint called with:", req.params.id, "{redacted}");
+        }
+        try {
+            const { id } = req.params;
+            const { email, password, username } = req.body;
+
+            if (!(email && password)) {
+                return res.status(400).json({ message: "Email and password are required" });
+            }
+
+            // Use the middleware-protected user (ensures account isolation)
+            const existingUser = await prisma.user.findFirst({
+                where: { accountId: getAccountId(req), id },
+            });
+
+            if (!existingUser) {
+                return res.status(404).json({ message: "User not found" });
+            }
+
+            // Check if user already has Stremio credentials
+            // Allow reconnection - we'll update the stremioAuthKey with new credentials
+
+            // Create a temporary storage object for this authentication session
+            const tempStorage = {};
+
+            // Create Stremio API store for this user
+            const apiStore = new StremioAPIStore({
+                endpoint: "https://api.strem.io",
+                storage: {
+                    getJSON: (key) => {
+                        if (tempStorage[key] !== undefined) {
+                            return tempStorage[key];
+                        }
+                        switch (key) {
+                            case "addons":
+                                return [];
+                            case "user":
+                                return null;
+                            case "auth":
+                                return null;
+                            default:
+                                return null;
+                        }
+                    },
+                    setJSON: (key, value) => {
+                        tempStorage[key] = value;
+                    },
+                },
+            });
+
+            // Create Stremio API client
+            const apiClient = new StremioAPIClient(apiStore);
+
+            // Authenticate with Stremio using the same method as new user creation
+            const loginEmailOnly = async () => {
+                let lastErr;
+                for (const attempt of [
+                    () => apiStore.login({ email, password }),
+                    () => apiStore.login(email, password),
+                ]) {
+                    try {
+                        await attempt();
+                        return;
+                    } catch (e) {
+                        lastErr = e;
+                    }
+                }
+                throw lastErr;
+            };
+
+            try {
+                await loginEmailOnly();
+            } catch (e) {
+                console.error("Stremio connection error:", e);
+
+                // Use centralized Stremio error handling
+                return handleStremioError(e, res);
+            }
+
+            // Pull user's addon collection from Stremio
+            await apiStore.pullAddonCollection();
+
+            // Get authentication data from the API store (support both possible keys)
+            const authKey = apiStore.authKey || tempStorage.auth || tempStorage.authKey;
+            const userData = apiStore.user || tempStorage.user;
+
+            if (!(authKey && userData)) {
+                console.error(
+                    "🔍 Missing auth data - authKey:",
+                    !!authKey,
+                    "userData:",
+                    !!userData
+                );
+                return res
+                    .status(401)
+                    .json({ message: "Failed to get Stremio authentication data" });
+            }
+
+            // Get user's addons using the same logic as stremio-addons endpoint
+            let addonsData = [];
+            try {
+                const collection = await apiClient.request("addonCollectionGet", {});
+                const rawAddons = collection?.addons || collection || {};
+                const addonsNormalized = Array.isArray(rawAddons)
+                    ? rawAddons
+                    : typeof rawAddons === "object"
+                      ? Object.values(rawAddons)
+                      : [];
+
+                // Process addons to get the actual count (same as stremio-addons endpoint)
+                addonsData = await Promise.all(
+                    addonsNormalized.map(async (a) => {
+                        let manifestData = null;
+
+                        // Always try to fetch manifest if we have a URL and no proper manifest data
+                        if (
+                            (a?.manifestUrl || a?.transportUrl || a?.url) &&
+                            (!(a?.manifest && a?.name) || a.name === "Unknown")
+                        ) {
+                            try {
+                                const manifestUrl = a?.manifestUrl || a?.transportUrl || a?.url;
+                                // An address from the person's own Stremio account, checked
+                                // like any other: a refused one reads as an addon that did not answer.
+                                const response = await safeFetch(manifestUrl, {}, instancePolicy());
+                                if (response.ok) {
+                                    manifestData = await response.json();
+                                }
+                            } catch {
+                                // Ignore manifest fetch errors for counting
+                            }
+                        }
+
+                        return {
+                            description:
+                                a?.description ||
+                                a?.manifest?.description ||
+                                manifestData?.description ||
+                                "",
+                            id: a?.id || a?.manifest?.id || manifestData?.id || "unknown",
+                            manifest: manifestData ||
+                                a?.manifest || {
+                                    catalogs: manifestData?.catalogs || a?.manifest?.catalogs || [],
+                                    description:
+                                        manifestData?.description ||
+                                        a?.manifest?.description ||
+                                        a?.description ||
+                                        "",
+                                    id: manifestData?.id || a?.manifest?.id || a?.id || "unknown",
+                                    name:
+                                        manifestData?.name ||
+                                        a?.manifest?.name ||
+                                        a?.name ||
+                                        "Unknown",
+                                    resources:
+                                        manifestData?.resources || a?.manifest?.resources || [],
+                                    types: manifestData?.types || a?.manifest?.types || ["other"],
+                                    version:
+                                        manifestData?.version ||
+                                        a?.manifest?.version ||
+                                        a?.version ||
+                                        null,
+                                },
+                            manifestUrl: a?.manifestUrl || a?.transportUrl || a?.url || null,
+                            name: a?.name || a?.manifest?.name || manifestData?.name || "Unknown",
+                            version:
+                                a?.version || a?.manifest?.version || manifestData?.version || null,
+                        };
+                    })
+                );
+            } catch (e) {
+                console.log("Could not fetch addons:", e.message);
+            }
+
+            // Encrypt the auth key for secure storage
+            const encryptedAuthKey = encrypt(authKey, req);
+
+            // Update user with Stremio credentials
+            const updatedUser = await prisma.user.update({
+                data: {
+                    email,
+                    isActive: true, // Re-enable the user after successful reconnection
+                    stremioAddons: JSON.stringify(addonsData || {}),
+                    stremioAuthKey: encryptedAuthKey,
+                    username: username || userData?.username || email.split("@")[0],
+                },
+                where: {
+                    accountId: getAccountId(req),
+                    id,
+                },
+            });
+
+            return res.json({
+                addonsCount: addonsData.length,
+                message: "Successfully connected to Stremio",
+                user: {
+                    email: updatedUser.email,
+                    id: updatedUser.id,
+                    username: updatedUser.username,
+                },
+            });
+        } catch (error) {
+            console.error("Stremio connection error:", error);
+            return res.status(500).json({
+                error: publicMessage(error, "Unknown error"),
+                message: "Failed to connect to Stremio",
+            });
+        }
+    });
+
+    // Import user addons endpoint
+    router.post("/:id/import-addons", async (req, res) => {
+        try {
+            const { id: userId } = req.params;
+            const { addons } = req.body || {};
+
+            if (!Array.isArray(addons) || addons.length === 0) {
+                return res.status(400).json({ message: "addons array is required" });
+            }
+
+            // Validate user exists
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId: getAccountId(req),
+                    id: userId,
+                },
+            });
+            if (!user) {
+                return res.status(404).json({ message: "User not found" });
+            }
+
+            // Create import group with unique name
+            const baseGroupName = `${user.username} Imports`;
+            let groupName = baseGroupName;
+            let group = await prisma.group.findFirst({
+                where: { accountId: getAccountId(req), name: groupName },
+            });
+
+            // Find unique name if group exists (Copy, Copy #2, etc.)
+            if (group) {
+                let copyNumber = 1;
+                while (group) {
+                    groupName =
+                        copyNumber === 1
+                            ? `${baseGroupName} Copy`
+                            : `${baseGroupName} Copy #${copyNumber}`;
+                    group = await prisma.group.findFirst({
+                        where: { accountId: getAccountId(req), name: groupName },
+                    });
+                    copyNumber++;
+                }
+            }
+
+            // Create the group
+            group = await prisma.group.create({
+                data: {
+                    accountId: getAccountId(req),
+                    colorIndex: 0,
+                    description: `Imported addons from ${user.username}`,
+                    isActive: true,
+                    name: groupName,
+                },
+            });
+
+            // Process each addon
+            const processedAddons = [];
+            const newlyImportedAddons = [];
+            const existingAddons = [];
+            const skippedAddons = [];
+
+            for (const addonData of addons) {
+                const addonUrl = addonData.manifestUrl || addonData.transportUrl || addonData.url;
+                if (!addonUrl) {
+                    console.log("⚠️ Skipping addon with no URL:", addonData);
+                    continue;
+                }
+
+                // Every later reload and sync fetches this address, so one this
+                // server will not connect to is left out whether or not the manifest
+                // came with it - the same rule as adding an addon by hand. The rest
+                // of the list is still imported.
+                if (await isRefusedAddonAddress(addonUrl)) {
+                    console.log(
+                        `⚠️ Skipping addon at an address this server does not connect to: ${addonUrl}`
+                    );
+                    skippedAddons.push({
+                        reason: addonAddressProblem({ message: "blocked host" }),
+                        url: addonUrl,
+                    });
+                    continue;
+                }
+
+                // Get manifest data first
+                let manifestData = addonData.manifest;
+                if (!manifestData) {
+                    try {
+                        const resp = await safeFetch(addonUrl, {}, instancePolicy());
+                        if (!resp.ok) {
+                            throw new Error(`HTTP ${resp.status}`);
+                        }
+                        manifestData = await resp.json();
+                    } catch {
+                        manifestData = {
+                            catalogs: addonData.manifest?.catalogs || [],
+                            description: addonData.description || "",
+                            id: addonData.id || "unknown",
+                            name: addonData.name || "Unknown Addon",
+                            resources: addonData.manifest?.resources || [],
+                            types: addonData.manifest?.types || ["other"],
+                            version: addonData.version || "1.0.0",
+                        };
+                    }
+                }
+
+                // Check if addon exists by manifest content hash
+                let addon = null;
+                try {
+                    const existingAddon = await prisma.addon.findFirst({
+                        select: { accountId: true, id: true, manifestUrl: true, name: true },
+                        where: {
+                            accountId: getAccountId(req),
+                            manifestHash: manifestHash(manifestData),
+                        },
+                    });
+                    if (existingAddon) {
+                        console.log(
+                            `♻️ Found existing addon with same manifest: ${existingAddon.name}`
+                        );
+                        processedAddons.push(existingAddon);
+                        existingAddons.push(existingAddon);
+                        addon = existingAddon;
+                    }
+                } catch (e) {
+                    console.log(`⚠️ Manifest check failed for ${addonUrl}:`, e?.message || e);
+                }
+
+                // Create new addon if not found
+                if (!addon) {
+                    console.log(`🔨 Creating new addon for: ${addonUrl}`);
+
+                    // Check if addon name exists and find unique name
+                    // Prefix with username: "addonname (username)"
+                    const baseAddonName = manifestData?.name || addonData.name || "Unknown Addon";
+                    const username = user.username || user.email || "user";
+                    const addonName = `${baseAddonName} (${username})`;
+                    let finalAddonName = addonName;
+                    let copyNumber = 1;
+
+                    while (true) {
+                        const nameExists = await prisma.addon.findFirst({
+                            where: {
+                                accountId: getAccountId(req),
+                                name: finalAddonName,
+                            },
+                        });
+
+                        if (!nameExists) {
+                            break;
+                        }
+
+                        finalAddonName =
+                            copyNumber === 1
+                                ? `${addonName} Copy`
+                                : `${addonName} Copy #${copyNumber}`;
+                        copyNumber++;
+                    }
+
+                    if (finalAddonName !== addonName) {
+                        console.log(`📝 Addon name exists, using: ${finalAddonName}`);
+                    }
+
+                    // Fetch original manifest for full capabilities - always try to fetch from transportUrl first
+                    let originalManifestObj = null;
+                    try {
+                        const resp = await safeFetch(addonUrl, {}, instancePolicy());
+                        if (resp.ok) {
+                            originalManifestObj = await resp.json();
+                        }
+                    } catch {
+                        // Optional remote data does not prevent the current operation from completing.
+                    }
+
+                    // If fetch failed, use the same manifest that goes into the manifest field
+                    if (!originalManifestObj) {
+                        originalManifestObj = manifestData;
+                    }
+
+                    // Create addon
+                    try {
+                        const resourcesNames = JSON.stringify(
+                            Array.isArray(manifestData?.resources)
+                                ? manifestData.resources
+                                      .map((r) => (typeof r === "string" ? r : r?.name || r?.type))
+                                      .filter(Boolean)
+                                : []
+                        );
+
+                        // Process catalogs with search detection logic
+                        const processedCatalogs = [];
+                        if (Array.isArray(manifestData?.catalogs)) {
+                            for (const catalog of manifestData.catalogs) {
+                                if (!(catalog?.type && catalog?.id)) {
+                                    continue;
+                                }
+
+                                // Check if catalog has search functionality
+                                const hasSearch = catalog?.extra?.some(
+                                    (extra) => extra.name === "search"
+                                );
+                                const hasOtherExtras = catalog?.extra?.some(
+                                    (extra) => extra.name !== "search"
+                                );
+                                const isEmbeddedSearch = hasSearch && hasOtherExtras;
+                                const isStandaloneSearch = hasSearch && !hasOtherExtras;
+
+                                if (isStandaloneSearch) {
+                                    // Standalone search catalog: add with original ID (no suffix)
+                                    processedCatalogs.push({
+                                        id: catalog.id,
+                                        type: catalog.type,
+                                    });
+                                } else if (isEmbeddedSearch) {
+                                    // Embedded search catalog: add both original and search versions
+                                    processedCatalogs.push({
+                                        id: catalog.id,
+                                        type: catalog.type,
+                                    });
+                                    processedCatalogs.push({
+                                        id: `${catalog.id}-embed-search`,
+                                        type: catalog.type,
+                                    });
+                                } else {
+                                    // Regular catalog: add as-is
+                                    processedCatalogs.push({
+                                        id: catalog.id,
+                                        type: catalog.type,
+                                    });
+                                }
+                            }
+                        }
+
+                        const catalogsData = JSON.stringify(
+                            processedCatalogs.map((c) => ({
+                                id: c.id,
+                                search: false, // Default to false for imported catalogs
+                                type: c.type,
+                            }))
+                        );
+
+                        const createdAddon = await prisma.addon.create({
+                            data: {
+                                accountId: getAccountId(req),
+                                catalogs: catalogsData,
+                                description:
+                                    manifestData?.description || addonData.description || "",
+                                iconUrl: manifestData?.logo || addonData.iconUrl || null,
+                                isActive: true,
+                                manifest: manifestData
+                                    ? encrypt(JSON.stringify(manifestData), req)
+                                    : null,
+                                manifestHash: manifestData ? manifestHash(manifestData) : null,
+                                manifestUrl: encrypt(addonUrl, req),
+                                manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                                name: finalAddonName,
+                                originalManifest: originalManifestObj
+                                    ? encrypt(JSON.stringify(originalManifestObj), req)
+                                    : null,
+                                resources: resourcesNames,
+                                stremioAddonId:
+                                    manifestData?.id || addonData.stremioAddonId || null,
+                                version: manifestData?.version || addonData.version || null,
+                            },
+                        });
+
+                        addon = createdAddon;
+                        processedAddons.push(addon);
+                        newlyImportedAddons.push(addon);
+                    } catch (error) {
+                        console.error("❌ Failed to create addon:", error?.message || error);
+                    }
+                }
+            }
+
+            // Get the starting position for new addons in this group
+            const maxPositionResult = await prisma.groupAddon.aggregate({
+                _max: { position: true },
+                where: {
+                    groupId: group.id,
+                    position: { not: null },
+                },
+            });
+            let nextPosition = (maxPositionResult._max.position ?? -1) + 1;
+
+            // Attach all processed addons to the group
+            for (let index = 0; index < processedAddons.length; index++) {
+                const addon = processedAddons[index];
+                try {
+                    // Get the addon URL for comparison
+                    const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null;
+
+                    if (addonUrl) {
+                        // Check if addon with same URL already exists in group
+                        const existingGroupAddon = await prisma.groupAddon.findFirst({
+                            include: { addon: true },
+                            where: {
+                                addon: {
+                                    accountId: getAccountId(req),
+                                    manifestUrlHash: manifestUrlHmac(req, addonUrl),
+                                },
+                                groupId: group.id,
+                            },
+                        });
+
+                        if (existingGroupAddon) {
+                            // Remove old addon from group
+                            await prisma.groupAddon.delete({
+                                where: {
+                                    groupId_addonId: {
+                                        addonId: existingGroupAddon.addonId,
+                                        groupId: group.id,
+                                    },
+                                },
+                            });
+                            console.log(
+                                `🗑️ Removed old addon from group: ${existingGroupAddon.addon.name}`
+                            );
+                        }
+                    }
+
+                    // Add new addon to group with the current position
+                    await prisma.groupAddon.create({
+                        data: {
+                            addonId: addon.id,
+                            groupId: group.id,
+                            isEnabled: true,
+                            position: nextPosition,
+                        },
+                    });
+
+                    // Increment position for next addon
+                    nextPosition++;
+                } catch (error) {
+                    console.error(`❌ Failed to attach ${addon.name}:`, error?.message || error);
+                }
+            }
+
+            // Assign user to group if they don't have any groups
+            const allGroups = await prisma.group.findMany({
+                select: { id: true, userIds: true },
+                where: { accountId: getAccountId(req) },
+            });
+
+            let userInAnyGroup = false;
+            for (const g of allGroups) {
+                if (g.userIds) {
+                    try {
+                        const userIds = JSON.parse(g.userIds);
+                        if (Array.isArray(userIds) && userIds.includes(userId)) {
+                            userInAnyGroup = true;
+                            break;
+                        }
+                    } catch (e) {
+                        console.error("Error parsing group userIds:", e);
+                    }
+                }
+            }
+
+            if (!userInAnyGroup) {
+                await assignUserToGroup(prisma, userId, group.id, req);
+            }
+
+            const message =
+                (existingAddons.length > 0
+                    ? `Successfully imported ${processedAddons.length} addons to group "${groupName}" (${existingAddons.length} already existed, ${newlyImportedAddons.length} newly created)`
+                    : `Successfully imported ${processedAddons.length} addons to group "${groupName}"`) +
+                (skippedAddons.length > 0
+                    ? `. ${skippedAddons.length} left out: ${skippedAddons[0].reason}`
+                    : "");
+
+            res.json({
+                addonCount: processedAddons.length,
+                existing: existingAddons.length,
+                groupId: group.id,
+                groupName: group.name,
+                message,
+                newlyImported: newlyImportedAddons.length,
+                skipped: skippedAddons,
+            });
+        } catch (error) {
+            console.error("❌ Import addons error:", error);
+            res.status(500).json({
+                error: publicMessage(error, "Failed to import addons"),
+                message: "Failed to import addons",
+            });
+        }
+    });
+
+    // POST /users/invite-webhook - Send webhook notification for invites (generation or summary)
+    router.post("/invite-webhook", async (req, res) => {
+        try {
+            const { type, invites, createdUsers, totalInvites, groupName } = req.body;
+
+            if (type !== "generated" && type !== "summary") {
+                return res
+                    .status(400)
+                    .json({ message: 'Invalid type. Must be "generated" or "summary"' });
+            }
+
+            const accountId = getAccountId(req);
+            const account = await prisma.appAccount.findFirst({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+
+            let syncCfg = account?.sync;
+            if (syncCfg && typeof syncCfg === "string") {
+                try {
+                    syncCfg = JSON.parse(syncCfg);
+                } catch {
+                    syncCfg = null;
+                }
+            }
+
+            const webhookUrl = syncCfg?.webhookUrl;
+            if (!webhookUrl) {
+                return res.json({ message: "No webhook URL configured", sent: false });
+            }
+
+            // Import notify utilities
+            const { postDiscord } = require("../utils/notify");
+
+            let embed;
+
+            if (type === "generated") {
+                // Webhook for when invites are generated
+                if (!Array.isArray(invites) || typeof totalInvites !== "number") {
+                    return res
+                        .status(400)
+                        .json({ message: "Invalid request data for generated type" });
+                }
+
+                const fields = [];
+                invites.forEach((invite, index) => {
+                    const codeBlock = `Code: ${invite.code}\nLink: ${invite.link}`;
+                    fields.push({
+                        inline: false,
+                        name: `Invite ${index + 1}`,
+                        value: `\`\`\`${codeBlock}\`\`\``,
+                    });
+                });
+
+                embed = {
+                    color: 0x80_80_80, // Gray, similar to sync notifications
+                    description: "Each link expires in 5 minutes.",
+                    fields,
+                    timestamp: new Date().toISOString(),
+                    title: `${invites.length} Invite${invites.length > 1 ? "s" : ""} Generated${groupName ? ` for ${groupName}` : ""}`,
+                };
+            } else {
+                // Webhook for invite summary (users created)
+                if (!Array.isArray(createdUsers) || typeof totalInvites !== "number") {
+                    return res
+                        .status(400)
+                        .json({ message: "Invalid request data for summary type" });
+                }
+
+                if (createdUsers.length === 0) {
+                    return res.json({ message: "No users created, skipping webhook", sent: false });
+                }
+
+                const fields = [];
+                createdUsers.forEach((user, index) => {
+                    const valueParts = [];
+                    if (user.username) {
+                        valueParts.push(`User: ${user.username}`);
+                    }
+                    if (user.code) {
+                        valueParts.push(`Code: ${user.code}`);
+                    }
+                    if (user.link) {
+                        valueParts.push(`Link: ${user.link}`);
+                    }
+
+                    const codeBlock = valueParts.join("\n");
+                    fields.push({
+                        inline: false,
+                        name: `Invite ${index + 1}`,
+                        value: `\`\`\`${codeBlock}\`\`\``,
+                    });
+                });
+
+                const userWord = createdUsers.length === 1 ? "User" : "Users";
+                const allSynced =
+                    createdUsers.length > 0 && createdUsers.every((user) => user.synced === true);
+                const syncText = allSynced ? " and Synced" : "";
+                const title =
+                    groupName && groupName !== "No Group"
+                        ? `${createdUsers.length} ${groupName} ${userWord} Created${syncText}`
+                        : `${createdUsers.length} ${userWord} Created${syncText}`;
+
+                embed = {
+                    color: 0x00_ff_00, // Green
+                    description: `${createdUsers.length}/${totalInvites} invite${totalInvites > 1 ? "s" : ""} resulted in new users.`,
+                    fields,
+                    timestamp: new Date().toISOString(),
+                    title,
+                };
+            }
+
+            // Add footer with SlickSync version (same as sync notifications)
+            let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+            if (!appVersion) {
+                try {
+                    appVersion = require("../../package.json")?.version || "";
+                } catch {}
+            }
+            if (appVersion) {
+                embed.footer = { text: `SlickSync v${appVersion}` };
+            }
+
+            await postDiscord(webhookUrl, null, {
+                avatar_url:
+                    "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+                embeds: [embed],
+            });
+
+            return res.json({ message: "Webhook sent successfully", sent: true });
+        } catch (error) {
+            console.error("Failed to send invite webhook:", error);
+            return res.status(500).json({
+                error: publicMessage(error, "Failed to send webhook"),
+                message: "Failed to send webhook",
+            });
+        }
+    });
+
+    // ==================== USER ACTIVITY VISIBILITY ====================
+    // Update user's activity visibility
+    router.patch("/:id/activity-visibility", async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { activityVisibility } = req.body;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            if (!(activityVisibility && ["public", "private"].includes(activityVisibility))) {
+                return res.status(400).json({
+                    error: 'Invalid activityVisibility value. Must be "public" or "private".',
+                });
+            }
+
+            const user = await prisma.user.findFirst({
+                where: {
+                    accountId,
+                    id,
+                },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const updatedUser = await prisma.user.update({
+                data: { activityVisibility },
+                where: {
+                    accountId,
+                    id,
+                },
+            });
+
+            res.json({
+                activityVisibility: updatedUser.activityVisibility,
+                message: `Activity visibility set to ${activityVisibility}`,
+            });
+        } catch (error) {
+            console.error("Error updating user activity visibility:", error);
+            res.status(500).json({
+                details: publicMessage(error, "Failed to update activity visibility"),
+                error: "Failed to update activity visibility",
+            });
+        }
+    });
+
+    // ==================== SHARES ENDPOINTS ====================
+    const {
+        getShares,
+        addShare,
+        removeShare,
+        markShareAsViewed,
+        getGroupMembers,
+    } = require("../utils/sharesManager");
+    const { getCachedLibrary } = require("../utils/libraryCache");
+
+    // Get all shares for a user (sent + received)
+    router.get("/:userId/shares", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            // Verify user exists and belongs to account
+            const user = await prisma.user.findFirst({
+                select: { id: true, username: true },
+                where: { accountId, id: userId },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const shares = getShares(accountId, userId);
+            res.json(shares);
+        } catch (error) {
+            console.error(`Failed to get shares for user ${req.params.userId}:`, error);
+            res.status(500).json({
+                error: "Failed to get shares",
+                message: publicMessage(error, "Failed to get shares"),
+            });
+        }
+    });
+
+    // Get received shares only
+    router.get("/:userId/shares/received", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: userId },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const shares = getShares(accountId, userId);
+            res.json({ received: shares.received });
+        } catch (error) {
+            console.error(`Failed to get received shares for user ${req.params.userId}:`, error);
+            res.status(500).json({
+                error: "Failed to get received shares",
+                message: publicMessage(error, "Failed to get received shares"),
+            });
+        }
+    });
+
+    // Get group members (users in same group)
+    router.get("/:userId/shares/group-members", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: userId },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const groupMembers = await getGroupMembers(prisma, accountId, userId);
+            res.json({ members: groupMembers });
+        } catch (error) {
+            console.error(`Failed to get group members for user ${req.params.userId}:`, error);
+            res.status(500).json({
+                error: "Failed to get group members",
+                message: publicMessage(error, "Failed to get group members"),
+            });
+        }
+    });
+
+    // Share item(s) with user(s)
+    router.post("/:userId/shares", async (req, res) => {
+        try {
+            const { userId } = req.params;
+            const { items, targetUserIds } = req.body;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            if (!Array.isArray(items) || items.length === 0) {
+                return res.status(400).json({ error: "Items array is required" });
+            }
+
+            if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) {
+                return res.status(400).json({ error: "Target user IDs array is required" });
+            }
+
+            // Verify sender exists and get info for notification
+            const sender = await prisma.user.findFirst({
+                select: { colorIndex: true, email: true, id: true, username: true },
+                where: { accountId, id: userId },
+            });
+
+            if (!sender) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            // Get target users with their Discord webhook URLs for notifications
+            const targetUsers = await prisma.user.findMany({
+                select: { discordWebhookUrl: true, id: true, username: true },
+                where: { accountId, id: { in: targetUserIds } },
+            });
+            const targetUserMap = new Map(targetUsers.map((u) => [u.id, u]));
+
+            // Get account sync config for account-level webhook
+            let accountWebhookUrl = null;
+            try {
+                const account = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                let syncCfg = account?.sync;
+                if (typeof syncCfg === "string") {
+                    try {
+                        syncCfg = JSON.parse(syncCfg);
+                    } catch {
+                        syncCfg = null;
+                    }
+                }
+                if (
+                    syncCfg &&
+                    typeof syncCfg === "object" &&
+                    syncCfg.notifyOnActivity === true &&
+                    syncCfg.webhookUrl
+                ) {
+                    accountWebhookUrl = syncCfg.webhookUrl;
+                }
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
+
+            // Verify all target users exist and are in the same group
+            const groupMembers = await getGroupMembers(prisma, accountId, userId);
+            const groupMemberIds = new Set(groupMembers.map((u) => u.id));
+
+            const invalidTargets = targetUserIds.filter((id) => !groupMemberIds.has(id));
+            if (invalidTargets.length > 0) {
+                return res.status(400).json({
+                    error: "Some target users are not in your group",
+                    invalidTargets,
+                });
+            }
+
+            // Get sender's library to verify items exist
+            const senderLibrary = getCachedLibrary(accountId, userId) || [];
+            const libraryItemMap = new Map();
+            const baseIdMap = new Map(); // Map base IDs (tt...) to any matching library item
+
+            senderLibrary.forEach((item) => {
+                const itemId = item._id || item.id;
+                if (itemId) {
+                    libraryItemMap.set(itemId, item);
+                    // Also index by base ID (everything before the first colon)
+                    const baseId = itemId.split(":")[0];
+                    if (baseId && !baseIdMap.has(baseId)) {
+                        baseIdMap.set(baseId, item);
+                    }
+                }
+            });
+
+            // Helper to find item in library (exact match first, then base ID match)
+            const findLibraryItem = (searchId) => {
+                // Try exact match first
+                let found = libraryItemMap.get(searchId);
+                if (found) {
+                    return found;
+                }
+
+                // Try base ID match (for shows where we might have episode IDs)
+                const baseId = searchId.split(":")[0];
+                found = baseIdMap.get(baseId);
+                if (found) {
+                    return found;
+                }
+
+                return null;
+            };
+
+            // Build valid items - use library data when available, fall back to frontend data
+            const validItems = [];
+            for (const item of items) {
+                const itemId = item.itemId || item._id || item.id;
+                const libraryItem = findLibraryItem(itemId);
+
+                // Accept item if found in library OR if frontend provided enough data
+                if (libraryItem || (item.itemName && item.itemType)) {
+                    validItems.push({
+                        itemId,
+                        itemName: libraryItem?.name || item.itemName || "Unknown",
+                        itemType: libraryItem?.type || item.itemType || "movie",
+                        poster: libraryItem?.poster || item.poster || "",
+                    });
+                }
+            }
+
+            if (validItems.length === 0) {
+                return res.status(400).json({
+                    error: "No valid items to share",
+                });
+            }
+
+            // Share each item with each target user
+            const results = [];
+            const errors = [];
+
+            // Track which users received shares for notifications
+            const notificationsToSend = [];
+
+            for (const item of validItems) {
+                for (const targetUserId of targetUserIds) {
+                    try {
+                        const targetUser = groupMembers.find((u) => u.id === targetUserId);
+                        if (!targetUser) {
+                            continue;
+                        }
+
+                        const share = addShare(
+                            accountId,
+                            userId,
+                            targetUserId,
+                            item,
+                            sender.username,
+                            targetUser.username
+                        );
+                        results.push(share);
+
+                        // Queue notification if target user has a Discord webhook
+                        const targetUserData = targetUserMap.get(targetUserId);
+                        if (targetUserData?.discordWebhookUrl) {
+                            notificationsToSend.push({
+                                item,
+                                webhookUrl: targetUserData.discordWebhookUrl,
+                            });
+                        }
+
+                        // Also queue account-level notification if enabled
+                        if (accountWebhookUrl) {
+                            notificationsToSend.push({
+                                isAccountNotification: true,
+                                item,
+                                webhookUrl: accountWebhookUrl,
+                            });
+                        }
+                    } catch (error) {
+                        if (error.message.includes("already shared")) {
+                            // Skip duplicates silently
+                            continue;
+                        }
+                        errors.push({
+                            error: publicMessage(error, "Something went wrong"),
+                            itemId: item.itemId,
+                            targetUserId,
+                        });
+                    }
+                }
+            }
+
+            // Send Discord notifications to target users (don't block the response)
+            if (notificationsToSend.length > 0) {
+                // Fire and forget - send notifications in the background
+                setImmediate(async () => {
+                    for (const notification of notificationsToSend) {
+                        try {
+                            const isAccount = notification.isAccountNotification;
+                            const username = isAccount
+                                ? `${sender.username} shared with ${targetUserMap.get(notification.item.targetUserId)?.username || "a user"}`
+                                : sender.username;
+                            const email = isAccount ? sender.email : sender.email;
+                            await sendShareNotification(
+                                notification.webhookUrl,
+                                username,
+                                email,
+                                sender.colorIndex,
+                                notification.item
+                            );
+                        } catch {
+                            // Silently fail - notifications are best effort
+                        }
+                    }
+                });
+            }
+
+            res.json({
+                errors: errors.length > 0 ? errors : undefined,
+                results,
+                shared: results.length,
+                success: errors.length === 0,
+            });
+        } catch (error) {
+            console.error(`Failed to share items for user ${req.params.userId}:`, error);
+            res.status(500).json({
+                error: "Failed to share items",
+                message: publicMessage(error, "Failed to share items"),
+            });
+        }
+    });
+
+    // Remove a share
+    router.delete("/:userId/shares/:shareId", async (req, res) => {
+        try {
+            const { userId, shareId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: userId },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const removed = removeShare(accountId, userId, shareId);
+            if (!removed) {
+                return res.status(404).json({ error: "Share not found" });
+            }
+
+            res.json({ message: "Share removed", success: true });
+        } catch (error) {
+            console.error(
+                `Failed to remove share ${req.params.shareId} for user ${req.params.userId}:`,
+                error
+            );
+            res.status(500).json({
+                error: "Failed to remove share",
+                message: publicMessage(error, "Failed to remove share"),
+            });
+        }
+    });
+
+    // Mark share as viewed
+    router.put("/:userId/shares/:shareId/viewed", async (req, res) => {
+        try {
+            const { userId, shareId } = req.params;
+            const accountId = getAccountId(req);
+
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const user = await prisma.user.findFirst({
+                select: { id: true },
+                where: { accountId, id: userId },
+            });
+
+            if (!user) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            const marked = markShareAsViewed(accountId, userId, shareId);
+            if (!marked) {
+                return res.status(404).json({ error: "Share not found" });
+            }
+
+            res.json({ message: "Share marked as viewed", success: true });
+        } catch (error) {
+            console.error(
+                `Failed to mark share ${req.params.shareId} as viewed for user ${req.params.userId}:`,
+                error
+            );
+            res.status(500).json({
+                error: "Failed to mark share as viewed",
+                message: publicMessage(error, "Failed to mark share as viewed"),
+            });
+        }
+    });
+
+    // Decode Stremio watched bitfield
+    router.post("/decode-watched", async (req, res) => {
+        try {
+            const { watched } = req.body;
+
+            if (!watched || typeof watched !== "string") {
+                return res.status(400).json({ error: "watched field is required" });
+            }
+
+            const { decodeWatchedBitfield } = require("../utils/stremioWatchedDecoder");
+            const decoded = decodeWatchedBitfield(watched);
+
+            if (!decoded) {
+                return res.status(400).json({ error: "Failed to decode watched field" });
+            }
+
+            res.json(decoded);
+        } catch (error) {
+            console.error("Error decoding watched bitfield:", error);
+            res.status(500).json({
+                error: "Failed to decode watched field",
+                message: publicMessage(error, "Failed to decode watched field"),
+            });
+        }
+    });
+
+    return router;
 };
 
 // Export the reloadGroupAddons helper function for use by other modules
@@ -8632,135 +10697,166 @@ module.exports.syncUserAddons = syncUserAddons;
 // kind of server, where, and as whom. Never the token, and never an
 // AIOStreams picker address's encrypted password (displayServer drops it).
 function jellyfinSummary(user) {
-  if (user?.providerType !== 'jellyfin') return {}
-  const { displayServer, serverKindLabel } = require('../providers/jellyfinAuth')
-  return {
-    jellyfinServerKind: user.jellyfinServerKind || 'jellyfin',
-    jellyfinServerLabel: serverKindLabel(user.jellyfinServerKind),
-    jellyfinServer: user.jellyfinServerUrl ? displayServer(user.jellyfinServerUrl) : null,
-    jellyfinUserName: user.jellyfinUserName || null,
-    aioConfigWatched: !!user.aioConfigPassword,
-  }
+    if (user?.providerType !== "jellyfin") {
+        return {};
+    }
+    const { displayServer, serverKindLabel } = require("../providers/jellyfinAuth");
+    return {
+        aioConfigWatched: !!user.aioConfigPassword,
+        jellyfinServer: user.jellyfinServerUrl ? displayServer(user.jellyfinServerUrl) : null,
+        jellyfinServerKind: user.jellyfinServerKind || "jellyfin",
+        jellyfinServerLabel: serverKindLabel(user.jellyfinServerKind),
+        jellyfinUserName: user.jellyfinUserName || null,
+    };
 }
 
-function getSyncMode(req) {
-  const syncMode = req?.headers?.['x-sync-mode'] || 'normal'
-  return syncMode === 'advanced' ? 'advanced' : 'normal'
+function _getSyncMode(req) {
+    const syncMode = req?.headers?.["x-sync-mode"] || "normal";
+    return syncMode === "advanced" ? "advanced" : "normal";
 }
 
 // Reusable function to sync a single user's addons
 // Import helpers for standalone usage (when called outside router closure)
 const {
-  parseAddonIds: parseAddonIdsUtil,
-  canonicalizeManifestUrl: canonicalizeManifestUrlUtil,
-  filterManifestByResources,
-  filterManifestByCatalogs
-} = require('../utils/validation')
+    parseAddonIds: parseAddonIdsUtil,
+    parseProtectedAddons: parseProtectedAddonsUtil,
+    canonicalizeManifestUrl: canonicalizeManifestUrlUtil,
+    filterManifestByResources,
+    filterManifestByCatalogs,
+} = require("../utils/validation");
 const {
-  getAccountDek: getAccountDekUtil,
-  getServerKey: getServerKeyUtil,
-  aesGcmDecrypt: aesGcmDecryptUtil,
-  encrypt,
-  getDecryptedManifestUrl
-} = require('../utils/encryption')
-const { manifestHash } = require('../utils/hashing')
+    getAccountDek: getAccountDekUtil,
+    getServerKey: getServerKeyUtil,
+    aesGcmDecrypt: aesGcmDecryptUtil,
+    encrypt,
+    getDecryptedManifestUrl,
+} = require("../utils/encryption");
+const { manifestHash } = require("../utils/hashing");
 
 // Import the shared reload addon helper at module level
-const { reloadAddon } = require('./addons')
+const { reloadAddon } = require("./addons");
 
 // Helper function to reload all addons for a group
 async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
-  let reloadedCount = 0
-  let failedCount = 0
-  const diffsByAddon = [] // { id, name, diffs }
+    let reloadedCount = 0;
+    let failedCount = 0;
+    const diffsByAddon = []; // { id, name, diffs }
 
-  // Get all active addons in the group
-  const group = await prisma.group.findFirst({
-    where: { id: groupId, accountId: getAccountId(req) },
-    include: {
-      addons: {
-        include: { addon: true }
-      }
+    // Get all active addons in the group
+    const group = await prisma.group.findFirst({
+        include: {
+            addons: {
+                include: { addon: true },
+            },
+        },
+        where: { accountId: getAccountId(req), id: groupId },
+    });
+
+    if (!group) {
+        throw new Error("Group not found");
     }
-  })
 
-  if (!group) {
-    throw new Error('Group not found')
-  }
+    const groupAddons = group.addons
+        .filter((ga) => ga.addon && ga.addon.isActive !== false)
+        .map((ga) => ga.addon);
 
-  const groupAddons = group.addons
-    .filter(ga => ga.addon && ga.addon.isActive !== false)
-    .map(ga => ga.addon)
-
-  // Single-line summary of addons to be reloaded
-  try {
-    const names = groupAddons.map(a => a.name).filter(Boolean)
-    if (names.length > 0) console.log(`🔄 Reloading addons: ${names.join(', ')}`)
-  } catch { }
-
-  // Warm every manifest at once before reloading them one by one - the
-  // fetches are independent, so waiting for them in sequence was pure dead
-  // time in front of an Advanced sync. See prewarmManifests: failures here
-  // change nothing, the reload below still does its own fetch and reports
-  // its own errors.
-  try {
-    const { prewarmManifests } = require('./addons')
-    const urls = groupAddons.map((a) => { try { return getDecryptedManifestUrl(a, req) } catch { return null } }).filter(Boolean)
-    if (urls.length > 1) {
-      const t0 = Date.now()
-      const { warmed, attempted } = await prewarmManifests(urls)
-      if (warmed > 0) console.log(`⚡ Pre-fetched ${warmed}/${attempted} addon manifests in ${Date.now() - t0}ms`)
-    }
-  } catch { }
-
-
-  for (const addon of groupAddons) {
+    // Single-line summary of addons to be reloaded
     try {
-      // Get fresh addon data from database to ensure we have latest resources/catalogs
-      const freshAddon = await prisma.addon.findFirst({
-        where: { id: addon.id, accountId: getAccountId(req) }
-      })
-
-      if (!freshAddon) {
-        console.warn(`⚠️ Addon ${addon.name} not found in database`)
-        failedCount++
-        continue
-      }
-
-      // Use the existing reloadAddon function with fresh addon data
-      const result = await reloadAddon(prisma, getAccountId, freshAddon.id, req, {
-        filterManifestByResources,
-        filterManifestByCatalogs,
-        encrypt,
-        decrypt,  // Use the same decrypt function as individual reload
-        getDecryptedManifestUrl,
-        manifestHash,
-        silent: true
-      }, true) // Auto-select truly new elements for bulk reload
-
-      if (result.success) {
-        reloadedCount++
-        if (result.diffs && (result.diffs.addedResources?.length || result.diffs.removedResources?.length || result.diffs.addedCatalogs?.length || result.diffs.removedCatalogs?.length)) {
-          diffsByAddon.push({ id: freshAddon.id, name: freshAddon.name, diffs: result.diffs })
+        const names = groupAddons.map((a) => a.name).filter(Boolean);
+        if (names.length > 0) {
+            console.log(`🔄 Reloading addons: ${names.join(", ")}`);
         }
-      } else {
-        console.warn(`⚠️ Failed to reload ${addon.name}`)
-        failedCount++
-      }
+    } catch {}
 
-    } catch (error) {
-      console.warn(`⚠️ Error reloading ${addon.name}:`, error.message)
-      failedCount++
+    // Warm every manifest at once before reloading them one by one - the
+    // fetches are independent, so waiting for them in sequence was pure dead
+    // time in front of an Advanced sync. See prewarmManifests: failures here
+    // change nothing, the reload below still does its own fetch and reports
+    // its own errors.
+    try {
+        const { prewarmManifests } = require("./addons");
+        const urls = groupAddons
+            .map((a) => {
+                try {
+                    return getDecryptedManifestUrl(a, req);
+                } catch {
+                    return null;
+                }
+            })
+            .filter(Boolean);
+        if (urls.length > 1) {
+            const t0 = Date.now();
+            const { warmed, attempted } = await prewarmManifests(urls);
+            if (warmed > 0) {
+                console.log(
+                    `⚡ Pre-fetched ${warmed}/${attempted} addon manifests in ${Date.now() - t0}ms`
+                );
+            }
+        }
+    } catch {}
+
+    for (const addon of groupAddons) {
+        try {
+            // Get fresh addon data from database to ensure we have latest resources/catalogs
+            const freshAddon = await prisma.addon.findFirst({
+                where: { accountId: getAccountId(req), id: addon.id },
+            });
+
+            if (!freshAddon) {
+                console.warn(`⚠️ Addon ${addon.name} not found in database`);
+                failedCount++;
+                continue;
+            }
+
+            // Use the existing reloadAddon function with fresh addon data
+            const result = await reloadAddon(
+                prisma,
+                getAccountId,
+                freshAddon.id,
+                req,
+                {
+                    decrypt, // Use the same decrypt function as individual reload
+                    encrypt,
+                    filterManifestByCatalogs,
+                    filterManifestByResources,
+                    getDecryptedManifestUrl,
+                    manifestHash,
+                    silent: true,
+                },
+                true
+            ); // Auto-select truly new elements for bulk reload
+
+            if (result.success) {
+                reloadedCount++;
+                if (
+                    result.diffs &&
+                    (result.diffs.addedResources?.length ||
+                        result.diffs.removedResources?.length ||
+                        result.diffs.addedCatalogs?.length ||
+                        result.diffs.removedCatalogs?.length)
+                ) {
+                    diffsByAddon.push({
+                        diffs: result.diffs,
+                        id: freshAddon.id,
+                        name: freshAddon.name,
+                    });
+                }
+            } else {
+                console.warn(`⚠️ Failed to reload ${addon.name}`);
+                failedCount++;
+            }
+        } catch (error) {
+            console.warn(`⚠️ Error reloading ${addon.name}:`, error.message);
+            failedCount++;
+        }
     }
-  }
 
-
-  return {
-    reloadedCount,
-    failedCount,
-    total: groupAddons.length,
-    diffsByAddon
-  }
+    return {
+        diffsByAddon,
+        failedCount,
+        reloadedCount,
+        total: groupAddons.length,
+    };
 }
 
 // Does the actual sync work for one set of provider credentials. Split out
@@ -8776,132 +10872,206 @@ async function reloadGroupAddons(prisma, getAccountId, groupId, req, decrypt) {
    function run unchanged if a future caller supplies them from its own scope.
    Linting them as undefined is correct in the letter and wrong in effect, and
    rewriting the sync path to please the rule is not worth the risk. */
-async function syncCredentialsAddons(prismaClient, credentials, excludedManifestUrls, unsafeMode, req, decrypt, getAccountIdParam, useCustomFields, options = {}) {
-  const hasCredentials = credentials.stremioAuthKey || (credentials.nuvioRefreshToken && credentials.nuvioUserId)
-  if (!hasCredentials) return { success: false, error: 'User is not connected to a provider' }
-
-  // Account-scoped decrypt helper. Tries, in order: the per-account DEK (if
-  // any), the server key, then every configured ENCRYPTION_KEY_FALLBACKS -
-  // the SAME fallback chain the global decrypt() uses. The fallbacks are
-  // essential: after an ENCRYPTION_KEY rotation, older credentials stay
-  // encrypted under a previous key (kept decrypt-only by keyManager). Without
-  // trying them here, this path alone failed to decrypt those credentials and
-  // returned a null provider -> "credentials may be invalid", even though the
-  // exact same data read fine everywhere that goes through global decrypt
-  // (confirmed real case 2026-07-29: a Stremio authKey encrypted under the
-  // previous key polled the native library fine but broke the addon-sync path
-  // for precisely this reason - a rotation had moved the key into fallback[1]).
-  const decryptWithAccountKey = (payload) => {
-    const dec = (typeof aesGcmDecrypt === 'function' ? aesGcmDecrypt : aesGcmDecryptUtil)
-    const keys = []
-    try { const dek = (typeof getAccountDek === 'function' ? getAccountDek : getAccountDekUtil)(credentials.accountId); if (dek) keys.push(dek) } catch { }
-    try { keys.push((typeof getServerKey === 'function' ? getServerKey : getServerKeyUtil)()) } catch { }
-    try { const { ENCRYPTION_KEY_FALLBACKS } = require('../utils/config'); for (const k of (ENCRYPTION_KEY_FALLBACKS || [])) keys.push(k) } catch { }
-    let lastErr
-    for (const key of keys) {
-      if (!key) continue
-      try { return dec(key, payload) } catch (e) { lastErr = e }
+async function syncCredentialsAddons(
+    prismaClient,
+    credentials,
+    _excludedManifestUrls,
+    unsafeMode,
+    req,
+    _decrypt,
+    getAccountIdParam,
+    useCustomFields,
+    options = {}
+) {
+    const hasCredentials =
+        credentials.stremioAuthKey || (credentials.nuvioRefreshToken && credentials.nuvioUserId);
+    if (!hasCredentials) {
+        return { error: "User is not connected to a provider", success: false };
     }
-    throw lastErr || new Error('decrypt failed: no usable key')
-  }
 
-  // Build provider (Stremio or Nuvio based on credentials.providerType).
-  // makeCreateProvider with prisma+encrypt enables Nuvio refresh-token persistence.
-  const { makeCreateProvider } = require('../providers')
-  const { encrypt: encryptUtil } = require('../utils/encryption')
-  // getAccountId is threaded through so a Nuvio user on an account with a
-  // self-hosted backend configured talks to that backend here too, not just
-  // on the main request path.
-  const { getAccountId: getAccountIdForProvider } = require('../utils/helpers')
-  const createProviderLocal = makeCreateProvider({ prisma: prismaClient, encrypt: encryptUtil, getAccountId: getAccountIdForProvider })
-  const provider = createProviderLocal(credentials, { decrypt: decryptWithAccountKey, req })
-  if (!provider) {
-    return { success: false, error: 'Failed to initialize provider for user (credentials may be invalid)' }
-  }
+    // Account-scoped decrypt helper. Tries, in order: the per-account DEK (if
+    // any), the server key, then every configured ENCRYPTION_KEY_FALLBACKS -
+    // the SAME fallback chain the global decrypt() uses. The fallbacks are
+    // essential: after an ENCRYPTION_KEY rotation, older credentials stay
+    // encrypted under a previous key (kept decrypt-only by keyManager). Without
+    // trying them here, this path alone failed to decrypt those credentials and
+    // returned a null provider -> "credentials may be invalid", even though the
+    // exact same data read fine everywhere that goes through global decrypt
+    // (confirmed real case 2026-07-29: a Stremio authKey encrypted under the
+    // previous key polled the native library fine but broke the addon-sync path
+    // for precisely this reason - a rotation had moved the key into fallback[1]).
+    const decryptWithAccountKey = (payload) => {
+        const dec = aesGcmDecryptUtil;
+        const keys = [];
+        try {
+            const dek = getAccountDekUtil(credentials.accountId);
+            if (dek) {
+                keys.push(dek);
+            }
+        } catch {}
+        try {
+            keys.push(getServerKeyUtil());
+        } catch {}
+        try {
+            const { ENCRYPTION_KEY_FALLBACKS } = require("../utils/config");
+            for (const k of ENCRYPTION_KEY_FALLBACKS || []) {
+                keys.push(k);
+            }
+        } catch {}
+        let lastErr;
+        for (const key of keys) {
+            if (!key) {
+                continue;
+            }
+            try {
+                return dec(key, payload);
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error("decrypt failed: no usable key");
+    };
 
-  // Compute plan (shared logic); short-circuit if already synced
-  try {
-    const { computeUserSyncPlan } = require('../utils/sync')
-    const parseAddonIdsFn = (typeof parseAddonIds === 'function' ? parseAddonIds : parseAddonIdsUtil)
-    const parseProtectedAddonsFn = (typeof parseProtectedAddons === 'function' ? parseProtectedAddons : require('../utils/validation').parseProtectedAddons)
-    const canonicalizeFn = (typeof canonicalizeManifestUrl === 'function' ? canonicalizeManifestUrl : canonicalizeManifestUrlUtil)
-    const plan = await computeUserSyncPlan(credentials, req, {
-      prisma: prismaClient,
-      // The fallback named a function that does not exist at this scope, so a
-      // caller that passed no resolver hit a ReferenceError instead of the
-      // intended default. The credentials being synced already carry the
-      // account they belong to, which is what a resolver would have returned.
-      getAccountId: (typeof getAccountIdParam === 'function'
-        ? getAccountIdParam
-        : () => credentials?.accountId || 'default'),
-      decrypt: (text) => decryptWithAccountKey(text),
-      parseAddonIds: parseAddonIdsFn,
-      parseProtectedAddons: parseProtectedAddonsFn,
-      canonicalizeManifestUrl: canonicalizeFn,
-      StremioAPIClient,
-      createProvider: createProviderLocal,
-      unsafeMode,
-      useCustomFields
-    })
-    if (!plan.success) return { success: false, error: plan.error || 'Failed to compute plan' }
+    // Build provider (Stremio or Nuvio based on credentials.providerType).
+    // makeCreateProvider with prisma+encrypt enables Nuvio refresh-token persistence.
+    const { makeCreateProvider } = require("../providers");
+    const { encrypt: encryptUtil } = require("../utils/encryption");
+    // getAccountId is threaded through so a Nuvio user on an account with a
+    // self-hosted backend configured talks to that backend here too, not just
+    // on the main request path.
+    const { getAccountId: getAccountIdForProvider } = require("../utils/helpers");
+    const createProviderLocal = makeCreateProvider({
+        encrypt: encryptUtil,
+        getAccountId: getAccountIdForProvider,
+        prisma: prismaClient,
+    });
+    const provider = createProviderLocal(credentials, { decrypt: decryptWithAccountKey, req });
+    if (!provider) {
+        return {
+            error: "Failed to initialize provider for user (credentials may be invalid)",
+            success: false,
+        };
+    }
 
-    // Log concise names
+    // Compute plan (shared logic); short-circuit if already synced
     try {
-      const currentNames = (plan.current || []).map(a => a?.manifest?.name || a?.transportName || 'Unknown').filter(Boolean)
-      const desiredNames = (plan.desired || []).map(a => a?.manifest?.name || a?.name || a?.transportName || 'Unknown').filter(Boolean)
-      console.log(`📥 Current addons (${currentNames.length}):`, currentNames.join(', '))
-      console.log(`🎯 Desired addons (${desiredNames.length}):`, desiredNames.join(', '))
-    } catch { }
+        const { computeUserSyncPlan } = require("../utils/sync");
+        const parseAddonIdsFn = parseAddonIdsUtil;
+        const parseProtectedAddonsFn = parseProtectedAddonsUtil;
+        const canonicalizeFn = canonicalizeManifestUrlUtil;
+        const plan = await computeUserSyncPlan(credentials, req, {
+            canonicalizeManifestUrl: canonicalizeFn,
+            createProvider: createProviderLocal,
+            decrypt: (text) => decryptWithAccountKey(text),
+            // The fallback named a function that does not exist at this scope, so a
+            // caller that passed no resolver hit a ReferenceError instead of the
+            // intended default. The credentials being synced already carry the
+            // account they belong to, which is what a resolver would have returned.
+            getAccountId:
+                typeof getAccountIdParam === "function"
+                    ? getAccountIdParam
+                    : () => credentials?.accountId || "default",
+            parseAddonIds: parseAddonIdsFn,
+            parseProtectedAddons: parseProtectedAddonsFn,
+            prisma: prismaClient,
+            StremioAPIClient,
+            unsafeMode,
+            useCustomFields,
+        });
+        if (!plan.success) {
+            return { error: plan.error || "Failed to compute plan", success: false };
+        }
 
-    // `force` pushes even when the set already matches. The comparison is
-    // order-insensitive on purpose (a person's own reorder inside their app
-    // must not be undone by every scheduled sync), so a reorder made HERE,
-    // at the group, looked like a no-op and was skipped - the group-level
-    // caller asked to force it, but the request never reached this far.
-    // A user in no group is left exactly as they are. Without this the
-    // branch below read an empty desired list as "remove everything".
-    if (plan.noGroup) {
-      console.log('✅ User is in no group - nothing to sync')
-      return { success: true, total: 0, alreadySynced: true, noGroup: true }
-    }
+        // Log concise names
+        try {
+            const currentNames = (plan.current || [])
+                .map((a) => a?.manifest?.name || a?.transportName || "Unknown")
+                .filter(Boolean);
+            const desiredNames = (plan.desired || [])
+                .map((a) => a?.manifest?.name || a?.name || a?.transportName || "Unknown")
+                .filter(Boolean);
+            console.log(`📥 Current addons (${currentNames.length}):`, currentNames.join(", "));
+            console.log(`🎯 Desired addons (${desiredNames.length}):`, desiredNames.join(", "));
+        } catch {}
 
-    if (plan.alreadySynced && !options.force) {
-      console.log(`✅ User already synced`)
-      // Account Guard: already-synced still CONFIRMS the account state, so
-      // refresh the asserted baseline (and clear any stale alarm).
-      await require('../utils/accountGuard').recordAssertedState(prismaClient, credentials.id, credentials.providerType, plan.desired || [])
-      if (credentials.providerType === 'nuvio' && credentials.traxAddonEnabled && credentials.traxToken) {
-        const { ensureTraxHomePlacement } = require('../utils/nuvioHomePlacement')
-        ensureTraxHomePlacement(provider, { id: credentials.id }, `vip.slicksync.trax.${credentials.id}:series:slicktrax-continue`)
-          .catch((e) => console.warn('[NuvioHomePlacement] failed:', e?.message))
-      }
-      return { success: true, total: (plan.desired || []).length, alreadySynced: true }
-    }
+        // `force` pushes even when the set already matches. The comparison is
+        // order-insensitive on purpose (a person's own reorder inside their app
+        // must not be undone by every scheduled sync), so a reorder made HERE,
+        // at the group, looked like a no-op and was skipped - the group-level
+        // caller asked to force it, but the request never reached this far.
+        // A user in no group is left exactly as they are. Without this the
+        // branch below read an empty desired list as "remove everything".
+        if (plan.noGroup) {
+            console.log("✅ User is in no group - nothing to sync");
+            return { alreadySynced: true, noGroup: true, success: true, total: 0 };
+        }
 
-    // If desired addons is empty (empty group), clear all addons
-    let finalDesired = plan.desired || []
-    if (finalDesired.length === 0) {
-      await provider.clearAddons()
-      console.log('📦 Empty group detected, cleared all addons')
-      await require('../utils/accountGuard').recordAssertedState(prismaClient, credentials.id, credentials.providerType, [])
-      return { success: true, total: 0 }
-    }
+        if (plan.alreadySynced && !options.force) {
+            console.log("✅ User already synced");
+            // Account Guard: already-synced still CONFIRMS the account state, so
+            // refresh the asserted baseline (and clear any stale alarm).
+            await require("../utils/accountGuard").recordAssertedState(
+                prismaClient,
+                credentials.id,
+                credentials.providerType,
+                plan.desired || []
+            );
+            if (
+                credentials.providerType === "nuvio" &&
+                credentials.traxAddonEnabled &&
+                credentials.traxToken
+            ) {
+                const { ensureTraxHomePlacement } = require("../utils/nuvioHomePlacement");
+                ensureTraxHomePlacement(
+                    provider,
+                    { id: credentials.id },
+                    `vip.slicksync.trax.${credentials.id}:series:slicktrax-continue`
+                ).catch((e) => console.warn("[NuvioHomePlacement] failed:", e?.message));
+            }
+            return { alreadySynced: true, success: true, total: (plan.desired || []).length };
+        }
 
-    await provider.setAddons(finalDesired)
-    console.log('✅ User now synced')
-    await require('../utils/accountGuard').recordAssertedState(prismaClient, credentials.id, credentials.providerType, finalDesired)
-    // Nuvio home placement for the SlickTrax row - head of its own group,
-    // once, never fighting a later human rearrangement.
-    if (credentials.providerType === 'nuvio' && credentials.traxAddonEnabled && credentials.traxToken) {
-      const { ensureTraxHomePlacement } = require('../utils/nuvioHomePlacement')
-      ensureTraxHomePlacement(provider, { id: credentials.id }, `vip.slicksync.trax.${credentials.id}:series:slicktrax-continue`)
-        .catch((e) => console.warn('[NuvioHomePlacement] failed:', e?.message))
+        // If desired addons is empty (empty group), clear all addons
+        const finalDesired = plan.desired || [];
+        if (finalDesired.length === 0) {
+            await provider.clearAddons();
+            console.log("📦 Empty group detected, cleared all addons");
+            await require("../utils/accountGuard").recordAssertedState(
+                prismaClient,
+                credentials.id,
+                credentials.providerType,
+                []
+            );
+            return { success: true, total: 0 };
+        }
+
+        await provider.setAddons(finalDesired);
+        console.log("✅ User now synced");
+        await require("../utils/accountGuard").recordAssertedState(
+            prismaClient,
+            credentials.id,
+            credentials.providerType,
+            finalDesired
+        );
+        // Nuvio home placement for the SlickTrax row - head of its own group,
+        // once, never fighting a later human rearrangement.
+        if (
+            credentials.providerType === "nuvio" &&
+            credentials.traxAddonEnabled &&
+            credentials.traxToken
+        ) {
+            const { ensureTraxHomePlacement } = require("../utils/nuvioHomePlacement");
+            ensureTraxHomePlacement(
+                provider,
+                { id: credentials.id },
+                `vip.slicksync.trax.${credentials.id}:series:slicktrax-continue`
+            ).catch((e) => console.warn("[NuvioHomePlacement] failed:", e?.message));
+        }
+        return { success: true, total: (plan.desired || []).length };
+    } catch (e) {
+        console.error("❌ Failed to apply sync plan:", e?.message);
+        return { error: publicMessage(e, "Failed to sync addons"), success: false };
     }
-    return { success: true, total: (plan.desired || []).length }
-  } catch (e) {
-    console.error('❌ Failed to apply sync plan:', e?.message)
-    return { success: false, error: publicMessage(e, 'Failed to sync addons') }
-  }
 }
 
 // Every sync, whoever started it - a person, the scheduler, a group edit -
@@ -8909,150 +11079,208 @@ async function syncCredentialsAddons(prismaClient, credentials, excludedManifest
 // refreshes at once instead of on its next poll, and the remembered status
 // for the account is dropped (utils/liveEvents.js -> utils/sync.js).
 async function syncUserAddons(...args) {
-  try {
-    return await syncUserAddonsCore(...args)
-  } finally {
     try {
-      const req = args[4]
-      const getAcct = args[6]
-      const accountId = (typeof getAcct === 'function' && req ? getAcct(req) : null) || req?.appAccountId || 'default'
-      require('../utils/liveEvents').emitLive(accountId, 'sync')
-    } catch { /* never disturbs the sync result */ }
-  }
+        return await syncUserAddonsCore(...args);
+    } finally {
+        try {
+            const req = args[4];
+            const getAcct = args[6];
+            const accountId =
+                (typeof getAcct === "function" && req ? getAcct(req) : null) ||
+                req?.appAccountId ||
+                "default";
+            require("../utils/liveEvents").emitLive(accountId, "sync");
+        } catch {
+            /* never disturbs the sync result */
+        }
+    }
 }
 
-async function syncUserAddonsCore(prismaClient, userId, excludedManifestUrls = [], unsafeMode = false, req, decrypt, getAccountIdParam, useCustomFields = true, options = {}) {
-  try {
-    // Ensure req has appAccountId for account scoping
-    if (!req.appAccountId) {
-      req.appAccountId = getAccountIdParam(req)
-    }
-
-    // Load user to get name for logging
-    const userForLog = await prismaClient.user.findFirst({
-      where: { id: userId },
-      select: { username: true }
-    })
-    const userName = userForLog?.username || userId
-    console.log(`🚀 Syncing user addons: ${userName}`)
-
-    // Load user
-    const user = await prismaClient.user.findFirst({
-      where: { id: userId },
-      select: {
-        id: true,
-        stremioAuthKey: true,
-        isActive: true,
-        protectedAddons: true,
-        excludedAddons: true,
-        accountId: true,
-        providerType: true,
-        nuvioRefreshToken: true,
-        nuvioUserId: true,
-        // SlickTrax injection reads these in appendTraxAddon - see sync.js.
-        traxAddonEnabled: true,
-        traxToken: true
-      }
-    })
-
-    if (!user) return { success: false, error: 'User not found' }
-    if (!user.isActive) return { success: false, error: 'User is disabled' }
-
-    // A Jellyfin-compatible server has no addon list, so the person's own
-    // login has nothing to sync - but a Stremio or Nuvio login merged into
-    // them below still does.
-    const result = user.providerType === 'jellyfin'
-      ? { success: true, unsupported: true, total: 0 }
-      : await syncCredentialsAddons(prismaClient, user, excludedManifestUrls, unsafeMode, req, decrypt, getAccountIdParam, useCustomFields, options)
-
-    // Merged users (see server/utils/userMerge.js) absorb a second provider's
-    // credentials into a UserProviderCredential row rather than a second
-    // User row - sync it as a second pass here so every existing caller of
-    // syncUserAddons (this route, sync-all, groups.js's group sync) picks up
-    // both providers automatically with no changes on their end. The
-    // PRIMARY result above is still what's returned/checked by callers
-    // (unchanged shape); the secondary pass is logged, not merged into it,
-    // so a secondary-only failure can't make an otherwise-successful primary
-    // sync look like it failed.
+async function syncUserAddonsCore(
+    prismaClient,
+    userId,
+    excludedManifestUrls = [],
+    unsafeMode = false,
+    req,
+    decrypt,
+    getAccountIdParam,
+    useCustomFields = true,
+    options = {}
+) {
     try {
-      // Every merged-in login with an addon list: Stremio and Nuvio, never
-      // the person's own provider. A Jellyfin person can hold both.
-      const secondaryCredentials = await prismaClient.userProviderCredential.findMany({
-        where: { userId: user.id, providerType: { in: ['stremio', 'nuvio'].filter((t) => t !== user.providerType) } }
-      }).catch(() => [])
-      for (const secondaryCredential of secondaryCredentials) {
-        // id MUST be the real survivor id, not a synthetic one - getDesiredAddons
-        // (server/utils/sync.js) resolves group membership via a string-contains
-        // match against this exact id, so a fake id here would silently resolve
-        // to zero groups and push an empty addon set to the absorbed provider.
-        // __persistNuvioRefreshToken (see server/providers/index.js) is what
-        // keeps a Nuvio token refresh from landing in the survivor's own
-        // User.nuvioRefreshToken field instead of this row.
-        const secondaryResult = await syncCredentialsAddons(prismaClient, {
-          id: user.id,
-          isActive: user.isActive,
-          protectedAddons: user.protectedAddons,
-          excludedAddons: user.excludedAddons,
-          accountId: user.accountId,
-          traxAddonEnabled: user.traxAddonEnabled,
-          traxToken: user.traxToken,
-          providerType: secondaryCredential.providerType,
-          stremioAuthKey: secondaryCredential.stremioAuthKey,
-          nuvioRefreshToken: secondaryCredential.nuvioRefreshToken,
-          nuvioUserId: secondaryCredential.nuvioUserId,
-          __persistNuvioRefreshToken: secondaryCredential.providerType === 'nuvio'
-            ? async (encryptedToken) => {
-                await prismaClient.userProviderCredential.update({
-                  where: { userId_providerType: { userId: user.id, providerType: 'nuvio' } },
-                  data: { nuvioRefreshToken: encryptedToken }
-                })
-              }
-            : undefined,
-        }, excludedManifestUrls, unsafeMode, req, decrypt, getAccountIdParam, useCustomFields, options)
-        if (secondaryResult.success) {
-          console.log(`✅ Secondary provider (${secondaryCredential.providerType}) also synced for ${userName}`)
-        } else {
-          console.error(`❌ Secondary provider (${secondaryCredential.providerType}) sync failed for ${userName}:`, secondaryResult.error)
+        // Ensure req has appAccountId for account scoping
+        if (!req.appAccountId) {
+            req.appAccountId = getAccountIdParam(req);
         }
-        result.secondary = secondaryResult
-      }
-    } catch (e) {
-      console.error('Secondary provider sync check skipped:', e?.message)
-    }
 
-    // Record the outcome. User.lastSyncedAt, syncStatus and syncErrorMessage
-    // have been on the model since this fork began but NOTHING has ever
-    // written them - every reference in server/ was a read. That is why the
-    // Users list and the group header could only ever say Unknown/Never: the
-    // display was fine, the column was simply always null.
-    //
-    // This is the single choke point for syncing - the per-user route,
-    // sync-all, group sync, invitation auto-sync and the public library route
-    // all funnel through here - so writing it once here covers every path.
-    //
-    // Keyed off the PRIMARY result only, matching what callers treat as
-    // success: a secondary-provider failure is logged above but does not make
-    // the sync a failure. On failure lastSyncedAt is left alone (undefined =
-    // no change) so a later error can't erase the last time it genuinely
-    // worked.
-    try {
-      await prismaClient.user.update({
-        where: { id: user.id },
-        data: {
-          lastSyncedAt: result.success ? new Date() : undefined,
-          syncStatus: result.success ? 'success' : 'error',
-          syncErrorMessage: result.success ? null : (result.error || 'Unknown error'),
-        },
-      })
-    } catch (e) {
-      // Bookkeeping must never turn a sync that actually worked into a
-      // reported failure.
-      console.error('Could not record sync outcome:', e?.message)
-    }
+        // Load user to get name for logging
+        const userForLog = await prismaClient.user.findFirst({
+            select: { username: true },
+            where: { id: userId },
+        });
+        const userName = userForLog?.username || userId;
+        console.log(`🚀 Syncing user addons: ${userName}`);
 
-    return result
-  } catch (error) {
-    console.error('Error in syncUserAddons:', error)
-    return { success: false, error: publicMessage(error, 'Unknown error') }
-  }
+        // Load user
+        const user = await prismaClient.user.findFirst({
+            select: {
+                accountId: true,
+                excludedAddons: true,
+                id: true,
+                isActive: true,
+                nuvioRefreshToken: true,
+                nuvioUserId: true,
+                protectedAddons: true,
+                providerType: true,
+                stremioAuthKey: true,
+                // SlickTrax injection reads these in appendTraxAddon - see sync.js.
+                traxAddonEnabled: true,
+                traxToken: true,
+            },
+            where: { id: userId },
+        });
+
+        if (!user) {
+            return { error: "User not found", success: false };
+        }
+        if (!user.isActive) {
+            return { error: "User is disabled", success: false };
+        }
+
+        // A Jellyfin-compatible server has no addon list, so the person's own
+        // login has nothing to sync - but a Stremio or Nuvio login merged into
+        // them below still does.
+        const result =
+            user.providerType === "jellyfin"
+                ? { success: true, total: 0, unsupported: true }
+                : await syncCredentialsAddons(
+                      prismaClient,
+                      user,
+                      excludedManifestUrls,
+                      unsafeMode,
+                      req,
+                      decrypt,
+                      getAccountIdParam,
+                      useCustomFields,
+                      options
+                  );
+
+        // Merged users (see server/utils/userMerge.js) absorb a second provider's
+        // credentials into a UserProviderCredential row rather than a second
+        // User row - sync it as a second pass here so every existing caller of
+        // syncUserAddons (this route, sync-all, groups.js's group sync) picks up
+        // both providers automatically with no changes on their end. The
+        // PRIMARY result above is still what's returned/checked by callers
+        // (unchanged shape); the secondary pass is logged, not merged into it,
+        // so a secondary-only failure can't make an otherwise-successful primary
+        // sync look like it failed.
+        try {
+            // Every merged-in login with an addon list: Stremio and Nuvio, never
+            // the person's own provider. A Jellyfin person can hold both.
+            const secondaryCredentials = await prismaClient.userProviderCredential
+                .findMany({
+                    where: {
+                        providerType: {
+                            in: ["stremio", "nuvio"].filter((t) => t !== user.providerType),
+                        },
+                        userId: user.id,
+                    },
+                })
+                .catch(() => []);
+            for (const secondaryCredential of secondaryCredentials) {
+                // id MUST be the real survivor id, not a synthetic one - getDesiredAddons
+                // (server/utils/sync.js) resolves group membership via a string-contains
+                // match against this exact id, so a fake id here would silently resolve
+                // to zero groups and push an empty addon set to the absorbed provider.
+                // __persistNuvioRefreshToken (see server/providers/index.js) is what
+                // keeps a Nuvio token refresh from landing in the survivor's own
+                // User.nuvioRefreshToken field instead of this row.
+                const secondaryResult = await syncCredentialsAddons(
+                    prismaClient,
+                    {
+                        __persistNuvioRefreshToken:
+                            secondaryCredential.providerType === "nuvio"
+                                ? async (encryptedToken) => {
+                                      await prismaClient.userProviderCredential.update({
+                                          data: { nuvioRefreshToken: encryptedToken },
+                                          where: {
+                                              userId_providerType: {
+                                                  providerType: "nuvio",
+                                                  userId: user.id,
+                                              },
+                                          },
+                                      });
+                                  }
+                                : undefined,
+                        accountId: user.accountId,
+                        excludedAddons: user.excludedAddons,
+                        id: user.id,
+                        isActive: user.isActive,
+                        nuvioRefreshToken: secondaryCredential.nuvioRefreshToken,
+                        nuvioUserId: secondaryCredential.nuvioUserId,
+                        protectedAddons: user.protectedAddons,
+                        providerType: secondaryCredential.providerType,
+                        stremioAuthKey: secondaryCredential.stremioAuthKey,
+                        traxAddonEnabled: user.traxAddonEnabled,
+                        traxToken: user.traxToken,
+                    },
+                    excludedManifestUrls,
+                    unsafeMode,
+                    req,
+                    decrypt,
+                    getAccountIdParam,
+                    useCustomFields,
+                    options
+                );
+                if (secondaryResult.success) {
+                    console.log(
+                        `✅ Secondary provider (${secondaryCredential.providerType}) also synced for ${userName}`
+                    );
+                } else {
+                    console.error(
+                        `❌ Secondary provider (${secondaryCredential.providerType}) sync failed for ${userName}:`,
+                        secondaryResult.error
+                    );
+                }
+                result.secondary = secondaryResult;
+            }
+        } catch (e) {
+            console.error("Secondary provider sync check skipped:", e?.message);
+        }
+
+        // Record the outcome. User.lastSyncedAt, syncStatus and syncErrorMessage
+        // have been on the model since this fork began but NOTHING has ever
+        // written them - every reference in server/ was a read. That is why the
+        // Users list and the group header could only ever say Unknown/Never: the
+        // display was fine, the column was simply always null.
+        //
+        // This is the single choke point for syncing - the per-user route,
+        // sync-all, group sync, invitation auto-sync and the public library route
+        // all funnel through here - so writing it once here covers every path.
+        //
+        // Keyed off the PRIMARY result only, matching what callers treat as
+        // success: a secondary-provider failure is logged above but does not make
+        // the sync a failure. On failure lastSyncedAt is left alone (undefined =
+        // no change) so a later error can't erase the last time it genuinely
+        // worked.
+        try {
+            await prismaClient.user.update({
+                data: {
+                    lastSyncedAt: result.success ? new Date() : undefined,
+                    syncErrorMessage: result.success ? null : result.error || "Unknown error",
+                    syncStatus: result.success ? "success" : "error",
+                },
+                where: { id: user.id },
+            });
+        } catch (e) {
+            // Bookkeeping must never turn a sync that actually worked into a
+            // reported failure.
+            console.error("Could not record sync outcome:", e?.message);
+        }
+
+        return result;
+    } catch (error) {
+        console.error("Error in syncUserAddons:", error);
+        return { error: publicMessage(error, "Unknown error"), success: false };
+    }
 }

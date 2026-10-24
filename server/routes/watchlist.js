@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require("express");
 
 // SlickSync's own personal-watchlist API + a batched "have I watched this?"
 // lookup that Discover uses to overlay ✓ badges on poster cards.
@@ -13,169 +13,188 @@ const express = require('express');
 // and return a { id: true } map. Batched because Discover asks about a
 // whole grid at once — 100+ ids per request.
 module.exports = ({ prisma, getAccountId }) => {
-  const router = express.Router();
+    const router = express.Router();
 
-  // GET /api/watchlist — manually ranked items first (in their ranked
-  // order), then everything unranked newest-added first. A watchlist nobody
-  // has ever reordered is therefore byte-identical to the old behaviour.
-  router.get('/', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      const items = await prisma.watchlistItem.findMany({
-        where: { accountId },
-        orderBy: [{ sortOrder: 'asc' }, { addedAt: 'desc' }],
-      });
-      // Prisma puts NULLs first on an ascending sort, which would float
-      // every unranked row above the ranked ones - exactly backwards. The
-      // split is done here rather than in SQL so both engines behave the
-      // same (SQLite and Postgres disagree about NULL ordering).
-      const ranked = items.filter((i) => Number.isInteger(i.sortOrder)).sort((a, b) => a.sortOrder - b.sortOrder);
-      const unranked = items.filter((i) => !Number.isInteger(i.sortOrder));
-      res.json([...ranked, ...unranked]);
-    } catch (e) {
-      console.error('Error fetching watchlist:', e);
-      res.status(500).json({ error: 'Failed to fetch watchlist' });
-    }
-  });
+    // GET /api/watchlist — manually ranked items first (in their ranked
+    // order), then everything unranked newest-added first. A watchlist nobody
+    // has ever reordered is therefore byte-identical to the old behaviour.
+    router.get("/", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const items = await prisma.watchlistItem.findMany({
+                orderBy: [{ sortOrder: "asc" }, { addedAt: "desc" }],
+                where: { accountId },
+            });
+            // Prisma puts NULLs first on an ascending sort, which would float
+            // every unranked row above the ranked ones - exactly backwards. The
+            // split is done here rather than in SQL so both engines behave the
+            // same (SQLite and Postgres disagree about NULL ordering).
+            const ranked = items
+                .filter((i) => Number.isInteger(i.sortOrder))
+                .sort((a, b) => a.sortOrder - b.sortOrder);
+            const unranked = items.filter((i) => !Number.isInteger(i.sortOrder));
+            res.json([...ranked, ...unranked]);
+        } catch (e) {
+            console.error("Error fetching watchlist:", e);
+            res.status(500).json({ error: "Failed to fetch watchlist" });
+        }
+    });
 
-  // PUT /api/watchlist/order — manual ranking. The array's order IS the
-  // ranking (position 1 is "up next"); anything omitted becomes unranked
-  // again and falls back to the newest-first tail.
-  router.put('/order', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : null;
-      if (!itemIds) return res.status(400).json({ error: 'itemIds array is required' });
-      await prisma.watchlistItem.updateMany({ where: { accountId }, data: { sortOrder: null } });
-      let position = 1;
-      for (const itemId of itemIds) {
-        await prisma.watchlistItem.updateMany({
-          where: { accountId, itemId: String(itemId) },
-          data: { sortOrder: position++ },
-        });
-      }
-      res.json({ success: true, ranked: itemIds.length });
-    } catch (e) {
-      console.error('Error ordering watchlist:', e);
-      res.status(500).json({ error: 'Failed to save the watchlist order' });
-    }
-  });
+    // PUT /api/watchlist/order — manual ranking. The array's order IS the
+    // ranking (position 1 is "up next"); anything omitted becomes unranked
+    // again and falls back to the newest-first tail.
+    router.put("/order", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const itemIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : null;
+            if (!itemIds) {
+                return res.status(400).json({ error: "itemIds array is required" });
+            }
+            await prisma.watchlistItem.updateMany({
+                data: { sortOrder: null },
+                where: { accountId },
+            });
+            let position = 1;
+            for (const itemId of itemIds) {
+                await prisma.watchlistItem.updateMany({
+                    data: { sortOrder: position++ },
+                    where: { accountId, itemId: String(itemId) },
+                });
+            }
+            res.json({ ranked: itemIds.length, success: true });
+        } catch (e) {
+            console.error("Error ordering watchlist:", e);
+            res.status(500).json({ error: "Failed to save the watchlist order" });
+        }
+    });
 
-  // POST /api/watchlist — add an item. Upserts so a repeat add is a no-op
-  // (matches the "one row per (account, itemId)" unique constraint).
-  router.post('/', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      const { itemId, itemType, name, poster } = req.body || {};
-      if (!itemId || !itemType || !name) {
-        return res.status(400).json({ error: 'itemId, itemType, and name are required' });
-      }
-      if (itemType !== 'movie' && itemType !== 'series') {
-        return res.status(400).json({ error: 'itemType must be movie or series' });
-      }
-      const entry = await prisma.watchlistItem.upsert({
-        where: { accountId_itemId: { accountId, itemId } },
-        create: { accountId, itemId, itemType, name, poster: poster || null },
-        // Refresh display fields on re-add in case the title / poster changed
-        // upstream; the addedAt timestamp is preserved so re-adding doesn't
-        // silently bump items back to the top.
-        update: { name, poster: poster || null, itemType },
-      });
-      res.status(201).json(entry);
-    } catch (e) {
-      console.error('Error adding to watchlist:', e);
-      res.status(500).json({ error: 'Failed to add to watchlist' });
-    }
-  });
+    // POST /api/watchlist — add an item. Upserts so a repeat add is a no-op
+    // (matches the "one row per (account, itemId)" unique constraint).
+    router.post("/", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const { itemId, itemType, name, poster } = req.body || {};
+            if (!(itemId && itemType && name)) {
+                return res.status(400).json({ error: "itemId, itemType, and name are required" });
+            }
+            if (itemType !== "movie" && itemType !== "series") {
+                return res.status(400).json({ error: "itemType must be movie or series" });
+            }
+            const entry = await prisma.watchlistItem.upsert({
+                create: { accountId, itemId, itemType, name, poster: poster || null },
+                // Refresh display fields on re-add in case the title / poster changed
+                // upstream; the addedAt timestamp is preserved so re-adding doesn't
+                // silently bump items back to the top.
+                update: { itemType, name, poster: poster || null },
+                where: { accountId_itemId: { accountId, itemId } },
+            });
+            res.status(201).json(entry);
+        } catch (e) {
+            console.error("Error adding to watchlist:", e);
+            res.status(500).json({ error: "Failed to add to watchlist" });
+        }
+    });
 
-  // DELETE /api/watchlist/:itemId — remove.
-  router.delete('/:itemId', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      await prisma.watchlistItem.deleteMany({ where: { accountId, itemId: req.params.itemId } });
-      res.json({ success: true });
-    } catch (e) {
-      console.error('Error removing from watchlist:', e);
-      res.status(500).json({ error: 'Failed to remove from watchlist' });
-    }
-  });
+    // DELETE /api/watchlist/:itemId — remove.
+    router.delete("/:itemId", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            await prisma.watchlistItem.deleteMany({
+                where: { accountId, itemId: req.params.itemId },
+            });
+            res.json({ success: true });
+        } catch (e) {
+            console.error("Error removing from watchlist:", e);
+            res.status(500).json({ error: "Failed to remove from watchlist" });
+        }
+    });
 
-  // POST /api/watchlist/watched-status — body: { ids: string[] }
-  // Returns { [id]: true } for any id considered "watched" on this account.
-  // Order of precedence: manual override wins (set to either true or false)
-  // over the automatic history-exists check, so a user who marks something
-  // as unwatched can suppress a false-positive from library sync, and a user
-  // who watched something off-platform can mark it watched without ever
-  // playing it here. POST (not GET) because id lists can be 100+ entries
-  // and don't belong in URLs.
-  router.post('/watched-status', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
-      // Cap batch size so a runaway request can't scan the whole table.
-      const ids = raw.slice(0, 500).filter((id) => typeof id === 'string' && id.length > 0);
-      if (ids.length === 0) return res.json({});
-      const [movies, episodes, overrides] = await Promise.all([
-        prisma.movieWatchHistory.findMany({
-          where: { accountId, itemId: { in: ids } },
-          select: { itemId: true },
-          distinct: ['itemId'],
-        }),
-        prisma.episodeWatchHistory.findMany({
-          where: { accountId, showId: { in: ids } },
-          select: { showId: true },
-          distinct: ['showId'],
-        }),
-        prisma.manualWatchOverride.findMany({
-          where: { accountId, itemId: { in: ids } },
-          select: { itemId: true, watched: true },
-        }),
-      ]);
-      const out = {};
-      for (const m of movies) out[m.itemId] = true;
-      for (const e of episodes) out[e.showId] = true;
-      // Overrides applied last — win over history whichever direction.
-      for (const o of overrides) out[o.itemId] = o.watched;
-      res.json(out);
-    } catch (e) {
-      console.error('Error checking watched status:', e);
-      res.status(500).json({ error: 'Failed to check watched status' });
-    }
-  });
+    // POST /api/watchlist/watched-status — body: { ids: string[] }
+    // Returns { [id]: true } for any id considered "watched" on this account.
+    // Order of precedence: manual override wins (set to either true or false)
+    // over the automatic history-exists check, so a user who marks something
+    // as unwatched can suppress a false-positive from library sync, and a user
+    // who watched something off-platform can mark it watched without ever
+    // playing it here. POST (not GET) because id lists can be 100+ entries
+    // and don't belong in URLs.
+    router.post("/watched-status", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+            // Cap batch size so a runaway request can't scan the whole table.
+            const ids = raw.slice(0, 500).filter((id) => typeof id === "string" && id.length > 0);
+            if (ids.length === 0) {
+                return res.json({});
+            }
+            const [movies, episodes, overrides] = await Promise.all([
+                prisma.movieWatchHistory.findMany({
+                    distinct: ["itemId"],
+                    select: { itemId: true },
+                    where: { accountId, itemId: { in: ids } },
+                }),
+                prisma.episodeWatchHistory.findMany({
+                    distinct: ["showId"],
+                    select: { showId: true },
+                    where: { accountId, showId: { in: ids } },
+                }),
+                prisma.manualWatchOverride.findMany({
+                    select: { itemId: true, watched: true },
+                    where: { accountId, itemId: { in: ids } },
+                }),
+            ]);
+            const out = {};
+            for (const m of movies) {
+                out[m.itemId] = true;
+            }
+            for (const e of episodes) {
+                out[e.showId] = true;
+            }
+            // Overrides applied last — win over history whichever direction.
+            for (const o of overrides) {
+                out[o.itemId] = o.watched;
+            }
+            res.json(out);
+        } catch (e) {
+            console.error("Error checking watched status:", e);
+            res.status(500).json({ error: "Failed to check watched status" });
+        }
+    });
 
-  // POST /api/watchlist/mark — body: { itemId, watched: bool }
-  // Set (or update) a manual watched-status override for an item.
-  router.post('/mark', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      const { itemId, watched } = req.body || {};
-      if (!itemId || typeof watched !== 'boolean') {
-        return res.status(400).json({ error: 'itemId and watched (boolean) are required' });
-      }
-      const row = await prisma.manualWatchOverride.upsert({
-        where: { accountId_itemId: { accountId, itemId } },
-        create: { accountId, itemId, watched },
-        update: { watched, markedAt: new Date() },
-      });
-      res.json(row);
-    } catch (e) {
-      console.error('Error marking watched status:', e);
-      res.status(500).json({ error: 'Failed to mark watched status' });
-    }
-  });
+    // POST /api/watchlist/mark — body: { itemId, watched: bool }
+    // Set (or update) a manual watched-status override for an item.
+    router.post("/mark", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const { itemId, watched } = req.body || {};
+            if (!itemId || typeof watched !== "boolean") {
+                return res.status(400).json({ error: "itemId and watched (boolean) are required" });
+            }
+            const row = await prisma.manualWatchOverride.upsert({
+                create: { accountId, itemId, watched },
+                update: { markedAt: new Date(), watched },
+                where: { accountId_itemId: { accountId, itemId } },
+            });
+            res.json(row);
+        } catch (e) {
+            console.error("Error marking watched status:", e);
+            res.status(500).json({ error: "Failed to mark watched status" });
+        }
+    });
 
-  // DELETE /api/watchlist/mark/:itemId — remove the override so watched
-  // status falls back to whatever real history says.
-  router.delete('/mark/:itemId', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default';
-      await prisma.manualWatchOverride.deleteMany({ where: { accountId, itemId: req.params.itemId } });
-      res.json({ success: true });
-    } catch (e) {
-      console.error('Error clearing watched override:', e);
-      res.status(500).json({ error: 'Failed to clear watched override' });
-    }
-  });
+    // DELETE /api/watchlist/mark/:itemId — remove the override so watched
+    // status falls back to whatever real history says.
+    router.delete("/mark/:itemId", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            await prisma.manualWatchOverride.deleteMany({
+                where: { accountId, itemId: req.params.itemId },
+            });
+            res.json({ success: true });
+        } catch (e) {
+            console.error("Error clearing watched override:", e);
+            res.status(500).json({ error: "Failed to clear watched override" });
+        }
+    });
 
-  return router;
+    return router;
 };

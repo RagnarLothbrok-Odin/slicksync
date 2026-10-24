@@ -22,33 +22,47 @@
 // to a CSV-imported one - same 'Imported' label, same never-overwrite-a-
 // native-record rule.
 
-const HEADERS = ['imdbID', 'Title', 'Year', 'Watched Date', 'Rating']
+const HEADERS = ["imdbID", "Title", "Year", "Watched Date", "Rating"];
 
 /**
  * Pull the movie/show object out of one export entry. Trakt's export mirrors
  * its own API shapes, so the payload hangs off a key named for its type.
  */
 function extractTitleObject(entry) {
-  if (!entry || typeof entry !== 'object') return null
-  // Episodes/seasons carry a `show`; a movie carries `movie`. Episode-level
-  // history has no equivalent write path in this codebase (the CSV importer
-  // is movies-only for the same reason), so those are reported as skipped
-  // rather than silently mangled into a movie row.
-  if (entry.movie && typeof entry.movie === 'object') return entry.movie
-  // `media_data` + `media_type` is the shape the traktexport tool produces
-  // once it has parsed the raw API response. Cheap to accept, and someone
-  // handed a file by that tool has no idea it differs.
-  if (entry.media_type === 'movie' && entry.media_data && typeof entry.media_data === 'object') return entry.media_data
-  // A bare title object (some re-exports drop the envelope entirely).
-  if (entry.ids && typeof entry.ids === 'object' && typeof entry.title === 'string' && !entry.show && !entry.episode) return entry
-  return null
+    if (!entry || typeof entry !== "object") {
+        return null;
+    }
+    // Episodes/seasons carry a `show`; a movie carries `movie`. Episode-level
+    // history has no equivalent write path in this codebase (the CSV importer
+    // is movies-only for the same reason), so those are reported as skipped
+    // rather than silently mangled into a movie row.
+    if (entry.movie && typeof entry.movie === "object") {
+        return entry.movie;
+    }
+    // `media_data` + `media_type` is the shape the traktexport tool produces
+    // once it has parsed the raw API response. Cheap to accept, and someone
+    // handed a file by that tool has no idea it differs.
+    if (entry.media_type === "movie" && entry.media_data && typeof entry.media_data === "object") {
+        return entry.media_data;
+    }
+    // A bare title object (some re-exports drop the envelope entirely).
+    if (
+        entry.ids &&
+        typeof entry.ids === "object" &&
+        typeof entry.title === "string" &&
+        !entry.show &&
+        !entry.episode
+    ) {
+        return entry;
+    }
+    return null;
 }
 
 function imdbIdOf(titleObj) {
-  // ids.imdb is what Trakt's own export and API use; imdb_id turns up in
-  // tools that rename the field when parsing.
-  const raw = titleObj?.ids?.imdb ?? titleObj?.ids?.imdb_id ?? titleObj?.imdb_id
-  return typeof raw === 'string' && /^tt\d+$/i.test(raw.trim()) ? raw.trim() : null
+    // ids.imdb is what Trakt's own export and API use; imdb_id turns up in
+    // tools that rename the field when parsing.
+    const raw = titleObj?.ids?.imdb ?? titleObj?.ids?.imdb_id ?? titleObj?.imdb_id;
+    return typeof raw === "string" && /^tt\d+$/i.test(raw.trim()) ? raw.trim() : null;
 }
 
 /**
@@ -57,14 +71,17 @@ function imdbIdOf(titleObj) {
  * since this ends up in an error message.
  */
 function describeShape(data) {
-  if (Array.isArray(data)) {
-    const first = data.find((x) => x && typeof x === 'object')
-    return `an array of ${data.length} item(s)` + (first ? `, first item has keys: ${Object.keys(first).slice(0, 12).join(', ')}` : '')
-  }
-  if (data && typeof data === 'object') {
-    return `an object with keys: ${Object.keys(data).slice(0, 12).join(', ')}`
-  }
-  return typeof data
+    if (Array.isArray(data)) {
+        const first = data.find((x) => x && typeof x === "object");
+        return (
+            `an array of ${data.length} item(s)` +
+            (first ? `, first item has keys: ${Object.keys(first).slice(0, 12).join(", ")}` : "")
+        );
+    }
+    if (data && typeof data === "object") {
+        return `an object with keys: ${Object.keys(data).slice(0, 12).join(", ")}`;
+    }
+    return typeof data;
 }
 
 /**
@@ -74,65 +91,83 @@ function describeShape(data) {
  * Returns { headers, records, skippedNonMovie } shaped for mapColumns().
  */
 function parseTraktExport(text) {
-  let data
-  try {
-    data = JSON.parse(text)
-  } catch {
-    return null // not JSON at all - caller falls back to the CSV parser
-  }
-
-  let entries = null
-  if (Array.isArray(data)) entries = data
-  else if (data && typeof data === 'object') {
-    // A whole-account export (the traktexport tool writes one file with all
-    // of these) rather than one of Trakt's own per-type files.
-    for (const key of ['history', 'watched', 'ratings', 'items', 'data', 'movies']) {
-      if (Array.isArray(data[key])) { entries = data[key]; break }
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch {
+        return null; // not JSON at all - caller falls back to the CSV parser
     }
-  }
-  if (!Array.isArray(entries)) return { headers: HEADERS, records: [], skippedNonMovie: 0, shape: describeShape(data) }
 
-  const records = []
-  let skippedNonMovie = 0
-  let skippedNoTimestamp = 0
+    let entries = null;
+    if (Array.isArray(data)) {
+        entries = data;
+    } else if (data && typeof data === "object") {
+        // A whole-account export (the traktexport tool writes one file with all
+        // of these) rather than one of Trakt's own per-type files.
+        for (const key of ["history", "watched", "ratings", "items", "data", "movies"]) {
+            if (Array.isArray(data[key])) {
+                entries = data[key];
+                break;
+            }
+        }
+    }
+    if (!Array.isArray(entries)) {
+        return { headers: HEADERS, records: [], shape: describeShape(data), skippedNonMovie: 0 };
+    }
 
-  for (const entry of entries) {
-    const titleObj = extractTitleObject(entry)
-    if (!titleObj) { skippedNonMovie++; continue }
+    const records = [];
+    let skippedNonMovie = 0;
+    let skippedNoTimestamp = 0;
 
-    // watched_at is history; rated_at is the ratings file. Either one is a
-    // reasonable "when", and the CSV path already treats IMDb's rating date
-    // the same way.
-    const when = entry.watched_at || entry.last_watched_at || entry.rated_at || null
+    for (const entry of entries) {
+        const titleObj = extractTitleObject(entry);
+        if (!titleObj) {
+            skippedNonMovie++;
+            continue;
+        }
 
-    // A real timestamp is required, not optional. Trakt's collection
-    // (collected_at) and watchlist (listed_at) exports carry the exact same
-    // movie/ids.imdb shape as history and ratings, with no watched_at or
-    // rated_at at all - confirmed against real export shapes, not assumed.
-    // The CSV import loop defaults a blank Watched Date to "right now", so
-    // without this check, importing someone's whole unzipped export (now
-    // that multi-file select makes that the obvious thing to do) would mark
-    // every movie in their COLLECTION and WATCHLIST as watched today. A
-    // title merely owned or queued is not a title watched.
-    if (typeof when !== 'string' || !when) { skippedNoTimestamp++; continue }
+        // watched_at is history; rated_at is the ratings file. Either one is a
+        // reasonable "when", and the CSV path already treats IMDb's rating date
+        // the same way.
+        const when = entry.watched_at || entry.last_watched_at || entry.rated_at || null;
 
-    const rating = typeof entry.rating === 'number' ? String(entry.rating) : ''
-    records.push({
-      imdbID: imdbIdOf(titleObj) || '',
-      Title: typeof titleObj.title === 'string' ? titleObj.title : '',
-      Year: titleObj.year != null ? String(titleObj.year) : '',
-      'Watched Date': when,
-      Rating: rating,
-    })
-  }
+        // A real timestamp is required, not optional. Trakt's collection
+        // (collected_at) and watchlist (listed_at) exports carry the exact same
+        // movie/ids.imdb shape as history and ratings, with no watched_at or
+        // rated_at at all - confirmed against real export shapes, not assumed.
+        // The CSV import loop defaults a blank Watched Date to "right now", so
+        // without this check, importing someone's whole unzipped export (now
+        // that multi-file select makes that the obvious thing to do) would mark
+        // every movie in their COLLECTION and WATCHLIST as watched today. A
+        // title merely owned or queued is not a title watched.
+        if (typeof when !== "string" || !when) {
+            skippedNoTimestamp++;
+            continue;
+        }
 
-  return { headers: HEADERS, records, skippedNonMovie, skippedNoTimestamp, shape: describeShape(entries) }
+        const rating = typeof entry.rating === "number" ? String(entry.rating) : "";
+        records.push({
+            imdbID: imdbIdOf(titleObj) || "",
+            Rating: rating,
+            Title: typeof titleObj.title === "string" ? titleObj.title : "",
+            "Watched Date": when,
+            Year: titleObj.year === null ? "" : String(titleObj.year),
+        });
+    }
+
+    return {
+        headers: HEADERS,
+        records,
+        shape: describeShape(entries),
+        skippedNonMovie,
+        skippedNoTimestamp,
+    };
 }
 
 /** Cheap check so the route can pick a parser without guessing on extension alone. */
 function looksLikeJson(text) {
-  const t = (text || '').trimStart()
-  return t.startsWith('[') || t.startsWith('{')
+    const t = (text || "").trimStart();
+    return t.startsWith("[") || t.startsWith("{");
 }
 
-module.exports = { parseTraktExport, looksLikeJson, describeShape, HEADERS }
+module.exports = { describeShape, HEADERS, looksLikeJson, parseTraktExport };

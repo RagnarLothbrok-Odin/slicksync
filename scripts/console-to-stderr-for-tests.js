@@ -8,9 +8,11 @@
 // with "Unable to deserialize cloned data", a different file each time.
 // Console output goes to stderr instead, which the runner shows but never
 // parses, so the result messages have stdout to themselves.
-const util = require('node:util')
+const util = require("node:util");
 
-for (const method of ['log', 'info', 'debug', 'dir', 'table']) {
-  // eslint-disable-next-line no-console
-  console[method] = (...args) => { process.stderr.write(util.format(...args) + '\n') }
+for (const method of ["log", "info", "debug", "dir", "table"]) {
+    // eslint-disable-next-line no-console
+    console[method] = (...args) => {
+        process.stderr.write(`${util.format(...args)}\n`);
+    };
 }

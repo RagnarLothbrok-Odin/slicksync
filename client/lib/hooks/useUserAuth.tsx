@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { userAuth, UserInfo, UserApiError } from '@/lib/user-api';
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import { UserApiError, type UserInfo, userAuth } from "@/lib/user-api";
 
-const STORAGE_KEY = 'slicksync-user-auth';
+const STORAGE_KEY = "slicksync-user-auth";
 
-type Provider = 'stremio' | 'nuvio' | 'jellyfin';
+type Provider = "stremio" | "nuvio" | "jellyfin";
 
 // authKey holds the caller's own bearer credential for whichever provider:
 // for Stremio, the real Stremio authKey; for Nuvio, a SlickSync-issued
@@ -17,370 +17,429 @@ type Provider = 'stremio' | 'nuvio' | 'jellyfin';
 // literally anyone. Fixed to require real proof of possession, matching
 // Stremio's existing model.
 interface StoredAuth {
-  userId: string;
-  provider: Provider;
-  profileSelected?: boolean;
-  authKey?: string;
-  userInfo: UserInfo;
+    authKey?: string;
+    profileSelected?: boolean;
+    provider: Provider;
+    userId: string;
+    userInfo: UserInfo;
 }
 
 interface UserAuthContextType {
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  userId: string | null;
-  provider: Provider | null;
-  authKey: string | null;
-  userInfo: UserInfo | null;
-  error: string | null;
-  errorCode: string | null;
-  login: (authKey: string) => Promise<{ success: boolean; error?: string }>;
-  loginNuvio: (code: string, deviceNonce: string, anonToken: string) => Promise<{ success: boolean; error?: string }>;
-  loginJellyfin: (credentials: Record<string, string>) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
-  refreshUserInfo: () => Promise<void>;
-  deleteAccount: () => Promise<{ success: boolean; error?: string }>;
+    authKey: string | null;
+    deleteAccount: () => Promise<{ success: boolean; error?: string }>;
+    error: string | null;
+    errorCode: string | null;
+    isAuthenticated: boolean;
+    isLoading: boolean;
+    login: (authKey: string) => Promise<{ success: boolean; error?: string }>;
+    loginJellyfin: (
+        credentials: Record<string, string>
+    ) => Promise<{ success: boolean; error?: string }>;
+    loginNuvio: (
+        code: string,
+        deviceNonce: string,
+        anonToken: string
+    ) => Promise<{ success: boolean; error?: string }>;
+    logout: () => void;
+    provider: Provider | null;
+    refreshUserInfo: () => Promise<void>;
+    userId: string | null;
+    userInfo: UserInfo | null;
 }
 
 const UserAuthContext = createContext<UserAuthContextType | null>(null);
 
 interface UserAuthProviderProps {
-  children: ReactNode;
+    children: ReactNode;
 }
 
 export function UserAuthProvider({ children }: UserAuthProviderProps) {
-  const [isLoading, setIsLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider | null>(null);
-  const [authKey, setAuthKey] = useState<string | null>(null);
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [errorCode, setErrorCode] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [userId, setUserId] = useState<string | null>(null);
+    const [provider, setProvider] = useState<Provider | null>(null);
+    const [authKey, setAuthKey] = useState<string | null>(null);
+    const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [errorCode, setErrorCode] = useState<string | null>(null);
 
-  // Load stored auth on mount
-  useEffect(() => {
-    let active = true;
-    const loadStoredAuth = async () => {
-      if (typeof window === 'undefined') {
-        setIsLoading(false);
-        return;
-      }
+    // Load stored auth on mount
+    useEffect(() => {
+        let active = true;
+        const loadStoredAuth = async () => {
+            if (typeof window === "undefined") {
+                setIsLoading(false);
+                return;
+            }
 
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) {
-        setIsLoading(false);
-        return;
-      }
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (!stored) {
+                setIsLoading(false);
+                return;
+            }
 
-      try {
-        const data: StoredAuth = JSON.parse(stored);
-        // Older sessions predate the provider field - treat as Stremio,
-        // same as the server's own `providerType || 'stremio'` default.
-        const dataProvider: Provider = data.provider || 'stremio';
-        // Both providers now require a real caller-held credential to
-        // restore a session - a pre-fix Nuvio session with no stored token
-        // can no longer be silently trusted, so it's dropped here same as
-        // any other invalid stored session (falls through to a fresh login).
-        if (!data.userId || !data.authKey) {
-          localStorage.removeItem(STORAGE_KEY);
-          setIsLoading(false);
-          return;
+            try {
+                const data: StoredAuth = JSON.parse(stored);
+                // Older sessions predate the provider field - treat as Stremio,
+                // same as the server's own `providerType || 'stremio'` default.
+                const dataProvider: Provider = data.provider || "stremio";
+                // Both providers now require a real caller-held credential to
+                // restore a session - a pre-fix Nuvio session with no stored token
+                // can no longer be silently trusted, so it's dropped here same as
+                // any other invalid stored session (falls through to a fresh login).
+                if (!(data.userId && data.authKey)) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    setIsLoading(false);
+                    return;
+                }
+
+                // Validate the stored session
+                const result =
+                    dataProvider === "nuvio"
+                        ? await userAuth.validateNuvio(data.userId, data.authKey)
+                        : dataProvider === "jellyfin"
+                          ? await userAuth.validateJellyfin(data.userId, data.authKey)
+                          : await userAuth.validate(data.authKey, data.userId);
+
+                if (!active) {
+                    return;
+                }
+                if (result.valid) {
+                    // Nuvio reissues a fresh session token on every successful
+                    // validate (sliding expiry) - use that going forward, not the
+                    // previous token.
+                    const currentAuthKey =
+                        dataProvider !== "stremio" &&
+                        "sessionToken" in result &&
+                        result.sessionToken
+                            ? result.sessionToken
+                            : data.authKey;
+                    setUserId(data.userId);
+                    setProvider(dataProvider);
+                    setAuthKey(currentAuthKey || null);
+                    setUserInfo(data.userInfo);
+
+                    // Refresh user info in background
+                    try {
+                        const freshInfo = await userAuth.getUserInfo(data.userId, currentAuthKey);
+                        if (!active) {
+                            return;
+                        }
+                        setUserInfo(freshInfo);
+                        // Update storage with fresh info
+                        localStorage.setItem(
+                            STORAGE_KEY,
+                            JSON.stringify({
+                                authKey: currentAuthKey,
+                                profileSelected: data.profileSelected === true,
+                                provider: dataProvider,
+                                userId: data.userId,
+                                userInfo: freshInfo,
+                            })
+                        );
+                    } catch {
+                        // Use cached info if refresh fails
+                    }
+                } else {
+                    // Invalid session - clear storage
+                    localStorage.removeItem(STORAGE_KEY);
+                    setError(result.error || "Session expired");
+                    setErrorCode(result.errorCode || null);
+                }
+            } catch (err) {
+                if (!active) {
+                    return;
+                }
+                if (
+                    err instanceof SyntaxError ||
+                    (err instanceof UserApiError && [401, 403].includes(err.status))
+                ) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    setError(err instanceof UserApiError ? err.message : "Please sign in again.");
+                } else {
+                    // Network errors, rate limits and server outages do not revoke a
+                    // session. Keep the credential and offer verification again.
+                    setError("Could not verify your session. Your sign-in has been kept.");
+                    setErrorCode("SESSION_CHECK_UNAVAILABLE");
+                }
+            } finally {
+                if (active) {
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        void loadStoredAuth();
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    // The sign-in answers carry only the basics, so right after one the saved
+    // info has no Gravatar choice yet and the person's own avatar would show
+    // initials until the next page load. Fetch the full info once, quietly.
+    const fillInfoAfterSignIn = useCallback(
+        async (signedInId: string, signedInProvider: Provider, key: string) => {
+            try {
+                const freshInfo = await userAuth.getUserInfo(signedInId, key);
+                const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+                setUserInfo(freshInfo);
+                localStorage.setItem(
+                    STORAGE_KEY,
+                    JSON.stringify({
+                        authKey: key,
+                        profileSelected:
+                            stored.userId === signedInId && stored.profileSelected === true,
+                        provider: signedInProvider,
+                        userId: signedInId,
+                        userInfo: freshInfo,
+                    })
+                );
+            } catch {
+                // Keep the basics from the sign-in; the next load fills the rest.
+            }
+        },
+        []
+    );
+
+    // Login with Stremio auth key
+    const login = useCallback(
+        async (newAuthKey: string): Promise<{ success: boolean; error?: string }> => {
+            setIsLoading(true);
+            setError(null);
+            setErrorCode(null);
+
+            try {
+                const result = await userAuth.authenticate(newAuthKey);
+
+                if (result.success && result.userId && result.userInfo) {
+                    setUserId(result.userId);
+                    setProvider("stremio");
+                    setAuthKey(newAuthKey);
+                    setUserInfo(result.userInfo);
+
+                    // Store in localStorage
+                    localStorage.setItem(
+                        STORAGE_KEY,
+                        JSON.stringify({
+                            authKey: newAuthKey,
+                            provider: "stremio",
+                            userId: result.userId,
+                            userInfo: result.userInfo,
+                        })
+                    );
+                    void fillInfoAfterSignIn(result.userId, "stremio", newAuthKey);
+
+                    return { success: true };
+                }
+                const errorMsg = result.error || "Authentication failed";
+                setError(errorMsg);
+                setErrorCode(result.errorCode || null);
+                return { error: errorMsg, success: false };
+            } catch (err) {
+                let errorMsg = "Authentication failed";
+                if (err instanceof UserApiError) {
+                    errorMsg = err.message;
+                    setError(errorMsg);
+                } else {
+                    setError(errorMsg);
+                }
+                return { error: errorMsg, success: false };
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [fillInfoAfterSignIn]
+    );
+
+    // Login with a completed Nuvio device-code exchange. The exchange result
+    // proves identity to the SERVER, which issues a SlickSync session token
+    // in response - that token (not the raw Nuvio refresh token, which never
+    // leaves the server) is what's held client-side from here on, the same
+    // role Stremio's authKey plays.
+    const loginNuvio = useCallback(
+        async (
+            code: string,
+            deviceNonce: string,
+            anonToken: string
+        ): Promise<{ success: boolean; error?: string }> => {
+            setIsLoading(true);
+            setError(null);
+            setErrorCode(null);
+
+            try {
+                const result = await userAuth.authenticateNuvio(code, deviceNonce, anonToken);
+
+                if (result.success && result.userId && result.userInfo && result.sessionToken) {
+                    setUserId(result.userId);
+                    setProvider("nuvio");
+                    setAuthKey(result.sessionToken);
+                    setUserInfo(result.userInfo);
+
+                    localStorage.setItem(
+                        STORAGE_KEY,
+                        JSON.stringify({
+                            authKey: result.sessionToken,
+                            profileSelected: false,
+                            provider: "nuvio",
+                            userId: result.userId,
+                            userInfo: result.userInfo,
+                        })
+                    );
+                    void fillInfoAfterSignIn(result.userId, "nuvio", result.sessionToken);
+
+                    return { success: true };
+                }
+                const errorMsg = result.error || "Authentication failed";
+                setError(errorMsg);
+                setErrorCode(result.errorCode || null);
+                return { error: errorMsg, success: false };
+            } catch (err) {
+                let errorMsg = "Authentication failed";
+                if (err instanceof UserApiError) {
+                    errorMsg = err.message;
+                    setError(errorMsg);
+                } else {
+                    setError(errorMsg);
+                }
+                return { error: errorMsg, success: false };
+            } finally {
+                setIsLoading(false);
+            }
+        },
+        [fillInfoAfterSignIn]
+    );
+
+    // Login through a Jellyfin-compatible server. Same session model as
+    // Nuvio: the server signs in, and the browser keeps only the SlickSync
+    // session token it issues.
+    const loginJellyfin = useCallback(
+        async (
+            credentials: Record<string, string>
+        ): Promise<{ success: boolean; error?: string }> => {
+            setError(null);
+            setErrorCode(null);
+            try {
+                const result = await userAuth.authenticateJellyfin(credentials);
+                if (result.success && result.userId && result.userInfo && result.sessionToken) {
+                    setUserId(result.userId);
+                    setProvider("jellyfin");
+                    setAuthKey(result.sessionToken);
+                    setUserInfo(result.userInfo);
+                    localStorage.setItem(
+                        STORAGE_KEY,
+                        JSON.stringify({
+                            authKey: result.sessionToken,
+                            provider: "jellyfin",
+                            userId: result.userId,
+                            userInfo: result.userInfo,
+                        })
+                    );
+                    void fillInfoAfterSignIn(result.userId, "jellyfin", result.sessionToken);
+                    return { success: true };
+                }
+                const errorMsg = result.error || "Authentication failed";
+                setErrorCode(result.errorCode || null);
+                return { error: errorMsg, success: false };
+            } catch (err) {
+                const errorMsg =
+                    err instanceof UserApiError ? err.message : "Authentication failed";
+                return { error: errorMsg, success: false };
+            }
+        },
+        [fillInfoAfterSignIn]
+    );
+
+    // Logout
+    const logout = useCallback(() => {
+        setUserId(null);
+        setProvider(null);
+        setAuthKey(null);
+        setUserInfo(null);
+        setError(null);
+        setErrorCode(null);
+        localStorage.removeItem(STORAGE_KEY);
+    }, []);
+
+    // Refresh user info
+    const refreshUserInfo = useCallback(async () => {
+        if (!userId) {
+            return;
         }
 
-        // Validate the stored session
-        const result = dataProvider === 'nuvio'
-          ? await userAuth.validateNuvio(data.userId, data.authKey)
-          : dataProvider === 'jellyfin'
-          ? await userAuth.validateJellyfin(data.userId, data.authKey)
-          : await userAuth.validate(data.authKey, data.userId);
-
-        if (!active) return;
-        if (result.valid) {
-          // Nuvio reissues a fresh session token on every successful
-          // validate (sliding expiry) - use that going forward, not the
-          // previous token.
-          const currentAuthKey = (dataProvider !== 'stremio' && 'sessionToken' in result && result.sessionToken) ? result.sessionToken : data.authKey;
-          setUserId(data.userId);
-          setProvider(dataProvider);
-          setAuthKey(currentAuthKey || null);
-          setUserInfo(data.userInfo);
-
-          // Refresh user info in background
-          try {
-            const freshInfo = await userAuth.getUserInfo(data.userId, currentAuthKey);
-            if (!active) return;
+        try {
+            const freshInfo = await userAuth.getUserInfo(userId, authKey || undefined);
             setUserInfo(freshInfo);
-            // Update storage with fresh info
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-              userId: data.userId,
-              provider: dataProvider,
-              authKey: currentAuthKey,
-              userInfo: freshInfo,
-              profileSelected: data.profileSelected === true,
-            }));
-          } catch {
-            // Use cached info if refresh fails
-          }
-        } else {
-          // Invalid session - clear storage
-          localStorage.removeItem(STORAGE_KEY);
-          setError(result.error || 'Session expired');
-          setErrorCode(result.errorCode || null);
+
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+            // Update storage
+            localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify({
+                    authKey,
+                    profileSelected: stored.profileSelected === true,
+                    provider: provider || "stremio",
+                    userId,
+                    userInfo: freshInfo,
+                })
+            );
+        } catch (err) {
+            console.error("Failed to refresh user info:", err);
         }
-      } catch (err) {
-        if (!active) return;
-        if (err instanceof SyntaxError || (err instanceof UserApiError && [401, 403].includes(err.status))) {
-          localStorage.removeItem(STORAGE_KEY);
-          setError(err instanceof UserApiError ? err.message : 'Please sign in again.');
-        } else {
-          // Network errors, rate limits and server outages do not revoke a
-          // session. Keep the credential and offer verification again.
-          setError('Could not verify your session. Your sign-in has been kept.');
-          setErrorCode('SESSION_CHECK_UNAVAILABLE');
+    }, [userId, provider, authKey]);
+
+    // Self-service "delete my account" - permanently removes only this user's
+    // own row and data. logout()'s local cleanup runs regardless of provider
+    // since there's nothing left server-side to keep a session valid against.
+    const deleteAccount = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+        if (!(userId && provider)) {
+            return { error: "Not signed in", success: false };
         }
-      } finally {
-        if (active) setIsLoading(false);
-      }
+        try {
+            await userAuth.deleteAccount(userId, provider, authKey || undefined);
+            logout();
+            return { success: true };
+        } catch (err) {
+            const errorMsg = err instanceof UserApiError ? err.message : "Failed to delete account";
+            return { error: errorMsg, success: false };
+        }
+    }, [userId, provider, authKey, logout]);
+
+    const value: UserAuthContextType = {
+        authKey,
+        deleteAccount,
+        error,
+        errorCode,
+        isAuthenticated: !!userId && (provider === "nuvio" || !!authKey),
+        isLoading,
+        login,
+        loginJellyfin,
+        loginNuvio,
+        logout,
+        provider,
+        refreshUserInfo,
+        userId,
+        userInfo,
     };
 
-    void loadStoredAuth();
-    return () => { active = false; };
-  }, []);
-
-  // The sign-in answers carry only the basics, so right after one the saved
-  // info has no Gravatar choice yet and the person's own avatar would show
-  // initials until the next page load. Fetch the full info once, quietly.
-  const fillInfoAfterSignIn = useCallback(async (signedInId: string, signedInProvider: Provider, key: string) => {
-    try {
-      const freshInfo = await userAuth.getUserInfo(signedInId, key);
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      setUserInfo(freshInfo);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        userId: signedInId,
-        provider: signedInProvider,
-        authKey: key,
-        userInfo: freshInfo,
-        profileSelected: stored.userId === signedInId && stored.profileSelected === true,
-      }));
-    } catch {
-      // Keep the basics from the sign-in; the next load fills the rest.
-    }
-  }, []);
-
-  // Login with Stremio auth key
-  const login =useCallback(async (newAuthKey: string): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    setError(null);
-    setErrorCode(null);
-
-    try {
-      const result = await userAuth.authenticate(newAuthKey);
-
-      if (result.success && result.userId && result.userInfo) {
-        setUserId(result.userId);
-        setProvider('stremio');
-        setAuthKey(newAuthKey);
-        setUserInfo(result.userInfo);
-
-        // Store in localStorage
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          userId: result.userId,
-          provider: 'stremio',
-          authKey: newAuthKey,
-          userInfo: result.userInfo,
-        }));
-        void fillInfoAfterSignIn(result.userId, 'stremio', newAuthKey);
-
-        return { success: true };
-      } else {
-        const errorMsg = result.error || 'Authentication failed';
-        setError(errorMsg);
-        setErrorCode(result.errorCode || null);
-        return { success: false, error: errorMsg };
-      }
-    } catch (err) {
-      let errorMsg = 'Authentication failed';
-      if (err instanceof UserApiError) {
-        errorMsg = err.message;
-        setError(errorMsg);
-      } else {
-        setError(errorMsg);
-      }
-      return { success: false, error: errorMsg };
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fillInfoAfterSignIn]);
-
-  // Login with a completed Nuvio device-code exchange. The exchange result
-  // proves identity to the SERVER, which issues a SlickSync session token
-  // in response - that token (not the raw Nuvio refresh token, which never
-  // leaves the server) is what's held client-side from here on, the same
-  // role Stremio's authKey plays.
-  const loginNuvio = useCallback(async (code: string, deviceNonce: string, anonToken: string): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    setError(null);
-    setErrorCode(null);
-
-    try {
-      const result = await userAuth.authenticateNuvio(code, deviceNonce, anonToken);
-
-      if (result.success && result.userId && result.userInfo && result.sessionToken) {
-        setUserId(result.userId);
-        setProvider('nuvio');
-        setAuthKey(result.sessionToken);
-        setUserInfo(result.userInfo);
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          userId: result.userId,
-          provider: 'nuvio',
-          profileSelected: false,
-          authKey: result.sessionToken,
-          userInfo: result.userInfo,
-        }));
-        void fillInfoAfterSignIn(result.userId, 'nuvio', result.sessionToken);
-
-        return { success: true };
-      } else {
-        const errorMsg = result.error || 'Authentication failed';
-        setError(errorMsg);
-        setErrorCode(result.errorCode || null);
-        return { success: false, error: errorMsg };
-      }
-    } catch (err) {
-      let errorMsg = 'Authentication failed';
-      if (err instanceof UserApiError) {
-        errorMsg = err.message;
-        setError(errorMsg);
-      } else {
-        setError(errorMsg);
-      }
-      return { success: false, error: errorMsg };
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fillInfoAfterSignIn]);
-
-  // Login through a Jellyfin-compatible server. Same session model as
-  // Nuvio: the server signs in, and the browser keeps only the SlickSync
-  // session token it issues.
-  const loginJellyfin = useCallback(async (credentials: Record<string, string>): Promise<{ success: boolean; error?: string }> => {
-    setError(null);
-    setErrorCode(null);
-    try {
-      const result = await userAuth.authenticateJellyfin(credentials);
-      if (result.success && result.userId && result.userInfo && result.sessionToken) {
-        setUserId(result.userId);
-        setProvider('jellyfin');
-        setAuthKey(result.sessionToken);
-        setUserInfo(result.userInfo);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          userId: result.userId,
-          provider: 'jellyfin',
-          authKey: result.sessionToken,
-          userInfo: result.userInfo,
-        }));
-        void fillInfoAfterSignIn(result.userId, 'jellyfin', result.sessionToken);
-        return { success: true };
-      }
-      const errorMsg = result.error || 'Authentication failed';
-      setErrorCode(result.errorCode || null);
-      return { success: false, error: errorMsg };
-    } catch (err) {
-      const errorMsg = err instanceof UserApiError ? err.message : 'Authentication failed';
-      return { success: false, error: errorMsg };
-    }
-  }, [fillInfoAfterSignIn]);
-
-  // Logout
-  const logout = useCallback(() => {
-    setUserId(null);
-    setProvider(null);
-    setAuthKey(null);
-    setUserInfo(null);
-    setError(null);
-    setErrorCode(null);
-    localStorage.removeItem(STORAGE_KEY);
-  }, []);
-
-  // Refresh user info
-  const refreshUserInfo = useCallback(async () => {
-    if (!userId) return;
-
-    try {
-      const freshInfo = await userAuth.getUserInfo(userId, authKey || undefined);
-      setUserInfo(freshInfo);
-
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      // Update storage
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        userId,
-        provider: provider || 'stremio',
-        profileSelected: stored.profileSelected === true,
-        authKey,
-        userInfo: freshInfo,
-      }));
-    } catch (err) {
-      console.error('Failed to refresh user info:', err);
-    }
-  }, [userId, provider, authKey]);
-
-  // Self-service "delete my account" - permanently removes only this user's
-  // own row and data. logout()'s local cleanup runs regardless of provider
-  // since there's nothing left server-side to keep a session valid against.
-  const deleteAccount = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
-    if (!userId || !provider) {
-      return { success: false, error: 'Not signed in' };
-    }
-    try {
-      await userAuth.deleteAccount(userId, provider, authKey || undefined);
-      logout();
-      return { success: true };
-    } catch (err) {
-      const errorMsg = err instanceof UserApiError ? err.message : 'Failed to delete account';
-      return { success: false, error: errorMsg };
-    }
-  }, [userId, provider, authKey, logout]);
-
-  const value: UserAuthContextType = {
-    isAuthenticated: !!userId && (provider === 'nuvio' || !!authKey),
-    isLoading,
-    userId,
-    provider,
-    authKey,
-    userInfo,
-    error,
-    errorCode,
-    login,
-    loginNuvio,
-    loginJellyfin,
-    logout,
-    refreshUserInfo,
-    deleteAccount,
-  };
-
-  return (
-    <UserAuthContext.Provider value={value}>
-      {children}
-    </UserAuthContext.Provider>
-  );
+    return <UserAuthContext.Provider value={value}>{children}</UserAuthContext.Provider>;
 }
 
 export function useUserAuth() {
-  const context = useContext(UserAuthContext);
-  if (!context) {
-    throw new Error('useUserAuth must be used within a UserAuthProvider');
-  }
-  return context;
+    const context = useContext(UserAuthContext);
+    if (!context) {
+        throw new Error("useUserAuth must be used within a UserAuthProvider");
+    }
+    return context;
 }
 
 // Helper hook to get auth headers for API calls
 export function useUserAuthHeaders() {
-  const { userId, authKey, provider } = useUserAuth();
+    const { userId, authKey, provider } = useUserAuth();
 
-  return {
-    userId,
-    authKey,
-    provider,
-    isReady: !!userId,
-  };
+    return {
+        authKey,
+        isReady: !!userId,
+        provider,
+        userId,
+    };
 }

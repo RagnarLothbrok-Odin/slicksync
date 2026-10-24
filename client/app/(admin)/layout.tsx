@@ -1,18 +1,10 @@
-import { Metadata } from 'next';
-import AdminClientLayout from './AdminClientLayout';
+import type { Metadata } from "next";
+import AdminClientLayout from "./AdminClientLayout";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - Dashboard',
+    title: "SlickSync - Dashboard",
 };
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <AdminClientLayout>
-      {children}
-    </AdminClientLayout>
-  );
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+    return <AdminClientLayout>{children}</AdminClientLayout>;
 }

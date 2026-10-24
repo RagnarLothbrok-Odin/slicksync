@@ -19,17 +19,23 @@
 // Pending-authorization state (PKCE verifier + where to redirect after) is
 // an in-memory, one-shot Map keyed by `state`, same pattern as
 // server/utils/twoFactor.js's pending 2FA challenges.
-const crypto = require('crypto')
+const crypto = require("node:crypto");
 const {
-  OIDC_ENABLED, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_REDIRECT_URI,
-  OIDC_SCOPES, OIDC_DISPLAY_NAME, OIDC_ALLOWED_EMAILS,
-} = require('./config')
+    OIDC_ENABLED,
+    OIDC_ISSUER,
+    OIDC_CLIENT_ID,
+    OIDC_CLIENT_SECRET,
+    OIDC_REDIRECT_URI,
+    OIDC_SCOPES,
+    OIDC_DISPLAY_NAME,
+    OIDC_ALLOWED_EMAILS,
+} = require("./config");
 
-const pendingStore = new Map() // state -> { codeVerifier, expiresAt }
-const PENDING_TTL_MS = 10 * 60 * 1000 // 10m - covers a slow provider-side login prompt
+const pendingStore = new Map(); // state -> { codeVerifier, expiresAt }
+const PENDING_TTL_MS = 10 * 60 * 1000; // 10m - covers a slow provider-side login prompt
 
-let discoveryCache = null // { doc, fetchedAt }
-const DISCOVERY_TTL_MS = 60 * 60 * 1000 // 1h - these endpoints essentially never change
+let discoveryCache = null; // { doc, fetchedAt }
+const DISCOVERY_TTL_MS = 60 * 60 * 1000; // 1h - these endpoints essentially never change
 
 // An error whose text was written for the person signing in. Anything else
 // that goes wrong here (a network failure, a bug) says nothing useful to them
@@ -38,41 +44,47 @@ const DISCOVERY_TTL_MS = 60 * 60 * 1000 // 1h - these endpoints essentially neve
 class OidcError extends Error {}
 
 function publicMessage(error, fallback) {
-  return error instanceof OidcError ? error.message : fallback
+    return error instanceof OidcError ? error.message : fallback;
 }
 
 function isConfigured() {
-  return OIDC_ENABLED
+    return OIDC_ENABLED;
 }
 
 function displayName() {
-  return OIDC_DISPLAY_NAME
+    return OIDC_DISPLAY_NAME;
 }
 
 async function getDiscoveryDocument() {
-  if (discoveryCache && Date.now() - discoveryCache.fetchedAt < DISCOVERY_TTL_MS) {
-    return discoveryCache.doc
-  }
-  const base = OIDC_ISSUER.replace(/\/+$/, '')
-  const res = await fetch(`${base}/.well-known/openid-configuration`)
-  if (!res.ok) throw new OidcError(`OIDC discovery failed (${res.status}) - check OIDC_ISSUER`)
-  const doc = await res.json()
-  discoveryCache = { doc, fetchedAt: Date.now() }
-  return doc
+    if (discoveryCache && Date.now() - discoveryCache.fetchedAt < DISCOVERY_TTL_MS) {
+        return discoveryCache.doc;
+    }
+    const base = OIDC_ISSUER.replace(/\/+$/, "");
+    const res = await fetch(`${base}/.well-known/openid-configuration`);
+    if (!res.ok) {
+        throw new OidcError(`OIDC discovery failed (${res.status}) - check OIDC_ISSUER`);
+    }
+    const doc = await res.json();
+    discoveryCache = { doc, fetchedAt: Date.now() };
+    return doc;
 }
 
 function base64url(buf) {
-  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/[=]+$/, "");
 }
 
 function decodeJwtPayload(token) {
-  const parts = String(token || '').split('.')
-  if (parts.length !== 3) return null
-  try {
-    return JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'))
-  } catch {
-    return null
-  }
+    const parts = String(token || "").split(".");
+    if (parts.length !== 3) {
+        return null;
+    }
+    try {
+        return JSON.parse(
+            Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")
+        );
+    } catch {
+        return null;
+    }
 }
 
 // Returns { authorizationUrl, state } - caller does a real top-level redirect
@@ -80,102 +92,143 @@ function decodeJwtPayload(token) {
 // handed back so the caller can tie the round trip to the browser that
 // started it (see the cookie in publicAuth.js's /oidc/start).
 async function startAuthorization() {
-  if (!isConfigured()) throw new OidcError('OIDC is not configured')
-  const doc = await getDiscoveryDocument()
-  if (!doc.authorization_endpoint) throw new OidcError('OIDC provider did not advertise an authorization_endpoint')
+    if (!isConfigured()) {
+        throw new OidcError("OIDC is not configured");
+    }
+    const doc = await getDiscoveryDocument();
+    if (!doc.authorization_endpoint) {
+        throw new OidcError("OIDC provider did not advertise an authorization_endpoint");
+    }
 
-  const codeVerifier = base64url(crypto.randomBytes(32))
-  const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest())
-  const state = crypto.randomBytes(24).toString('hex')
-  // Sign-ins that were started and never finished are dropped here, and the
-  // store is capped - anyone can start one, so it can't be left to grow.
-  const now = Date.now()
-  for (const [key, entry] of pendingStore) if (entry.expiresAt < now) pendingStore.delete(key)
-  while (pendingStore.size >= 5000) pendingStore.delete(pendingStore.keys().next().value)
-  pendingStore.set(state, { codeVerifier, expiresAt: now + PENDING_TTL_MS })
+    const codeVerifier = base64url(crypto.randomBytes(32));
+    const codeChallenge = base64url(crypto.createHash("sha256").update(codeVerifier).digest());
+    const state = crypto.randomBytes(24).toString("hex");
+    // Sign-ins that were started and never finished are dropped here, and the
+    // store is capped - anyone can start one, so it can't be left to grow.
+    const now = Date.now();
+    for (const [key, entry] of pendingStore) {
+        if (entry.expiresAt < now) {
+            pendingStore.delete(key);
+        }
+    }
+    while (pendingStore.size >= 5000) {
+        pendingStore.delete(pendingStore.keys().next().value);
+    }
+    pendingStore.set(state, { codeVerifier, expiresAt: now + PENDING_TTL_MS });
 
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: OIDC_CLIENT_ID,
-    redirect_uri: OIDC_REDIRECT_URI,
-    scope: OIDC_SCOPES,
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: 'S256',
-  })
-  return { authorizationUrl: `${doc.authorization_endpoint}?${params.toString()}`, state }
+    const params = new URLSearchParams({
+        client_id: OIDC_CLIENT_ID,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+        redirect_uri: OIDC_REDIRECT_URI,
+        response_type: "code",
+        scope: OIDC_SCOPES,
+        state,
+    });
+    return { authorizationUrl: `${doc.authorization_endpoint}?${params.toString()}`, state };
 }
 
 // Completes the callback: exchanges the code, fetches userinfo, sanity-
 // checks the id_token claims. Returns { sub, email, name } on success -
 // throws on any failure (caller maps that to a login-page error redirect).
 async function handleCallback(code, state) {
-  if (!isConfigured()) throw new OidcError('OIDC is not configured')
-  if (!code || !state) throw new OidcError('Missing code or state')
-
-  const pending = pendingStore.get(state)
-  pendingStore.delete(state) // one-shot regardless of outcome
-  if (!pending) throw new OidcError('This sign-in attempt has expired - try again')
-  if (Date.now() > pending.expiresAt) throw new OidcError('This sign-in attempt has expired - try again')
-
-  const doc = await getDiscoveryDocument()
-  if (!doc.token_endpoint) throw new OidcError('OIDC provider did not advertise a token_endpoint')
-
-  const tokenRes = await fetch(doc.token_endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: OIDC_REDIRECT_URI,
-      client_id: OIDC_CLIENT_ID,
-      client_secret: OIDC_CLIENT_SECRET,
-      code_verifier: pending.codeVerifier,
-    }),
-  })
-  if (!tokenRes.ok) {
-    const body = await tokenRes.text().catch(() => '')
-    console.error(`[OIDC] token exchange failed (${tokenRes.status}): ${body}`)
-    throw new OidcError('Sign-in with your identity provider failed')
-  }
-  const tokens = await tokenRes.json()
-  if (!tokens.access_token) throw new OidcError('OIDC provider did not return an access token')
-
-  const idClaims = tokens.id_token ? decodeJwtPayload(tokens.id_token) : null
-  if (idClaims) {
-    const issuerHost = new URL(OIDC_ISSUER).host
-    const claimIssuerHost = (() => { try { return new URL(idClaims.iss).host } catch { return null } })()
-    if (claimIssuerHost && claimIssuerHost !== issuerHost) throw new OidcError('OIDC id_token issuer mismatch')
-    const aud = Array.isArray(idClaims.aud) ? idClaims.aud : [idClaims.aud]
-    if (!aud.includes(OIDC_CLIENT_ID)) throw new OidcError('OIDC id_token audience mismatch')
-    if (idClaims.exp && Date.now() / 1000 > idClaims.exp) throw new OidcError('OIDC id_token expired')
-  }
-
-  let profile = idClaims || {}
-  if (doc.userinfo_endpoint) {
-    try {
-      const uiRes = await fetch(doc.userinfo_endpoint, { headers: { Authorization: `Bearer ${tokens.access_token}` } })
-      if (uiRes.ok) profile = { ...profile, ...(await uiRes.json()) }
-    } catch {
-      // fall back to id_token claims alone - not fatal
+    if (!isConfigured()) {
+        throw new OidcError("OIDC is not configured");
     }
-  }
+    if (!(code && state)) {
+        throw new OidcError("Missing code or state");
+    }
 
-  const sub = profile.sub || idClaims?.sub
-  if (!sub) throw new OidcError('OIDC provider did not return a subject id')
-  const email = (profile.email || '').trim().toLowerCase() || null
-  const name = profile.name || profile.preferred_username || null
-  // Verified only when the provider says so outright. A missing claim, or
-  // the string "false" some providers send, proves nothing about who owns
-  // the address - and this decides whether an OIDC identity may be linked
-  // onto an existing account (or keep an email on a new one) on the strength
-  // of that address alone. Some providers send the answer as the text "true"
-  // (in the user info reply, which wins over the id_token), and that is the
-  // provider saying so just the same.
-  const claim = profile.email_verified
-  const emailVerified = claim === true || (typeof claim === 'string' && claim.trim().toLowerCase() === 'true')
+    const pending = pendingStore.get(state);
+    pendingStore.delete(state); // one-shot regardless of outcome
+    if (!pending) {
+        throw new OidcError("This sign-in attempt has expired - try again");
+    }
+    if (Date.now() > pending.expiresAt) {
+        throw new OidcError("This sign-in attempt has expired - try again");
+    }
 
-  return { sub: String(sub), email, name, emailVerified }
+    const doc = await getDiscoveryDocument();
+    if (!doc.token_endpoint) {
+        throw new OidcError("OIDC provider did not advertise a token_endpoint");
+    }
+
+    const tokenRes = await fetch(doc.token_endpoint, {
+        body: new URLSearchParams({
+            client_id: OIDC_CLIENT_ID,
+            client_secret: OIDC_CLIENT_SECRET,
+            code,
+            code_verifier: pending.codeVerifier,
+            grant_type: "authorization_code",
+            redirect_uri: OIDC_REDIRECT_URI,
+        }),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        method: "POST",
+    });
+    if (!tokenRes.ok) {
+        const body = await tokenRes.text().catch(() => "");
+        console.error(`[OIDC] token exchange failed (${tokenRes.status}): ${body}`);
+        throw new OidcError("Sign-in with your identity provider failed");
+    }
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) {
+        throw new OidcError("OIDC provider did not return an access token");
+    }
+
+    const idClaims = tokens.id_token ? decodeJwtPayload(tokens.id_token) : null;
+    if (idClaims) {
+        const issuerHost = new URL(OIDC_ISSUER).host;
+        const claimIssuerHost = (() => {
+            try {
+                return new URL(idClaims.iss).host;
+            } catch {
+                return null;
+            }
+        })();
+        if (claimIssuerHost && claimIssuerHost !== issuerHost) {
+            throw new OidcError("OIDC id_token issuer mismatch");
+        }
+        const aud = Array.isArray(idClaims.aud) ? idClaims.aud : [idClaims.aud];
+        if (!aud.includes(OIDC_CLIENT_ID)) {
+            throw new OidcError("OIDC id_token audience mismatch");
+        }
+        if (idClaims.exp && Date.now() / 1000 > idClaims.exp) {
+            throw new OidcError("OIDC id_token expired");
+        }
+    }
+
+    let profile = idClaims || {};
+    if (doc.userinfo_endpoint) {
+        try {
+            const uiRes = await fetch(doc.userinfo_endpoint, {
+                headers: { Authorization: `Bearer ${tokens.access_token}` },
+            });
+            if (uiRes.ok) {
+                profile = { ...profile, ...(await uiRes.json()) };
+            }
+        } catch {
+            // fall back to id_token claims alone - not fatal
+        }
+    }
+
+    const sub = profile.sub || idClaims?.sub;
+    if (!sub) {
+        throw new OidcError("OIDC provider did not return a subject id");
+    }
+    const email = (profile.email || "").trim().toLowerCase() || null;
+    const name = profile.name || profile.preferred_username || null;
+    // Verified only when the provider says so outright. A missing claim, or
+    // the string "false" some providers send, proves nothing about who owns
+    // the address - and this decides whether an OIDC identity may be linked
+    // onto an existing account (or keep an email on a new one) on the strength
+    // of that address alone. Some providers send the answer as the text "true"
+    // (in the user info reply, which wins over the id_token), and that is the
+    // provider saying so just the same.
+    const claim = profile.email_verified;
+    const emailVerified =
+        claim === true || (typeof claim === "string" && claim.trim().toLowerCase() === "true");
+
+    return { email, emailVerified, name, sub: String(sub) };
 }
 
 // Private-mode extra gate - if OIDC_ALLOWED_EMAILS is set, only those
@@ -185,16 +238,18 @@ async function handleCallback(code, state) {
 // provider reports it, verified or not: a household runs its own identity
 // provider, and several common ones send no email_verified claim at all.
 function isEmailAllowedForPrivateMode(email) {
-  if (OIDC_ALLOWED_EMAILS.length === 0) return true
-  return !!email && OIDC_ALLOWED_EMAILS.includes(email.toLowerCase())
+    if (OIDC_ALLOWED_EMAILS.length === 0) {
+        return true;
+    }
+    return !!email && OIDC_ALLOWED_EMAILS.includes(email.toLowerCase());
 }
 
 module.exports = {
-  isConfigured,
-  displayName,
-  startAuthorization,
-  handleCallback,
-  isEmailAllowedForPrivateMode,
-  publicMessage,
-  PENDING_TTL_MS,
-}
+    displayName,
+    handleCallback,
+    isConfigured,
+    isEmailAllowedForPrivateMode,
+    PENDING_TTL_MS,
+    publicMessage,
+    startAuthorization,
+};

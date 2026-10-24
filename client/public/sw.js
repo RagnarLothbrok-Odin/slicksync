@@ -26,152 +26,212 @@
 // WRONG, but a navigation served from the pages cache (which only happens
 // when the network is slow) hands back HTML that points at an older build's
 // hashes - and those are cached forever. One bump clears that out.
-const STATIC_CACHE = 'slicksync-static-v3';
-const PAGES_CACHE = 'slicksync-pages-v2';
+const STATIC_CACHE = "slicksync-static-v3";
+const PAGES_CACHE = "slicksync-pages-v2";
 // Resized posters and avatars from this instance's own image cache. Their
 // URLs are stable and the responses immutable, so cache-first is safe; the
 // cap keeps the store from growing without bound (oldest entries go first).
 // This is what makes posters instant on a phone's installed app, whose own
 // HTTP cache is small and evicted aggressively.
-const IMAGE_CACHE = 'slicksync-images-v1';
+const IMAGE_CACHE = "slicksync-images-v1";
 const IMAGE_CACHE_MAX = 900;
 let imagePutsSinceTrim = 0;
 // Development chunks reuse URLs as their contents change. Cache-first is
 // only safe for production's content-hashed files.
-const DEVELOPMENT = new URL(self.location.href).searchParams.has('development') ||
-  ['localhost', '127.0.0.1', '[::1]'].includes(self.location.hostname);
+const DEVELOPMENT =
+    new URL(self.location.href).searchParams.has("development") ||
+    ["localhost", "127.0.0.1", "[::1]"].includes(self.location.hostname);
 
-self.addEventListener('install', () => {
-  self.skipWaiting();
+self.addEventListener("install", () => {
+    self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
-    // Drop caches from older worker versions, then take over open tabs so
-    // caching starts without waiting for the next full reload.
-    const names = await caches.keys();
-    await Promise.all(names.filter((n) => DEVELOPMENT ? n.startsWith('slicksync-') : n !== STATIC_CACHE && n !== PAGES_CACHE && n !== IMAGE_CACHE).map((n) => caches.delete(n)));
-    // Let the browser start a navigation's network request while this worker
-    // is still waking up, instead of after. The navigate handler below picks
-    // the preloaded response up when there is one.
-    try { if (self.registration.navigationPreload) await self.registration.navigationPreload.enable(); } catch {}
-    await self.clients.claim();
-  })());
+self.addEventListener("activate", (event) => {
+    event.waitUntil(
+        (async () => {
+            // Drop caches from older worker versions, then take over open tabs so
+            // caching starts without waiting for the next full reload.
+            const names = await caches.keys();
+            await Promise.all(
+                names
+                    .filter((n) =>
+                        DEVELOPMENT
+                            ? n.startsWith("slicksync-")
+                            : n !== STATIC_CACHE && n !== PAGES_CACHE && n !== IMAGE_CACHE
+                    )
+                    .map((n) => caches.delete(n))
+            );
+            // Let the browser start a navigation's network request while this worker
+            // is still waking up, instead of after. The navigate handler below picks
+            // the preloaded response up when there is one.
+            try {
+                if (self.registration.navigationPreload) {
+                    await self.registration.navigationPreload.enable();
+                }
+            } catch {}
+            await self.clients.claim();
+        })()
+    );
 });
 
-self.addEventListener('fetch', (event) => {
-  if (DEVELOPMENT) return;
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
+self.addEventListener("fetch", (event) => {
+    if (DEVELOPMENT) {
+        return;
+    }
+    const req = event.request;
+    if (req.method !== "GET") {
+        return;
+    }
+    const url = new URL(req.url);
+    if (url.origin !== self.location.origin) {
+        return;
+    }
 
-  // The self-hosted default fonts are versioned in their filenames, so
-  // they get the same cache-first-forever treatment as hashed assets.
-  if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/fonts/')) {
-    event.respondWith((async () => {
-      const cache = await caches.open(STATIC_CACHE);
-      const hit = await cache.match(req);
-      if (hit) return hit;
-      const res = await fetch(req);
-      if (res.ok) cache.put(req, res.clone());
-      // A hashed asset that the server no longer has means this page came
-      // from a build that is gone - the one way a cached shell can leave
-      // someone stuck. Drop the cached pages so the next navigation is
-      // fetched fresh instead of rebuilding the same broken combination.
-      if (res.status === 404) {
-        caches.delete(PAGES_CACHE).catch(() => {});
-      }
-      return res;
-    })());
-    return;
-  }
+    // The self-hosted default fonts are versioned in their filenames, so
+    // they get the same cache-first-forever treatment as hashed assets.
+    if (url.pathname.startsWith("/_next/static/") || url.pathname.startsWith("/fonts/")) {
+        event.respondWith(
+            (async () => {
+                const cache = await caches.open(STATIC_CACHE);
+                const hit = await cache.match(req);
+                if (hit) {
+                    return hit;
+                }
+                const res = await fetch(req);
+                if (res.ok) {
+                    cache.put(req, res.clone());
+                }
+                // A hashed asset that the server no longer has means this page came
+                // from a build that is gone - the one way a cached shell can leave
+                // someone stuck. Drop the cached pages so the next navigation is
+                // fetched fresh instead of rebuilding the same broken combination.
+                if (res.status === 404) {
+                    caches.delete(PAGES_CACHE).catch(() => undefined);
+                }
+                return res;
+            })()
+        );
+        return;
+    }
 
-  if (url.pathname === '/api/img') {
-    event.respondWith((async () => {
-      const cache = await caches.open(IMAGE_CACHE);
-      const hit = await cache.match(req);
-      if (hit) return hit;
-      const res = await fetch(req);
-      if (res.ok && (res.headers.get('content-type') || '').startsWith('image/')) {
-        cache.put(req, res.clone()).then(() => {
-          imagePutsSinceTrim += 1;
-          if (imagePutsSinceTrim < 25) return;
-          imagePutsSinceTrim = 0;
-          return cache.keys().then((keys) => {
-            if (keys.length <= IMAGE_CACHE_MAX) return;
-            // Cache keys come back in insertion order: drop the oldest.
-            return Promise.all(keys.slice(0, keys.length - IMAGE_CACHE_MAX + 100).map((k) => cache.delete(k)));
-          });
-        }).catch(() => {});
-      }
-      return res;
-    })());
-    return;
-  }
+    if (url.pathname === "/api/img") {
+        event.respondWith(
+            (async () => {
+                const cache = await caches.open(IMAGE_CACHE);
+                const hit = await cache.match(req);
+                if (hit) {
+                    return hit;
+                }
+                const res = await fetch(req);
+                if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) {
+                    cache
+                        .put(req, res.clone())
+                        .then(() => {
+                            imagePutsSinceTrim += 1;
+                            if (imagePutsSinceTrim < 25) {
+                                return;
+                            }
+                            imagePutsSinceTrim = 0;
+                            return cache.keys().then((keys) => {
+                                if (keys.length <= IMAGE_CACHE_MAX) {
+                                    return;
+                                }
+                                // Cache keys come back in insertion order: drop the oldest.
+                                return Promise.all(
+                                    keys
+                                        .slice(0, keys.length - IMAGE_CACHE_MAX + 100)
+                                        .map((k) => cache.delete(k))
+                                );
+                            });
+                        })
+                        .catch(() => undefined);
+                }
+                return res;
+            })()
+        );
+        return;
+    }
 
-  if (req.mode === 'navigate') {
-    event.respondWith((async () => {
-      const cache = await caches.open(PAGES_CACHE);
-      try {
-        // No timeout race here on purpose - see the note at the top of this
-        // file. Waiting on a slow network is correct; substituting a shell
-        // from an older build is not.
-        const preloaded = await (event.preloadResponse || Promise.resolve(null)).catch(() => null);
-        const res = preloaded || await fetch(req);
-        if (res.ok) cache.put(req, res.clone());
-        return res;
-      } catch {
-        const hit = await cache.match(req);
-        if (hit) return hit;
-        // Nothing cached for this exact page - any cached page beats a
-        // browser error screen; the app router takes over client-side.
-        const any = await cache.match('/');
-        if (any) return any;
-        throw new Error('offline with empty cache');
-      }
-    })());
-  }
-  // All other requests: not handled - straight to the network.
+    if (req.mode === "navigate") {
+        event.respondWith(
+            (async () => {
+                const cache = await caches.open(PAGES_CACHE);
+                try {
+                    // No timeout race here on purpose - see the note at the top of this
+                    // file. Waiting on a slow network is correct; substituting a shell
+                    // from an older build is not.
+                    const preloaded = await (event.preloadResponse || Promise.resolve(null)).catch(
+                        () => null
+                    );
+                    const res = preloaded || (await fetch(req));
+                    if (res.ok) {
+                        cache.put(req, res.clone());
+                    }
+                    return res;
+                } catch {
+                    const hit = await cache.match(req);
+                    if (hit) {
+                        return hit;
+                    }
+                    // Nothing cached for this exact page - any cached page beats a
+                    // browser error screen; the app router takes over client-side.
+                    const any = await cache.match("/");
+                    if (any) {
+                        return any;
+                    }
+                    throw new Error("offline with empty cache");
+                }
+            })()
+        );
+    }
+    // All other requests: not handled - straight to the network.
 });
 
-self.addEventListener('push', (event) => {
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch {
-    data = { title: 'SlickSync', body: event.data ? event.data.text() : '' };
-  }
-  const title = data.title || 'SlickSync';
-  const options = {
-    body: data.body || '',
-    icon: data.icon || '/android-chrome-192x192.png',
-    badge: '/android-chrome-192x192.png',
-    // url is read back in notificationclick to decide where to navigate.
-    data: { url: data.url || '/' },
-    tag: data.tag || undefined,
-  };
-  // App-icon badge, best-effort: the worker doesn't know the real unread
-  // count, so a bare dot marks "something's waiting" - the app corrects it
-  // to the actual number the next time it opens (NotificationsDropdown).
-  try { if (navigator.setAppBadge) navigator.setAppBadge().catch(() => {}); } catch {}
-  event.waitUntil(self.registration.showNotification(title, options));
-});
-
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/';
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // Focus an existing SlickSync tab and navigate it, rather than opening
-      // a duplicate, when one is already open.
-      for (const client of clientList) {
-        if ('focus' in client) {
-          client.navigate(target).catch(() => {});
-          return client.focus();
+self.addEventListener("push", (event) => {
+    let data = {};
+    try {
+        data = event.data ? event.data.json() : {};
+    } catch {
+        data = { body: event.data ? event.data.text() : "", title: "SlickSync" };
+    }
+    const title = data.title || "SlickSync";
+    const options = {
+        badge: "/android-chrome-192x192.png",
+        body: data.body || "",
+        // url is read back in notificationclick to decide where to navigate.
+        data: { url: data.url || "/" },
+        icon: data.icon || "/android-chrome-192x192.png",
+        tag: data.tag || undefined,
+    };
+    // App-icon badge, best-effort: the worker doesn't know the real unread
+    // count, so a bare dot marks "something's waiting" - the app corrects it
+    // to the actual number the next time it opens (NotificationsDropdown).
+    try {
+        if (navigator.setAppBadge) {
+            navigator.setAppBadge().catch(() => undefined);
         }
-      }
-      if (self.clients.openWindow) return self.clients.openWindow(target);
-    })
-  );
+    } catch {
+        // This browser capability may be unavailable in the current environment.
+    }
+    event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+    event.notification.close();
+    const target = event.notification.data?.url || "/";
+    event.waitUntil(
+        self.clients.matchAll({ includeUncontrolled: true, type: "window" }).then((clientList) => {
+            // Focus an existing SlickSync tab and navigate it, rather than opening
+            // a duplicate, when one is already open.
+            for (const client of clientList) {
+                if ("focus" in client) {
+                    client.navigate(target).catch(() => undefined);
+                    return client.focus();
+                }
+            }
+            if (self.clients.openWindow) {
+                return self.clients.openWindow(target);
+            }
+        })
+    );
 });

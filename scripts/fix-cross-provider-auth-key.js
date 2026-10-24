@@ -22,42 +22,42 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/fix-cross-provider-auth-key.js
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/fix-cross-provider-auth-key.js --apply
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 async function main() {
-  const apply = process.argv.includes('--apply')
-  const prisma = new PrismaClient()
-  try {
-    const affected = await prisma.user.findMany({
-      where: { providerType: 'nuvio', stremioAuthKey: { not: null } },
-      select: { id: true, username: true, email: true, providerType: true },
-    })
+    const apply = process.argv.includes("--apply");
+    const prisma = new PrismaClient();
+    try {
+        const affected = await prisma.user.findMany({
+            select: { email: true, id: true, providerType: true, username: true },
+            where: { providerType: "nuvio", stremioAuthKey: { not: null } },
+        });
 
-    console.log(`Nuvio users with a stray stremioAuthKey: ${affected.length}\n`)
-    for (const u of affected) {
-      console.log(`  ${u.username}  (${u.email})  id=${u.id}`)
-    }
+        console.log(`Nuvio users with a stray stremioAuthKey: ${affected.length}\n`);
+        for (const u of affected) {
+            console.log(`  ${u.username}  (${u.email})  id=${u.id}`);
+        }
 
-    if (affected.length === 0) {
-      console.log('Nothing to do.')
-      return
-    }
+        if (affected.length === 0) {
+            console.log("Nothing to do.");
+            return;
+        }
 
-    if (apply) {
-      const r = await prisma.user.updateMany({
-        where: { id: { in: affected.map((u) => u.id) } },
-        data: { stremioAuthKey: null },
-      })
-      console.log(`\nCleared stremioAuthKey on ${r.count} user(s).`)
-    } else {
-      console.log('\nDry run only - re-run with --apply to clear these.')
+        if (apply) {
+            const r = await prisma.user.updateMany({
+                data: { stremioAuthKey: null },
+                where: { id: { in: affected.map((u) => u.id) } },
+            });
+            console.log(`\nCleared stremioAuthKey on ${r.count} user(s).`);
+        } else {
+            console.log("\nDry run only - re-run with --apply to clear these.");
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-  } finally {
-    await prisma.$disconnect()
-  }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

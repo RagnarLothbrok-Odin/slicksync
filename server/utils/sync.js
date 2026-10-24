@@ -4,69 +4,76 @@
  * Get addons from the user's provider (Stremio or Nuvio)
  */
 async function getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider }) {
-  // Provider path: routes to Stremio, Nuvio or Jellyfin based on user.providerType.
-  // Providers return collection shape ({ addons: [...] }) which callers already handle.
-  if (createProvider) {
-    try {
-      const provider = createProvider(user, { decrypt, req })
-      if (!provider) {
-        return { success: false, addons: [], error: 'User not connected to a provider' }
-      }
-      const result = await provider.getAddons()
-      return { success: true, addons: result, error: null }
-    } catch (error) {
-      return { success: false, addons: [], error: error.message || 'Failed to fetch addons' }
-    }
-  }
-
-  // Legacy path: direct StremioAPIClient usage (backward compat if no factory injected)
-  if (!user.stremioAuthKey) {
-    return { success: false, addons: [], error: 'User not connected to Stremio' }
-  }
-
-  try {
-    const authKeyPlain = decrypt(user.stremioAuthKey, req)
-    const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKeyPlain })
-    const collection = await apiClient.request('addonCollectionGet', {})
-
-    // Reading never writes to the account: addons: null (an empty account, or
-    // a degraded answer from Stremio) is treated as "no addons" below.
-    // Handle the case where collection.addons might be null (empty account) or not an array
-    // Use the same logic as /stremio-addons endpoint: try collection.addons first, then fall back to collection itself
-    const rawAddons = collection?.addons !== undefined ? collection.addons : collection
-    let addonsArray = []
-    
-    if (rawAddons !== null && rawAddons !== undefined) {
-      if (Array.isArray(rawAddons)) {
-        addonsArray = rawAddons
-      } else if (typeof rawAddons === 'object') {
-        // If it's an object (not an array), try to convert it to an array
-        addonsArray = Object.values(rawAddons)
-      }
-    }
-
-    // Ensure addons is always an array in the response (never null)
-    const sanitized = {
-      ...collection,
-      addons: addonsArray.map((addon) => {
-        const manifest = addon?.manifest
-        if (manifest && typeof manifest === 'object') {
-          const { manifestUrl, ...restManifest } = manifest
-          return { ...addon, manifest: restManifest, transportName: "" }
+    // Provider path: routes to Stremio, Nuvio or Jellyfin based on user.providerType.
+    // Providers return collection shape ({ addons: [...] }) which callers already handle.
+    if (createProvider) {
+        try {
+            const provider = createProvider(user, { decrypt, req });
+            if (!provider) {
+                return { addons: [], error: "User not connected to a provider", success: false };
+            }
+            const result = await provider.getAddons();
+            return { addons: result, error: null, success: true };
+        } catch (error) {
+            return { addons: [], error: error.message || "Failed to fetch addons", success: false };
         }
-        return { ...addon, transportName: "" }
-      })
     }
 
-    // Final safety check: ensure addons is always an array
-    if (sanitized.addons === null || sanitized.addons === undefined) {
-      sanitized.addons = []
+    // Legacy path: direct StremioAPIClient usage (backward compat if no factory injected)
+    if (!user.stremioAuthKey) {
+        return { addons: [], error: "User not connected to Stremio", success: false };
     }
 
-    return { success: true, addons: sanitized, error: null }
-  } catch (error) {
-    return { success: false, addons: [], error: error.message || 'Failed to fetch Stremio addons' }
-  }
+    try {
+        const authKeyPlain = decrypt(user.stremioAuthKey, req);
+        const apiClient = new StremioAPIClient({
+            authKey: authKeyPlain,
+            endpoint: "https://api.strem.io",
+        });
+        const collection = await apiClient.request("addonCollectionGet", {});
+
+        // Reading never writes to the account: addons: null (an empty account, or
+        // a degraded answer from Stremio) is treated as "no addons" below.
+        // Handle the case where collection.addons might be null (empty account) or not an array
+        // Use the same logic as /stremio-addons endpoint: try collection.addons first, then fall back to collection itself
+        const rawAddons = collection?.addons === undefined ? collection : collection.addons;
+        let addonsArray = [];
+
+        if (rawAddons !== null && rawAddons !== undefined) {
+            if (Array.isArray(rawAddons)) {
+                addonsArray = rawAddons;
+            } else if (typeof rawAddons === "object") {
+                // If it's an object (not an array), try to convert it to an array
+                addonsArray = Object.values(rawAddons);
+            }
+        }
+
+        // Ensure addons is always an array in the response (never null)
+        const sanitized = {
+            ...collection,
+            addons: addonsArray.map((addon) => {
+                const manifest = addon?.manifest;
+                if (manifest && typeof manifest === "object") {
+                    const { manifestUrl, ...restManifest } = manifest;
+                    return { ...addon, manifest: restManifest, transportName: "" };
+                }
+                return { ...addon, transportName: "" };
+            }),
+        };
+
+        // Final safety check: ensure addons is always an array
+        if (sanitized.addons === null || sanitized.addons === undefined) {
+            sanitized.addons = [];
+        }
+
+        return { addons: sanitized, error: null, success: true };
+    } catch (error) {
+        return {
+            addons: [],
+            error: error.message || "Failed to fetch Stremio addons",
+            success: false,
+        };
+    }
 }
 
 // Last-resort safety net before a desired-addons list ever reaches
@@ -86,16 +93,20 @@ async function getUserAddons(user, req, { decrypt, StremioAPIClient, createProvi
 // occurrence, preserving the position-locked/protected copy over any
 // redundant later one from the group list.
 function dedupeByUrl(addons) {
-  const seen = new Set()
-  const out = []
-  for (const addon of addons) {
-    const url = addon?.transportUrl || addon?.manifestUrl || addon?.url || ''
-    const key = String(url).trim().toLowerCase()
-    if (key && seen.has(key)) continue
-    if (key) seen.add(key)
-    out.push(addon)
-  }
-  return out
+    const seen = new Set();
+    const out = [];
+    for (const addon of addons) {
+        const url = addon?.transportUrl || addon?.manifestUrl || addon?.url || "";
+        const key = String(url).trim().toLowerCase();
+        if (key && seen.has(key)) {
+            continue;
+        }
+        if (key) {
+            seen.add(key);
+        }
+        out.push(addon);
+    }
+    return out;
 }
 
 /**
@@ -116,63 +127,87 @@ function dedupeByUrl(addons) {
 // that serves /trax/:token/manifest.json, so the synced copy and the live
 // endpoint can never drift.
 async function appendTraxAddon(user, addons, prisma) {
-  try {
-    if (!user?.traxAddonEnabled || !user?.traxToken || !prisma) return addons
-    // PUBLIC_APP_URL wins when set; otherwise the base the admin's own
-    // authenticated browser session observed when enabling the addon (stored
-    // by the toggle route). Only with neither does injection skip - and the
-    // toggle UI hands over the URL for manual install in that case.
-    // Three sources, in order of how much they can be trusted: the env var
-    // an operator set deliberately, the address they typed into Settings,
-    // and finally the one an authenticated admin request revealed. Sync has
-    // no request of its own to borrow a hostname from, so without one of
-    // these it genuinely cannot build an installable url.
-    // utils/ownAddress.js: PUBLIC_APP_URL, else the address learned from an
-    // admin's visits.
-    const base = await require('./ownAddress').publicBase(prisma, user.accountId)
-    if (!base) {
-      // Loud on purpose. This is the one failure mode where SlickTrax looks
-      // switched on in the UI and simply never appears on the device, with
-      // nothing anywhere saying why - reported exactly that way.
-      console.warn(`[SlickTrax] ${user.username || user.id}: enabled, but this instance does not know the address devices reach it at yet, so it cannot be installed. Open SlickSync once from that address (or set the PUBLIC_APP_URL env var).`)
-      return addons
-    }
-    const { buildTraxManifest, getListsForAccount, traxPathVersion } = require('../routes/traxAddon')
-    const lists = await getListsForAccount(prisma, user.accountId)
-    // The person's own rows. Read here rather than trusted from `user`, which
-    // arrives from many different selects and may not carry the column.
-    const rowsUser = user.traxRowsJson !== undefined
-      ? user
-      : { ...user, traxRowsJson: (await prisma.user.findUnique({ where: { id: user.id }, select: { traxRowsJson: true } }))?.traxRowsJson ?? null }
-    const manifest = buildTraxManifest(rowsUser, lists)
-    // Version segment in the path = cache bust: Nuvio never refetches a
-    // manifest while the URL is unchanged (see TRAX_MANIFEST_VERSION), and a
-    // change to the person's rows changes it too (traxPathVersion).
-    const transportUrl = `${base}/trax/${user.traxToken}/v${traxPathVersion(rowsUser)}/manifest.json`
+    try {
+        if (!(user?.traxAddonEnabled && user?.traxToken && prisma)) {
+            return addons;
+        }
+        // PUBLIC_APP_URL wins when set; otherwise the base the admin's own
+        // authenticated browser session observed when enabling the addon (stored
+        // by the toggle route). Only with neither does injection skip - and the
+        // toggle UI hands over the URL for manual install in that case.
+        // Three sources, in order of how much they can be trusted: the env var
+        // an operator set deliberately, the address they typed into Settings,
+        // and finally the one an authenticated admin request revealed. Sync has
+        // no request of its own to borrow a hostname from, so without one of
+        // these it genuinely cannot build an installable url.
+        // utils/ownAddress.js: PUBLIC_APP_URL, else the address learned from an
+        // admin's visits.
+        const base = await require("./ownAddress").publicBase(prisma, user.accountId);
+        if (!base) {
+            // Loud on purpose. This is the one failure mode where SlickTrax looks
+            // switched on in the UI and simply never appears on the device, with
+            // nothing anywhere saying why - reported exactly that way.
+            console.warn(
+                `[SlickTrax] ${user.username || user.id}: enabled, but this instance does not know the address devices reach it at yet, so it cannot be installed. Open SlickSync once from that address (or set the PUBLIC_APP_URL env var).`
+            );
+            return addons;
+        }
+        const {
+            buildTraxManifest,
+            getListsForAccount,
+            traxPathVersion,
+        } = require("../routes/traxAddon");
+        const lists = await getListsForAccount(prisma, user.accountId);
+        // The person's own rows. Read here rather than trusted from `user`, which
+        // arrives from many different selects and may not carry the column.
+        const rowsUser =
+            user.traxRowsJson === undefined
+                ? {
+                      ...user,
+                      traxRowsJson:
+                          (
+                              await prisma.user.findUnique({
+                                  select: { traxRowsJson: true },
+                                  where: { id: user.id },
+                              })
+                          )?.traxRowsJson ?? null,
+                  }
+                : user;
+        const manifest = buildTraxManifest(rowsUser, lists);
+        // Version segment in the path = cache bust: Nuvio never refetches a
+        // manifest while the URL is unchanged (see TRAX_MANIFEST_VERSION), and a
+        // change to the person's rows changes it too (traxPathVersion).
+        const transportUrl = `${base}/trax/${user.traxToken}/v${traxPathVersion(rowsUser)}/manifest.json`;
 
-    // Every OTHER url carrying this user's trax token is a previous version
-    // of this same addon and has to go. The version segment is part of the
-    // path, so each bump produces a new url - and matching only the exact
-    // current one meant the old entry stayed on the account forever. Seen
-    // live: an account holding both /trax/<token>/manifest.json and
-    // /trax/<token>/v1.7.0/manifest.json, listed twice as "SlickTrax", which
-    // also left the user permanently "unsynced" because the account held an
-    // addon the desired list did not.
-    //
-    // Matched on the token rather than the name: an addon's NAME is
-    // whatever its manifest says and a user can rename it, while the token
-    // is this instance's own identifier for this user's feed and cannot
-    // collide with anyone else's addon.
-    const tokenMarker = `/trax/${user.traxToken}/`
-    const withoutStale = addons.filter((a) => {
-      const url = a?.transportUrl || a?.manifestUrl || a?.url || ''
-      return !(url.includes(tokenMarker) && url !== transportUrl)
-    })
-    if (withoutStale.some((a) => (a?.transportUrl || a?.manifestUrl || a?.url || '') === transportUrl)) return withoutStale
-    return [...withoutStale, { transportUrl, transportName: 'SlickTrax', manifest }]
-  } catch {
-    return addons
-  }
+        // Every OTHER url carrying this user's trax token is a previous version
+        // of this same addon and has to go. The version segment is part of the
+        // path, so each bump produces a new url - and matching only the exact
+        // current one meant the old entry stayed on the account forever. Seen
+        // live: an account holding both /trax/<token>/manifest.json and
+        // /trax/<token>/v1.7.0/manifest.json, listed twice as "SlickTrax", which
+        // also left the user permanently "unsynced" because the account held an
+        // addon the desired list did not.
+        //
+        // Matched on the token rather than the name: an addon's NAME is
+        // whatever its manifest says and a user can rename it, while the token
+        // is this instance's own identifier for this user's feed and cannot
+        // collide with anyone else's addon.
+        const tokenMarker = `/trax/${user.traxToken}/`;
+        const withoutStale = addons.filter((a) => {
+            const url = a?.transportUrl || a?.manifestUrl || a?.url || "";
+            return !(url.includes(tokenMarker) && url !== transportUrl);
+        });
+        if (
+            withoutStale.some(
+                (a) => (a?.transportUrl || a?.manifestUrl || a?.url || "") === transportUrl
+            )
+        ) {
+            return withoutStale;
+        }
+        return [...withoutStale, { manifest, transportName: "SlickTrax", transportUrl }];
+    } catch {
+        return addons;
+    }
 }
 
 /**
@@ -181,202 +216,257 @@ async function appendTraxAddon(user, addons, prisma) {
  * logo always applies (only the logo field, like the original manifest).
  */
 function presentGroupAddon(addon, useCustomFields = true) {
-  const manifestObj = (addon && addon.manifest && typeof addon.manifest === 'object')
-    ? { ...addon.manifest }
-    : addon?.manifest ? addon.manifest : {}
-  if (addon && manifestObj && typeof manifestObj === 'object') {
-    if (useCustomFields && typeof addon.name === 'string') manifestObj.name = addon.name
-    // Even an empty description is kept.
-    if (useCustomFields && addon.description !== undefined && addon.description !== null) manifestObj.description = addon.description
-    if (addon.customLogo && addon.customLogo.trim()) manifestObj.logo = addon.customLogo.trim()
-  }
-  return { transportUrl: addon.transportUrl, transportName: addon.transportName, manifest: manifestObj }
+    const manifestObj =
+        addon?.manifest && typeof addon.manifest === "object"
+            ? { ...addon.manifest }
+            : addon?.manifest
+              ? addon.manifest
+              : {};
+    if (addon && manifestObj && typeof manifestObj === "object") {
+        if (useCustomFields && typeof addon.name === "string") {
+            manifestObj.name = addon.name;
+        }
+        // Even an empty description is kept.
+        if (useCustomFields && addon.description !== undefined && addon.description !== null) {
+            manifestObj.description = addon.description;
+        }
+        if (addon.customLogo?.trim()) {
+            manifestObj.logo = addon.customLogo.trim();
+        }
+    }
+    return {
+        manifest: manifestObj,
+        transportName: addon.transportName,
+        transportUrl: addon.transportUrl,
+    };
 }
 
-async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, createProvider, unsafeMode = false, useCustomFields = true, _prefetchedUserAddons = null }) {
-  try {
-    // Get group addons
-    const groups = await prisma.group.findMany({
-      where: {
-        accountId: getAccountId(req),
-        userIds: {
-          contains: user.id
-        }
-      },
-      include: {
-        addons: {
-          include: {
-            addon: true
-          }
-        }
-      }
-    })
-
-    const { getGroupAddons } = require('../utils/helpers')
-    // A user who belongs to NO group has expressed no desired state at all,
-    // which is not the same as "their desired state is nothing". The
-    // difference matters because the caller clears the account when the
-    // desired list comes back empty: syncing a user before putting them in
-    // a group would have removed every addon from their real Stremio or
-    // Nuvio account, and Sync All would have done it to all of them at
-    // once. Sync status already treats this case as "not in a group"
-    // rather than as out of sync; this makes the sync itself agree.
-    // An empty GROUP is left alone - that is a real instruction.
-    if (groups.length === 0) {
-      return { success: true, addons: [], noGroup: true, error: null }
+async function getDesiredAddons(
+    user,
+    req,
+    {
+        prisma,
+        getAccountId,
+        decrypt,
+        parseAddonIds,
+        parseProtectedAddons,
+        canonicalizeManifestUrl,
+        StremioAPIClient,
+        createProvider,
+        unsafeMode = false,
+        useCustomFields = true,
+        _prefetchedUserAddons = null,
     }
-    // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
-    const groupAddons = await getGroupAddons(prisma, groups[0].id, req)
-
-    // Use prefetched user addons if provided, otherwise fetch from Stremio
-    // This avoids making duplicate API calls which can return inconsistent results
-    let userAddons = []
-    if (_prefetchedUserAddons && Array.isArray(_prefetchedUserAddons)) {
-      userAddons = _prefetchedUserAddons
-    } else {
-      // Get user's addons from their provider
-      const { success, addons: userAddonsResponse, error } = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
-      if (!success) {
-        return { success: false, addons: [], error }
-      }
-      
-      // Extract the addons array from the complete response (collection shape)
-      // Ensure we always get an array, even if the response structure is unexpected
-      if (Array.isArray(userAddonsResponse)) {
-        userAddons = userAddonsResponse
-      } else if (userAddonsResponse && typeof userAddonsResponse === 'object') {
-        // Handle collection shape: { addons: [...] }
-        if (Array.isArray(userAddonsResponse.addons)) {
-          userAddons = userAddonsResponse.addons
-        }
-      }
-    }
-
-    // Parse excluded addons (DB addon IDs)
-    const excludedAddons = parseAddonIds(user.excludedAddons)
-    // Parse protected addons as PLAINTEXT NAMES from DB
-    let protectedNames = []
+) {
     try {
-      protectedNames = user.protectedAddons ? JSON.parse(user.protectedAddons) : []
-    } catch {
-      protectedNames = []
-    }
-    
-    
-    // Include default addons as protected addons (names, only in safe mode)
-    const { defaultAddons } = require('../utils/config')
-    const normalizeName = (n) => String(n || '').trim().toLowerCase()
-    const defaultProtectedNames = unsafeMode ? [] : (defaultAddons.names || [])
-    const protectedNameSet = new Set([
-      ...protectedNames.map(normalizeName),
-      ...defaultProtectedNames.map(normalizeName)
-    ])
-    
+        // Get group addons
+        const groups = await prisma.group.findMany({
+            include: {
+                addons: {
+                    include: {
+                        addon: true,
+                    },
+                },
+            },
+            where: {
+                accountId: getAccountId(req),
+                userIds: {
+                    contains: user.id,
+                },
+            },
+        });
 
-    // Helper function to check if an addon is protected (by name)
-    const isProtected = (addon) => {
-      const n = addon?.manifest?.name || addon?.transportName || addon?.name
-      return n && protectedNameSet.has(normalizeName(n))
-    }
-
-    // Parse excluded addons - these are database IDs stored in the database
-    const excludedAddonIds = (excludedAddons || []).map(id => String(id).trim()).filter(Boolean)
-    const excludedAddonIdSet = new Set(excludedAddonIds)
-    
-    // A pause (utils/screenTime.js) is decided here rather than in the pause
-    // itself, so every sync - scheduled, Sync All, the guardian - agrees with
-    // it. Someone with a pause set up has their stream addons go through
-    // SlickSync's gate (utils/streamGate.js): the pause happens there, so the
-    // list stays the same and their app needs no restart. Only when the gate
-    // can't be used (no public address) are the addons taken off instead.
-    const { isStreamingPaused, servesStreams } = require('./screenTime')
-    const paused = await isStreamingPaused(prisma, getAccountId(req), user.id).catch(() => false)
-    const { gateFor, gateUrl } = require('./streamGate')
-    const gate = await gateFor(prisma, getAccountId(req), user).catch(() => null)
-
-    const groupAddonsFiltered = groupAddons.filter(groupAddon => {
-      const addonId = groupAddon?.id
-      const isExcluded = addonId && excludedAddonIdSet.has(addonId)
-      return !isExcluded && !(paused && !gate && servesStreams(groupAddon))
-    })
-
-    const cleanGroupAddons = groupAddonsFiltered.map((addon) => {
-      const clean = presentGroupAddon(addon, useCustomFields)
-      if (gate && addon?.id && servesStreams(addon)) clean.transportUrl = gateUrl(gate, addon.id, addon.transportUrl)
-      return clean
-    })
-
-    // 2) Keep only protected addons from userAddons
-    // Ensure userAddons is an array before filtering
-    const userAddonsArray = Array.isArray(userAddons) ? userAddons : []
-    const protectedUserAddons = userAddonsArray.filter(addon => isProtected(addon))
-
-    // Build a protected NAME set from userAddons (normalized)
-    const protectedUserNameSet = new Set(
-      protectedUserAddons
-        .map(a => normalizeName(a?.manifest?.name || a?.transportName || a?.name))
-        .filter(Boolean)
-    )
-
-    // 3) If an addon is protected and also present in groupAddons, remove it from groupAddons (compare by NAME)
-    const nonProtectedGroupAddons = cleanGroupAddons.filter(groupAddon => {
-      const n = normalizeName(groupAddon?.manifest?.name || groupAddon?.transportName || groupAddon?.name)
-      return n && !protectedUserNameSet.has(n)
-    })
-    
-
-    // Build locked positions map for protected addons from current Stremio account (by name)
-    // IMPORTANT: positions must be taken from the FULL userAddons list
-    const lockedByUrl = new Map()
-    for (let i = 0; i < userAddons.length; i++) {
-      const cur = userAddons[i]
-      const name = normalizeName(cur?.manifest?.name || cur?.transportName || cur?.name)
-      if (name && isProtected(cur)) {
-        lockedByUrl.set(name, i)
-      }
-    }
-
-    // Start with an array sized to current addons length
-    const finalLength = userAddons.length
-    const finalDesiredCollection = new Array(finalLength).fill(null)
-
-    // Place protected addons at their original positions
-    for (const addon of protectedUserAddons) {
-      const name = normalizeName(addon?.manifest?.name || addon?.transportName || addon?.name)
-      if (name && lockedByUrl.has(name)) {
-        const pos = lockedByUrl.get(name)
-        if (pos < finalLength) {
-          finalDesiredCollection[pos] = addon
+        const { getGroupAddons } = require("../utils/helpers");
+        // A user who belongs to NO group has expressed no desired state at all,
+        // which is not the same as "their desired state is nothing". The
+        // difference matters because the caller clears the account when the
+        // desired list comes back empty: syncing a user before putting them in
+        // a group would have removed every addon from their real Stremio or
+        // Nuvio account, and Sync All would have done it to all of them at
+        // once. Sync status already treats this case as "not in a group"
+        // rather than as out of sync; this makes the sync itself agree.
+        // An empty GROUP is left alone - that is a real instruction.
+        if (groups.length === 0) {
+            return { addons: [], error: null, noGroup: true, success: true };
         }
-      }
+        // groupAddons are returned in collection shape: { transportUrl, transportName, manifest }
+        const groupAddons = await getGroupAddons(prisma, groups[0].id, req);
+
+        // Use prefetched user addons if provided, otherwise fetch from Stremio
+        // This avoids making duplicate API calls which can return inconsistent results
+        let userAddons = [];
+        if (_prefetchedUserAddons && Array.isArray(_prefetchedUserAddons)) {
+            userAddons = _prefetchedUserAddons;
+        } else {
+            // Get user's addons from their provider
+            const {
+                success,
+                addons: userAddonsResponse,
+                error,
+            } = await getUserAddons(user, req, { createProvider, decrypt, StremioAPIClient });
+            if (!success) {
+                return { addons: [], error, success: false };
+            }
+
+            // Extract the addons array from the complete response (collection shape)
+            // Ensure we always get an array, even if the response structure is unexpected
+            if (Array.isArray(userAddonsResponse)) {
+                userAddons = userAddonsResponse;
+            } else if (userAddonsResponse && typeof userAddonsResponse === "object") {
+                // Handle collection shape: { addons: [...] }
+                if (Array.isArray(userAddonsResponse.addons)) {
+                    userAddons = userAddonsResponse.addons;
+                }
+            }
+        }
+
+        // Parse excluded addons (DB addon IDs)
+        const excludedAddons = parseAddonIds(user.excludedAddons);
+        // Parse protected addons as PLAINTEXT NAMES from DB
+        let protectedNames = [];
+        try {
+            protectedNames = user.protectedAddons ? JSON.parse(user.protectedAddons) : [];
+        } catch {
+            protectedNames = [];
+        }
+
+        // Include default addons as protected addons (names, only in safe mode)
+        const { defaultAddons } = require("../utils/config");
+        const normalizeName = (n) =>
+            String(n || "")
+                .trim()
+                .toLowerCase();
+        const defaultProtectedNames = unsafeMode ? [] : defaultAddons.names || [];
+        const protectedNameSet = new Set([
+            ...protectedNames.map(normalizeName),
+            ...defaultProtectedNames.map(normalizeName),
+        ]);
+
+        // Helper function to check if an addon is protected (by name)
+        const isProtected = (addon) => {
+            const n = addon?.manifest?.name || addon?.transportName || addon?.name;
+            return n && protectedNameSet.has(normalizeName(n));
+        };
+
+        // Parse excluded addons - these are database IDs stored in the database
+        const excludedAddonIds = (excludedAddons || [])
+            .map((id) => String(id).trim())
+            .filter(Boolean);
+        const excludedAddonIdSet = new Set(excludedAddonIds);
+
+        // A pause (utils/screenTime.js) is decided here rather than in the pause
+        // itself, so every sync - scheduled, Sync All, the guardian - agrees with
+        // it. Someone with a pause set up has their stream addons go through
+        // SlickSync's gate (utils/streamGate.js): the pause happens there, so the
+        // list stays the same and their app needs no restart. Only when the gate
+        // can't be used (no public address) are the addons taken off instead.
+        const { isStreamingPaused, servesStreams } = require("./screenTime");
+        const paused = await isStreamingPaused(prisma, getAccountId(req), user.id).catch(
+            () => false
+        );
+        const { gateFor, gateUrl } = require("./streamGate");
+        const gate = await gateFor(prisma, getAccountId(req), user).catch(() => null);
+
+        const groupAddonsFiltered = groupAddons.filter((groupAddon) => {
+            const addonId = groupAddon?.id;
+            const isExcluded = addonId && excludedAddonIdSet.has(addonId);
+            return !(isExcluded || (paused && !gate && servesStreams(groupAddon)));
+        });
+
+        const cleanGroupAddons = groupAddonsFiltered.map((addon) => {
+            const clean = presentGroupAddon(addon, useCustomFields);
+            if (gate && addon?.id && servesStreams(addon)) {
+                clean.transportUrl = gateUrl(gate, addon.id, addon.transportUrl);
+            }
+            return clean;
+        });
+
+        // 2) Keep only protected addons from userAddons
+        // Ensure userAddons is an array before filtering
+        const userAddonsArray = Array.isArray(userAddons) ? userAddons : [];
+        const protectedUserAddons = userAddonsArray.filter((addon) => isProtected(addon));
+
+        // Build a protected NAME set from userAddons (normalized)
+        const protectedUserNameSet = new Set(
+            protectedUserAddons
+                .map((a) => normalizeName(a?.manifest?.name || a?.transportName || a?.name))
+                .filter(Boolean)
+        );
+
+        // 3) If an addon is protected and also present in groupAddons, remove it from groupAddons (compare by NAME)
+        const nonProtectedGroupAddons = cleanGroupAddons.filter((groupAddon) => {
+            const n = normalizeName(
+                groupAddon?.manifest?.name || groupAddon?.transportName || groupAddon?.name
+            );
+            return n && !protectedUserNameSet.has(n);
+        });
+
+        // Build locked positions map for protected addons from current Stremio account (by name)
+        // IMPORTANT: positions must be taken from the FULL userAddons list
+        const lockedByUrl = new Map();
+        for (let i = 0; i < userAddons.length; i++) {
+            const cur = userAddons[i];
+            const name = normalizeName(cur?.manifest?.name || cur?.transportName || cur?.name);
+            if (name && isProtected(cur)) {
+                lockedByUrl.set(name, i);
+            }
+        }
+
+        // Start with an array sized to current addons length
+        const finalLength = userAddons.length;
+        const finalDesiredCollection = new Array(finalLength).fill(null);
+
+        // Place protected addons at their original positions
+        for (const addon of protectedUserAddons) {
+            const name = normalizeName(
+                addon?.manifest?.name || addon?.transportName || addon?.name
+            );
+            if (name && lockedByUrl.has(name)) {
+                const pos = lockedByUrl.get(name);
+                if (pos < finalLength) {
+                    finalDesiredCollection[pos] = addon;
+                }
+            }
+        }
+
+        // Fill remaining positions with non-protected group addons
+        let groupAddonIndex = 0;
+        for (let i = 0; i < finalLength && groupAddonIndex < nonProtectedGroupAddons.length; i++) {
+            if (finalDesiredCollection[i] === null) {
+                finalDesiredCollection[i] = nonProtectedGroupAddons[groupAddonIndex++];
+            }
+        }
+
+        // Add any remaining group addons at the end
+        while (groupAddonIndex < nonProtectedGroupAddons.length) {
+            finalDesiredCollection.push(nonProtectedGroupAddons[groupAddonIndex++]);
+        }
+
+        // If current is empty (finalLength = 0), ensure we still add all group addons
+        if (finalLength === 0 && nonProtectedGroupAddons.length > 0) {
+            // When current is empty, just return all non-protected group addons
+            return {
+                addons: await appendTraxAddon(user, dedupeByUrl(nonProtectedGroupAddons), prisma),
+                error: null,
+                success: true,
+            };
+        }
+
+        // Remove nulls and return
+        const finalDesiredAddons = finalDesiredCollection.filter(Boolean);
+
+        return {
+            addons: await appendTraxAddon(user, dedupeByUrl(finalDesiredAddons), prisma),
+            error: null,
+            success: true,
+        };
+    } catch (error) {
+        return {
+            addons: [],
+            error: error.message || "Failed to get desired addons",
+            success: false,
+        };
     }
-
-    // Fill remaining positions with non-protected group addons
-    let groupAddonIndex = 0
-    for (let i = 0; i < finalLength && groupAddonIndex < nonProtectedGroupAddons.length; i++) {
-      if (finalDesiredCollection[i] === null) {
-        finalDesiredCollection[i] = nonProtectedGroupAddons[groupAddonIndex++]
-      }
-    }
-
-    // Add any remaining group addons at the end
-    while (groupAddonIndex < nonProtectedGroupAddons.length) {
-      finalDesiredCollection.push(nonProtectedGroupAddons[groupAddonIndex++])
-    }
-
-    // If current is empty (finalLength = 0), ensure we still add all group addons
-    if (finalLength === 0 && nonProtectedGroupAddons.length > 0) {
-      // When current is empty, just return all non-protected group addons
-      return { success: true, addons: await appendTraxAddon(user, dedupeByUrl(nonProtectedGroupAddons), prisma), error: null }
-    }
-
-    // Remove nulls and return
-    const finalDesiredAddons = finalDesiredCollection.filter(Boolean)
-
-    return { success: true, addons: await appendTraxAddon(user, dedupeByUrl(finalDesiredAddons), prisma), error: null }
-  } catch (error) {
-    return { success: false, addons: [], error: error.message || 'Failed to get desired addons' }
-  }
 }
 
 // Sync status is asked for constantly - every badge on the Users, Groups and
@@ -388,241 +478,402 @@ async function getDesiredAddons(user, req, { prisma, getAccountId, decrypt, pars
 // invalidateSyncStatus). The guardian's own fresh reads go through here too
 // and refresh the entry, so a badge opened just after a pass answers from
 // memory.
-const SYNC_STATUS_MEMO_MS = 20 * 1000
-const syncStatusMemo = new Map()
+const SYNC_STATUS_MEMO_MS = 20 * 1000;
+const syncStatusMemo = new Map();
 function invalidateSyncStatus(accountId, userId) {
-  const prefix = `${accountId || 'default'}:${userId ? `${userId}:` : ''}`
-  for (const key of syncStatusMemo.keys()) if (key.startsWith(prefix)) syncStatusMemo.delete(key)
+    const prefix = `${accountId || "default"}:${userId ? `${userId}:` : ""}`;
+    for (const key of syncStatusMemo.keys()) {
+        if (key.startsWith(prefix)) {
+            syncStatusMemo.delete(key);
+        }
+    }
 }
 
-function createGetUserSyncStatus({ prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient, createProvider }) {
-  const normalizeUrl = (u) => {
-    try {
-      return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase()
-    } catch (e) {
-      return String(u || '').trim().toLowerCase()
-    }
-  }
-
-  // _prefetchedUserAddons: the Sync Guardian + Account Guard loop fetches the
-  // live collection once per user per pass - passing it here avoids this
-  // function immediately re-fetching the identical list from the provider.
-  const computeUserSyncStatus = async function (userId, { groupId = undefined, unsafe = false, _prefetchedUserAddons = null } = {}, req) {
-    const user = await prisma.user.findFirst({
-      where: { id: userId, accountId: getAccountId(req) },
-      // traxAddonEnabled/traxToken MUST ride along: appendTraxAddon reads
-      // them off this object, and a select that omits them silently disables
-      // SlickTrax injection for the whole path (confirmed live 2026-09-03 -
-      // sync ran, addon never installed, and status agreed because desired
-      // was missing it too).
-      select: { id: true, stremioAuthKey: true, isActive: true, excludedAddons: true, protectedAddons: true, providerType: true, nuvioRefreshToken: true, nuvioUserId: true, accountId: true, traxAddonEnabled: true, traxToken: true }
-    })
-    if (!user) return { status: 'error', isSynced: false, message: 'User not found' }
-    // A Jellyfin-compatible server has no addon list for SlickSync to keep in
-    // step, so there is nothing to be synced or unsynced.
-    if (user.providerType === 'jellyfin') return { isSynced: true, status: 'unsupported', message: 'Their server has no addon list to sync' }
-    const hasCredentials = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId)
-    if (!hasCredentials) return { isSynced: false, status: 'connect', message: 'User not connected to a provider' }
-
-    // A user in no group has nothing to be synced against. The badge used to
-    // work this out by fetching the entire user record first and counting
-    // groups, which meant every badge cost two round trips before it could
-    // show anything. Answering it here makes that second request
-    // unnecessary.
-    try {
-      const groupCount = await prisma.group.count({
-        where: { accountId: getAccountId(req), userIds: { contains: user.id } },
-      })
-      if (groupCount === 0) return { isSynced: false, status: 'stale', message: 'User is not in a group' }
-    } catch { /* fall through and compute normally */ }
-
-    // Derive unsafe and useCustomFields from DB-backed account sync (single source of truth)
-    let useCustomFields = true
-    try {
-      const acc = await prisma.appAccount.findFirst({ where: { id: getAccountId(req) }, select: { sync: true } })
-      let cfg = acc?.sync
-      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-      if (cfg && typeof cfg === 'object') {
-        if (typeof cfg.safe === 'boolean') unsafe = !cfg.safe
-        if (typeof cfg.useCustomFields === 'boolean') {
-          useCustomFields = cfg.useCustomFields
-        } else if (typeof cfg.useCustomNames === 'boolean') {
-          // Backward compatibility: migrate old useCustomNames to useCustomFields
-          useCustomFields = cfg.useCustomNames
-        } else {
-          useCustomFields = true
+function createGetUserSyncStatus({
+    prisma,
+    getAccountId,
+    decrypt,
+    parseAddonIds,
+    parseProtectedAddons,
+    getDecryptedManifestUrl,
+    canonicalizeManifestUrl,
+    StremioAPIClient,
+    createProvider,
+}) {
+    const _normalizeUrl = (u) => {
+        try {
+            return canonicalizeManifestUrl
+                ? canonicalizeManifestUrl(u)
+                : String(u || "")
+                      .trim()
+                      .toLowerCase();
+        } catch {
+            return String(u || "")
+                .trim()
+                .toLowerCase();
         }
-      }
-    } catch {}
+    };
 
-    // Get user's current addons from their provider
-    const { success: userAddonsSuccess, addons: userAddonsResponse, error: userAddonsError } = Array.isArray(_prefetchedUserAddons)
-      ? { success: true, addons: _prefetchedUserAddons, error: null }
-      : await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
-    if (!userAddonsSuccess) {
-      // If the error is related to authentication, treat it as "connect" status
-      if (userAddonsError && (
-        userAddonsError.includes('Unsupported state or unable to authenticate') ||
-        userAddonsError.includes('authentication') ||
-        userAddonsError.includes('auth') ||
-        userAddonsError.includes('invalid') ||
-        userAddonsError.includes('corrupted') ||
-        userAddonsError.includes('PROVIDER_AUTH_EXPIRED')
-      )) {
-        return { isSynced: false, status: 'connect', message: 'Provider connection invalid - please reconnect' }
-      }
-      return { isSynced: false, status: 'error', message: userAddonsError }
-    }
-    
-    // Extract the addons array from the complete response
-    // Ensure we always get an array, even if the response structure is unexpected
-    let userAddons = []
-    if (Array.isArray(userAddonsResponse)) {
-      userAddons = userAddonsResponse
-    } else if (userAddonsResponse && typeof userAddonsResponse === 'object') {
-      // Handle collection shape: { addons: [...] }
-      if (Array.isArray(userAddonsResponse.addons)) {
-        userAddons = userAddonsResponse.addons
-      }
-    }
+    // _prefetchedUserAddons: the Sync Guardian + Account Guard loop fetches the
+    // live collection once per user per pass - passing it here avoids this
+    // function immediately re-fetching the identical list from the provider.
+    const computeUserSyncStatus = async (
+        userId,
+        { groupId, unsafe = false, _prefetchedUserAddons = null } = {},
+        req
+    ) => {
+        const user = await prisma.user.findFirst({
+            // traxAddonEnabled/traxToken MUST ride along: appendTraxAddon reads
+            // them off this object, and a select that omits them silently disables
+            // SlickTrax injection for the whole path (confirmed live 2026-09-03 -
+            // sync ran, addon never installed, and status agreed because desired
+            // was missing it too).
+            select: {
+                accountId: true,
+                excludedAddons: true,
+                id: true,
+                isActive: true,
+                nuvioRefreshToken: true,
+                nuvioUserId: true,
+                protectedAddons: true,
+                providerType: true,
+                stremioAuthKey: true,
+                traxAddonEnabled: true,
+                traxToken: true,
+            },
+            where: { accountId: getAccountId(req), id: userId },
+        });
+        if (!user) {
+            return { isSynced: false, message: "User not found", status: "error" };
+        }
+        // A Jellyfin-compatible server has no addon list for SlickSync to keep in
+        // step, so there is nothing to be synced or unsynced.
+        if (user.providerType === "jellyfin") {
+            return {
+                isSynced: true,
+                message: "Their server has no addon list to sync",
+                status: "unsupported",
+            };
+        }
+        const hasCredentials = user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId);
+        if (!hasCredentials) {
+            return {
+                isSynced: false,
+                message: "User not connected to a provider",
+                status: "connect",
+            };
+        }
 
-    // Get desired addons (group addons + protected addons)
-    // IMPORTANT: Pass the already-fetched userAddons to avoid making a second Stremio API call
-    // Making two separate calls can return different results due to race conditions, causing inconsistent sync status
-    const { success: desiredAddonsSuccess, addons: desiredAddons, error: desiredAddonsError } = await getDesiredAddons(user, req, {
-      prisma,
-      getAccountId,
-      decrypt,
-      parseAddonIds,
-      parseProtectedAddons,
-      canonicalizeManifestUrl,
-      StremioAPIClient,
-      createProvider,
-      unsafeMode: unsafe,
-      useCustomFields,
-      _prefetchedUserAddons: userAddons
-    })
-    if (!desiredAddonsSuccess) {
-      return { isSynced: false, status: 'error', message: desiredAddonsError }
-    }
+        // A user in no group has nothing to be synced against. The badge used to
+        // work this out by fetching the entire user record first and counting
+        // groups, which meant every badge cost two round trips before it could
+        // show anything. Answering it here makes that second request
+        // unnecessary.
+        try {
+            const groupCount = await prisma.group.count({
+                where: { accountId: getAccountId(req), userIds: { contains: user.id } },
+            });
+            if (groupCount === 0) {
+                return { isSynced: false, message: "User is not in a group", status: "stale" };
+            }
+        } catch {
+            /* fall through and compute normally */
+        }
 
-    // Unified comparison using manifest fingerprint (order-sensitive).
-    // Nuvio (and other non-Stremio providers) store only URLs — SlickSync controls the
-    // URL set — so compare by URL only rather than full manifest content.
-    const urlOnly = (user.providerType || 'stremio') !== 'stremio'
-    const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly })
-    const currentKeys = userAddons.map(fingerprint)
-    const desiredKeys = desiredAddons.map(fingerprint)
-    // Order-insensitive comparison: sort both key lists first so pure reordering
-    // (e.g. user reordered addons in the Stremio app) doesn't falsely report
-    // "unsynced" - only an actual difference in the addon set should.
-    const sortedCurrent = [...currentKeys].sort()
-    const sortedDesired = [...desiredKeys].sort()
-    const isSynced = sortedCurrent.length === sortedDesired.length && sortedCurrent.every((k, i) => k === sortedDesired[i])
+        // Derive unsafe and useCustomFields from DB-backed account sync (single source of truth)
+        let useCustomFields = true;
+        try {
+            const acc = await prisma.appAccount.findFirst({
+                select: { sync: true },
+                where: { id: getAccountId(req) },
+            });
+            let cfg = acc?.sync;
+            if (typeof cfg === "string") {
+                try {
+                    cfg = JSON.parse(cfg);
+                } catch {
+                    cfg = null;
+                }
+            }
+            if (cfg && typeof cfg === "object") {
+                if (typeof cfg.safe === "boolean") {
+                    unsafe = !cfg.safe;
+                }
+                if (typeof cfg.useCustomFields === "boolean") {
+                    useCustomFields = cfg.useCustomFields;
+                } else if (typeof cfg.useCustomNames === "boolean") {
+                    // Backward compatibility: migrate old useCustomNames to useCustomFields
+                    useCustomFields = cfg.useCustomNames;
+                } else {
+                    useCustomFields = true;
+                }
+            }
+        } catch {
+            // Malformed optional data leaves the existing fallback in place.
+        }
 
-    return {
-      isSynced,
-      status: isSynced ? 'synced' : 'unsynced',
-      stremioAddonsCount: userAddons.length,
-      groupAddonsCount: desiredAddons.length,
-      excludedAddons: parseAddonIds(user.excludedAddons),
-      protectedAddons: parseProtectedAddons(user.protectedAddons, req),
-    }
-  }
+        // Get user's current addons from their provider
+        const {
+            success: userAddonsSuccess,
+            addons: userAddonsResponse,
+            error: userAddonsError,
+        } = Array.isArray(_prefetchedUserAddons)
+            ? { addons: _prefetchedUserAddons, error: null, success: true }
+            : await getUserAddons(user, req, { createProvider, decrypt, StremioAPIClient });
+        if (!userAddonsSuccess) {
+            // If the error is related to authentication, treat it as "connect" status
+            if (
+                userAddonsError &&
+                (userAddonsError.includes("Unsupported state or unable to authenticate") ||
+                    userAddonsError.includes("authentication") ||
+                    userAddonsError.includes("auth") ||
+                    userAddonsError.includes("invalid") ||
+                    userAddonsError.includes("corrupted") ||
+                    userAddonsError.includes("PROVIDER_AUTH_EXPIRED"))
+            ) {
+                return {
+                    isSynced: false,
+                    message: "Provider connection invalid - please reconnect",
+                    status: "connect",
+                };
+            }
+            return { isSynced: false, message: userAddonsError, status: "error" };
+        }
 
-  // Remembered for a short while per user - see syncStatusMemo above. A
-  // caller that brings the user's addons with it (the guardian) always
-  // computes, and its fresh answer refreshes the entry.
-  return async function getUserSyncStatus(userId, options = {}, req) {
-    const accountId = getAccountId(req) || 'default'
-    const key = `${accountId}:${userId}:${options.groupId || ''}:${options.unsafe ? 1 : 0}`
-    if (!options._prefetchedUserAddons) {
-      const hit = syncStatusMemo.get(key)
-      if (hit && Date.now() - hit.at < SYNC_STATUS_MEMO_MS) return hit.value
-    }
-    const value = await computeUserSyncStatus(userId, options, req)
-    if (value && value.status !== 'error') syncStatusMemo.set(key, { at: Date.now(), value })
-    return value
-  }
+        // Extract the addons array from the complete response
+        // Ensure we always get an array, even if the response structure is unexpected
+        let userAddons = [];
+        if (Array.isArray(userAddonsResponse)) {
+            userAddons = userAddonsResponse;
+        } else if (userAddonsResponse && typeof userAddonsResponse === "object") {
+            // Handle collection shape: { addons: [...] }
+            if (Array.isArray(userAddonsResponse.addons)) {
+                userAddons = userAddonsResponse.addons;
+            }
+        }
+
+        // Get desired addons (group addons + protected addons)
+        // IMPORTANT: Pass the already-fetched userAddons to avoid making a second Stremio API call
+        // Making two separate calls can return different results due to race conditions, causing inconsistent sync status
+        const {
+            success: desiredAddonsSuccess,
+            addons: desiredAddons,
+            error: desiredAddonsError,
+        } = await getDesiredAddons(user, req, {
+            _prefetchedUserAddons: userAddons,
+            canonicalizeManifestUrl,
+            createProvider,
+            decrypt,
+            getAccountId,
+            parseAddonIds,
+            parseProtectedAddons,
+            prisma,
+            StremioAPIClient,
+            unsafeMode: unsafe,
+            useCustomFields,
+        });
+        if (!desiredAddonsSuccess) {
+            return { isSynced: false, message: desiredAddonsError, status: "error" };
+        }
+
+        // Unified comparison using manifest fingerprint (order-sensitive).
+        // Nuvio (and other non-Stremio providers) store only URLs — SlickSync controls the
+        // URL set — so compare by URL only rather than full manifest content.
+        const urlOnly = (user.providerType || "stremio") !== "stremio";
+        const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly });
+        const currentKeys = userAddons.map(fingerprint);
+        const desiredKeys = desiredAddons.map(fingerprint);
+        // Order-insensitive comparison: sort both key lists first so pure reordering
+        // (e.g. user reordered addons in the Stremio app) doesn't falsely report
+        // "unsynced" - only an actual difference in the addon set should.
+        const sortedCurrent = [...currentKeys].sort();
+        const sortedDesired = [...desiredKeys].sort();
+        const isSynced =
+            sortedCurrent.length === sortedDesired.length &&
+            sortedCurrent.every((k, i) => k === sortedDesired[i]);
+
+        return {
+            excludedAddons: parseAddonIds(user.excludedAddons),
+            groupAddonsCount: desiredAddons.length,
+            isSynced,
+            protectedAddons: parseProtectedAddons(user.protectedAddons, req),
+            status: isSynced ? "synced" : "unsynced",
+            stremioAddonsCount: userAddons.length,
+        };
+    };
+
+    // Remembered for a short while per user - see syncStatusMemo above. A
+    // caller that brings the user's addons with it (the guardian) always
+    // computes, and its fresh answer refreshes the entry.
+    return async function getUserSyncStatus(userId, options = {}, req) {
+        const accountId = getAccountId(req) || "default";
+        const key = `${accountId}:${userId}:${options.groupId || ""}:${options.unsafe ? 1 : 0}`;
+        if (!options._prefetchedUserAddons) {
+            const hit = syncStatusMemo.get(key);
+            if (hit && Date.now() - hit.at < SYNC_STATUS_MEMO_MS) {
+                return hit.value;
+            }
+        }
+        const value = await computeUserSyncStatus(userId, options, req);
+        if (value && value.status !== "error") {
+            syncStatusMemo.set(key, { at: Date.now(), value });
+        }
+        return value;
+    };
 }
 
 function createGetGroupSyncStatus(deps) {
-  const getUserSyncStatus = createGetUserSyncStatus(deps)
-  const { prisma, getAccountId } = deps
-  return async function getGroupSyncStatus(groupId, req) {
-    // The member and addon counts ride along. A badge needs them to say
-    // "nothing to sync yet", and without them here it had to fetch the
-    // whole group separately first - two round trips per badge, on every
-    // page that shows one per group.
-    const group = await prisma.group.findFirst({
-      where: { id: groupId, accountId: getAccountId(req) },
-      include: { _count: { select: { addons: true } } },
-    })
-    if (!group) return { error: 'Group not found' }
-    let userIds = []
-    try { userIds = Array.isArray(group.userIds) ? group.userIds : JSON.parse(group.userIds || '[]') } catch {}
-    const userStatuses = []
-    for (const uid of userIds) {
-      try {
-        const status = await getUserSyncStatus(uid, { groupId: groupId }, req)
-        userStatuses.push({ userId: uid, ...status })
-      } catch (e) {
-        userStatuses.push({ userId: uid, status: 'error', isSynced: false, message: e?.message || 'Failed' })
-      }
-    }
-    // People whose server has no addon list (Jellyfin) have nothing to be in
-    // or out of step with, so the group's verdict is about everyone else - a
-    // group of only them has nothing to sync at all.
-    const syncable = userStatuses.filter(s => s.status !== 'unsupported')
-    const groupStatus = syncable.every(s => s.status === 'synced') ? 'synced' : 'unsynced'
-    return { groupStatus, userStatuses: syncable, memberCount: syncable.length, addonCount: group?._count?.addons ?? 0 }
-  }
+    const getUserSyncStatus = createGetUserSyncStatus(deps);
+    const { prisma, getAccountId } = deps;
+    return async function getGroupSyncStatus(groupId, req) {
+        // The member and addon counts ride along. A badge needs them to say
+        // "nothing to sync yet", and without them here it had to fetch the
+        // whole group separately first - two round trips per badge, on every
+        // page that shows one per group.
+        const group = await prisma.group.findFirst({
+            include: { _count: { select: { addons: true } } },
+            where: { accountId: getAccountId(req), id: groupId },
+        });
+        if (!group) {
+            return { error: "Group not found" };
+        }
+        let userIds = [];
+        try {
+            userIds = Array.isArray(group.userIds)
+                ? group.userIds
+                : JSON.parse(group.userIds || "[]");
+        } catch {
+            // Malformed optional data leaves the existing fallback in place.
+        }
+        const userStatuses = [];
+        for (const uid of userIds) {
+            try {
+                const status = await getUserSyncStatus(uid, { groupId }, req);
+                userStatuses.push({ userId: uid, ...status });
+            } catch (e) {
+                userStatuses.push({
+                    isSynced: false,
+                    message: e?.message || "Failed",
+                    status: "error",
+                    userId: uid,
+                });
+            }
+        }
+        // People whose server has no addon list (Jellyfin) have nothing to be in
+        // or out of step with, so the group's verdict is about everyone else - a
+        // group of only them has nothing to sync at all.
+        const syncable = userStatuses.filter((s) => s.status !== "unsupported");
+        const groupStatus = syncable.every((s) => s.status === "synced") ? "synced" : "unsynced";
+        return {
+            addonCount: group?._count?.addons ?? 0,
+            groupStatus,
+            memberCount: syncable.length,
+            userStatuses: syncable,
+        };
+    };
 }
 
 /**
  * Compute a user's sync plan (shared by sync-status and actual sync)
  * Returns: { alreadySynced, current, desired }
  */
-async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, createProvider, unsafeMode = false, useCustomFields = true, useCustomNames = undefined }) {
-  // Backward compatibility: support both useCustomFields (new) and useCustomNames (old)
-  const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : (useCustomNames !== undefined ? useCustomNames : true)
-  // Nothing to plan for a server with no addon list (see computeUserSyncStatus).
-  if (user?.providerType === 'jellyfin') return { success: true, unsupported: true, alreadySynced: true, current: [], desired: [] }
-  
-  // 1) Current - getUserAddons only reads, and treats a null addon list as empty
-  const currentRes = await getUserAddons(user, req, { decrypt, StremioAPIClient, createProvider })
-  if (!currentRes.success) return { success: false, error: currentRes.error, alreadySynced: false, current: [], desired: [] }
-  const current = currentRes.addons?.addons || currentRes.addons || []
-  // 2) Desired - pass prefetched current addons to avoid duplicate provider API calls
-  const desiredRes = await getDesiredAddons(user, req, { prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons, canonicalizeManifestUrl, StremioAPIClient, createProvider, unsafeMode, useCustomFields: useCustomFieldsValue, _prefetchedUserAddons: current })
-  if (!desiredRes.success) return { success: false, error: desiredRes.error, alreadySynced: false, current, desired: [] }
-  // Carried through so the caller can tell "nothing is wanted" apart from
-  // "nothing was ever asked for" - see getDesiredAddons.
-  if (desiredRes.noGroup) return { success: true, noGroup: true, alreadySynced: true, current, desired: [] }
-  const desired = desiredRes.addons || []
-  
-  // Ensure desired is always an array, never null
-  const safeDesired = Array.isArray(desired) ? desired : []
-  // 3) Compare (set + order) using manifest fingerprint; URL-only mode for non-Stremio providers
-  const urlOnly = (user.providerType || 'stremio') !== 'stremio'
-  const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly })
-  const aKeys = current.map(fingerprint)
-  const bKeys = desired.map(fingerprint)
-  // Order-insensitive, matching getUserSyncStatus's comparison above - a
-  // pure reorder (e.g. user reordered addons in the Stremio app) must not
-  // count as "not synced" here either, otherwise this function's
-  // alreadySynced verdict can disagree with the badge's.
-  const sortedA = [...aKeys].sort()
-  const sortedB = [...bKeys].sort()
-  const sameSet = sortedA.length === sortedB.length && sortedA.every((k, i) => k === sortedB[i])
-  // The same set of addons can still be behind: a Stremio account keeps a
-  // copy of each manifest, so after Reload picked up a new version (or an
-  // addon was renamed here) the account holds the old one until it is
-  // pushed again. Deciding "already synced" on the set alone skipped that
-  // push forever - a resync did nothing and the version stayed old.
-  const staleManifests = urlOnly ? [] : staleManifestKeys(current, safeDesired, fingerprint)
-  const alreadySynced = sameSet && staleManifests.length === 0
-  return { success: true, alreadySynced, current, desired, staleManifests }
+async function computeUserSyncPlan(
+    user,
+    req,
+    {
+        prisma,
+        getAccountId,
+        decrypt,
+        parseAddonIds,
+        parseProtectedAddons,
+        canonicalizeManifestUrl,
+        StremioAPIClient,
+        createProvider,
+        unsafeMode = false,
+        useCustomFields = true,
+        useCustomNames,
+    }
+) {
+    // Backward compatibility: support both useCustomFields (new) and useCustomNames (old)
+    const useCustomFieldsValue =
+        useCustomFields === undefined
+            ? useCustomNames === undefined
+                ? true
+                : useCustomNames
+            : useCustomFields;
+    // Nothing to plan for a server with no addon list (see computeUserSyncStatus).
+    if (user?.providerType === "jellyfin") {
+        return { alreadySynced: true, current: [], desired: [], success: true, unsupported: true };
+    }
+
+    // 1) Current - getUserAddons only reads, and treats a null addon list as empty
+    const currentRes = await getUserAddons(user, req, {
+        createProvider,
+        decrypt,
+        StremioAPIClient,
+    });
+    if (!currentRes.success) {
+        return {
+            alreadySynced: false,
+            current: [],
+            desired: [],
+            error: currentRes.error,
+            success: false,
+        };
+    }
+    const current = currentRes.addons?.addons || currentRes.addons || [];
+    // 2) Desired - pass prefetched current addons to avoid duplicate provider API calls
+    const desiredRes = await getDesiredAddons(user, req, {
+        _prefetchedUserAddons: current,
+        canonicalizeManifestUrl,
+        createProvider,
+        decrypt,
+        getAccountId,
+        parseAddonIds,
+        parseProtectedAddons,
+        prisma,
+        StremioAPIClient,
+        unsafeMode,
+        useCustomFields: useCustomFieldsValue,
+    });
+    if (!desiredRes.success) {
+        return {
+            alreadySynced: false,
+            current,
+            desired: [],
+            error: desiredRes.error,
+            success: false,
+        };
+    }
+    // Carried through so the caller can tell "nothing is wanted" apart from
+    // "nothing was ever asked for" - see getDesiredAddons.
+    if (desiredRes.noGroup) {
+        return { alreadySynced: true, current, desired: [], noGroup: true, success: true };
+    }
+    const desired = desiredRes.addons || [];
+
+    // Ensure desired is always an array, never null
+    const safeDesired = Array.isArray(desired) ? desired : [];
+    // 3) Compare (set + order) using manifest fingerprint; URL-only mode for non-Stremio providers
+    const urlOnly = (user.providerType || "stremio") !== "stremio";
+    const fingerprint = createManifestFingerprint(canonicalizeManifestUrl, { urlOnly });
+    const aKeys = current.map(fingerprint);
+    const bKeys = desired.map(fingerprint);
+    // Order-insensitive, matching getUserSyncStatus's comparison above - a
+    // pure reorder (e.g. user reordered addons in the Stremio app) must not
+    // count as "not synced" here either, otherwise this function's
+    // alreadySynced verdict can disagree with the badge's.
+    const sortedA = [...aKeys].sort();
+    const sortedB = [...bKeys].sort();
+    const sameSet = sortedA.length === sortedB.length && sortedA.every((k, i) => k === sortedB[i]);
+    // The same set of addons can still be behind: a Stremio account keeps a
+    // copy of each manifest, so after Reload picked up a new version (or an
+    // addon was renamed here) the account holds the old one until it is
+    // pushed again. Deciding "already synced" on the set alone skipped that
+    // push forever - a resync did nothing and the version stayed old.
+    const staleManifests = urlOnly ? [] : staleManifestKeys(current, safeDesired, fingerprint);
+    const alreadySynced = sameSet && staleManifests.length === 0;
+    return { alreadySynced, current, desired, staleManifests, success: true };
 }
 
 // Fingerprints of desired addons whose installed copy differs in version or
@@ -630,20 +881,26 @@ async function computeUserSyncPlan(user, req, { prisma, getAccountId, decrypt, p
 // what a reload or a rename changes, and the provider hands them back as
 // given, so nothing here can flip on its own between two syncs.
 function staleManifestKeys(current, desired, fingerprint) {
-  const installed = new Map()
-  for (const a of current || []) installed.set(fingerprint(a), a)
-  const stale = []
-  for (const d of desired || []) {
-    const key = fingerprint(d)
-    const c = installed.get(key)
-    if (!c) continue
-    const wantVersion = String(d?.manifest?.version ?? '')
-    const haveVersion = String(c?.manifest?.version ?? '')
-    const wantName = String(d?.manifest?.name ?? '')
-    const haveName = String(c?.manifest?.name ?? '')
-    if ((wantVersion && wantVersion !== haveVersion) || (wantName && wantName !== haveName)) stale.push(key)
-  }
-  return stale
+    const installed = new Map();
+    for (const a of current || []) {
+        installed.set(fingerprint(a), a);
+    }
+    const stale = [];
+    for (const d of desired || []) {
+        const key = fingerprint(d);
+        const c = installed.get(key);
+        if (!c) {
+            continue;
+        }
+        const wantVersion = String(d?.manifest?.version ?? "");
+        const haveVersion = String(c?.manifest?.version ?? "");
+        const wantName = String(d?.manifest?.name ?? "");
+        const haveName = String(c?.manifest?.name ?? "");
+        if ((wantVersion && wantVersion !== haveVersion) || (wantName && wantName !== haveName)) {
+            stale.push(key);
+        }
+    }
+    return stale;
 }
 
 // Build a stable fingerprint (identity) for an addon entry, used to compare
@@ -652,59 +909,69 @@ function staleManifestKeys(current, desired, fingerprint) {
 // this function for why the Stremio branch also dropped deep manifest
 // comparison.
 function createManifestFingerprint(canonicalizeManifestUrl, { urlOnly = false } = {}) {
-  const normalizeUrl = (u) => {
-    try { return canonicalizeManifestUrl ? canonicalizeManifestUrl(u) : String(u || '').trim().toLowerCase() } catch { return String(u || '').trim().toLowerCase() }
-  }
+    const normalizeUrl = (u) => {
+        try {
+            return canonicalizeManifestUrl
+                ? canonicalizeManifestUrl(u)
+                : String(u || "")
+                      .trim()
+                      .toLowerCase();
+        } catch {
+            return String(u || "")
+                .trim()
+                .toLowerCase();
+        }
+    };
 
-  return (addon) => {
-    // URL-only mode: canonical URL is the identity (non-Stremio providers)
-    if (urlOnly) {
-      return normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || '')
-    }
-    // An address with an addon ID in its path (e.g. /stremio/00000000-0000-
-    // 4000-8000-000000000000/<encrypted>/manifest.json, AIOStreams-style) is
-    // identified by that ID: the encrypted part beside it can change while it
-    // is still the same addon. Every other address is identified by the whole
-    // address, canonicalized. (It used to be the last path segment - which is
-    // "manifest.json" for nearly every addon, so Cinemeta, Torrentio and
-    // OpenSubtitles all looked like the same addon and only the count was
-    // ever compared.)
-    let url = addon?.transportUrl || addon?.manifestUrl || addon?.url || ''
-    try {
-      const urlObj = new URL(url)
-      const pathParts = urlObj.pathname.split('/').filter(Boolean)
-      const uuidMatch = pathParts.find(part => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(part))
-      url = uuidMatch || normalizeUrl(url)
-    } catch {
-      url = normalizeUrl(url)
-    }
-    
-    // ID-only identity, same as urlOnly mode above (not a deep manifest diff).
-    // A prior version compared the full manifest JSON here, which meant
-    // "Synced" for a Stremio user depended on the DB's *cached* manifest
-    // copy being byte-identical to what's actually installed - but that
-    // cache gets silently refreshed by the background addon health checker
-    // (reloadAddon) independent of anything the admin did, flipping the
-    // status to "Unsynced" for changes the user never needs to act on.
-    // Sync status should answer "does this user have the right set of
-    // addons", not "is our manifest cache stale" - the full manifest
-    // content is still what actually gets pushed during a real sync, this
-    // only affects what counts as already-synced for status/skip purposes.
-    return url
-  }
+    return (addon) => {
+        // URL-only mode: canonical URL is the identity (non-Stremio providers)
+        if (urlOnly) {
+            return normalizeUrl(addon?.transportUrl || addon?.manifestUrl || addon?.url || "");
+        }
+        // An address with an addon ID in its path (e.g. /stremio/00000000-0000-
+        // 4000-8000-000000000000/<encrypted>/manifest.json, AIOStreams-style) is
+        // identified by that ID: the encrypted part beside it can change while it
+        // is still the same addon. Every other address is identified by the whole
+        // address, canonicalized. (It used to be the last path segment - which is
+        // "manifest.json" for nearly every addon, so Cinemeta, Torrentio and
+        // OpenSubtitles all looked like the same addon and only the count was
+        // ever compared.)
+        let url = addon?.transportUrl || addon?.manifestUrl || addon?.url || "";
+        try {
+            const urlObj = new URL(url);
+            const pathParts = urlObj.pathname.split("/").filter(Boolean);
+            const uuidMatch = pathParts.find((part) =>
+                /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(part)
+            );
+            url = uuidMatch || normalizeUrl(url);
+        } catch {
+            url = normalizeUrl(url);
+        }
+
+        // ID-only identity, same as urlOnly mode above (not a deep manifest diff).
+        // A prior version compared the full manifest JSON here, which meant
+        // "Synced" for a Stremio user depended on the DB's *cached* manifest
+        // copy being byte-identical to what's actually installed - but that
+        // cache gets silently refreshed by the background addon health checker
+        // (reloadAddon) independent of anything the admin did, flipping the
+        // status to "Unsynced" for changes the user never needs to act on.
+        // Sync status should answer "does this user have the right set of
+        // addons", not "is our manifest cache stale" - the full manifest
+        // content is still what actually gets pushed during a real sync, this
+        // only affects what counts as already-synced for status/skip purposes.
+        return url;
+    };
 }
 
 module.exports = {
-  invalidateSyncStatus,
-  staleManifestKeys,
-  appendTraxAddon,
-  getUserAddons,
-  getDesiredAddons,
-  presentGroupAddon,
-  createGetUserSyncStatus,
-  createGetGroupSyncStatus,
-  computeUserSyncPlan,
-  createManifestFingerprint,
-}
-
-
+    appendTraxAddon,
+    computeUserSyncPlan,
+    createGetGroupSyncStatus,
+    createGetUserSyncStatus,
+    createManifestFingerprint,
+    getDesiredAddons,
+    getUserAddons,
+    invalidateSyncStatus,
+    presentGroupAddon,
+    staleManifestKeys,
+};

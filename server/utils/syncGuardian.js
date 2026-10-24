@@ -33,144 +33,218 @@
  *    confirmed synced again (whether via a manual resync or the drift
  *    resolving itself).
  */
-const { createNotification } = require('./notificationStore')
+const { createNotification } = require("./notificationStore");
 
-const CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-let timer = null
+let timer = null;
 
 async function checkAccount(prisma, accountId, deps) {
-  const { getAccountId, decrypt, parseAddonIds, parseProtectedAddons, getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient, createProvider } = deps
-  const { createGetUserSyncStatus } = require('./sync')
-  const { notifyPushForType } = require('./pushNotifications')
-  const getUserSyncStatus = createGetUserSyncStatus({
-    prisma, getAccountId, decrypt, parseAddonIds, parseProtectedAddons,
-    getDecryptedManifestUrl, canonicalizeManifestUrl, StremioAPIClient, createProvider,
-  })
-  const req = { appAccountId: accountId, headers: {}, body: {} }
+    const {
+        getAccountId,
+        decrypt,
+        parseAddonIds,
+        parseProtectedAddons,
+        getDecryptedManifestUrl,
+        canonicalizeManifestUrl,
+        StremioAPIClient,
+        createProvider,
+    } = deps;
+    const { createGetUserSyncStatus } = require("./sync");
+    const { notifyPushForType } = require("./pushNotifications");
+    const getUserSyncStatus = createGetUserSyncStatus({
+        canonicalizeManifestUrl,
+        createProvider,
+        decrypt,
+        getAccountId,
+        getDecryptedManifestUrl,
+        parseAddonIds,
+        parseProtectedAddons,
+        prisma,
+        StremioAPIClient,
+    });
+    const req = { appAccountId: accountId, body: {}, headers: {} };
 
-  const users = await prisma.user.findMany({
-    where: { accountId, isActive: true },
-    select: { id: true, username: true, stremioAuthKey: true, nuvioRefreshToken: true, nuvioUserId: true, providerType: true, isActive: true, excludedAddons: true, protectedAddons: true, accountId: true, guardStateJson: true },
-  })
-  if (users.length === 0) return
-
-  const groups = await prisma.group.findMany({ where: { accountId }, select: { userIds: true } })
-  const groupedUserIds = new Set()
-  for (const g of groups) {
-    let ids = []
-    try { ids = JSON.parse(g.userIds || '[]') } catch {}
-    for (const id of ids) groupedUserIds.add(id)
-  }
-
-  for (const user of users) {
-    const hasCredentials = !!(user.stremioAuthKey || (user.nuvioRefreshToken && user.nuvioUserId))
-    if (!hasCredentials || !groupedUserIds.has(user.id)) continue
-
-    // Account Guard rides this same pass: checkUser fetches the live addon
-    // collection once, attributes any change SlickSync didn't write (with a
-    // diff), and hands the collection back so getUserSyncStatus below doesn't
-    // fetch it a second time. One provider call serves both detectors.
-    let guard = { verdict: 'skipped', liveAddons: null, external: null }
-    try {
-      const { checkUser } = require('./accountGuard')
-      guard = await checkUser(prisma, user, req, deps)
-    } catch (e) {
-      console.warn('[SyncGuardian] guard check failed:', e?.message)
+    const users = await prisma.user.findMany({
+        select: {
+            accountId: true,
+            excludedAddons: true,
+            guardStateJson: true,
+            id: true,
+            isActive: true,
+            nuvioRefreshToken: true,
+            nuvioUserId: true,
+            protectedAddons: true,
+            providerType: true,
+            stremioAuthKey: true,
+            username: true,
+        },
+        where: { accountId, isActive: true },
+    });
+    if (users.length === 0) {
+        return;
     }
 
-    let status
-    try {
-      status = await getUserSyncStatus(user.id, Array.isArray(guard.liveAddons) ? { _prefetchedUserAddons: guard.liveAddons } : {}, req)
-    } catch {
-      continue
-    }
-    if (!status || status.status === 'error' || status.status === 'connect') continue
-
-    const dedupeKey = `sync-guardian-${user.id}`
-    const state = await prisma.userSyncGuardState
-      .findUnique({ where: { accountId_userId: { accountId, userId: user.id } } })
-      .catch(() => null)
-
-    let driftNotifiedThisPass = false
-    if (state && state.wasSynced === true && status.isSynced === false) {
-      driftNotifiedThisPass = true
-      // When Account Guard attributed the change, name exactly what happened
-      // instead of the generic drift text - same notification row either way
-      // (the dedupeKey keeps the Health board's incident listing and the
-      // self-heal delete below working unchanged).
-      const ext = guard.external
-      const bits = []
-      if (ext?.added?.length) bits.push(`${ext.added.length} addon${ext.added.length === 1 ? '' : 's'} added`)
-      if (ext?.removed?.length) bits.push(`${ext.removed.length} removed`)
-      await createNotification(prisma, accountId, {
-        type: 'sync',
-        title: 'Addons changed outside SlickSync',
-        body: ext
-          ? `${user.username}'s ${ext.provider === 'nuvio' ? 'Nuvio' : 'Stremio'} account was changed outside SlickSync (${bits.join(', ') || 'addon set changed'}) - likely another signed-in session. Re-assert or accept it on the Users page.`
-          : `${user.username}'s addons no longer match its group - something outside SlickSync (likely another signed-in Stremio/Nuvio session) changed them. Resync to restore.`,
-        url: `/users/${user.id}`,
-        dedupeKey,
-      })
-      try {
-        await notifyPushForType(prisma, accountId, 'notifyOnSync', {
-          title: 'Sync drift detected',
-          body: `${user.username} reverted to Unsynced outside SlickSync`,
-          icon: '/android-chrome-192x192.png',
-          url: `/users/${user.id}`,
-        })
-      } catch {}
-      // Fired on the same synced -> unsynced edge as the alert above, so a
-      // rule can't repeat while the user stays drifted (the wasSynced state
-      // row below is what makes this an edge rather than a level).
-      try {
-        const { emitAutomationEvent } = require('./automation/engine')
-        await emitAutomationEvent(prisma, accountId, 'user.sync_reverted', {
-          username: user.username,
-          userId: user.id,
-          providerType: user.providerType,
-        })
-      } catch { /* emit never throws; guarding the require itself */ }
-    } else if (status.isSynced === true) {
-      // Self-heal: confirmed synced again - clear any standing drift alert,
-      // and the Account Guard's own bell rows for this user with it (a
-      // confirmed re-sync recorded a fresh baseline, so the alarm is over).
-      await prisma.notification.deleteMany({ where: { accountId, dedupeKey } }).catch(() => {})
-      await prisma.notification.deleteMany({ where: { accountId, dedupeKey: { startsWith: `guard:${user.id}:` } } }).catch(() => {})
+    const groups = await prisma.group.findMany({ select: { userIds: true }, where: { accountId } });
+    const groupedUserIds = new Set();
+    for (const g of groups) {
+        let ids = [];
+        try {
+            ids = JSON.parse(g.userIds || "[]");
+        } catch {
+            // Malformed optional data leaves the existing fallback in place.
+        }
+        for (const id of ids) {
+            groupedUserIds.add(id);
+        }
     }
 
-    // A foreign write the drift edge above didn't cover (the user was already
-    // unsynced, or the outside change coincidentally still matches the
-    // desired set): the guard raises its own alert - once per distinct
-    // foreign state, and never doubled with the drift notification.
-    if (guard.verdict === 'alerted' && guard.external && !driftNotifiedThisPass) {
-      try {
-        const { dispatchAlert } = require('./accountGuard')
-        await dispatchAlert(prisma, accountId, user, guard.external)
-      } catch (e) {
-        console.warn('[SyncGuardian] guard alert dispatch failed:', e?.message)
-      }
-    }
+    for (const user of users) {
+        const hasCredentials = !!(
+            user.stremioAuthKey ||
+            (user.nuvioRefreshToken && user.nuvioUserId)
+        );
+        if (!(hasCredentials && groupedUserIds.has(user.id))) {
+            continue;
+        }
 
-    await prisma.userSyncGuardState.upsert({
-      where: { accountId_userId: { accountId, userId: user.id } },
-      create: { accountId, userId: user.id, wasSynced: status.isSynced, lastCheckedAt: new Date() },
-      update: { wasSynced: status.isSynced, lastCheckedAt: new Date() },
-    })
-  }
+        // Account Guard rides this same pass: checkUser fetches the live addon
+        // collection once, attributes any change SlickSync didn't write (with a
+        // diff), and hands the collection back so getUserSyncStatus below doesn't
+        // fetch it a second time. One provider call serves both detectors.
+        let guard = { external: null, liveAddons: null, verdict: "skipped" };
+        try {
+            const { checkUser } = require("./accountGuard");
+            guard = await checkUser(prisma, user, req, deps);
+        } catch (e) {
+            console.warn("[SyncGuardian] guard check failed:", e?.message);
+        }
+
+        let status;
+        try {
+            status = await getUserSyncStatus(
+                user.id,
+                Array.isArray(guard.liveAddons) ? { _prefetchedUserAddons: guard.liveAddons } : {},
+                req
+            );
+        } catch {
+            continue;
+        }
+        if (!status || status.status === "error" || status.status === "connect") {
+            continue;
+        }
+
+        const dedupeKey = `sync-guardian-${user.id}`;
+        const state = await prisma.userSyncGuardState
+            .findUnique({ where: { accountId_userId: { accountId, userId: user.id } } })
+            .catch(() => null);
+
+        let driftNotifiedThisPass = false;
+        if (state && state.wasSynced === true && status.isSynced === false) {
+            driftNotifiedThisPass = true;
+            // When Account Guard attributed the change, name exactly what happened
+            // instead of the generic drift text - same notification row either way
+            // (the dedupeKey keeps the Health board's incident listing and the
+            // self-heal delete below working unchanged).
+            const ext = guard.external;
+            const bits = [];
+            if (ext?.added?.length) {
+                bits.push(`${ext.added.length} addon${ext.added.length === 1 ? "" : "s"} added`);
+            }
+            if (ext?.removed?.length) {
+                bits.push(`${ext.removed.length} removed`);
+            }
+            await createNotification(prisma, accountId, {
+                body: ext
+                    ? `${user.username}'s ${ext.provider === "nuvio" ? "Nuvio" : "Stremio"} account was changed outside SlickSync (${bits.join(", ") || "addon set changed"}) - likely another signed-in session. Re-assert or accept it on the Users page.`
+                    : `${user.username}'s addons no longer match its group - something outside SlickSync (likely another signed-in Stremio/Nuvio session) changed them. Resync to restore.`,
+                dedupeKey,
+                title: "Addons changed outside SlickSync",
+                type: "sync",
+                url: `/users/${user.id}`,
+            });
+            try {
+                await notifyPushForType(prisma, accountId, "notifyOnSync", {
+                    body: `${user.username} reverted to Unsynced outside SlickSync`,
+                    icon: "/android-chrome-192x192.png",
+                    title: "Sync drift detected",
+                    url: `/users/${user.id}`,
+                });
+            } catch {
+                // Unavailable optional records leave the current result in place.
+            }
+            // Fired on the same synced -> unsynced edge as the alert above, so a
+            // rule can't repeat while the user stays drifted (the wasSynced state
+            // row below is what makes this an edge rather than a level).
+            try {
+                const { emitAutomationEvent } = require("./automation/engine");
+                await emitAutomationEvent(prisma, accountId, "user.sync_reverted", {
+                    providerType: user.providerType,
+                    userId: user.id,
+                    username: user.username,
+                });
+            } catch {
+                /* emit never throws; guarding the require itself */
+            }
+        } else if (status.isSynced === true) {
+            // Self-heal: confirmed synced again - clear any standing drift alert,
+            // and the Account Guard's own bell rows for this user with it (a
+            // confirmed re-sync recorded a fresh baseline, so the alarm is over).
+            await prisma.notification
+                .deleteMany({ where: { accountId, dedupeKey } })
+                .catch(() => undefined);
+            await prisma.notification
+                .deleteMany({
+                    where: { accountId, dedupeKey: { startsWith: `guard:${user.id}:` } },
+                })
+                .catch(() => undefined);
+        }
+
+        // A foreign write the drift edge above didn't cover (the user was already
+        // unsynced, or the outside change coincidentally still matches the
+        // desired set): the guard raises its own alert - once per distinct
+        // foreign state, and never doubled with the drift notification.
+        if (guard.verdict === "alerted" && guard.external && !driftNotifiedThisPass) {
+            try {
+                const { dispatchAlert } = require("./accountGuard");
+                await dispatchAlert(prisma, accountId, user, guard.external);
+            } catch (e) {
+                console.warn("[SyncGuardian] guard alert dispatch failed:", e?.message);
+            }
+        }
+
+        await prisma.userSyncGuardState.upsert({
+            create: {
+                accountId,
+                lastCheckedAt: new Date(),
+                userId: user.id,
+                wasSynced: status.isSynced,
+            },
+            update: { lastCheckedAt: new Date(), wasSynced: status.isSynced },
+            where: { accountId_userId: { accountId, userId: user.id } },
+        });
+    }
 }
 
 function scheduleSyncGuardian(prisma, deps, accountId) {
-  if (timer) { clearInterval(timer); timer = null }
-  const run = () => {
-    checkAccount(prisma, accountId, deps).catch((e) => console.warn('[SyncGuardian] check failed:', e?.message))
-  }
-  run()
-  timer = setInterval(run, CHECK_INTERVAL_MS)
+    if (timer) {
+        clearInterval(timer);
+        timer = null;
+    }
+    const run = () => {
+        checkAccount(prisma, accountId, deps).catch((e) =>
+            console.warn("[SyncGuardian] check failed:", e?.message)
+        );
+    };
+    run();
+    timer = setInterval(run, CHECK_INTERVAL_MS);
 }
 
 function clearSyncGuardian() {
-  if (timer) { clearInterval(timer); timer = null }
+    if (timer) {
+        clearInterval(timer);
+        timer = null;
+    }
 }
 
-module.exports = { scheduleSyncGuardian, clearSyncGuardian, checkAccount }
+module.exports = { checkAccount, clearSyncGuardian, scheduleSyncGuardian };

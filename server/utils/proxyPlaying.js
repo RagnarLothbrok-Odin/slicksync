@@ -29,17 +29,25 @@
  * proxyNowPlaying.js (Now Playing) and watchSyncMismatch.js (the mismatch
  * warning).
  */
-const MIN_PLAYING_SECONDS = 45
-const MANY_REQUESTS = 20
+const MIN_PLAYING_SECONDS = 45;
+const MANY_REQUESTS = 20;
 
 /** conn: a ProxyStreamSession row ({ requestCount, startTime, lastSeenAt }) or a polled stream ({ requests, startedAt, lastSeenAt }). */
 function isPlayingConnection(conn) {
-  if (!conn || typeof conn !== 'object') return false
-  const requests = Number(conn.requestCount ?? conn.requests ?? 0)
-  if (requests >= MANY_REQUESTS) return true
-  const start = new Date(conn.startTime ?? conn.startedAt).getTime()
-  const last = new Date(conn.lastSeenAt ?? conn.startTime ?? conn.startedAt).getTime()
-  return Number.isFinite(start) && Number.isFinite(last) && last - start >= MIN_PLAYING_SECONDS * 1000
+    if (!conn || typeof conn !== "object") {
+        return false;
+    }
+    const requests = Number(conn.requestCount ?? conn.requests ?? 0);
+    if (requests >= MANY_REQUESTS) {
+        return true;
+    }
+    const start = new Date(conn.startTime ?? conn.startedAt).getTime();
+    const last = new Date(conn.lastSeenAt ?? conn.startTime ?? conn.startedAt).getTime();
+    return (
+        Number.isFinite(start) &&
+        Number.isFinite(last) &&
+        last - start >= MIN_PLAYING_SECONDS * 1000
+    );
 }
 
-module.exports = { MIN_PLAYING_SECONDS, MANY_REQUESTS, isPlayingConnection }
+module.exports = { isPlayingConnection, MANY_REQUESTS, MIN_PLAYING_SECONDS };

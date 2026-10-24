@@ -27,29 +27,39 @@
  * @returns {Set<string>} userIds that share their email with another user
  */
 function findSharedEmailUserIds(users) {
-  const byEmail = new Map()
-  for (const u of users) {
-    const email = (u.email || '').trim().toLowerCase()
-    if (!email) continue
-    if (!byEmail.has(email)) byEmail.set(email, [])
-    byEmail.get(email).push(u.id)
-  }
-  const shared = new Set()
-  for (const ids of byEmail.values()) {
-    if (ids.length > 1) for (const id of ids) shared.add(id)
-  }
-  // People on a Nuvio profile other than the main one share the main
-  // person's email but are somebody else. Their rows that say which profile
-  // they were watched under are their own viewing, never a copy - see
-  // isIndependentRow below. Older rows without a profile are still treated
-  // as possible copies, because before profiles were scoped every person on
-  // the account recorded every profile.
-  shared.profilePeople = new Set(users.filter((u) => Number(u.nuvioProfileId) > 1).map((u) => u.id))
-  return shared
+    const byEmail = new Map();
+    for (const u of users) {
+        const email = (u.email || "").trim().toLowerCase();
+        if (!email) {
+            continue;
+        }
+        if (!byEmail.has(email)) {
+            byEmail.set(email, []);
+        }
+        byEmail.get(email).push(u.id);
+    }
+    const shared = new Set();
+    for (const ids of byEmail.values()) {
+        if (ids.length > 1) {
+            for (const id of ids) {
+                shared.add(id);
+            }
+        }
+    }
+    // People on a Nuvio profile other than the main one share the main
+    // person's email but are somebody else. Their rows that say which profile
+    // they were watched under are their own viewing, never a copy - see
+    // isIndependentRow below. Older rows without a profile are still treated
+    // as possible copies, because before profiles were scoped every person on
+    // the account recorded every profile.
+    shared.profilePeople = new Set(
+        users.filter((u) => Number(u.nuvioProfileId) > 1).map((u) => u.id)
+    );
+    return shared;
 }
 
 function isIndependentRow(row, sharedEmailUserIds) {
-  return !!(row.profileLabel && sharedEmailUserIds.profilePeople && sharedEmailUserIds.profilePeople.has(row.userId))
+    return !!(row.profileLabel && sharedEmailUserIds.profilePeople?.has(row.userId));
 }
 
 /**
@@ -80,51 +90,69 @@ function isIndependentRow(row, sharedEmailUserIds) {
  * @param {{ itemKey?: (row: any) => string, dateField?: string, durationField?: string }} [opts]
  */
 function dedupWatchActivityBySharedEmail(rows, sharedEmailUserIds, opts = {}) {
-  if (!sharedEmailUserIds || sharedEmailUserIds.size === 0) return rows
-
-  const itemKey = opts.itemKey || ((r) => r.itemId)
-  const dateField = opts.dateField || 'date'
-  const durationField = opts.durationField || 'watchTimeSeconds'
-  // Watch time is only labelled with its profile from the version that
-  // scoped profiles, so a labelled row is never an old copy. History rows
-  // were always labelled, copies included, so they opt out.
-  const independent = opts.independentProfiles === false ? () => false : (r) => isIndependentRow(r, sharedEmailUserIds)
-
-  // Group by (item, day-bucket) and separate shared-email rows from the
-  // rest. Only the shared-email group needs a decision; unshared users
-  // pass through untouched.
-  const dayKey = (r) => {
-    const d = new Date(r[dateField])
-    return `${itemKey(r)}::${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`
-  }
-  const groups = new Map()
-  for (const r of rows) {
-    const k = dayKey(r)
-    if (!groups.has(k)) groups.set(k, [])
-    groups.get(k).push(r)
-  }
-
-  const kept = []
-  for (const group of groups.values()) {
-    // Split into shared-email rows vs the rest.
-    const shared = group.filter((r) => sharedEmailUserIds.has(r.userId) && !independent(r))
-    const rest = group.filter((r) => !sharedEmailUserIds.has(r.userId) || independent(r))
-    kept.push(...rest)
-
-    if (shared.length === 0) continue
-
-    // Sum shared-email rows per user; keep only the user with the max sum.
-    const sums = new Map()
-    for (const r of shared) sums.set(r.userId, (sums.get(r.userId) || 0) + (r[durationField] || 0))
-    let winner = null
-    let winnerSum = -1
-    for (const [uid, s] of sums) {
-      if (s > winnerSum) { winner = uid; winnerSum = s }
+    if (!sharedEmailUserIds || sharedEmailUserIds.size === 0) {
+        return rows;
     }
-    for (const r of shared) if (r.userId === winner) kept.push(r)
-  }
 
-  return kept
+    const itemKey = opts.itemKey || ((r) => r.itemId);
+    const dateField = opts.dateField || "date";
+    const durationField = opts.durationField || "watchTimeSeconds";
+    // Watch time is only labelled with its profile from the version that
+    // scoped profiles, so a labelled row is never an old copy. History rows
+    // were always labelled, copies included, so they opt out.
+    const independent =
+        opts.independentProfiles === false
+            ? () => false
+            : (r) => isIndependentRow(r, sharedEmailUserIds);
+
+    // Group by (item, day-bucket) and separate shared-email rows from the
+    // rest. Only the shared-email group needs a decision; unshared users
+    // pass through untouched.
+    const dayKey = (r) => {
+        const d = new Date(r[dateField]);
+        return `${itemKey(r)}::${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+    };
+    const groups = new Map();
+    for (const r of rows) {
+        const k = dayKey(r);
+        if (!groups.has(k)) {
+            groups.set(k, []);
+        }
+        groups.get(k).push(r);
+    }
+
+    const kept = [];
+    for (const group of groups.values()) {
+        // Split into shared-email rows vs the rest.
+        const shared = group.filter((r) => sharedEmailUserIds.has(r.userId) && !independent(r));
+        const rest = group.filter((r) => !sharedEmailUserIds.has(r.userId) || independent(r));
+        kept.push(...rest);
+
+        if (shared.length === 0) {
+            continue;
+        }
+
+        // Sum shared-email rows per user; keep only the user with the max sum.
+        const sums = new Map();
+        for (const r of shared) {
+            sums.set(r.userId, (sums.get(r.userId) || 0) + (r[durationField] || 0));
+        }
+        let winner = null;
+        let winnerSum = -1;
+        for (const [uid, s] of sums) {
+            if (s > winnerSum) {
+                winner = uid;
+                winnerSum = s;
+            }
+        }
+        for (const r of shared) {
+            if (r.userId === winner) {
+                kept.push(r);
+            }
+        }
+    }
+
+    return kept;
 }
 
-module.exports = { findSharedEmailUserIds, dedupWatchActivityBySharedEmail }
+module.exports = { dedupWatchActivityBySharedEmail, findSharedEmailUserIds };
