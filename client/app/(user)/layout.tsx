@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { PersonalPageHint } from '@/components/user/PersonalPageHint';
 import { PersonalPreferencesProvider } from '@/components/user/PersonalPreferences';
 import { UserAuthProvider } from '@/lib/hooks/useUserAuth';
 import { UserAuthGate } from '@/components/user/UserAuthGate';
@@ -67,7 +68,7 @@ export default function UserLayout({
             {/* The collapsed nav opens inside the bar, so nothing locks the page
                 behind it the way the old side drawer did. */}
             <PersonTopbar />
-            <UserPageContainer>
+            <UserPageContainer><PersonalPageHint />
               {children}
             </UserPageContainer>
           </div>

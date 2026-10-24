@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
 import { useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { personalRequest, type PersonalPreferences } from '@/lib/user-api';
 import { toast } from '@/components/ui/Toast';
@@ -10,6 +10,8 @@ const Context = createContext<{ preferences: PersonalPreferences; ready: boolean
 
 export function PersonalPreferencesProvider({ children }: { children: ReactNode }) {
   const { userId, authKey, isReady } = useUserAuthHeaders();
+  const identity = useRef({ userId, authKey });
+  identity.current = { userId, authKey };
   const [preferences, setPreferences] = useState(defaults);
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -17,7 +19,7 @@ export function PersonalPreferencesProvider({ children }: { children: ReactNode 
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let active = true;
-    setReady(false); setPreferences(defaults); setError(null);
+    setReady(false); setSaving(false); setPreferences(defaults); setError(null);
     if (isReady && userId && authKey) personalRequest<PersonalPreferences>(userId, authKey, '/preferences')
       .then(value => { if (active) { setPreferences(value); setReady(true); } })
       .catch(() => { if (active) setError('Could not load your display preferences.'); });
@@ -28,10 +30,9 @@ export function PersonalPreferencesProvider({ children }: { children: ReactNode 
     setSaving(true);
     try {
       const next = await personalRequest<PersonalPreferences>(userId, authKey, '/preferences', { method: 'PATCH', body: JSON.stringify({ preferences: { ...preferences, ...patch } }) });
-      setPreferences(next);
-      toast.success('Saved');
-    } catch { toast.error('Could not save your display preferences'); }
-    finally { setSaving(false); }
+      if (identity.current.userId === userId && identity.current.authKey === authKey) { setPreferences(next); toast.success('Saved'); }
+    } catch { if (identity.current.userId === userId && identity.current.authKey === authKey) toast.error('Could not save your display preferences'); }
+    finally { if (identity.current.userId === userId && identity.current.authKey === authKey) setSaving(false); }
   }, [ready, saving, userId, authKey, preferences]);
   return <Context.Provider value={{ preferences, ready, saving, error, reload: () => setRevision(value => value + 1), save }}>{children}</Context.Provider>;
 }

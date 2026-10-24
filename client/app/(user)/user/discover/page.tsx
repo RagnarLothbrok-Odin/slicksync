@@ -38,6 +38,7 @@ export default function PersonalDiscoverPage() {
   const [detailError, setDetailError] = useState('');
   const [saving, setSaving] = useState(false);
   const [trailer, setTrailer] = useState(false);
+  const [explicitTrailer, setExplicitTrailer] = useState(false);
   const [attribution, setAttribution] = useState('');
   // A generation pins pagination to its filters. Late pages never append to
   // a newer search, and double taps cannot request the same cursor twice.
@@ -77,7 +78,7 @@ export default function PersonalDiscoverPage() {
     finally { if (version === generation.current) { paging.current = false; setBusy(false); } }
   };
   useEffect(() => {
-    let active = true; setDetails(null); setState(null); setDetailError(''); setTrailer(false);
+    let active = true; setDetails(null); setState(null); setDetailError(''); setTrailer(false); setExplicitTrailer(false);
     if (selected && userId && authKey) personalRequest<{ metadata: Details | null; state: TitleState | null }>(userId, authKey, `/discover/titles/${selected.id}?type=${selected.type}`)
       .then(data => { if (active) { setDetails(data.metadata); setState(data.state || { itemId: selected.id, itemType: selected.type, name: selected.name, poster: selected.poster, saved: false, reaction: null }); if (!data.metadata) setDetailError('Details are unavailable right now.'); setTrailer(preferences.autoplayTrailer); } })
       .catch(() => { if (active) setDetailError('Could not load this title. Close it and try again.'); });
@@ -106,7 +107,7 @@ export default function PersonalDiscoverPage() {
   }, [items, sort]);
   const trailerId = details?.trailers.find(id => /^[\w-]{11}$/.test(id));
   return <div className="pt-6 pb-8"><UserPageHeader title="Discover" subtitle="Find your next favourite." />
-    {preferences.beginnerMode && <Card padding="md" className="mb-5"><p className="text-sm text-muted">Browse or search, then open a poster for details. Save titles to your personal watchlist. Your likes and dislikes are private to this account.</p></Card>}
+
     <div className="flex gap-2 mb-5" role="group" aria-label="Discover view"><Button size="sm" variant={lens === 'browse' ? 'primary' : 'secondary'} onClick={() => setLens('browse')}>Browse</Button><Button size="sm" variant={lens === 'saved' ? 'primary' : 'secondary'} onClick={() => setLens('saved')}>My watchlist</Button></div>
     {lens === 'browse' && <Card padding="lg" className="mb-6"><label className="sr-only" htmlFor="discover-search">Search titles</label><input id="discover-search" className="input-base w-full px-4 py-3 text-sm mb-4" placeholder="Search movies and shows" value={query} onChange={event => setQuery(event.target.value)} />
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">{[
@@ -130,7 +131,7 @@ export default function PersonalDiscoverPage() {
       {!details && !detailError && <p role="status" className="text-sm text-muted">Loading details...</p>}
       {details && <><p className="text-xs text-muted">{[details.runtime, details.imdbRating ? `IMDb ${details.imdbRating}` : null, ...details.genres].filter(Boolean).join(' · ')}</p><p className="text-sm text-default leading-relaxed">{details.description || 'No description available.'}</p>
         {details.cast.length > 0 && <div><h3 className="text-sm font-medium text-default mb-2">Cast</h3><p className="text-sm text-muted">{details.cast.slice(0, 12).map(person => person.character ? `${person.name} (${person.character})` : person.name).join(', ')}</p></div>}
-        {trailerId && <div>{trailer ? <iframe title={`${selected?.name} trailer`} className="w-full aspect-video rounded-xl" src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1&mute=${preferences.trailerSound ? 0 : 1}`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : <Button variant="secondary" size="sm" onClick={() => setTrailer(true)}>Play trailer</Button>}</div>}
+        {trailerId && <div>{trailer ? <iframe title={`${selected?.name} trailer`} className="w-full aspect-video rounded-xl" src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1&mute=${explicitTrailer || preferences.trailerSound ? 0 : 1}`} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : <Button variant="secondary" size="sm" onClick={() => { setExplicitTrailer(true); setTrailer(true); }}>Play trailer</Button>}</div>}
       </>}
       {state && <div className="flex flex-wrap gap-2 pt-4 border-t border-default"><Button size="sm" variant={state.saved ? 'primary' : 'secondary'} disabled={saving} onClick={() => change({ saved: !state.saved })} leftIcon={<BookmarkIcon className="w-4 h-4" />}>{state.saved ? 'Saved to watchlist' : 'Save to watchlist'}</Button><Button size="sm" variant={state.reaction === 'like' ? 'primary' : 'secondary'} disabled={saving} aria-pressed={state.reaction === 'like'} onClick={() => change({ reaction: state.reaction === 'like' ? null : 'like' })} leftIcon={<HandThumbUpIcon className="w-4 h-4" />}>Like</Button><Button size="sm" variant={state.reaction === 'dislike' ? 'primary' : 'secondary'} disabled={saving} aria-pressed={state.reaction === 'dislike'} onClick={() => change({ reaction: state.reaction === 'dislike' ? null : 'dislike' })} leftIcon={<HandThumbDownIcon className="w-4 h-4" />}>Dislike</Button></div>}
       {provider === 'stremio' && selected && <a href={`stremio:///detail/${selected.type}/${selected.id}`} className="inline-block text-sm text-primary">Open in Stremio</a>}

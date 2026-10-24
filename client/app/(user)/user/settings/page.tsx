@@ -38,19 +38,20 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
 import { AvatarPickerModal } from '@/components/modals/AvatarPickerModal';
 
 const PERSONAL_SECTIONS = [
-  { key: 'general', label: 'General', icon: UserCircleIcon, group: 'Your experience', blurb: 'Profile, privacy, and sharing', keywords: 'avatar picture profile visibility public stats export' },
+  { key: 'general', label: 'General', icon: UserCircleIcon, group: 'Your experience', blurb: 'Profile, privacy, and sharing', keywords: 'avatar picture profile visibility public stats export display beginner private sensitive poster ratings trailer autoplay sound' },
   { key: 'sync', label: 'Sync', icon: ArrowPathIcon, group: 'Your setup', blurb: 'Your connection and next sync', keywords: 'sync status preview addons connection' },
-  { key: 'history', label: 'History', icon: ClipboardDocumentIcon, group: 'Your setup', blurb: 'Bring your watch history with you', keywords: 'import history csv trakt json' },
-  { key: 'about', label: 'Help & About', icon: GlobeAltIcon, group: 'Your experience', blurb: 'Guides, privacy, and credits', keywords: 'help about guides credits data privacy' },
+  { key: 'history', label: 'History', icon: ClipboardDocumentIcon, group: 'Your setup', blurb: 'Bring your watch history with you', keywords: 'import history csv trakt json export download restore' },
   { key: 'themes', label: 'Themes', icon: PaintBrushIcon, group: 'Your experience', blurb: 'Make SlickSync feel like home', keywords: 'appearance colours color dark light theme' },
-  { key: 'notifications', label: 'Notifications', icon: BellIcon, group: 'Your experience', blurb: 'Push, watch alerts, and Discord', keywords: 'webhook alerts watch notifications push discord' },
+  { key: 'notifications', label: 'Notifications', icon: BellIcon, group: 'Your experience', blurb: 'Push, watch alerts, and Discord', keywords: 'webhook alerts watch notifications push discord devices rename revoke' },
   { key: 'integrations', label: 'Integrations', icon: KeyIcon, group: 'Your setup', blurb: 'Connect your apps', keywords: 'api key rotate integrations' },
   { key: 'security', label: 'Security', icon: ShieldCheckIcon, group: 'Your setup', blurb: 'Manage your account', keywords: 'delete account security' },
+  { key: 'about', label: 'Help & About', icon: GlobeAltIcon, group: 'Your experience', blurb: 'Guides, privacy, and credits', keywords: 'help about guides credits data privacy version support' },
 ] as const;
 
 export default function UserSettingsPage() {
   const [activeSection, setActiveSection] = useState<typeof PERSONAL_SECTIONS[number]['key']>('general');
   const [settingsQuery, setSettingsQuery] = useState('');
+  useEffect(() => { const section = new URLSearchParams(window.location.search).get('section'); if (PERSONAL_SECTIONS.some(item => item.key === section)) setActiveSection(section as typeof PERSONAL_SECTIONS[number]['key']); }, []);
   const currentSection = PERSONAL_SECTIONS.find(section => section.key === activeSection)!;
   const matches = PERSONAL_SECTIONS.filter(section => `${section.label} ${section.blurb} ${section.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()));
   const { preferences } = usePersonalPreferences();

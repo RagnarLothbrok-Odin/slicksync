@@ -8,7 +8,8 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
   // Resolve the credential before every operation, including uploaded files.
   router.use(async (req, res, next) => {
     try {
-      req.person = await personAsking(req, req.query.userId || req.body?.userId)
+      const person = await personAsking(req, req.query.userId || req.body?.userId)
+      Object.assign(req, { person })
       next()
     } catch (error) { res.status(error.status || 401).json({ error: 'Please sign in to your own account again.' }) }
   })
@@ -31,8 +32,8 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
   router.patch('/preferences', handle(async (req, res) => {
     const patch = req.body.preferences
     if (!patch || Object.keys(patch).some(key => !Object.hasOwn(PREFERENCES, key) || typeof patch[key] !== 'boolean')) return res.status(400).json({ error: 'Invalid display preferences' })
-    // The client sends the full preference object so unrelated partial saves
-    // cannot overwrite one another after a delayed response.
+    // Require a complete, typed snapshot; household configuration is never
+    // writable through the personal preference endpoint.
     if (Object.keys(patch).length !== Object.keys(PREFERENCES).length) return res.status(400).json({ error: 'Send all display preferences' })
     await prisma.user.update({ where: { id: req.person.id }, data: { portalPreferences: JSON.stringify(patch) } })
     res.json(patch)
