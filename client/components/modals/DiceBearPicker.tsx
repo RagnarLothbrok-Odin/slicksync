@@ -18,12 +18,13 @@ export function DiceBearPicker({ name, initialUrl, onChange }: {
   const [styles, setStyles] = useState<string[]>([...DICEBEAR_STYLES]);
   const [style, setStyle] = useState(saved?.style || 'notionists');
   const [seed, setSeed] = useState(saved?.seed || md5(`slicksync-picker:${name}`).toString());
-  const [anchorSeed] = useState(seed);
+  const [anchorSeed, setAnchorSeed] = useState(seed);
   const [background, setBackground] = useState(saved?.background || '');
   const [choosingStyle, setChoosingStyle] = useState(!saved);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
-  const [supportsBackground, setSupportsBackground] = useState(false);
+  const [capabilities, setCapabilities] = useState<{ style: string; background: boolean } | null>(null);
+  const supportsBackground = capabilities?.style === style && capabilities.background;
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
@@ -39,9 +40,8 @@ export function DiceBearPicker({ name, initialUrl, onChange }: {
 
   useEffect(() => {
     const controller = new AbortController();
-    setSupportsBackground(false);
     fetch(`${DICEBEAR_BASE}/${style}/options.json`, { signal: controller.signal }).then(response => response.json()).then(options => {
-      setSupportsBackground(!!options.backgroundColor);
+      setCapabilities({ style, background: !!options.backgroundColor });
     }).catch(() => { /* Keep unsupported controls hidden until capabilities are known. */ });
     return () => controller.abort();
   }, [style]);
@@ -78,12 +78,12 @@ export function DiceBearPicker({ name, initialUrl, onChange }: {
           <div className="flex items-center justify-between gap-2">
             <Button variant="ghost" size="sm" leftIcon={<ArrowLeftIcon className="w-4 h-4" />} onClick={() => setChoosingStyle(true)}>Styles</Button>
             <h3 className="text-base font-semibold text-default">{styleName(style)}</h3>
-            <Button variant="ghost" size="sm" leftIcon={<ArrowPathIcon className="w-4 h-4" />} onClick={() => setPage(value => value + 1)}>More</Button>
+            <Button variant="ghost" size="sm" leftIcon={<ArrowPathIcon className="w-4 h-4" />} onClick={() => { setAnchorSeed(seed); setPage(value => value + 1); }}>More</Button>
           </div>
           <motion.div key={`${style}:${page}`} initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }} className="grid grid-cols-4 gap-2" role="group" aria-label="Avatar characters">
             {[anchorSeed, ...variants.filter(value => value !== anchorSeed)].slice(0, 12).map((value, index) => (
               <button key={value} type="button" aria-label={`Choose avatar ${index + 1}`} aria-pressed={seed === value} onClick={() => setSeed(value)} className={`relative aspect-square rounded-2xl border-2 p-1 transition-colors ${seed === value ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-surface-hover'}`}>
-                <img src={diceBearUrl(style, value, supportsBackground ? background : undefined)} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-full h-full rounded-xl" style={checker} />
+                <img src={diceBearUrl(style, value)} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-full h-full rounded-xl" style={background && background !== 'ffffff00' ? { backgroundColor: `#${background}` } : checker} />
                 {seed === value && <span className="absolute bottom-0 right-0 rounded-full bg-primary p-0.5 text-on-primary"><CheckIcon className="w-3.5 h-3.5" /></span>}
               </button>
             ))}
