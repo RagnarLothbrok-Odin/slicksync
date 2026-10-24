@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express');
 const { signInFromBody, rememberSignIn, jellyfinFields, findJellyfinUser, mountSignInSteps, sendError } = require('../utils/jellyfinConnect');
 const { serverKindLabel } = require('../providers/jellyfinAuth');
@@ -66,6 +67,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup })
 
       const created = await prisma.user.create({
         data: {
+          avatarUrl: createDefaultAvatar(),
           accountId,
           username: finalUsername,
           email,

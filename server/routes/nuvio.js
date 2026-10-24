@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express');
 const { publicMessage } = require('../utils/publicError');
 const { validateNuvioCredentials, refreshNuvioToken, parseJwtPayload, startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin } = require('../providers/nuvioAuth');
@@ -339,6 +340,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt }) => {
       // Create user
       const newUser = await prisma.user.create({
         data: {
+          avatarUrl: createDefaultAvatar(),
           accountId,
           username: finalUsername,
           email: normalizedEmail,

@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('./utils/defaultAvatar')
 // Restart trigger: 2026-01-29 - Refreshing backend state for library cache fixes
 const express = require('express');
 const cors = require('cors');
@@ -68,6 +69,7 @@ async function ensureDefaultAccount(prismaClient) {
     const passwordHash = await bcrypt.hash(defaultPassword, 12)
     await prismaClient.appAccount.create({
       data: {
+        avatarUrl: createDefaultAvatar(),
         id: DEFAULT_ACCOUNT_ID,
         uuid: DEFAULT_ACCOUNT_UUID,
         passwordHash,

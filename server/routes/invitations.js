@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express')
 const { publicMessage } = require('../utils/publicError');
 const crypto = require('crypto')
@@ -459,6 +460,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assig
         // Create the user
         const newUser = await prisma.user.create({
           data: {
+            avatarUrl: createDefaultAvatar(),
             accountId: request.invitation.accountId,
             email: request.email,
             username: request.username,
@@ -1717,6 +1719,7 @@ module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decryp
 
       const newUser = await prisma.user.create({
         data: {
+          avatarUrl: createDefaultAvatar(),
           accountId: invitation.accountId,
           email: email.trim().toLowerCase(),
           username: username.trim(),
