@@ -701,19 +701,15 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
       whileHover={{ y: -4 }}
       className="group relative cursor-pointer"
     >
-      {/* Nuvio profile - a plain static label ABOVE the poster, not on the
-          avatar. Previously a dot on the avatar that opened a popover on
-          tap; that popover was nested inside the poster's own
-          overflow-hidden container, so it visually clipped/cut off no
-          matter how it was sized (confirmed real case). A label outside
-          the poster's bounds, in normal flow, can't be clipped by it. Only
-          shown for a single watcher - the multi-watcher popover below
-          already lists each person's own profile inline. */}
-      {activity.additionalWatchers?.length ? null : activity.profileLabel && (
-        <p className="mb-1 w-fit max-w-full mx-auto px-1.5 py-0.5 rounded-md bg-surface-hover text-[10px] font-medium text-muted truncate text-center">
-          {activity.profileLabel}
-        </p>
-      )}
+      {/* Reserve the profile row even when the provider supplied no label,
+          so posters and titles stay aligned across mixed activity sources. */}
+      <div className="activity-profile-slot h-6 mb-1 flex items-center justify-center min-w-0">
+        {!activity.additionalWatchers?.length && activity.profileLabel && (
+          <p className="w-fit max-w-full px-1.5 py-0.5 rounded-md bg-surface-hover text-[10px] font-medium text-muted truncate text-center">
+            {activity.profileLabel}
+          </p>
+        )}
+      </div>
 
       {/* Poster Card */}
       <div
