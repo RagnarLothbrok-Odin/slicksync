@@ -43,7 +43,7 @@ function findNextEpisode(allEpisodes, lastSeason, lastEpisode) {
 // lastPosition/totalDuration come from WatchSession, which records them from
 // state.timeOffset/state.duration only - the position field that's bounded
 // by the item's own runtime and safe to read at a point in time (see
-// CLAUDE.md on timeOffset vs overallTimeWatched; overallTimeWatched is
+// docs/runtime-behavior.md on timeOffset vs overallTimeWatched; overallTimeWatched is
 // never used here).
 const RESUME_MIN_POSITION_MS = 2 * 60 * 1000
 const RESUME_MAX_RATIO = 0.92

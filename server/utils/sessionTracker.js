@@ -193,7 +193,7 @@ async function sendSessionStartNotification(webhookUrl, session, user) {
  * enough to confirm what stopped and roughly how long it ran. The elapsed
  * time shown here is display-only, never written to any duration/history
  * field - the proxy connection's wall-clock lifetime is not real watch
- * time (see this repo's CLAUDE.md on why durations come from native only).
+ * time (see docs/runtime-behavior.md on why durations come from native only).
  */
 async function sendSessionStopNotification(webhookUrl, session, user) {
   try {
@@ -463,7 +463,7 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
     }
     // state.timeOffset only, never state.overallTimeWatched here - the latter
     // is a lifetime-cumulative counter that can run to absurd values (see the
-    // CLAUDE.md note this file already documents elsewhere), unsafe to treat
+    // docs/runtime-behavior.md note this file already documents elsewhere), unsafe to treat
     // as a single-point-in-time "position" the way timeOffset is. Falling
     // back to it produced a bogus 92h+ duration badge on a session that had
     // been running for minutes, the one time timeOffset was momentarily

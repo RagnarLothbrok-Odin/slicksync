@@ -26,7 +26,7 @@ const { notifyPushForType } = require('./pushNotifications')
 // if freshly watched. Gated on watchedAt (the provider's own reported watch
 // time, not "now") being within this window - generous enough to cover
 // native's own checkpoint-then-poll lag (checkpoints happen at pause/stop,
-// polled every 1min per this repo's CLAUDE.md), tight enough to exclude a
+// polled every 1min per docs/runtime-behavior.md), tight enough to exclude a
 // real backlog.
 const NOTIFY_RECENCY_WINDOW_MS = 2 * 60 * 60 * 1000
 
@@ -150,7 +150,7 @@ function isActuallyWatched(item) {
 // watch-history row that the proxy pipeline never had a chance to notify
 // about — content that never routed through the monitored AIOStreams proxy
 // at all (usenet via newznab is the confirmed real case; see this repo's
-// CLAUDE.md on the two watch-tracking pipelines). The proxy's own instant
+// docs/runtime-behavior.md on the two watch-tracking pipelines). The proxy's own instant
 // "started watching" ping (proxyStreamMonitor.js -> sessionTracker.js's
 // sendSessionStartNotification) already covers everything that DOES route
 // through it, so callers only invoke this when there's no WatchSession row
@@ -814,7 +814,7 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
     // the viewer advances to a new episode (confirmed: nuvio.js maps a
     // series' progress row to overallTimeWatched = p.position, the same
     // per-episode value as timeOffset, not a true lifetime counter the way
-    // Stremio's is - see CLAUDE.md's Watch tracking notes). Without this
+    // Stremio's is - see docs/runtime-behavior.md's Watch tracking notes). Without this
     // check, the code below treated that legitimate reset as either a
     // regression to reject (silently dropping the new episode's watch time
     // entirely, since it never exceeds the old episode's higher max) or a
@@ -1023,7 +1023,7 @@ async function processLibraryItem(prisma, accountId, userId, item, today, users 
         // (maxSeenBig is scoped by videoId above). WITHIN one episode,
         // overallTimeWatched only ever grows in reality, so a same-episode drop
         // is always a data artifact - specifically Nuvio's multi-profile merge
-        // transiently dropping a profile's progress (documented in CLAUDE.md).
+        // transiently dropping a profile's progress (documented in docs/runtime-behavior.md).
         // Before this clamp, that drop overwrote the snapshot LOWER, which erased
         // the high-water-mark getMaxOverallTimeWatched relies on - so when the
         // value recovered, the recovery re-registered as a fresh delta, over and

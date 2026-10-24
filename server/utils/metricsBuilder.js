@@ -428,7 +428,7 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
       // lastPosition is a direct snapshot value per WatchSession's own field
       // comment ("always accurate the instant new data arrives"), safe to
       // surface as-is, unlike overallTimeWatched which needs two
-      // observations to diff (see this repo's CLAUDE.md).
+      // observations to diff (see docs/runtime-behavior.md).
       lastPosition: session.lastPosition ?? null,
       totalDuration: session.totalDuration ?? null,
       // Same episode-aware deep-link builder Continue Watching already uses

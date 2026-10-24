@@ -1,7 +1,7 @@
 // Best-effort correlation: was a watch about to be written to
 // MovieWatchHistory/EpisodeWatchHistory actually observed by the AIOStreams
 // proxy, and if so, which debrid service resolved the stream? This is
-// deliberately narrow in scope - CLAUDE.md's "the proxy must never write
+// deliberately narrow in scope - docs/runtime-behavior.md's "the proxy must never write
 // watch history or durations" rule is about presence/duration data leaking
 // into History; this never touches durationSeconds or watchedAt, only adds
 // an informational label, and only when BOTH a confident title+user+time
@@ -103,7 +103,7 @@ async function findDebridServiceForWatch(prisma, { accountId, userId, title, wat
 // never became a MovieWatchHistory row despite the proxy having confirmed a
 // real, non-trivial connection existed (a >90s connection rules out the
 // preview/hover-autoplay case isActuallyWatched's threshold exists to guard
-// against - see this repo's CLAUDE.md on the two-pipeline split for why the
+// against - see docs/runtime-behavior.md on the two-pipeline split for why the
 // proxy is authoritative for "did playback happen" but never for duration;
 // this only answers the former, the actual recorded duration still comes
 // from native's own position data exactly as before).

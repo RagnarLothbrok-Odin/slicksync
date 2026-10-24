@@ -1869,11 +1869,11 @@ function ActivityPageContent() {
 
     // Floor against today's individual watch entries (same durationSeconds
     // shown on the "Today" poster cards below). WatchActivity needs two
-    // overallTimeWatched observations to produce a delta (see CLAUDE.md), so
+    // overallTimeWatched observations to produce a delta (see docs/runtime-behavior.md), so
     // a title watched for the first time ever today can sit at 0 here for a
     // poll cycle while the card already shows a real duration seeded from
     // state.timeOffset on its first observation. Duration merges take max(),
-    // not sum() - same rule CLAUDE.md documents for proxy/native
+    // not sum() - same rule docs/runtime-behavior.md documents for proxy/native
     // reconciliation, since both numbers already approximate the same real
     // total and summing them would double count.
     return Math.max(totalSeconds, historySecondsToday) / 3600;

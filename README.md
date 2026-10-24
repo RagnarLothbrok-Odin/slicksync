@@ -10,7 +10,6 @@ Collections, home rows, addons, shared credentials, watch history and live playb
 kept in sync across every profile — on **Nuvio**, **Stremio**, **Jellyfin**, **AIOStreams** and **AIOMetadata** alike.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](./LICENSE)
-[![Docker Pulls](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/slicknsliding/slicksync/badges/docker-pulls.json&logo=docker&logoColor=white&style=flat-square)](https://hub.docker.com/r/slicknsliding/slicksync)
 [![Bun](https://img.shields.io/badge/bun-1%2B-000000?logo=bun&logoColor=white&style=flat-square)](https://bun.sh)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white&style=flat-square)](https://nextjs.org) [![Fork of Syncio](https://img.shields.io/badge/fork%20of-Syncio-blueviolet?style=flat-square)](https://github.com/iamneur0/syncio)
 
@@ -452,6 +451,10 @@ Everything beyond `JWT_SECRET`/`ENCRYPTION_KEY` has a sensible default — see `
 </details>
 
 ---
+
+## Development
+
+See [runtime behavior](docs/runtime-behavior.md) for watch tracking, timezone, notification, poster, and provider configuration notes.
 
 ## Credits
 

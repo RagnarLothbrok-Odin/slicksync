@@ -740,7 +740,7 @@ async function maybeNotifyStart(prisma, accountId, webhookUrl, users, aiostreams
 // own "watched" notification (real title, real poster, resolved by ID not
 // filename-guessing) once History caught up. Two notifications for one
 // session, one of them worse, is worse than the proxy just staying silent
-// on the stop side - same reasoning CLAUDE.md already documents for why
+// on the stop side - same reasoning docs/runtime-behavior.md already documents for why
 // native must not ALSO send the start-side notification, applied to the
 // stop side instead. The session still closes (isActive: false) below;
 // only the notification side-effect is gone.
