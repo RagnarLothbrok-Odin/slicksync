@@ -3,7 +3,7 @@ const { publicMessage } = require('../utils/publicError');
 const jwt = require('jsonwebtoken');
 const { StremioAPIClient } = require('stremio-api-client');
 const { validateStremioAuthKey } = require('../utils/stremio');
-const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin, refreshNuvioToken, isTokenExpired } = require('../providers/nuvioAuth');
+const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin, isTokenExpired } = require('../providers/nuvioAuth');
 const { makeCreateProvider } = require('../providers');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { canonicalizeManifestUrl } = require('../utils/validation');
@@ -857,14 +857,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
       const storedRefreshToken = decrypt(user.nuvioRefreshToken, mockReq);
 
-      let refreshed;
-      try {
-        refreshed = await refreshNuvioToken(storedRefreshToken);
-      } catch (err) {
-        return res.status(401).json({ error: 'Validation failed', message: 'Invalid or expired Nuvio session' });
-      }
-
-      const validatedUser = await getPublicUserNuvio(user.nuvioUserId, refreshed.refresh_token || storedRefreshToken, req, userId);
+      // The signed portal session already proves identity. A page reload must
+      // not consume a rotating provider refresh token: concurrent reloads can
+      // otherwise spend the same token and invalidate a valid portal session.
+      const validatedUser = await getPublicUserNuvio(user.nuvioUserId, storedRefreshToken, req, userId);
 
       res.json({
         success: true,

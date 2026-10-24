@@ -18,11 +18,11 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && errorCode !== 'SESSION_CHECK_UNAVAILABLE') {
       // Redirect to login with user mode
       router.push('/login?mode=user');
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, errorCode, router]);
 
   // Loading state
   if (isLoading) {
@@ -52,6 +52,15 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
             Verifying session...
           </p>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (errorCode === 'SESSION_CHECK_UNAVAILABLE') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 bg-background text-default" role="alert">
+        <p className="text-sm text-muted text-center">{error}</p>
+        <button className="px-5 py-2 rounded-full bg-primary text-primary-foreground font-medium" onClick={() => window.location.reload()}>Try again</button>
       </div>
     );
   }

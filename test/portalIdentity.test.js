@@ -389,3 +389,22 @@ test('Nuvio profile selection stays within the authenticated login and household
     assert.equal((await call('GET', '/user-info', { key: switched.body.sessionToken, query: { userId: 'nSibling' } })).status, 200)
   } finally { group.userIds = previousMembers; for (const id of ['nSibling', 'nOther']) data.user.rows.splice(data.user.rows.findIndex(row => row.id === id), 1) }
 })
+
+test('rapid Nuvio session restoration never consumes a provider refresh token', async () => {
+  const before = data.user.rows.find(row => row.id === 'nA').nuvioRefreshToken
+  const previousFetch = global.fetch
+  let providerCalls = 0
+  global.fetch = async () => { providerCalls++; throw new Error('Provider unavailable') }
+  try {
+    const key = session('nA', 'nuvio')
+    const results = await Promise.all(Array.from({ length: 4 }, () => call('POST', '/validate-nuvio', { key, body: { userId: 'nA' } })))
+    for (const result of results) {
+      assert.equal(result.status, 200)
+      assert.equal(result.body.valid, true)
+      assert.equal(jwt.verify(result.body.sessionToken, SECRET).sub, 'nA')
+    }
+    assert.equal(providerCalls, 0)
+    assert.equal(data.user.rows.find(row => row.id === 'nA').nuvioRefreshToken, before)
+    assert.equal((await call('POST', '/validate-nuvio', { key: 'invalid', body: { userId: 'nA' } })).status, 401)
+  } finally { global.fetch = previousFetch }
+})
