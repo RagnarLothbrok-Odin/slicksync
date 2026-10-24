@@ -14,6 +14,7 @@ import { TVFocusable } from '@/components/tv/TVFocusable';
 import { TVLink } from '@/components/tv/TVLink';
 import { Button, Card, StatCard, Avatar, UserAvatar, Badge, StatusBadge, VersionBadge, ResourceBadge, MediaDetailModal } from '@/components/ui';
 import { UpcomingEpisodesPanel } from '@/components/ui/UpcomingEpisodesPanel';
+import { ContinueWatchingSection } from '@/components/ui/ContinueWatchingSection';
 import { ContinueWatchingCard } from '@/components/ui/ContinueWatchingCard';
 import { NowPlayingSection } from '@/components/admin/NowPlayingSection';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
@@ -651,8 +652,7 @@ export default function DashboardPage() {
 
             {/* Continue Watching - identical cards/drag logic to Current mode */}
             {continueWatching.length > 0 && (
-              <section className="interface-media-section my-7" aria-label="Continue watching">
-                <h2 className="text-xl font-semibold font-display text-default mb-4">Continue Watching</h2>
+              <ContinueWatchingSection>
                 <div
                   ref={scrollRowRef}
                   onPointerDown={handleRowPointerDown}
@@ -682,7 +682,7 @@ export default function DashboardPage() {
                     );
                   })}
                 </div>
-              </section>
+              </ContinueWatchingSection>
             )}
 
             {/* Coming up - upcoming episodes for shows being watched */}
@@ -966,11 +966,7 @@ export default function DashboardPage() {
 
         {/* Continue Watching */}
         {continueWatching.length > 0 && (
-          <PageSection className="mb-6" delay={0.18}>
-            <Card padding="lg">
-              <h3 className="text-base font-semibold font-display text-default mb-4">
-                Continue Watching
-              </h3>
+          <ContinueWatchingSection>
               <div
                 ref={scrollRowRef}
                 onPointerDown={handleRowPointerDown}
@@ -992,8 +988,7 @@ export default function DashboardPage() {
                   />
                 ))}
               </div>
-            </Card>
-          </PageSection>
+          </ContinueWatchingSection>
         )}
 
         {/* Coming up - upcoming episodes for shows being watched */}
