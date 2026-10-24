@@ -1,18 +1,17 @@
 # Multi-stage Dockerfile for SlickSync
 FROM oven/bun:1-alpine AS base
 
-# Install npm for building
-RUN apk add --no-cache libc6-compat openssl3 curl npm
+# Install native runtime libraries
+RUN apk add --no-cache libc6-compat openssl3 curl
 WORKDIR /app
 
 # Deps stage - install dependencies
 FROM base AS deps
 WORKDIR /app
-COPY package*.json ./
-COPY client/package*.json ./client/
+COPY package.json bun.lock ./
+COPY client/package.json ./client/
 COPY prisma ./prisma/
 RUN bun install --frozen-lockfile
-RUN cd client && bun install --frozen-lockfile
 
 # Runtime dependencies only. The image used to ship whatever the build needed,
 # so every release carried eslint, nodemon, concurrently and their transitive
@@ -22,7 +21,8 @@ RUN cd client && bun install --frozen-lockfile
 # being dropped by this install.
 FROM base AS prod-deps
 WORKDIR /app
-COPY package*.json ./
+COPY package.json bun.lock ./
+COPY client/package.json ./client/
 COPY prisma ./prisma/
 RUN bun install --frozen-lockfile --production
 
@@ -46,7 +46,7 @@ RUN if [ "$INSTANCE" = "public" ]; then \
         cp prisma/schema.sqlite.prisma prisma/schema.prisma; \
     fi
 # Use the main schema file for generation
-RUN npx prisma generate --schema=prisma/schema.prisma
+RUN bunx --no-install prisma generate --schema=prisma/schema.prisma
 
 # Set environment variables
 ARG NEXT_PUBLIC_API_URL
@@ -61,7 +61,7 @@ RUN cd client && \
     date +%s > .build-stamp && \
     NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
-    npm run build && \
+    bun run build && \
     cp .build-stamp .next/build-stamp
 
 # Production stage
@@ -80,7 +80,7 @@ RUN mkdir -p /app/data /app/logs && chown -R appuser:nodejs /app/data /app/logs
 # fully-buffer (rather than line-buffer) output when backgrounded in a
 # non-TTY context, which was making the backend's own console output never
 # reach `docker logs` at all despite the process running correctly.
-RUN apk add --no-cache curl openssl3 npm coreutils
+RUN apk add --no-cache curl openssl3 coreutils
 
 # Set environment variables for Prisma
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"

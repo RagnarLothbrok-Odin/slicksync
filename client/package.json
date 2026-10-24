@@ -1,13 +1,16 @@
 {
-  "name": "new-ui",
+  "name": "@slicksync/client",
   "version": "0.1.0",
-  "sideEffects": ["*.css"],
+  "sideEffects": [
+    "*.css"
+  ],
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
     "build": "next build",
+    "dev": "next dev -p 3000",
+    "lint": "eslint",
     "start": "next start -p 3000",
-    "lint": "eslint"
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -4,22 +4,24 @@
   "description": "SlickSync - Nuvio and Stremio addon, user and credential management",
   "main": "server/index.js",
   "scripts": {
+    "build": "bun run --cwd client build",
+    "client:dev": "bun run --cwd client dev",
+    "client:dev:private": "bun run --cwd client dev",
+    "client:dev:public": "bun run --cwd client dev",
     "dev": "concurrently \"bun run server:watch\" \"bun run client:dev\"",
-    "dev:private": "concurrently \"bun run server:private:watch\" \"bun run client:dev\"",
-    "dev:public": "concurrently \"bun run server:public:watch\" \"bun run client:dev\"",
-    "server:watch": "nodemon server/index.js",
-    "server:private:watch": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && bunx prisma generate && QUIET=true NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=false REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" SLICKSYNC_PRIVATE_USERNAME=\"${SLICKSYNC_PRIVATE_USERNAME}\" SLICKSYNC_PRIVATE_PASSWORD=\"${SLICKSYNC_PRIVATE_PASSWORD}\" nodemon --config nodemon.json server/index.js",
-    "server:public:watch": "cp prisma/schema.postgres.prisma prisma/schema.prisma && bunx prisma generate && QUIET=false NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=true DATABASE_URL=\"postgresql://slicksync:slicksync@localhost:5432/slicksync\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/index.js",
-    "client:dev": "cd client && npm run dev",
-    "client:dev:private": "cd client && npm run dev",
-    "client:dev:public": "cd client && npm run dev",
-    "build": "cd client && npm run build",
-    "start": "node server/index.js",
-    "test": "node scripts/run-tests.js",
+    "dev:private": "concurrently \"bun run server:private:watch\" \"bun run client:dev:private\"",
+    "dev:public": "concurrently \"bun run server:public:watch\" \"bun run client:dev:public\"",
     "lint": "eslint server/ scripts/ test/",
     "lint:fix": "eslint server/ --fix",
+    "server:private:watch": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && bunx prisma generate && QUIET=true NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=false REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" SLICKSYNC_PRIVATE_USERNAME=\"${SLICKSYNC_PRIVATE_USERNAME}\" SLICKSYNC_PRIVATE_PASSWORD=\"${SLICKSYNC_PRIVATE_PASSWORD}\" nodemon --config nodemon.json server/index.js",
+    "server:public:watch": "cp prisma/schema.postgres.prisma prisma/schema.prisma && bunx prisma generate && QUIET=false NEXT_PUBLIC_DEBUG=true AUTH_ENABLED=true DATABASE_URL=\"postgresql://slicksync:slicksync@localhost:5432/slicksync\" REDIS_URL=\"redis://localhost:6379\" JWT_SECRET=\"temp-jwt-secret-key\" ENCRYPTION_KEY=\"temp-encryption-key-32-chars-long\" nodemon server/index.js",
+    "server:watch": "nodemon server/index.js",
+    "start": "bun server/index.js",
     "studio": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && bunx prisma generate && DATABASE_URL=\"file:./prisma/sqlite.db\" bunx prisma studio",
-    "studio:public": "cp prisma/schema.postgres.prisma prisma/schema.prisma && bunx prisma generate && DATABASE_URL=\"postgresql://slicksync:slicksync@localhost:5432/slicksync\" bunx prisma studio"
+    "studio:public": "cp prisma/schema.postgres.prisma prisma/schema.prisma && bunx prisma generate && DATABASE_URL=\"postgresql://slicksync:slicksync@localhost:5432/slicksync\" bunx prisma studio",
+    "test": "node scripts/run-tests.js",
+    "test:bun": "bun test --isolate --timeout 30000 test/",
+    "type-check": "bun run --cwd client type-check"
   },
   "keywords": [
     "nuvio",
@@ -55,14 +57,16 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.11",
     "@types/node": "^20.0.0",
     "concurrently": "^8.2.0",
     "eslint": "^8.57.0",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "ultracite": "7.10.7"
   },
-  "overrides": {
-    "qs": "^6.16.0",
-    "proxy-addr": "^2.0.8",
-    "body-parser": "^1.20.6"
-  }
+  "private": true,
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "client"
+  ]
 }

@@ -35,8 +35,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Tests
-        run: npm test
+        run: bun run test
 
       # Warnings are reported but do not fail the run; errors do.
       - name: Lint
-        run: npm run lint
+        run: bun run lint
