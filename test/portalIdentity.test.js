@@ -339,3 +339,13 @@ for (const type of ['public', 'private']) {
     assert.deepEqual(calls, ['https://addon.example.com/manifest.json'])
   })
 }
+
+test('an authenticated person can read their own profile before joining a group', async () => {
+  const person = data.user.rows.find(row => row.id === 'jA')
+  const previous = person.accountId
+  person.accountId = 'household-without-groups'
+  try {
+    const response = await call('GET', '/user-info', { key: session('jA', 'jellyfin'), query: { userId: 'jA' } })
+    assert.equal(response.status, 200)
+  } finally { person.accountId = previous }
+})

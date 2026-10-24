@@ -559,7 +559,7 @@ app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, INSTANCE_T
 app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }));
 // Public library router (no auth required)
 const { getCachedLibrary, setCachedLibrary } = require('./utils/libraryCache');
-app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET }));
+app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET, imageUpload }));
 
 // Addon proxy router (no auth required - UUID serves as bearer token)
 app.use('/proxy', proxyRouter({ prisma, decrypt, getAccountId, getServerKey }));
