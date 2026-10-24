@@ -370,7 +370,7 @@ html.daylight .interface-login { --login-action-text: #fff; }
 .interface-login-panel button { max-width: 100%; }
 .interface-login .login-provider-tabs { background: var(--color-bg-subtle); }
 .interface-login .login-provider-tabs button { padding-inline: 0.65rem; }
-.interface-login .verification-code code { overflow-wrap: anywhere; letter-spacing: 0.015em; }
+.interface-login .verification-code code { overflow-wrap: anywhere; }
 @media (max-width: 479px) {
   .interface-login { padding-inline: 1rem; }
   .interface-login-panel > div { padding: 1.25rem; }
