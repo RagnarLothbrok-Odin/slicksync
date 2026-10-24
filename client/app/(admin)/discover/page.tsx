@@ -592,7 +592,18 @@ export default function DiscoverPage() {
 
   const shownItems = useMemo(() => {
     const kept = keepByWatched(items);
-    return sort === 'az' && !debouncedQuery ? [...kept].sort((a, b) => a.name.localeCompare(b.name)) : kept;
+    if (debouncedQuery) return kept;
+    if (sort === 'az') return [...kept].sort((a, b) => a.name.localeCompare(b.name));
+    // Cinemeta's Featured catalog is not strictly ordered by its IMDb scores.
+    // Sort all loaded pages together, with unavailable ratings at the end.
+    if (sort === 'rated') return [...kept].sort((a, b) => {
+      const score = (value: string | null) => {
+        const parsed = Number.parseFloat(value ?? '');
+        return Number.isFinite(parsed) ? parsed : -1;
+      };
+      return score(b.imdbRating) - score(a.imdbRating);
+    });
+    return kept;
   }, [items, keepByWatched, sort, debouncedQuery]);
   const shownWatchlist = useMemo(() => {
     const kept = keepByWatched(watchlistItems);
