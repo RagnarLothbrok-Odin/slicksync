@@ -1,6 +1,6 @@
 const { safeFetch, instancePolicy } = require("./safeUrl");
 const { buildAddonDbData } = require("./stremio");
-const { decrypt, encrypt } = require("./encryption");
+const { decrypt, encrypt: _encrypt } = require("./encryption");
 
 async function ensureDek(req, prisma, INSTANCE_TYPE, getAccountDek) {
     try {
@@ -32,8 +32,8 @@ async function repairAddonsList(
         getDecryptedManifestUrl,
         filterManifestByResources,
         filterManifestByCatalogs,
-        manifestHash,
-        encrypt,
+        manifestHash: _manifestHash,
+        encrypt: _encrypt,
     },
     req,
     addonsList

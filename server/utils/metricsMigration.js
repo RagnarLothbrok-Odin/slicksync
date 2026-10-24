@@ -207,7 +207,9 @@ async function migrateAccountMetrics(prisma, accountId) {
     // Calculate unique items from watch_activity that should have sessions
     // One session per user + item combination (not per date - that's too granular)
     const uniqueUserItems = new Set();
-    activities.forEach((a) => uniqueUserItems.add(`${a.userId}:${a.itemId}`));
+    activities.forEach((a) => {
+        uniqueUserItems.add(`${a.userId}:${a.itemId}`);
+    });
     const neededSessions = uniqueUserItems.size;
 
     console.log(

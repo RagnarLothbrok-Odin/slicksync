@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // "Age limit": the highest rating someone may play (server/utils/ageLimits.js),
 // as a card with its own switch under Daily limit and Bedtime in the Limits
@@ -60,8 +61,8 @@ export function AgeLimitCard({
         setSaving(true);
         try {
             setState(await api.setAgeLimit(userId, value, blockUnrated));
-        } catch (e: any) {
-            toast.error(e?.message || "Could not set the age limit");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not set the age limit"));
         } finally {
             setSaving(false);
         }

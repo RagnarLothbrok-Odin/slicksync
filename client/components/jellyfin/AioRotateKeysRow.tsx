@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // Opt-in, per AIOStreams person: when a debrid key changes in the Vault
 // (rotated, a backup taking over, or swapped back), SlickSync also swaps it
@@ -40,8 +41,8 @@ export function AioRotateKeysRow({ userId, name }: { userId: string; name: strin
                     ? `Vault key changes will update ${name}'s AIOStreams`
                     : `Vault key changes leave ${name}'s AIOStreams alone`
             );
-        } catch (e: any) {
-            toast.error(e?.message || "Could not change that");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not change that"));
         } finally {
             setSaving(false);
         }

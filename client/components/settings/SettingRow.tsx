@@ -22,6 +22,7 @@ export function ToggleSwitch({
             disabled={disabled}
             onClick={() => !disabled && onChange(!enabled)}
             role="switch"
+            type="button"
         >
             <div
                 className={`relative h-5 w-10 rounded-full transition-colors ${

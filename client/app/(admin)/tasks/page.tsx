@@ -51,6 +51,7 @@ import {
     type User,
 } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { displayEmail, providerBadgeVariant, providerTypeLabel } from "@/lib/providers";
@@ -321,8 +322,8 @@ export default function TasksPage() {
                 `Kit downloaded: ${kit.counts.users} users, ${kit.counts.groups} groups, ${kit.counts.addons} addons, ${kit.counts.vaultEntries} Vault entries`
             );
             setDrkExportPassphrase("");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to build recovery kit");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to build recovery kit"));
         } finally {
             setIsExportingDrk(false);
         }
@@ -349,8 +350,8 @@ export default function TasksPage() {
                         `Restored: ${result.counts.users} users, ${result.counts.groups} groups, ${result.counts.addons} addons, ${result.restoredVaultCount} Vault entries`
                     );
                     setDrkImportPassphrase("");
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to restore recovery kit");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to restore recovery kit"));
                 } finally {
                     setIsImportingDrk(false);
                 }
@@ -493,8 +494,8 @@ export default function TasksPage() {
                     `Synced ${result.success} user${result.success === 1 ? "" : "s"}, ${result.failed} failed`
                 );
             }
-        } catch (e: any) {
-            toast.error(e.message || "Failed to sync users");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to sync users"));
         } finally {
             setSyncingUsers(false);
         }
@@ -510,8 +511,8 @@ export default function TasksPage() {
                     toast.success(
                         `Deleted ${result.success} user${result.success === 1 ? "" : "s"}`
                     );
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to delete users");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to delete users"));
                 } finally {
                     setDeletingUsers(false);
                 }
@@ -532,8 +533,8 @@ export default function TasksPage() {
                     toast.success(
                         `Cleared addons from ${result.success} user${result.success === 1 ? "" : "s"}`
                     );
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to clear user addons");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to clear user addons"));
                 } finally {
                     setClearingUserAddons(false);
                 }
@@ -557,8 +558,8 @@ export default function TasksPage() {
                     `Synced ${result.syncedGroups} group${result.syncedGroups === 1 ? "" : "s"}, ${result.failedGroups} failed`
                 );
             }
-        } catch (e: any) {
-            toast.error(e.message || "Failed to sync groups");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to sync groups"));
         } finally {
             setSyncingGroups(false);
         }
@@ -574,8 +575,8 @@ export default function TasksPage() {
                     toast.success(
                         `Deleted ${result.success} group${result.success === 1 ? "" : "s"}`
                     );
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to delete groups");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to delete groups"));
                 } finally {
                     setDeletingGroups(false);
                 }
@@ -593,8 +594,8 @@ export default function TasksPage() {
             toast.success(
                 `Import complete: ${result.successful} successful, ${result.failed} failed, ${result.redundant} redundant`
             );
-        } catch (e: any) {
-            toast.error(e.message || "Failed to import addons");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to import addons"));
         } finally {
             setImportingAddons(false);
         }
@@ -612,8 +613,8 @@ export default function TasksPage() {
             a.click();
             URL.revokeObjectURL(url);
             toast.success("Addons exported");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to export addons");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to export addons"));
         }
     };
 
@@ -622,8 +623,8 @@ export default function TasksPage() {
         try {
             const result = await api.reloadAllAddons();
             toast.success(`Reloaded ${result.reloaded} addon${result.reloaded === 1 ? "" : "s"}`);
-        } catch (e: any) {
-            toast.error(e.message || "Failed to reload addons");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to reload addons"));
         } finally {
             setReloadingAddons(false);
         }
@@ -636,8 +637,8 @@ export default function TasksPage() {
             toast.success(
                 `Repaired ${result.updated} of ${result.inspected} addon${result.inspected === 1 ? "" : "s"}`
             );
-        } catch (e: any) {
-            toast.error(e.message || "Failed to repair addons");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to repair addons"));
         } finally {
             setRepairingAddons(false);
         }
@@ -653,8 +654,8 @@ export default function TasksPage() {
                     toast.success(
                         `Deleted ${result.success} addon${result.success === 1 ? "" : "s"}`
                     );
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to delete addons");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to delete addons"));
                 } finally {
                     setDeletingAddons(false);
                 }
@@ -713,8 +714,8 @@ export default function TasksPage() {
             a.click();
             URL.revokeObjectURL(url);
             toast.success("Configuration exported");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to export configuration");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to export configuration"));
         }
     };
 
@@ -726,8 +727,8 @@ export default function TasksPage() {
                 try {
                     await api.resetConfig();
                     toast.success("Configuration reset");
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to reset configuration");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to reset configuration"));
                 } finally {
                     setResettingConfig(false);
                 }
@@ -747,8 +748,8 @@ export default function TasksPage() {
         try {
             await api.backupUserLibrary(selectedUserId);
             toast.success("Library exported successfully");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to export library");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to export library"));
         } finally {
             setIsExportingLibrary(false);
         }
@@ -761,8 +762,8 @@ export default function TasksPage() {
             const userId = selectedHistoryUserId === "all" ? undefined : selectedHistoryUserId;
             await api.exportHistory(userId);
             toast.success("History exported successfully");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to export history");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to export history"));
         } finally {
             setIsExportingHistory(false);
         }
@@ -780,8 +781,8 @@ export default function TasksPage() {
                 (result.results?.episodeWatchHistory?.imported || 0) +
                 (result.results?.watchActivity?.imported || 0);
             toast.success(`Imported ${total} history records`);
-        } catch (e: any) {
-            toast.error(e.message || "Failed to import history");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to import history"));
         } finally {
             setIsImportingHistory(false);
         }
@@ -801,8 +802,8 @@ export default function TasksPage() {
                 try {
                     const result = await api.clearUserLibrary(selectedUserId);
                     toast.success(`Library cleared: ${result.deleted} items removed`);
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to clear library");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to clear library"));
                 } finally {
                     setIsClearingLibrary(false);
                 }
@@ -831,8 +832,8 @@ export default function TasksPage() {
                         (result.deleted?.watchActivity || 0) +
                         (result.deleted?.watchSnapshots || 0);
                     toast.success(`History cleared: ${total} records deleted`);
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to clear history");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to clear history"));
                 } finally {
                     setIsClearingHistory(false);
                 }
@@ -849,8 +850,8 @@ export default function TasksPage() {
             await api.runBackupNow();
             toast.success("Backup started");
             fetchBackups();
-        } catch (e: any) {
-            toast.error(e.message || "Failed to start backup");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to start backup"));
         } finally {
             setIsBackupRunning(false);
         }
@@ -861,8 +862,8 @@ export default function TasksPage() {
         try {
             await api.setBackupFrequency(days);
             toast.success("Backup schedule updated");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to update backup schedule");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update backup schedule"));
         }
     };
 
@@ -871,8 +872,8 @@ export default function TasksPage() {
     const handleDownloadBackup = async (filename: string) => {
         try {
             await api.downloadBackup(filename);
-        } catch (e: any) {
-            toast.error(e.message || "Failed to download backup");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to download backup"));
         }
     };
 
@@ -891,8 +892,8 @@ export default function TasksPage() {
             const r = await api.offerMigration();
             setMigrationCode(r.code);
             toast.success("Code ready - paste it on the new instance within 15 minutes");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to create migration code");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to create migration code"));
         } finally {
             setIsOfferingMigration(false);
         }
@@ -910,8 +911,8 @@ export default function TasksPage() {
                         `Migration complete${r?.counts ? `: ${r.counts.users ?? "?"} users, ${r.counts.groups ?? "?"} groups, ${r.counts.addons ?? "?"} addons` : ""} - reloading`
                     );
                     setTimeout(() => window.location.reload(), 1500);
-                } catch (err: any) {
-                    toast.error(err.message || "Migration failed");
+                } catch (err) {
+                    toast.error(readErrorMessage(err, "Migration failed"));
                     setIsReceivingMigration(false);
                 }
             },
@@ -954,8 +955,8 @@ export default function TasksPage() {
             setUserRestorePreview(
                 await api.restoreBackupUser(userRestore.backup.filename, userId, true)
             );
-        } catch (e: any) {
-            toast.error(e.message || "Could not preview");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not preview"));
             setUserRestoreUserId("");
         } finally {
             setUserRestoreBusy(false);
@@ -977,8 +978,8 @@ export default function TasksPage() {
                 `${r.username} rewound to this backup - the previous state is in the Trash for 30 days`
             );
             setUserRestore(null);
-        } catch (e: any) {
-            toast.error(e.message || "Failed to restore user");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to restore user"));
         } finally {
             setUserRestoreBusy(false);
         }
@@ -1048,8 +1049,8 @@ export default function TasksPage() {
                         `Restored ${result.users.created + result.users.reused} users, ${result.groups.created + result.groups.reused} groups, ${result.addons.created + result.addons.reused} addons`
                     );
                     setTimeout(() => window.location.reload(), 1500);
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to restore backup");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to restore backup"));
                     setRestoringBackup(null);
                 }
             },
@@ -1067,8 +1068,8 @@ export default function TasksPage() {
                     await api.deleteBackup(backup.filename);
                     toast.success("Backup deleted");
                     fetchBackups();
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to delete backup");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to delete backup"));
                 } finally {
                     setDeletingBackup(null);
                 }
@@ -1098,8 +1099,8 @@ export default function TasksPage() {
             setNewSnapshotDescription("");
             setNewSnapshotSourceId("");
             fetchSnapshots();
-        } catch (e: any) {
-            toast.error(e.message || "Failed to save template");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save template"));
         } finally {
             setCreatingSnapshot(false);
         }
@@ -1123,8 +1124,8 @@ export default function TasksPage() {
             );
             setDeployingSnapshot(null);
             setDeployTargetUserId("");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to deploy template");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to deploy template"));
         } finally {
             setIsDeploying(false);
         }
@@ -1139,8 +1140,8 @@ export default function TasksPage() {
                     await api.deleteSnapshot(snapshot.id);
                     toast.success("Template deleted");
                     fetchSnapshots();
-                } catch (e: any) {
-                    toast.error(e.message || "Failed to delete template");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Failed to delete template"));
                 } finally {
                     setDeletingSnapshotId(null);
                 }
@@ -1158,8 +1159,8 @@ export default function TasksPage() {
             toast.success(
                 `Sync completed: ${result.syncedGroups} synced, ${result.failedGroups} failed`
             );
-        } catch (e: any) {
-            toast.error(e.message || "Failed to start sync");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to start sync"));
         } finally {
             setIsSyncRunning(false);
         }
@@ -1174,8 +1175,8 @@ export default function TasksPage() {
                 frequency,
             });
             toast.success("Sync schedule updated");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to update sync schedule");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update sync schedule"));
         }
     };
 
@@ -1186,8 +1187,8 @@ export default function TasksPage() {
         try {
             await api.setAddonHealthCheckInterval(minutes);
             toast.success("Health check interval updated. Restart server to apply changes.");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to update health check interval");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update health check interval"));
         } finally {
             setIsHealthCheckLoading(false);
         }
@@ -1198,8 +1199,8 @@ export default function TasksPage() {
         try {
             await api.runAddonHealthCheckNow();
             toast.success("Health check started");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to start health check");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to start health check"));
         } finally {
             setIsRunningHealthCheck(false);
         }
@@ -2962,13 +2963,13 @@ export default function TasksPage() {
                             value={newSnapshotSourceId}
                         >
                             <option value="">Select a {newSnapshotSourceType}...</option>
-                            {(newSnapshotSourceType === "user" ? users : groups).map(
-                                (item: any) => (
-                                    <option key={item.id} value={item.id}>
-                                        {item.name || displayEmail(item.email) || item.id}
-                                    </option>
-                                )
-                            )}
+                            {(newSnapshotSourceType === "user" ? users : groups).map((item) => (
+                                <option key={item.id} value={item.id}>
+                                    {item.name ||
+                                        ("email" in item ? displayEmail(item.email) : null) ||
+                                        item.id}
+                                </option>
+                            ))}
                         </select>
                     </div>
                     <div className="flex justify-end gap-2 pt-2">

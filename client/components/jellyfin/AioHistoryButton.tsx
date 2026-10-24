@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // "AIOStreams history": every version of this person's AIOStreams
 // configuration SlickSync has seen, what changed between them, and putting
@@ -114,8 +115,8 @@ export function AioHistoryButton({ userId, name }: { userId: string; name: strin
             setState(await api.restoreAioVersion(userId, restoring.id, keep));
             toast.success(`${name}'s AIOStreams configuration is back to how it was`);
             setRestoring(null);
-        } catch (e: any) {
-            toast.error(e?.message || "Could not put that version back");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not put that version back"));
         } finally {
             setBusy(false);
         }

@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // Jellyfin | AIOStreams collections, one page. An AIOStreams account and a
 // household's own Jellyfin server are both picked here; a Jellyfin server
@@ -488,11 +489,11 @@ export default function AiostreamsCollectionsPage() {
 
 /** Somewhere "Copy to" can send a set of collections: an account, or a profile on one. */
 interface CopyTarget {
-    userId: string;
-    profileId: string | null;
-    name: string;
-    detail: string;
     blocked: string | null;
+    detail: string;
+    name: string;
+    profileId: string | null;
+    userId: string;
 }
 
 /** One AIOStreams account's (or profile's) collections: reorder, hide, remove, open. */
@@ -533,8 +534,8 @@ function AccountCollections({
             setView(next);
             setCollections(next.collections);
             saved.current = next.collections;
-        } catch (e: any) {
-            toast.error(e?.message || "Could not load the collections");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not load the collections"));
         }
     }, [userId, profileId]);
     useEffect(() => {
@@ -579,8 +580,8 @@ function AccountCollections({
                     toast.success(`${profile.name} has their own collections now`);
                     onProfileChanged();
                 }
-            } catch (e: any) {
-                toast.error(e?.message || "Could not save that change");
+            } catch (e) {
+                toast.error(readErrorMessage(e, "Could not save that change"));
                 setCollections(saved.current);
             }
         });
@@ -694,8 +695,8 @@ function AccountCollections({
             }
             setCopyTo(null);
             setCopyOpen(false);
-        } catch (e: any) {
-            toast.error(e?.message || "Could not copy the collections");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not copy the collections"));
         } finally {
             setCopying(false);
         }
@@ -716,8 +717,8 @@ function AccountCollections({
             a.download = `aiostreams-collections-${here.replace(/[^\w-]+/g, "-").toLowerCase()}.json`;
             a.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } catch (e: any) {
-            toast.error(e?.message || "Could not export the collections");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not export the collections"));
         }
     };
 
@@ -739,11 +740,11 @@ function AccountCollections({
         try {
             const payload = JSON.parse(await file.text());
             await importPayload(payload);
-        } catch (e: any) {
+        } catch (e) {
             toast.error(
                 e instanceof SyntaxError
                     ? "That file isn’t an AIOStreams collections export"
-                    : e?.message || "Could not import that file"
+                    : readErrorMessage(e, "Could not import that file")
             );
         }
     };
@@ -762,8 +763,8 @@ function AccountCollections({
             if (profile) {
                 onProfileChanged();
             }
-        } catch (e: any) {
-            toast.error(e?.message || "Could not reset");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not reset"));
         } finally {
             setSaving(false);
             setConfirmReset(false);

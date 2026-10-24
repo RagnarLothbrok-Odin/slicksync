@@ -61,6 +61,7 @@ export default function GlobalError({
                                 marginTop: 20,
                                 padding: "8px 16px",
                             }}
+                            type="button"
                         >
                             Try again
                         </button>

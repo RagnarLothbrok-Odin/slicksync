@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // "Devices": what is signed in as this person on their Jellyfin server, with
 // Sign out next to each - an old TV, one at a friend's. Real Jellyfin servers
@@ -113,8 +114,8 @@ export function JellyfinDevicesButton({ userId, name }: { userId: string; name: 
             await api.signOutJellyfinDevice(userId, d.id);
             toast.success(`${d.name} is signed out`);
             setState((s) => (s ? { ...s, devices: s.devices.filter((x) => x.id !== d.id) } : s));
-        } catch (e: any) {
-            toast.error(e?.message || "Could not sign that device out");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not sign that device out"));
         } finally {
             setBusy(null);
         }

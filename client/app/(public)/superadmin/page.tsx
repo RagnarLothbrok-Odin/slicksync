@@ -14,6 +14,7 @@ import {
     ToggleSwitch,
 } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
+import { readErrorMessage } from "@/lib/errors";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -317,8 +318,8 @@ export default function SuperAdminPage() {
                 throw new Error(data?.message || "Failed to save");
             }
             await loadMaintenance();
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to save setting");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save setting"));
         } finally {
             setSavingMaintenanceSetting(false);
         }
@@ -337,8 +338,8 @@ export default function SuperAdminPage() {
             }
             toast.success("VACUUM completed - disk space reclaimed");
             await loadMaintenance();
-        } catch (e: any) {
-            toast.error(e?.message || "VACUUM failed");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "VACUUM failed"));
         } finally {
             setVacuumBusy(false);
         }
@@ -401,8 +402,8 @@ export default function SuperAdminPage() {
             setSignedIn(true);
             setPassword("");
             loadAccounts();
-        } catch (e: any) {
-            toast.error(e.message || "Login failed");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Login failed"));
         } finally {
             setSigningIn(false);
         }
@@ -440,8 +441,8 @@ export default function SuperAdminPage() {
                 prev.map((a) => (a.id === account.id ? { ...a, disabled: !a.disabled } : a))
             );
             toast.success(account.disabled ? "Account re-enabled" : "Account disabled");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to update account");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update account"));
         } finally {
             setBusyId(null);
         }
@@ -505,8 +506,8 @@ export default function SuperAdminPage() {
                 `${ids.length} account${ids.length === 1 ? "" : "s"} ${disable ? "disabled" : "re-enabled"}`
             );
             setSelectedIds(new Set());
-        } catch (e: any) {
-            toast.error(e.message || "Bulk update failed");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Bulk update failed"));
         } finally {
             setBulkBusy(false);
         }
@@ -585,8 +586,8 @@ export default function SuperAdminPage() {
             setShowBroadcast(false);
             setBroadcastTitle("");
             setBroadcastBody("");
-        } catch (e: any) {
-            toast.error(e?.message || "Broadcast failed");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Broadcast failed"));
         } finally {
             setBroadcasting(false);
         }
@@ -1107,6 +1108,7 @@ export default function SuperAdminPage() {
                         <button
                             className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover"
                             onClick={() => setSelectedIds(new Set())}
+                            type="button"
                         >
                             <XMarkIcon className="h-5 w-5" />
                         </button>

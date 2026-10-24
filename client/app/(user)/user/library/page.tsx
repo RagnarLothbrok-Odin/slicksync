@@ -16,6 +16,7 @@ import type { PosterCardItem } from "@/components/ui/PosterCard";
 import { PersonalMediaDetailModal } from "@/components/user/PersonalMediaDetailModal";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
 import { buildNuvioAppUrl, buildStremioAppUrl } from "@/lib/appLinks";
+import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { type LibraryItem, userLibrary } from "@/lib/user-api";
 
@@ -160,6 +161,7 @@ function LibraryCardItem({
                             }}
                             style={{ background: "rgba(239, 68, 68, 0.9)" }}
                             title="Delete"
+                            type="button"
                         >
                             {isDeleting ? (
                                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
@@ -335,6 +337,7 @@ function LibraryListItem({
                             color: "var(--color-error)",
                         }}
                         title="Delete"
+                        type="button"
                     >
                         {isDeleting ? (
                             <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -361,8 +364,8 @@ function LibraryListItem({
 // Get watch date from item (used for sorting)
 function getWatchDate(item: LibraryItem): Date | null {
     const dates: number[] = [];
-    if ((item as any)._mtime) {
-        const d = new Date((item as any)._mtime).getTime();
+    if (item._mtime) {
+        const d = new Date(item._mtime).getTime();
         if (!Number.isNaN(d)) {
             dates.push(d);
         }
@@ -427,11 +430,11 @@ export default function UserLibraryPage() {
                 const result = await userLibrary.getLibrary(userId, authKey || undefined);
                 // Filter to only show items that are in the library (not removed)
                 // !item.removed handles false, 0, null, undefined
-                const activeItems = (result.library || []).filter((item: any) => !item.removed);
+                const activeItems = (result.library || []).filter((item) => !item.removed);
                 setLibrary(activeItems);
-            } catch (err: any) {
+            } catch (err) {
                 console.error("Failed to load library:", err);
-                setError(err.message || "Failed to load library");
+                setError(readErrorMessage(err, "Failed to load library"));
             } finally {
                 setLoading(false);
             }
@@ -502,8 +505,8 @@ export default function UserLibraryPage() {
             await userLibrary.deleteItem(userId, itemId, authKey || undefined);
             setLibrary((prev) => prev.filter((item) => item._id !== itemId));
             setSelectedItems((prev) => prev.filter((id) => id !== itemId));
-        } catch (err: any) {
-            setError(err.message || "Failed to delete item");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to delete item"));
         } finally {
             setDeletingIds((prev) => {
                 const next = new Set(prev);
@@ -530,8 +533,8 @@ export default function UserLibraryPage() {
             );
             setLibrary((prev) => prev.filter((item) => !toDelete.includes(item._id)));
             setSelectedItems([]);
-        } catch (err: any) {
-            setError(err.message || "Failed to delete items");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to delete items"));
         } finally {
             setDeletingIds(new Set());
         }
@@ -600,6 +603,7 @@ export default function UserLibraryPage() {
                                 background: "var(--color-surface)",
                                 color: "var(--color-text-muted)",
                             }}
+                            type="button"
                         >
                             Clear
                         </button>
@@ -612,6 +616,7 @@ export default function UserLibraryPage() {
                                     background: "var(--color-error)",
                                     color: "white",
                                 }}
+                                type="button"
                             >
                                 <TrashIcon className="h-4 w-4" />
                                 Remove selected
@@ -665,6 +670,7 @@ export default function UserLibraryPage() {
                                 : handleSelectAll
                         }
                         style={{ color: "var(--color-primary)" }}
+                        type="button"
                     >
                         {selectedItems.length === filteredLibrary.length
                             ? "Clear selection"

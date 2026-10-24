@@ -37,8 +37,8 @@ export interface EntityColorStyles {
 
 interface HSL {
     h: number;
-    s: number;
     l: number;
+    s: number;
 }
 type Offset = Partial<HSL>;
 

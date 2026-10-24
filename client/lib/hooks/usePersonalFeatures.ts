@@ -112,7 +112,11 @@ export function invalidatePersonalFeatures() {
     cached = null;
     inFlight = null;
     // Re-fetch immediately + notify every mounted subscriber so they re-render.
-    fetchOnce().then((v) => listeners.forEach((l) => l(v)));
+    fetchOnce().then((v) =>
+        listeners.forEach((l) => {
+            l(v);
+        })
+    );
     if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
     }

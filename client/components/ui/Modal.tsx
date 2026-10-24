@@ -149,6 +149,7 @@ export function Modal({
                         background: "color-mix(in srgb, var(--color-surface) 70%, transparent)",
                         color: "var(--color-text-muted)",
                     }}
+                    type="button"
                 >
                     <XMarkIcon className="h-5 w-5" />
                 </button>

@@ -656,10 +656,10 @@ function isValidSavedCustom(x: unknown): x is SavedCustomTheme {
 // Server payload shape ↔ local shape. Server accepts either the new list
 // shape { themeId, customThemes } or the legacy single-slot shape.
 interface ServerThemePref {
-    themeId?: string;
-    customThemes?: SavedCustomTheme[];
     // legacy
     custom?: CustomTheme;
+    customThemes?: SavedCustomTheme[];
+    themeId?: string;
 }
 
 interface ThemeContextValue {

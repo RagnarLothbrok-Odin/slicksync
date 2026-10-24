@@ -1,8 +1,8 @@
 const express = require("express");
 const { publicMessage } = require("../utils/publicError");
-const { StremioAPIClient } = require("stremio-api-client");
+const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
 const {
-    handleDatabaseError,
+    handleDatabaseError: _handleDatabaseError,
     sendError,
     createRouteHandler,
     DatabaseTransactions,
@@ -999,7 +999,9 @@ module.exports = ({
                                 try {
                                     const userIds = JSON.parse(groupAddon.group.userIds);
                                     if (Array.isArray(userIds)) {
-                                        userIds.forEach((userId) => allUserIds.add(userId));
+                                        userIds.forEach((userId) => {
+                                            allUserIds.add(userId);
+                                        });
                                     }
                                 } catch (e) {
                                     console.error("Error parsing group userIds for addon:", e);

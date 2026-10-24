@@ -30,6 +30,7 @@ export function ContentLeaderboard({ movies, series, trending }: ContentLeaderbo
                         }`}
                         key={key}
                         onClick={() => setActiveTab(key as "movies" | "series" | "trending")}
+                        type="button"
                     >
                         <Icon className="mr-2 inline h-4 w-4" />
                         {label}

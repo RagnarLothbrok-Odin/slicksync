@@ -36,6 +36,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
 import { showDeletedWithUndo } from "@/components/ui/undoToast";
 import { api, type CustomList, type CustomListItem, type DescribedCatalogPreview } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { decodeShareCode, looksLikeShareCode } from "@/lib/shareCodes";
@@ -197,8 +198,8 @@ export default function ListsPage() {
                     : `Imported "${list.name}" (${list.items.length} title${list.items.length === 1 ? "" : "s"})`
             );
             router.push(`/catalogs/${list.id}`);
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to import catalog");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to import catalog"));
         } finally {
             setImporting(false);
         }
@@ -221,8 +222,8 @@ export default function ListsPage() {
                 `Imported "${list.name}" (${list.items.length} title${list.items.length === 1 ? "" : "s"})`
             );
             router.push(`/catalogs/${list.id}`);
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to import from SIMKL");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to import from SIMKL"));
         } finally {
             setImportingSimkl(false);
         }
@@ -771,6 +772,7 @@ export default function ListsPage() {
                                 handleTogglePin(menuTarget);
                                 closeMenu();
                             }}
+                            type="button"
                         >
                             {menuTarget.pinned ? (
                                 <MapPinIconSolid className="h-4 w-4 text-primary" />
@@ -785,6 +787,7 @@ export default function ListsPage() {
                                 setCoverPicker(menuTarget);
                                 closeMenu();
                             }}
+                            type="button"
                         >
                             <PhotoIcon className="h-4 w-4" />
                             Cover art
@@ -796,6 +799,7 @@ export default function ListsPage() {
                                 setRenameValue(menuTarget.name);
                                 closeMenu();
                             }}
+                            type="button"
                         >
                             <PencilSquareIcon className="h-4 w-4" />
                             Rename
@@ -806,6 +810,7 @@ export default function ListsPage() {
                                 router.push(`/catalogs/${menuTarget.id}?openRating=1`);
                                 closeMenu();
                             }}
+                            type="button"
                         >
                             <ShieldExclamationIcon className="h-4 w-4" />
                             Content Rating
@@ -816,6 +821,7 @@ export default function ListsPage() {
                                 setDeleting(menuTarget);
                                 closeMenu();
                             }}
+                            type="button"
                         >
                             <TrashIcon className="h-4 w-4" />
                             Delete catalog
@@ -1108,8 +1114,8 @@ function DescribeCatalogModal({
                 const words = description.trim().split(/\s+/).slice(0, 6).join(" ");
                 setName(words.charAt(0).toUpperCase() + words.slice(1));
             }
-        } catch (err: any) {
-            setError(err.message || "Failed to generate a preview");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to generate a preview"));
         } finally {
             setLoading(false);
         }
@@ -1127,8 +1133,8 @@ function DescribeCatalogModal({
                 name: name.trim(),
             });
             onSaved(saved);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to save catalog");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to save catalog"));
         } finally {
             setSaving(false);
         }

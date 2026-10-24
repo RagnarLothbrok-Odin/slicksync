@@ -58,9 +58,9 @@ const {
     DEFAULT_ACCOUNT_ID,
     DEFAULT_ACCOUNT_UUID,
     defaultAddons,
-    BACKUP_DIR,
-    BACKUP_CFG,
-    ENCRYPTION_KEY,
+    BACKUP_DIR: _BACKUP_DIR,
+    BACKUP_CFG: _BACKUP_CFG,
+    ENCRYPTION_KEY: _ENCRYPTION_KEY,
     allowedOrigins,
     QUIET,
     DEBUG_ENABLED,
@@ -72,24 +72,24 @@ const {
     parseAddonIds,
     parseProtectedAddons,
     canonicalizeManifestUrl,
-    normalizeUrl,
+    normalizeUrl: _normalizeUrl,
     isProdEnv,
     filterManifestByResources,
     filterManifestByCatalogs,
 } = require("./utils/validation");
 const {
-    sha256Hex,
-    hmacHex,
+    sha256Hex: _sha256Hex,
+    hmacHex: _hmacHex,
     manifestUrlHmac,
-    getAccountHmacKey,
-    normalizeManifestObject,
+    getAccountHmacKey: _getAccountHmacKey,
+    normalizeManifestObject: _normalizeManifestObject,
     manifestHash,
-    manifestHmac,
+    manifestHmac: _manifestHmac,
 } = require("./utils/hashing");
 const {
     validateStremioAuthKey,
-    filterDefaultAddons,
-    buildAddonDbData,
+    filterDefaultAddons: _filterDefaultAddons,
+    buildAddonDbData: _buildAddonDbData,
 } = require("./utils/stremio");
 const {
     pathIsAllowlisted,
@@ -107,12 +107,12 @@ const {
     assignUserToGroup,
 } = require("./utils/helpers");
 const {
-    selectKeyForRequest,
+    selectKeyForRequest: _selectKeyForRequest,
     encrypt,
     decrypt,
-    getAccountHmacKey: getAccountHmacKeyEnc,
-    encryptIf,
-    decryptIf,
+    getAccountHmacKey: _getAccountHmacKeyEnc,
+    encryptIf: _encryptIf,
+    decryptIf: _decryptIf,
     getDecryptedManifestUrl,
     decryptWithFallback,
 } = require("./utils/encryption");
@@ -478,7 +478,12 @@ app.use(
 );
 
 // Encryption helpers
-const { getServerKey, aesGcmEncrypt, aesGcmDecrypt, getAccountDek } = require("./utils/encryption");
+const {
+    getServerKey,
+    aesGcmEncrypt: _aesGcmEncrypt,
+    aesGcmDecrypt,
+    getAccountDek,
+} = require("./utils/encryption");
 
 // Liveness/readiness probe. Deliberately registered BEFORE the auth gate
 // and kept separate from /api/health (routes/health.js), which is the

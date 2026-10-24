@@ -105,9 +105,7 @@ async function sendSessionStartNotification(webhookUrl, session, user) {
                 inline: false,
                 name: "Overview",
                 value:
-                    overviewText.length > 1024
-                        ? `${overviewText.substring(0, 1021)}...`
-                        : overviewText,
+                    overviewText.length > 1024 ? `${overviewText.slice(0, 1021)}...` : overviewText,
             });
         }
 

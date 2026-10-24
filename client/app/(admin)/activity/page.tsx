@@ -394,7 +394,7 @@ function transformInvitationsToHistory(
 
     invitations.forEach((inv) => {
         const group = inv.groupId ? groupMap.get(inv.groupId) : null;
-        const code = (inv as any).code || (inv as any).inviteCode || "";
+        const code = inv.code || inv.inviteCode || "";
 
         // Add created event
         history.push({
@@ -409,8 +409,8 @@ function transformInvitationsToHistory(
         // Add used events from requests
         if (inv.requests && Array.isArray(inv.requests)) {
             inv.requests
-                .filter((req: any) => req.status === "accepted")
-                .forEach((req: any) => {
+                .filter((req) => req.status === "accepted")
+                .forEach((req) => {
                     history.push({
                         action: "used" as const,
                         groupColor: group?.color,
@@ -591,7 +591,7 @@ function getActivityText(activity: ActivityItem): string {
 const ActivityCard = memo(function ActivityCard({
     activity,
     onFilterByContent,
-    onFilterByEpisode,
+    onFilterByEpisode: _onFilterByEpisode,
     onOpenDetails,
     onMenu,
     focusable = false,
@@ -1208,7 +1208,7 @@ const TaskHistoryCard = memo(function TaskHistoryCard({ task }: { task: TaskHist
                   : "text-warning";
 
         // Render the icon with the appropriate color
-        let iconElement;
+        let iconElement: React.ReactNode;
         switch (task.type) {
             case "sync_users":
                 iconElement = <UsersIcon className={`h-4 w-4 ${statusColor}`} />;
@@ -2023,7 +2023,7 @@ function ActivityPageContent() {
     const [viewMode, setViewMode] = useState<"watch" | "tasks" | "invites" | "proxy" | "dropped">(
         "watch"
     );
-    const { viewMode: watchActivityViewMode, setViewMode: setWatchActivityViewMode } =
+    const { viewMode: watchActivityViewMode, setViewMode: _setWatchActivityViewMode } =
         useDefaultViewMode();
     const [visibleCount, setVisibleCount] = useState(50); // lazy-load activity in chunks
     const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -2100,7 +2100,7 @@ function ActivityPageContent() {
             console.log("[ActivityPage] Metrics received:", {
                 nowPlaying: metrics.nowPlaying?.length,
                 sessions: metrics.watchSessions?.length,
-                synthetic: metrics.watchSessions?.filter((s: any) => s.isSynthetic)?.length,
+                synthetic: metrics.watchSessions?.filter((s) => s.isSynthetic)?.length,
             });
 
             setMetricsData(metrics);
@@ -2760,6 +2760,7 @@ function ActivityPageContent() {
                                                 <button
                                                     className="rounded-md p-0.5 transition-colors hover:bg-white/20"
                                                     onClick={() => setSelectedGroup(null)}
+                                                    type="button"
                                                 >
                                                     <XMarkIcon className="h-3.5 w-3.5" />
                                                 </button>

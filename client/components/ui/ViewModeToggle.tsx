@@ -30,6 +30,7 @@ export function ViewModeToggle({ mode, onChange, showLabels = true }: ViewModeTo
                 }`}
                 onClick={() => onChange("grid")}
                 title="Grid view"
+                type="button"
             >
                 <Squares2X2Icon className="h-5 w-5" />
                 {showLabels && <span className="hidden font-medium text-sm sm:inline">Grid</span>}
@@ -42,6 +43,7 @@ export function ViewModeToggle({ mode, onChange, showLabels = true }: ViewModeTo
                 }`}
                 onClick={() => onChange("list")}
                 title="List view"
+                type="button"
             >
                 <ListBulletIcon className="h-5 w-5" />
                 {showLabels && <span className="hidden font-medium text-sm sm:inline">List</span>}

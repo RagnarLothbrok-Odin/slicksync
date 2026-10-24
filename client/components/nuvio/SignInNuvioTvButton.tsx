@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // "Sign in a Nuvio TV": a Nuvio TV or computer that isn't signed in shows a
 // 6-character code. Typed here, SlickSync looks it up with this person's
@@ -110,8 +111,8 @@ export function SignInNuvioTvButton({ userId, name }: { userId: string; name: st
         try {
             const r = await api.lookupNuvioDeviceLogin(userId, code);
             setFound({ deviceName: r.deviceName, deviceType: r.deviceType });
-        } catch (e: any) {
-            toast.error(e?.message || "That code didn't work");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "That code didn't work"));
         } finally {
             setBusy(false);
         }
@@ -125,8 +126,8 @@ export function SignInNuvioTvButton({ userId, name }: { userId: string; name: st
                 `${r.deviceName || "The device"} is signing in to ${name}'s Nuvio account`
             );
             close();
-        } catch (e: any) {
-            toast.error(e?.message || "That didn't work");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "That didn't work"));
             setFound(null);
         } finally {
             setBusy(false);

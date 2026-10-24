@@ -10,6 +10,7 @@ import {
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { stremioOAuth } from "@/lib/invite-api";
 
 interface StremioOAuthCardProps {
@@ -172,8 +173,8 @@ export function StremioOAuthCard({
             setOAuthCode(result.code);
             setOAuthExpiresAt(result.expiresAt);
             setIsPolling(true);
-        } catch (err: any) {
-            const message = err?.message || "Failed to generate OAuth link";
+        } catch (err) {
+            const message = readErrorMessage(err, "Failed to generate OAuth link");
             setError(message);
             onError?.(message);
         } finally {
@@ -289,6 +290,7 @@ export function StremioOAuthCard({
                             color: "var(--color-bg)",
                             opacity: !oauthLink || disabled || isExpired || isCompleting ? 0.5 : 1,
                         }}
+                        type="button"
                     >
                         {isCompleting ? (
                             <>
@@ -350,6 +352,7 @@ export function StremioOAuthCard({
                                 backgroundColor: "var(--color-bg-subtle)",
                                 border: "1px solid var(--color-surface-border)",
                             }}
+                            type="button"
                         >
                             <span
                                 className="font-mono text-lg tracking-widest"
@@ -385,6 +388,7 @@ export function StremioOAuthCard({
                                 disabled={isGenerating || disabled}
                                 onClick={generateLink}
                                 style={{ color: "var(--color-text-muted)" }}
+                                type="button"
                             >
                                 <ArrowPathIcon
                                     className={`h-4 w-4 ${isGenerating ? "animate-spin" : ""}`}

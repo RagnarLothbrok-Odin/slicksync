@@ -255,6 +255,7 @@ export function TopbarActions({ activities, inviteHistory, taskHistory }: Topbar
                 className="whitespace-nowrap rounded-lg px-2.5 py-1.5 font-semibold text-xs transition-opacity hover:opacity-90"
                 onClick={resume}
                 style={{ background: "var(--color-primary)", color: "var(--color-bg)" }}
+                type="button"
             >
                 Resume tour
             </button>
@@ -264,6 +265,7 @@ export function TopbarActions({ activities, inviteHistory, taskHistory }: Topbar
                 onClick={dismiss}
                 style={{ color: "var(--color-text-muted)" }}
                 title="Dismiss - don't show this again"
+                type="button"
             >
                 <XMarkIcon className="h-4 w-4" />
             </button>
@@ -301,6 +303,7 @@ export function TopbarActions({ activities, inviteHistory, taskHistory }: Topbar
                     ...(floating ? FLOATING_ICON_STYLE : {}),
                 }}
                 title="Search, jump to a page, or ask how to do something (Ctrl+K)"
+                type="button"
             >
                 <WizardBooksIcon className="h-5 w-5" />
             </button>

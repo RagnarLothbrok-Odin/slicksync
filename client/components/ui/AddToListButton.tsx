@@ -7,9 +7,9 @@ import { api, type CustomList } from "@/lib/api";
 
 interface CatalogItem {
     id: string;
-    type: "movie" | "series";
     name: string;
     poster?: string | null;
+    type: "movie" | "series";
 }
 
 // Shared picker body - fetches the account's catalogs on mount, lets you

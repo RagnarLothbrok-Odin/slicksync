@@ -7,13 +7,13 @@ import type { MediaDetails, RatingsBatchEntry, WatchlistItem } from "@/lib/api";
 import { personalRequest } from "@/lib/user-api";
 
 interface TitleState {
+    createdAt?: string;
     itemId: string;
     itemType: "movie" | "series";
     name: string;
     poster: string | null;
-    saved: boolean;
     reaction: "like" | "dislike" | null;
-    createdAt?: string;
+    saved: boolean;
 }
 
 export function PersonalMediaDetailModal({

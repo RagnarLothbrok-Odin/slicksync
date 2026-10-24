@@ -45,6 +45,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
 import { api, type Group, type Invitation } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
@@ -91,7 +92,7 @@ export default function InvitationsPage() {
     const isTV = useIsTV();
     const Wrapper = isTV ? TVPageProvider : Fragment;
     const [activeTab, setActiveTab] = useState<"invitations" | "requests">("invitations");
-    const { viewMode, setViewMode } = useDefaultViewMode();
+    const { viewMode, setViewMode: _setViewMode } = useDefaultViewMode();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     // Data state
@@ -147,7 +148,7 @@ export default function InvitationsPage() {
                 for (const inv of invitationsData) {
                     if (inv.requests && Array.isArray(inv.requests)) {
                         allRequests.push(
-                            ...inv.requests.map((req: any) => ({
+                            ...inv.requests.map((req) => ({
                                 ...req,
                                 invitationId: inv.id,
                             }))
@@ -158,7 +159,7 @@ export default function InvitationsPage() {
                             const invRequests = await api.getInvitationRequests(inv.id);
                             if (Array.isArray(invRequests)) {
                                 allRequests.push(
-                                    ...invRequests.map((req: any) => ({
+                                    ...invRequests.map((req) => ({
                                         ...req,
                                         invitationId: inv.id,
                                     }))
@@ -198,7 +199,7 @@ export default function InvitationsPage() {
             }
         }
 
-        return (invitations || []).map((inv: any) => {
+        return (invitations || []).map((inv) => {
             const code = inv.code || inv.inviteCode || "";
             const rawGroupName = inv.groupName || "";
             const group = rawGroupName ? groupByName.get(rawGroupName) : undefined;
@@ -831,6 +832,7 @@ export default function InvitationsPage() {
                             <button
                                 className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover"
                                 onClick={deselectAll}
+                                type="button"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
@@ -848,6 +850,7 @@ export default function InvitationsPage() {
                     boxShadow:
                         "0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
                 }}
+                type="button"
             >
                 <PlusIcon className="h-6 w-6" />
             </button>
@@ -1239,6 +1242,7 @@ function InvitationCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                     onClick={handleViewDetail}
+                    type="button"
                 >
                     <EyeIcon className="h-4 w-4" />
                     View Details
@@ -1246,6 +1250,7 @@ function InvitationCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                     onClick={handleEdit}
+                    type="button"
                 >
                     <PencilIcon className="h-4 w-4" />
                     Edit
@@ -1253,6 +1258,7 @@ function InvitationCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                     onClick={handleDuplicate}
+                    type="button"
                 >
                     <DocumentDuplicateIcon className="h-4 w-4" />
                     Duplicate
@@ -1260,6 +1266,7 @@ function InvitationCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                     onClick={handleCopy}
+                    type="button"
                 >
                     <ClipboardIcon className="h-4 w-4" />
                     Copy Link
@@ -1271,6 +1278,7 @@ function InvitationCard({
                         close();
                         setQrOpen(true);
                     }}
+                    type="button"
                 >
                     <QrCodeIcon className="h-4 w-4" />
                     Show QR
@@ -1279,6 +1287,7 @@ function InvitationCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-error text-sm transition-colors hover:bg-error-muted"
                     onClick={handleDelete}
+                    type="button"
                 >
                     <TrashIcon className="h-4 w-4" />
                     Delete
@@ -1367,8 +1376,8 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
             if (onUpdate) {
                 onUpdate();
             }
-        } catch (err: any) {
-            toast.error(err.message || `Failed to ${action} request`);
+        } catch (err) {
+            toast.error(readErrorMessage(err, `Failed to ${action} request`));
             console.error(`Failed to ${action} request:`, err);
         } finally {
             setIsProcessing(false);
@@ -1384,8 +1393,8 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
             if (onUpdate) {
                 onUpdate();
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to undo rejection");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to undo rejection"));
         } finally {
             setIsProcessing(false);
         }
@@ -1399,8 +1408,8 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
             if (onUpdate) {
                 onUpdate();
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to refresh OAuth");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to refresh OAuth"));
         } finally {
             setIsRefreshing(false);
         }
@@ -1500,6 +1509,7 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
                                     className="rounded p-1 hover:bg-surface-hover"
                                     onClick={handleCopyCode}
                                     title="Copy code"
+                                    type="button"
                                 >
                                     {copiedCode ? (
                                         <CheckIcon className="h-4 w-4 text-success" />
@@ -1518,6 +1528,7 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
                                 className="rounded-lg bg-surface-hover p-1.5 text-muted transition-colors hover:bg-primary-muted hover:text-primary"
                                 onClick={handleCopyLink}
                                 title="Copy OAuth link"
+                                type="button"
                             >
                                 {copiedLink ? (
                                     <CheckIcon className="h-4 w-4" />
@@ -1530,6 +1541,7 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
                                 disabled={isRefreshing}
                                 onClick={handleRefreshOAuth}
                                 title="Refresh OAuth link"
+                                type="button"
                             >
                                 <ArrowPathIcon
                                     className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
@@ -1706,8 +1718,8 @@ function CreateInvitationModal({
                 // No dedicated invitation detail page yet; keep user on list for now.
                 window.location.reload();
             }, 800);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to create invitation");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to create invitation"));
         } finally {
             setIsLoading(false);
         }
@@ -2161,8 +2173,8 @@ function DuplicateInvitationForm({
             onClose();
             // Refresh page to show new invitation
             window.location.reload();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to duplicate invitation");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to duplicate invitation"));
         } finally {
             setIsLoading(false);
         }

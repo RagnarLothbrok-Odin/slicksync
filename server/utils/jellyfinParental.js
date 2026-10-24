@@ -102,10 +102,14 @@ async function setAgeLimit(prisma, decrypt, accountId, userId, { value, blockUnr
         Array.isArray(policy.BlockUnratedItems) ? policy.BlockUnratedItems : []
     );
     if (blockUnrated === true) {
-        UNRATED_TYPES.forEach((t) => blocked.add(t));
+        UNRATED_TYPES.forEach((t) => {
+            blocked.add(t);
+        });
     }
     if (blockUnrated === false) {
-        UNRATED_TYPES.forEach((t) => blocked.delete(t));
+        UNRATED_TYPES.forEach((t) => {
+            blocked.delete(t);
+        });
     }
     await serverCollections.call(ctx.session, `/Users/${ctx.person.jellyfinUserId}/Policy`, {
         body: {

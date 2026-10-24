@@ -59,6 +59,7 @@ import {
 import { DraggableList } from "@/components/ui/DragSortable";
 import { toast } from "@/components/ui/Toast";
 import { type Addon, api, type Group, type User } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { displayEmail } from "@/lib/providers";
@@ -510,7 +511,7 @@ export default function GroupDetailPage() {
             const allDates = new Set<string>();
             userWatchTimeResults.forEach(({ data }) => {
                 if (data?.byDate) {
-                    data.byDate.forEach((period: any) => {
+                    data.byDate.forEach((period) => {
                         allDates.add(period.date);
                     });
                 }
@@ -523,7 +524,7 @@ export default function GroupDetailPage() {
             const aggregatedWatchTime: AggregatedWatchTimeData[] = sortedDates.map((date) => {
                 const dayData: AggregatedWatchTimeData = { date };
                 userWatchTimeResults.forEach(({ userId, data }) => {
-                    const userData = data?.byDate?.find((p: any) => p.date === date);
+                    const userData = data?.byDate?.find((p) => p.date === date);
                     dayData[userId] = userData
                         ? Math.round((userData.watchTimeSeconds || 0) / 60)
                         : 0;
@@ -535,7 +536,7 @@ export default function GroupDetailPage() {
             const aggregatedContent: AggregatedContentData[] = sortedDates.map((date) => {
                 const dayData: AggregatedContentData = { date };
                 userWatchTimeResults.forEach(({ userId, data }) => {
-                    const userData = data?.byDate?.find((p: any) => p.date === date);
+                    const userData = data?.byDate?.find((p) => p.date === date);
                     dayData[`${userId}_movies`] = userData?.movies || 0;
                     dayData[`${userId}_series`] = userData?.shows || 0;
                 });
@@ -699,8 +700,8 @@ export default function GroupDetailPage() {
             await api.syncGroup(params.id as string);
             toast.success("Group synced successfully");
             await refetchData();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to sync group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to sync group"));
         } finally {
             setIsSyncing(false);
         }
@@ -712,8 +713,8 @@ export default function GroupDetailPage() {
             await api.deleteGroup(params.id as string);
             toast.success("Group deleted successfully");
             router.push("/groups");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to delete group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete group"));
         } finally {
             setIsDeleting(false);
             setIsDeleteModalOpen(false);
@@ -727,8 +728,8 @@ export default function GroupDetailPage() {
                 await api.removeUserFromGroup(params.id as string, userId);
                 toast.success(`${userName} removed from group`);
                 await refetchData();
-            } catch (err: any) {
-                toast.error(err.message || `Failed to remove ${userName}`);
+            } catch (err) {
+                toast.error(readErrorMessage(err, `Failed to remove ${userName}`));
             } finally {
                 setUsersSyncing(false);
             }
@@ -743,8 +744,8 @@ export default function GroupDetailPage() {
         try {
             await api.syncUser(userId);
             toast.success(`${userName} synced successfully`);
-        } catch (err: any) {
-            toast.error(err.message || `Failed to sync ${userName}`);
+        } catch (err) {
+            toast.error(readErrorMessage(err, `Failed to sync ${userName}`));
         } finally {
             setSyncingUsers((prev) => {
                 const next = new Set(prev);
@@ -767,8 +768,8 @@ export default function GroupDetailPage() {
             toast.success(`Removed ${groupUsers.length} members from group`);
             await refetchData();
             setIsClearMembersModalOpen(false);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to clear members");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to clear members"));
         } finally {
             setIsClearing(false);
             setUsersSyncing(false);
@@ -790,8 +791,8 @@ export default function GroupDetailPage() {
             );
             await refetchData();
             setIsClearAddonsModalOpen(false);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to clear addons");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to clear addons"));
         } finally {
             setIsClearing(false);
             setGroupSyncing(false);
@@ -813,8 +814,8 @@ export default function GroupDetailPage() {
                 );
                 await refetchData();
                 setIsAddAddonModalOpen(false);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to add addons");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to add addons"));
             } finally {
                 setGroupSyncing(false);
                 setUsersSyncing(false);
@@ -833,8 +834,8 @@ export default function GroupDetailPage() {
                 await api.removeAddonFromGroup(params.id as string, addonId);
                 toast.success(`${addon?.name || "Addon"} removed from group`);
                 await refetchData();
-            } catch (err: any) {
-                toast.error(err.message || "Failed to remove addon");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to remove addon"));
             } finally {
                 setGroupSyncing(false);
                 setUsersSyncing(false);
@@ -863,8 +864,8 @@ export default function GroupDetailPage() {
                 await api.updateGroup(params.id as string, { colorIndex });
                 toast.success("Group color updated");
                 await refetchData();
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update group color");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update group color"));
                 await refetchData();
             }
         },
@@ -878,8 +879,8 @@ export default function GroupDetailPage() {
                 await api.updateGroup(params.id as string, { name: newName });
                 toast.success("Group name updated");
                 await refetchData();
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update group name");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update group name"));
             }
         },
         [params.id, refetchData]
@@ -894,8 +895,8 @@ export default function GroupDetailPage() {
                 });
                 toast.success("Group description updated");
                 await refetchData();
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update group description");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update group description"));
             }
         },
         [params.id, refetchData]
@@ -907,12 +908,12 @@ export default function GroupDetailPage() {
             const currentGroup = await api.getGroup(params.id as string);
             // Same reading the switch uses, so a missing value means "active" in
             // both places instead of active on screen and inactive in the maths.
-            const newStatus = !((currentGroup as any).isActive !== false);
+            const newStatus = !(currentGroup.isActive !== false);
             await api.toggleGroupStatus(params.id as string, newStatus);
             toast.success(`Group ${newStatus ? "activated" : "deactivated"}`);
             await refetchData();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to toggle group status");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to toggle group status"));
         }
     }, [params.id, refetchData]);
 
@@ -1010,7 +1011,7 @@ export default function GroupDetailPage() {
             <div className="flex items-center gap-2">
                 <span className="text-muted text-sm">Active</span>
                 <ToggleSwitch
-                    checked={(group as any)?.isActive !== false}
+                    checked={group?.isActive !== false}
                     onChange={handleToggleActive}
                     size="sm"
                     title="Activate group"
@@ -1138,10 +1139,12 @@ export default function GroupDetailPage() {
                                                         toast.success(
                                                             `Synced ${group?.name} successfully`
                                                         );
-                                                    } catch (err: any) {
+                                                    } catch (err) {
                                                         toast.error(
-                                                            err.message ||
+                                                            readErrorMessage(
+                                                                err,
                                                                 `Failed to sync ${group?.name}`
+                                                            )
                                                         );
                                                     }
                                                     setTimeout(() => {
@@ -1436,7 +1439,7 @@ export default function GroupDetailPage() {
                                                 if (!addon) {
                                                     return null;
                                                 }
-                                                const anyAddon = addon as any;
+                                                const anyAddon = addon;
                                                 const logo =
                                                     anyAddon.customLogo ||
                                                     anyAddon.manifest?.logo ||
@@ -1704,8 +1707,8 @@ function EditGroupForm({ group, onClose }: { group: Group | null; onClose: () =>
             toast.success("Group updated successfully");
             onClose();
             window.location.reload();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update group"));
         } finally {
             setIsLoading(false);
         }
@@ -1811,8 +1814,8 @@ function AddMemberForm({
             if (onUsersChanged) {
                 onUsersChanged();
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to add users to group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to add users to group"));
         } finally {
             setIsLoading(false);
         }
@@ -1936,7 +1939,7 @@ function AddAddonForm({ availableAddons, onAdd, onClose }: AddAddonFormProps) {
             <div className="max-h-64 space-y-2 overflow-y-auto">
                 {filteredAddons.map((addon) => {
                     // Extract logo from various sources: customLogo > manifest.logo > logo > iconUrl
-                    const anyAddon = addon as any;
+                    const anyAddon = addon;
                     const logo =
                         anyAddon.customLogo ||
                         anyAddon.manifest?.logo ||

@@ -52,6 +52,7 @@ import {
     type ContinueWatchingItem,
     type MetricsData,
 } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
@@ -453,8 +454,8 @@ export default function DashboardPage() {
             await api.syncAllUsers();
             toast.success("Global sync triggered for all users");
             await refreshData();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to trigger global sync");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to trigger global sync"));
         } finally {
             setIsSyncing(false);
         }
@@ -560,7 +561,7 @@ export default function DashboardPage() {
     // Transform recent addons for display
     const recentAddons = useMemo(() => {
         return recentAddonsData.map((addon) => {
-            const anyAddon = addon as any;
+            const anyAddon = addon;
 
             // Mirror Addons page logo logic
             const logo =
@@ -572,12 +573,15 @@ export default function DashboardPage() {
                 undefined;
 
             return {
-                groupCount: anyAddon.groups || 0,
+                groupCount:
+                    typeof anyAddon.groups === "number"
+                        ? anyAddon.groups
+                        : anyAddon.groups?.length || 0,
                 id: addon.id,
                 logo,
                 name: addon.name,
                 resources: addon.resources || [],
-                status: (addon as any).status || "active",
+                status: addon.status || "active",
                 userCount: anyAddon.users || 0,
                 version: addon.version,
             };
@@ -1079,8 +1083,10 @@ export default function DashboardPage() {
                                                     try {
                                                         await api.reloadAddon(addon.id);
                                                         toast.success(`Reloaded ${addon.name}`);
-                                                    } catch (err: any) {
-                                                        toast.error(err.message || "Reload failed");
+                                                    } catch (err) {
+                                                        toast.error(
+                                                            readErrorMessage(err, "Reload failed")
+                                                        );
                                                     } finally {
                                                         setReloadingAddons((prev) => {
                                                             const next = new Set(prev);
@@ -1501,8 +1507,10 @@ export default function DashboardPage() {
                                                 try {
                                                     await api.reloadAddon(addon.id);
                                                     toast.success(`Reloaded ${addon.name}`);
-                                                } catch (err: any) {
-                                                    toast.error(err.message || "Reload failed");
+                                                } catch (err) {
+                                                    toast.error(
+                                                        readErrorMessage(err, "Reload failed")
+                                                    );
                                                 } finally {
                                                     setReloadingAddons((prev) => {
                                                         const next = new Set(prev);

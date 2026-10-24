@@ -28,6 +28,7 @@ import { Badge, Button, Card, ConfirmModal, Modal, UserAvatar } from "@/componen
 import { toast } from "@/components/ui/Toast";
 import { api, type Group, type Invitation, type InviteRequest } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { displayEmail } from "@/lib/providers";
 
@@ -66,7 +67,7 @@ export default function InvitationDetailPage() {
                     api.getGroups(),
                 ]);
 
-                const foundInvitation = invitationsData.find((inv: any) => inv.id === invitationId);
+                const foundInvitation = invitationsData.find((inv) => inv.id === invitationId);
                 if (!foundInvitation) {
                     throw new Error("Invitation not found");
                 }
@@ -121,8 +122,8 @@ export default function InvitationDetailPage() {
             await api.deleteInvitation(invitationId);
             toast.success("Invitation deleted successfully");
             router.push("/invitations");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to delete invitation");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete invitation"));
             setIsDeleting(false);
         }
     };
@@ -133,8 +134,8 @@ export default function InvitationDetailPage() {
             toast.success("Request accepted");
             // Refresh data
             window.location.reload();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to accept request");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to accept request"));
         }
     };
 
@@ -143,8 +144,8 @@ export default function InvitationDetailPage() {
             await api.rejectInviteRequest(requestId);
             toast.success("Request rejected");
             window.location.reload();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reject request");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reject request"));
         }
     };
 
@@ -153,8 +154,8 @@ export default function InvitationDetailPage() {
             await api.rejectInviteRequest(requestId);
             toast.success("User removed");
             window.location.reload();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to remove user");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to remove user"));
         }
     };
 

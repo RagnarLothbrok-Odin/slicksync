@@ -120,8 +120,8 @@ export function SyncBadge({
                 // a user in no group itself, so this is one round trip instead of
                 // two.
                 const syncStatus = await api.getUserSyncStatus(userId);
-                const syncStatusValue = (syncStatus as any)?.status;
-                const syncMessage = (syncStatus as any)?.message;
+                const syncStatusValue = syncStatus?.status;
+                const syncMessage = syncStatus?.message;
 
                 if (syncStatusValue === "error") {
                     const message = syncMessage || "";

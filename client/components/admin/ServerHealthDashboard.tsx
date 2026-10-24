@@ -48,7 +48,7 @@ export function ServerHealthDashboard({ status, checks, metrics }: ServerHealthD
         critical: { color: "error", icon: XCircleIcon, label: "Critical Issues Detected" },
         healthy: { color: "success", icon: CheckCircleIcon, label: "All Systems Operational" },
         warning: { color: "warning", icon: ExclamationTriangleIcon, label: "Degraded Performance" },
-    };
+    } as const;
 
     const currentStatus = statusConfig[status];
     const StatusIcon = currentStatus.icon;
@@ -71,7 +71,7 @@ export function ServerHealthDashboard({ status, checks, metrics }: ServerHealthD
                         {new Date(metrics.serverTime).toLocaleTimeString()}
                     </p>
                 </div>
-                <Badge variant={currentStatus.color as any}>{status.toUpperCase()}</Badge>
+                <Badge variant={currentStatus.color}>{status.toUpperCase()}</Badge>
             </motion.div>
 
             {/* Health Checks Grid */}

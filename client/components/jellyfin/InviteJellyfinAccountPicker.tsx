@@ -11,9 +11,9 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 interface Server {
+    canCreate: boolean;
     key: string;
     name: string;
-    canCreate: boolean;
 }
 
 export function InviteJellyfinAccountPicker({

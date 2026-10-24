@@ -555,7 +555,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
                             ? g.userIds
                             : JSON.parse(g.userIds || "[]");
                         if (Array.isArray(userIds)) {
-                            userIds.forEach((id) => allUserIds.add(id));
+                            userIds.forEach((id) => {
+                                allUserIds.add(id);
+                            });
                         }
                     } catch {
                         // Malformed optional data leaves the existing fallback in place.
@@ -694,7 +696,9 @@ module.exports = ({ prisma, getAccountId, scopedWhere, reloadDeps, syncGroupUser
                             ? g.userIds
                             : JSON.parse(g.userIds || "[]");
                         if (Array.isArray(userIds)) {
-                            userIds.forEach((id) => allUserIds.add(id));
+                            userIds.forEach((id) => {
+                                allUserIds.add(id);
+                            });
                         }
                     } catch {
                         // Malformed optional data leaves the existing fallback in place.

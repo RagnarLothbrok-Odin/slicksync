@@ -61,6 +61,7 @@ import {
 } from "@/lib/api";
 import { isBeginnerMode, setBeginnerMode as setBeginnerModePref } from "@/lib/beginnerMode";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage, readErrorName } from "@/lib/errors";
 import { invalidatePersonalFeatures } from "@/lib/hooks/usePersonalFeatures";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { SETTINGS_INDEX } from "@/lib/settingsIndex";
@@ -732,8 +733,8 @@ export default function SettingsPage() {
                 toast.error(`Saved, but verification failed: ${result.lastCheckMessage}`);
             }
             fetchLiveAiModels({ hasKey: true }); // refresh the model dropdown against whatever key/URL just got saved
-        } catch (e: any) {
-            toast.error(e.message || "Failed to save AI Services");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save AI Services"));
         } finally {
             setIsSavingAi(false);
         }
@@ -749,8 +750,8 @@ export default function SettingsPage() {
         try {
             const result = await api.revealAiServicesKey();
             setAiApiKey(result.secret);
-        } catch (e: any) {
-            toast.error(e.message || "Failed to reveal API key");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to reveal API key"));
         }
     };
 
@@ -768,8 +769,8 @@ export default function SettingsPage() {
             setAiCheckStatus(null);
             setAiCheckMessage(null);
             toast.success("AI Services removed");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to remove AI Services");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to remove AI Services"));
         }
     };
 
@@ -794,8 +795,8 @@ export default function SettingsPage() {
         try {
             const updated = await api.renamePushDevice(id, label || null);
             setPushDevices((prev) => prev.map((d) => (d.id === id ? updated : d)));
-        } catch (e: any) {
-            toast.error(e.message || "Failed to rename device");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to rename device"));
         }
     };
 
@@ -804,9 +805,9 @@ export default function SettingsPage() {
         try {
             await api.revokePushDevice(id);
             toast.success("Device revoked");
-        } catch (e: any) {
+        } catch (e) {
             loadPushDevices(); // revert on failure
-            toast.error(e.message || "Failed to revoke device");
+            toast.error(readErrorMessage(e, "Failed to revoke device"));
         }
     };
 
@@ -900,12 +901,15 @@ export default function SettingsPage() {
             const r = await api.verifyPasskeyRegistration(credential, suggested);
             setPasskeys(r.passkeys || []);
             toast.success("Passkey added");
-        } catch (e: any) {
+        } catch (e) {
             // A cancelled prompt is not a failure worth a red toast.
-            if (e?.name === "NotAllowedError" || /cancel|abort/i.test(e?.message || "")) {
+            if (
+                readErrorName(e) === "NotAllowedError" ||
+                /cancel|abort/i.test(readErrorMessage(e, ""))
+            ) {
                 return;
             }
-            toast.error(e?.message || "Could not add that passkey");
+            toast.error(readErrorMessage(e, "Could not add that passkey"));
         } finally {
             setPasskeyBusy(false);
         }
@@ -916,8 +920,8 @@ export default function SettingsPage() {
             const r = await api.deletePasskey(id);
             setPasskeys(r.passkeys || []);
             toast.success("Passkey removed");
-        } catch (e: any) {
-            toast.error(e?.message || "Could not remove that passkey");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not remove that passkey"));
         }
     };
 
@@ -1189,8 +1193,8 @@ export default function SettingsPage() {
         try {
             await api.updateSyncSettings({ [key]: value });
             toast.success("Setting saved");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to save setting");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save setting"));
         }
     };
 
@@ -1213,8 +1217,8 @@ export default function SettingsPage() {
             setAccountInfo((prev) => (prev ? { ...prev, displayName: result.displayName } : prev));
             setDisplayNameDraft(result.displayName || "");
             toast.success("Nickname saved");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to save nickname");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save nickname"));
         } finally {
             setSavingDisplayName(false);
         }
@@ -1230,8 +1234,8 @@ export default function SettingsPage() {
         try {
             await api.testWebhook(syncSettings.webhookUrl);
             toast.success("Test message sent to Discord");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to send test message");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to send test message"));
         } finally {
             setIsTestingWebhook(false);
         }
@@ -1252,8 +1256,8 @@ export default function SettingsPage() {
             } else {
                 toast.error(result.reason || "Failed to generate mosaic");
             }
-        } catch (e: any) {
-            toast.error(e.message || "Failed to generate mosaic");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to generate mosaic"));
         } finally {
             setIsGeneratingMosaic(false);
         }
@@ -1266,8 +1270,8 @@ export default function SettingsPage() {
             setApiKey(result.apiKey);
             copyToClipboard(result.apiKey);
             toast.success(apiKey ? "API key rotated and copied" : "API key generated and copied");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to generate API key");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to generate API key"));
         } finally {
             setIsGeneratingKey(false);
         }
@@ -1286,8 +1290,8 @@ export default function SettingsPage() {
             const result = await api.setup2fa();
             setTwoFaSetup(result);
             setTwoFaSetupCode("");
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to start 2FA setup");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to start 2FA setup"));
         } finally {
             setTwoFaStartingSetup(false);
         }
@@ -1305,8 +1309,8 @@ export default function SettingsPage() {
             setTwoFaSetupCode("");
             setTwoFaBackupCodes(result.backupCodes);
             toast.success("2FA enabled");
-        } catch (e: any) {
-            toast.error(e?.message || "Incorrect code");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Incorrect code"));
         } finally {
             setTwoFaEnabling(false);
         }
@@ -1328,8 +1332,8 @@ export default function SettingsPage() {
             setTwoFaDisablePrompt(false);
             setTwoFaDisableCode("");
             toast.success("2FA disabled");
-        } catch (e: any) {
-            toast.error(e?.message || "Incorrect code");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Incorrect code"));
         } finally {
             setTwoFaDisabling(false);
         }
@@ -1346,8 +1350,8 @@ export default function SettingsPage() {
             setTwoFaRegenCode("");
             setTwoFaBackupCodes(result.backupCodes);
             toast.success("New backup codes generated - your old codes no longer work");
-        } catch (e: any) {
-            toast.error(e?.message || "Incorrect code");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Incorrect code"));
         } finally {
             setTwoFaRegenerating(false);
         }
@@ -1406,8 +1410,8 @@ export default function SettingsPage() {
                 webhookUrl: "",
             });
             toast.success("Settings reset to defaults");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to reset settings");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to reset settings"));
         }
     };
 
@@ -1422,8 +1426,8 @@ export default function SettingsPage() {
             await api.logout();
             toast.success("Account deleted");
             window.location.href = "/login?mode=admin";
-        } catch (e: any) {
-            toast.error(e.message || "Failed to delete account");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to delete account"));
             setIsDeletingAccount(false);
         }
     };
@@ -2237,6 +2241,7 @@ export default function SettingsPage() {
                                                                                     )
                                                                                 }
                                                                                 title="Revoke this device"
+                                                                                type="button"
                                                                             >
                                                                                 <TrashIcon className="h-3.5 w-3.5" />
                                                                             </button>
@@ -2287,6 +2292,7 @@ export default function SettingsPage() {
                                                                                             device.id
                                                                                         )
                                                                                     }
+                                                                                    type="button"
                                                                                 >
                                                                                     <CheckIcon className="h-3.5 w-3.5" />
                                                                                 </button>
@@ -2297,6 +2303,7 @@ export default function SettingsPage() {
                                                                                             null
                                                                                         )
                                                                                     }
+                                                                                    type="button"
                                                                                 >
                                                                                     <XMarkIcon className="h-3.5 w-3.5" />
                                                                                 </button>
@@ -2313,6 +2320,7 @@ export default function SettingsPage() {
                                                                                             ""
                                                                                     );
                                                                                 }}
+                                                                                type="button"
                                                                             >
                                                                                 <p className="truncate font-medium text-default text-sm">
                                                                                     {displayName}
@@ -3699,6 +3707,7 @@ export default function SettingsPage() {
                                                                 title={
                                                                     apiKeyVisible ? "Hide" : "Show"
                                                                 }
+                                                                type="button"
                                                             >
                                                                 {apiKeyVisible ? (
                                                                     <EyeSlashIcon className="h-4 w-4 text-muted" />
@@ -3711,6 +3720,7 @@ export default function SettingsPage() {
                                                                 disabled={!apiKey}
                                                                 onClick={handleCopyApiKey}
                                                                 title="Copy"
+                                                                type="button"
                                                             >
                                                                 <ClipboardDocumentIcon className="h-4 w-4 text-muted" />
                                                             </button>

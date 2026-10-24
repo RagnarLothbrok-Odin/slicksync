@@ -33,6 +33,7 @@ import {
 import { PersonPushRow } from "@/components/user/PersonPushRow";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
 import { getUserApiKey, userAuth, userExport } from "@/lib/user-api";
@@ -257,8 +258,8 @@ export default function UserSettingsPage() {
             setActivityVisibility(newVisibility);
             await refreshUserInfo();
             toast.success(`Activity visibility set to ${newVisibility}`);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update visibility");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update visibility"));
         } finally {
             setUpdating(false);
         }
@@ -282,8 +283,8 @@ export default function UserSettingsPage() {
                 setPublicStatsSlug(slug);
                 toast.success("Public stats link enabled");
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update public stats link");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update public stats link"));
         } finally {
             setSavingPublicStats(false);
         }
@@ -323,8 +324,8 @@ export default function UserSettingsPage() {
             a.click();
             URL.revokeObjectURL(url);
             toast.success("Your data was exported");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to export your data");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to export your data"));
         } finally {
             setIsExportingMyData(false);
         }
@@ -350,8 +351,8 @@ export default function UserSettingsPage() {
                 throw new Error(data?.message || data?.error || "Failed to save webhook");
             }
             toast.success("Webhook URL saved");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to save webhook");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save webhook"));
         } finally {
             setIsSavingWebhook(false);
         }
@@ -378,9 +379,9 @@ export default function UserSettingsPage() {
                 );
             }
             toast.success(next ? "Watch notifications enabled" : "Watch notifications disabled");
-        } catch (e: any) {
+        } catch (e) {
             setNotifyOnWatch(!next);
-            toast.error(e.message || "Failed to update notification preference");
+            toast.error(readErrorMessage(e, "Failed to update notification preference"));
         } finally {
             setIsSavingNotifyOnWatch(false);
         }
@@ -405,8 +406,8 @@ export default function UserSettingsPage() {
                 method: "POST",
             });
             toast.success("Test message sent to Discord");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to send test message");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to send test message"));
         } finally {
             setIsTestingWebhook(false);
         }
@@ -436,8 +437,8 @@ export default function UserSettingsPage() {
                     currentApiKey ? "API key rotated and copied" : "API key generated and copied"
                 );
             }
-        } catch (e: any) {
-            toast.error(e.message || "Failed to generate API key");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to generate API key"));
         } finally {
             setIsGeneratingKey(false);
         }
@@ -722,6 +723,7 @@ export default function UserSettingsPage() {
                                                             style={{
                                                                 color: "var(--color-primary)",
                                                             }}
+                                                            type="button"
                                                         >
                                                             Copy
                                                         </button>
@@ -934,6 +936,7 @@ export default function UserSettingsPage() {
                                                 onClick={() => setApiKeyVisible(!apiKeyVisible)}
                                                 style={{ color: "var(--color-text-muted)" }}
                                                 title={apiKeyVisible ? "Hide" : "Show"}
+                                                type="button"
                                             >
                                                 {apiKeyVisible ? (
                                                     <EyeSlashIcon className="h-4 w-4" />
@@ -947,6 +950,7 @@ export default function UserSettingsPage() {
                                                 onClick={handleCopyApiKey}
                                                 style={{ color: "var(--color-text-muted)" }}
                                                 title="Copy"
+                                                type="button"
                                             >
                                                 <ClipboardDocumentIcon className="h-4 w-4" />
                                             </button>

@@ -88,6 +88,7 @@ export default function GuidesPage() {
                                         className="shrink-0 text-xs hover:opacity-80"
                                         onClick={() => setQuery("")}
                                         style={{ color: "var(--color-text-muted)" }}
+                                        type="button"
                                     >
                                         Clear
                                     </button>

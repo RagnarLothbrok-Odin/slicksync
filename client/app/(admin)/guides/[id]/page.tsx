@@ -85,6 +85,7 @@ export default function GuideTopicPage() {
                             className="inline-flex items-center gap-1.5 font-medium text-sm transition-opacity hover:opacity-80"
                             onClick={() => (back ? back.go() : router.push("/guides"))}
                             style={{ color: "var(--color-secondary)" }}
+                            type="button"
                         >
                             <ArrowLeftIcon className="h-4 w-4" />
                             {back ? back.label : "All guides"}

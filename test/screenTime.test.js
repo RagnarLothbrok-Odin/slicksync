@@ -13,7 +13,7 @@ const SUN_EVENING_LA = new Date("2026-10-05T06:00:00Z");
 // gateSettled: anyone whose limit can pause already has their stream addons
 // through the gate. Off by default: without a public address the gate can't
 // be reached, so it stays off (the gate's own tests say it can).
-function world({ limits, activity, now, gateSettled = false }) {
+function world({ limits, activity, now: _now, gateSettled = false }) {
     const notes = [];
     const gate = Object.fromEntries(
         Object.entries(limits || {})

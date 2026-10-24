@@ -20,6 +20,7 @@ import type {
     AutomationRun,
 } from "@/lib/api";
 import { api } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { AUTOMATION_RECIPES } from "./automationRecipes";
 
 // Index matches what the server stores in triggerConfig.days and what JS
@@ -137,8 +138,8 @@ export function AutomationPanel() {
             } else {
                 toast.success("Drafted - review the sentence at the top, then save");
             }
-        } catch (err: any) {
-            toast.error(err.message || "Could not draft a rule from that");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Could not draft a rule from that"));
         } finally {
             setIsComposing(false);
         }
@@ -186,8 +187,8 @@ export function AutomationPanel() {
             ]);
             setRegistry(reg);
             setRules(ruleList);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to load automation");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to load automation"));
         } finally {
             setLoading(false);
         }
@@ -200,8 +201,8 @@ export function AutomationPanel() {
     const loadRuns = useCallback(async () => {
         try {
             setRuns(await api.getAutomationRuns());
-        } catch (err: any) {
-            toast.error(err.message || "Failed to load run history");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to load run history"));
         }
     }, []);
 
@@ -215,9 +216,9 @@ export function AutomationPanel() {
         setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled: next } : r)));
         try {
             await api.updateAutomationRule(rule.id, { enabled: next });
-        } catch (err: any) {
+        } catch (err) {
             setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, enabled: !next } : r)));
-            toast.error(err.message || "Failed to update rule");
+            toast.error(readErrorMessage(err, "Failed to update rule"));
         }
     };
 
@@ -231,8 +232,8 @@ export function AutomationPanel() {
             } else {
                 toast.error(`Test found a problem: ${failed.map((r) => r.message).join("; ")}`);
             }
-        } catch (err: any) {
-            toast.error(err.message || "Test failed");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Test failed"));
         } finally {
             setTestingId(null);
         }
@@ -246,8 +247,8 @@ export function AutomationPanel() {
             await api.deleteAutomationRule(deleteTarget.id);
             setRules((prev) => prev.filter((r) => r.id !== deleteTarget.id));
             toast.success(`Deleted "${deleteTarget.name}"`);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to delete rule");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete rule"));
         } finally {
             setDeleteTarget(null);
         }
@@ -517,6 +518,7 @@ export function AutomationPanel() {
                                         className="rounded-lg p-2 text-muted transition-colors hover:bg-error-muted hover:text-error"
                                         onClick={() => setDeleteTarget(rule)}
                                         title="Delete rule"
+                                        type="button"
                                     >
                                         <TrashIcon className="h-4 w-4" />
                                     </button>
@@ -650,8 +652,8 @@ function RuleEditorModal({
                 : await api.createAutomationRule(payload);
             toast.success(rule ? "Rule updated" : "Rule created");
             onSaved(saved);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to save rule");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to save rule"));
         } finally {
             setSaving(false);
         }
@@ -940,6 +942,7 @@ function ConditionBuilder({
                                     className="ml-auto shrink-0 rounded-lg p-2 text-muted transition-colors hover:bg-error-muted hover:text-error sm:ml-0"
                                     onClick={() => removeCondition(i)}
                                     title="Remove this condition"
+                                    type="button"
                                 >
                                     <TrashIcon className="h-4 w-4" />
                                 </button>
@@ -1015,6 +1018,7 @@ function ActionBuilder({
                                 <button
                                     className="shrink-0 rounded-lg p-2 text-muted transition-colors hover:bg-error-muted hover:text-error"
                                     onClick={() => removeAction(i)}
+                                    type="button"
                                 >
                                     <TrashIcon className="h-4 w-4" />
                                 </button>

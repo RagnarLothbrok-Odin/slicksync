@@ -63,6 +63,7 @@ import {
     type StremioAddon,
     type User,
 } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { decodeShareCode, encodeNuvioCollectionsShareCode } from "@/lib/shareCodes";
 import { useDefaultViewMode } from "@/lib/viewMode";
@@ -1022,8 +1023,8 @@ export default function NuvioCollectionsPage() {
             setCollections(normalized);
             setSavedSnapshot(JSON.stringify(normalized));
             toast.success("Collections saved");
-        } catch (e: any) {
-            toast.error(e.message || "Failed to save Collections");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to save Collections"));
         } finally {
             setSaving(false);
         }
@@ -1085,8 +1086,8 @@ export default function NuvioCollectionsPage() {
             toast.success(
                 `Imported ${valid.length} collection${valid.length === 1 ? "" : "s"} - review, then Save changes`
             );
-        } catch (e: any) {
-            toast.error(e.message || "That file isn't valid Collections JSON");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "That file isn't valid Collections JSON"));
         }
     };
 
@@ -1262,7 +1263,7 @@ export default function NuvioCollectionsPage() {
         // Lazy per open: the catalog list is tiny and the trax flag can change
         // from the user's own page between opens.
         api.getLists()
-            .then((ls) => setSlickCatalogs(ls.filter((l) => (l as any).isOwner !== false)))
+            .then((ls) => setSlickCatalogs(ls.filter((l) => l.isOwner !== false)))
             .catch(() => setSlickCatalogs([]));
         if (selectedUserId) {
             api.getUser(selectedUserId)
@@ -1421,8 +1422,8 @@ export default function NuvioCollectionsPage() {
                     `Profile ${targetProfileIndex}`;
                 toast.success(`Copied "${copyTarget.title}" to ${targetName}`);
                 setCopyTarget(null);
-            } catch (e: any) {
-                toast.error(e.message || "Failed to copy Collection");
+            } catch (e) {
+                toast.error(readErrorMessage(e, "Failed to copy Collection"));
             } finally {
                 setCopyingToIndex(null);
             }
@@ -1435,17 +1436,17 @@ export default function NuvioCollectionsPage() {
     // collections mass-vanished since the last good snapshot. Restore pushes
     // that snapshot back; Accept adopts the new state as the baseline.
     interface GuardAlarm {
-        kind: "collections" | "layout";
-        userId: string;
-        username: string | null;
-        profileId: number;
-        profileName?: string | null;
         currentCount: number;
-        lastGoodCount: number | null;
-        lastGoodAt: string | null;
         detectedAt: string;
+        kind: "collections" | "layout";
+        lastGoodAt: string | null;
+        lastGoodCount: number | null;
         preview: string[];
         previewTotal: number;
+        profileId: number;
+        profileName?: string | null;
+        userId: string;
+        username: string | null;
     }
     const [guardAlarms, setGuardAlarms] = useState<GuardAlarm[]>([]);
     const [guardBusy, setGuardBusy] = useState<string | null>(null);
@@ -1478,8 +1479,8 @@ export default function NuvioCollectionsPage() {
             if (alarm.userId === selectedUserId && alarm.profileId === selectedProfileIndex) {
                 window.location.reload();
             }
-        } catch (e: any) {
-            toast.error(e.message || "Restore failed");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Restore failed"));
         } finally {
             setGuardBusy(null);
         }
@@ -1491,8 +1492,8 @@ export default function NuvioCollectionsPage() {
             await api.acceptCollectionsState(alarm.userId, alarm.profileId, alarm.kind);
             toast.success("Current state accepted as the new baseline");
             loadGuardAlarms();
-        } catch (e: any) {
-            toast.error(e.message || "Accept failed");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Accept failed"));
         } finally {
             setGuardBusy(null);
         }
@@ -1642,8 +1643,8 @@ export default function NuvioCollectionsPage() {
                 `Home-row layout copied to ${targetName} (${r.copiedItems} row${r.copiedItems === 1 ? "" : "s"})`
             );
             setHomeRowsMenuOpen(false);
-        } catch (e: any) {
-            toast.error(e.message || "Failed to copy the home-row layout");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to copy the home-row layout"));
         } finally {
             setHomeRowsBusy(false);
         }
@@ -3143,21 +3144,19 @@ export default function NuvioCollectionsPage() {
                                         </p>
                                     ) : (
                                         <div className="grid grid-cols-2 gap-2">
-                                            {(pickerAddon.manifest?.catalogs || []).map(
-                                                (cat: any) => (
-                                                    <button
-                                                        className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${pickerCatalog?.id === cat.id && pickerCatalog?.type === cat.type ? "border-primary bg-primary/10" : "border-default hover:border-primary/50"}`}
-                                                        key={`${cat.type}:${cat.id}`}
-                                                        onClick={() => handlePickCatalog(cat)}
-                                                        type="button"
-                                                    >
-                                                        <p className="truncate font-medium text-default">
-                                                            {cat.name || cat.id}
-                                                        </p>
-                                                        <p className="text-subtle">{cat.type}</p>
-                                                    </button>
-                                                )
-                                            )}
+                                            {(pickerAddon.manifest?.catalogs || []).map((cat) => (
+                                                <button
+                                                    className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${pickerCatalog?.id === cat.id && pickerCatalog?.type === cat.type ? "border-primary bg-primary/10" : "border-default hover:border-primary/50"}`}
+                                                    key={`${cat.type}:${cat.id}`}
+                                                    onClick={() => handlePickCatalog(cat)}
+                                                    type="button"
+                                                >
+                                                    <p className="truncate font-medium text-default">
+                                                        {cat.name || cat.id}
+                                                    </p>
+                                                    <p className="text-subtle">{cat.type}</p>
+                                                </button>
+                                            ))}
                                         </div>
                                     )}
                                 </div>

@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // "AIOStreams health": what AIOStreams itself says about this person's
 // configuration - which addons it sees failing, coming back empty, slow or
@@ -93,8 +94,8 @@ export function AioHealthButton({ userId, name }: { userId: string; name: string
         setResult(null);
         try {
             setResult({ data: await api.runAioTestSearch(userId, type, id), label });
-        } catch (e: any) {
-            toast.error(e?.message || "Could not run the search");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not run the search"));
         } finally {
             setTesting(false);
         }

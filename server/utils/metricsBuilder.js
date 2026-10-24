@@ -2,8 +2,8 @@
 // Consumes cached libraries (from activityMonitor + libraryCache) and only
 // falls back to Stremio API when cache is missing.
 
-const { StremioAPIClient } = require("stremio-api-client");
-const { getCachedLibrary, setCachedLibrary } = require("./libraryCache");
+const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
+const { getCachedLibrary, setCachedLibrary: _setCachedLibrary } = require("./libraryCache");
 const { fetchKitsuMetadata } = require("./kitsuUtils");
 const { enrichPostersFromCinemeta } = require("./libraryHelpers");
 const { getAccountDateString, resolveAccountTimezone } = require("./dateUtils");
@@ -624,7 +624,7 @@ async function buildMetricsForAccount({
     prisma,
     accountId,
     period = "30d",
-    decrypt,
+    decrypt: _decrypt,
     deepActivity = false,
 }) {
     const activityTake = deepActivity ? ACTIVITY_TAKE_DEEP : ACTIVITY_TAKE;

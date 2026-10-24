@@ -368,7 +368,7 @@ export function PageToolbar({
  */
 export function PageToolbarCompact({
     searchConfig,
-    viewModeConfig,
+    viewModeConfig: _viewModeConfig,
     rightActions,
     className = "",
 }: Pick<PageToolbarProps, "searchConfig" | "viewModeConfig" | "rightActions" | "className">) {

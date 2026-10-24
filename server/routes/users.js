@@ -74,9 +74,9 @@ module.exports = ({
     debug,
     defaultAddons,
     canonicalizeManifestUrl,
-    getAccountDek,
-    getServerKey,
-    aesGcmDecrypt,
+    getAccountDek: _getAccountDek,
+    getServerKey: _getServerKey,
+    aesGcmDecrypt: _aesGcmDecrypt,
     validateStremioAuthKey,
     manifestUrlHmac,
     manifestHash,
@@ -3962,7 +3962,7 @@ module.exports = ({
     router.get("/:id", async (req, res) => {
         try {
             const { id } = req.params;
-            const { basic } = req.query;
+            const { basic: _basic } = req.query;
 
             const user = await findUserById(prisma, id, getAccountId(req), {});
             if (!user) {

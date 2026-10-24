@@ -40,7 +40,7 @@ function moveTabFocus(event: KeyboardEvent<HTMLButtonElement>) {
 function DroppableTabButton({
     id,
     enabled,
-    isOver: isOverOverride,
+    isOver: _isOverOverride,
     children,
 }: {
     id: string;
@@ -172,7 +172,9 @@ export function FilterTabs({
 
         // Observe all tab buttons for size changes
         const buttons = containerRef.current.querySelectorAll("[data-tab-key]");
-        buttons.forEach((button) => resizeObserver.observe(button));
+        buttons.forEach((button) => {
+            resizeObserver.observe(button);
+        });
         resizeObserver.observe(containerRef.current);
 
         return () => resizeObserver.disconnect();
@@ -265,6 +267,7 @@ export function FilterTabs({
                                         onKeyDown={moveTabFocus}
                                         role="tab"
                                         tabIndex={isActive ? 0 : -1}
+                                        type="button"
                                     >
                                         {/* Icon */}
                                         {option.icon && (
@@ -367,6 +370,7 @@ export function FilterTabsSimple({
                         onKeyDown={moveTabFocus}
                         role="tab"
                         tabIndex={isActive ? 0 : -1}
+                        type="button"
                     >
                         {option.label}
                         {option.count !== undefined && (

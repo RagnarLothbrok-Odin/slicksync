@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 
 export interface WatchedToggleItem {
     id: string;
@@ -33,7 +34,9 @@ export function useWatchedStatusBatch(ids: (string | null | undefined)[], enable
             return;
         }
 
-        unknown.forEach((id) => knownIdsRef.current.add(id));
+        unknown.forEach((id) => {
+            knownIdsRef.current.add(id);
+        });
 
         let cancelled = false;
         api.getWatchedStatus(unknown)
@@ -72,9 +75,9 @@ export function useWatchedStatusBatch(ids: (string | null | undefined)[], enable
                     ? `Marked "${item.name}" as watched`
                     : `Marked "${item.name}" as unwatched`
             );
-        } catch (e: any) {
+        } catch (e) {
             setWatchedStatus((prev) => ({ ...prev, [item.id]: !nextWatched }));
-            toast.error(e?.message || "Failed to update watched status");
+            toast.error(readErrorMessage(e, "Failed to update watched status"));
         }
     }, []);
 

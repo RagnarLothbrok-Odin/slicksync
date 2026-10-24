@@ -50,6 +50,7 @@ import {
 import { useSortableDragState } from "@/components/ui/DragSortable";
 import { toast } from "@/components/ui/Toast";
 import { api, type Group, type User } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLongPress } from "@/lib/hooks/useLongPress";
@@ -86,7 +87,7 @@ export default function GroupsPage() {
     const isTV = useIsTV();
     const Wrapper = isTV ? TVPageProvider : Fragment;
     const [searchQuery, setSearchQuery] = useState("");
-    const { viewMode, setViewMode } = useDefaultViewMode();
+    const { viewMode, setViewMode: _setViewMode } = useDefaultViewMode();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     // Data state
@@ -359,8 +360,8 @@ export default function GroupsPage() {
             }
             const groupsData = await api.getGroups();
             setGroups(groupsData);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to sync all groups");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to sync all groups"));
         } finally {
             setIsSyncing(false);
         }
@@ -743,10 +744,12 @@ export default function GroupsPage() {
                                                                                         toast.success(
                                                                                             `Synced ${group.name} successfully`
                                                                                         );
-                                                                                    } catch (err: any) {
+                                                                                    } catch (err) {
                                                                                         toast.error(
-                                                                                            err.message ||
+                                                                                            readErrorMessage(
+                                                                                                err,
                                                                                                 `Failed to sync ${group.name}`
+                                                                                            )
                                                                                         );
                                                                                     }
                                                                                 }}
@@ -847,6 +850,7 @@ export default function GroupsPage() {
                             <button
                                 className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover"
                                 onClick={deselectAll}
+                                type="button"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
@@ -864,6 +868,7 @@ export default function GroupsPage() {
                     boxShadow:
                         "0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
                 }}
+                type="button"
             >
                 <PlusIcon className="h-6 w-6" />
             </button>
@@ -1077,8 +1082,10 @@ function GroupCard({
                                 await api.toggleGroupStatus(group.id, newStatus);
                                 toast.success(`Group ${newStatus ? "activated" : "deactivated"}`);
                                 onToggleStatus?.(group.id, newStatus);
-                            } catch (err: any) {
-                                toast.error(err.message || `Failed to toggle ${group.name}`);
+                            } catch (err) {
+                                toast.error(
+                                    readErrorMessage(err, `Failed to toggle ${group.name}`)
+                                );
                             }
                         }}
                         title={`Activate ${group.name}`}
@@ -1102,8 +1109,8 @@ function GroupCard({
                             try {
                                 await api.syncGroup(id);
                                 toast.success(`Synced ${group.name} successfully`);
-                            } catch (err: any) {
-                                toast.error(err.message || `Failed to sync ${group.name}`);
+                            } catch (err) {
+                                toast.error(readErrorMessage(err, `Failed to sync ${group.name}`));
                             }
                         }}
                         size="sm"
@@ -1145,6 +1152,7 @@ function GroupCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                     onClick={handleSync}
+                    type="button"
                 >
                     <ArrowPathIcon className="h-4 w-4" />
                     Sync Group
@@ -1152,6 +1160,7 @@ function GroupCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                     onClick={handleClone}
+                    type="button"
                 >
                     <DocumentDuplicateIcon className="h-4 w-4" />
                     Clone Group
@@ -1160,6 +1169,7 @@ function GroupCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-error text-sm transition-colors hover:bg-error-muted"
                     onClick={handleDelete}
+                    type="button"
                 >
                     <TrashIcon className="h-4 w-4" />
                     Delete
@@ -1201,7 +1211,7 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                 colorIndex: selectedColorIndex,
                 description: description.trim() || undefined,
                 name: name.trim(),
-            } as any);
+            });
             setShowSuccess(true);
             setTimeout(() => {
                 onClose();
@@ -1211,8 +1221,8 @@ function CreateGroupModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                     window.location.reload();
                 }
             }, 800);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to create group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to create group"));
         } finally {
             setIsLoading(false);
         }
@@ -1485,7 +1495,7 @@ function CloneGroupModal({
                 colorIndex: selectedColorIndex,
                 description: description.trim() || undefined,
                 name: name.trim(),
-            } as any);
+            });
 
             if (includeUsers && group.users.length > 0) {
                 for (const user of group.users) {
@@ -1500,8 +1510,8 @@ function CloneGroupModal({
             toast.success("Group cloned successfully");
             onClose();
             window.location.reload();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to clone group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to clone group"));
         } finally {
             setIsLoading(false);
         }

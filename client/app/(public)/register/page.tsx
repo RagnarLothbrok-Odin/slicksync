@@ -116,6 +116,7 @@ export default function RegisterPage() {
                         className="text-sm hover:underline"
                         onClick={() => router.push("/login?mode=admin")}
                         style={{ color: "var(--color-primary)" }}
+                        type="button"
                     >
                         Go to sign in
                     </button>
@@ -343,6 +344,7 @@ export default function RegisterPage() {
                         className="hover:underline"
                         onClick={() => router.push("/login?mode=admin")}
                         style={{ color: "var(--color-primary)" }}
+                        type="button"
                     >
                         Sign in
                     </button>

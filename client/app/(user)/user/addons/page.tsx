@@ -12,6 +12,7 @@ import {
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
+import { readErrorMessage } from "@/lib/errors";
 import { useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
 import { type GroupAddon, type StremioAddon, userAddons } from "@/lib/user-api";
@@ -45,8 +46,8 @@ export default function UserAddonsPage() {
                 setStremioAddons(result.stremioAddons || []);
                 setExcludedIds(result.excludedAddonIds || []);
                 setProtectedNames(result.protectedAddonNames || []);
-            } catch (err: any) {
-                setError(err.message || "Failed to load addons");
+            } catch (err) {
+                setError(readErrorMessage(err, "Failed to load addons"));
             } finally {
                 setLoading(false);
             }
@@ -70,8 +71,8 @@ export default function UserAddonsPage() {
                 await userAddons.excludeAddon(userId, addonId);
                 setExcludedIds((prev) => [...prev, addonId]);
             }
-        } catch (err: any) {
-            setError(err.message || "Failed to update addon");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to update addon"));
         } finally {
             setActionLoading(null);
         }
@@ -91,8 +92,8 @@ export default function UserAddonsPage() {
             } else {
                 setProtectedNames((prev) => prev.filter((n) => n !== addonName));
             }
-        } catch (err: any) {
-            setError(err.message || "Failed to update protection");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to update protection"));
         } finally {
             setActionLoading(null);
         }
@@ -112,8 +113,8 @@ export default function UserAddonsPage() {
         try {
             await userAddons.removeAddon(userId, addonName);
             setStremioAddons((prev) => prev.filter((a) => a.manifest.name !== addonName));
-        } catch (err: any) {
-            setError(err.message || "Failed to remove addon");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to remove addon"));
         } finally {
             setActionLoading(null);
         }
@@ -149,12 +150,14 @@ export default function UserAddonsPage() {
                 <button
                     className={`rounded-lg px-6 py-2.5 font-medium text-sm transition-all ${activeTab === "group" ? "seg-on" : "seg-off"}`}
                     onClick={() => setActiveTab("group")}
+                    type="button"
                 >
                     Group Addons ({groupAddons.length})
                 </button>
                 <button
                     className={`rounded-lg px-6 py-2.5 font-medium text-sm transition-all ${activeTab === "stremio" ? "seg-on" : "seg-off"}`}
                     onClick={() => setActiveTab("stremio")}
+                    type="button"
                 >
                     {providerLabel} Addons ({stremioAddons.length})
                 </button>
@@ -185,6 +188,7 @@ export default function UserAddonsPage() {
                     <button
                         className="ml-2 underline hover:no-underline"
                         onClick={() => setError(null)}
+                        type="button"
                     >
                         Dismiss
                     </button>
@@ -296,6 +300,7 @@ export default function UserAddonsPage() {
                                         disabled={actionLoading === addon.id}
                                         onClick={() => handleToggleExclude(addon.id, isExcluded)}
                                         title={isExcluded ? "Include addon" : "Exclude addon"}
+                                        type="button"
                                     >
                                         {actionLoading === addon.id ? (
                                             <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -458,6 +463,7 @@ export default function UserAddonsPage() {
                                             title={
                                                 isProtected ? "Remove protection" : "Protect addon"
                                             }
+                                            type="button"
                                         >
                                             {actionLoading === addon.manifest.name ? (
                                                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -483,6 +489,7 @@ export default function UserAddonsPage() {
                                                 }
                                                 style={{ background: "var(--color-error-muted)" }}
                                                 title="Remove addon"
+                                                type="button"
                                             >
                                                 <TrashIcon
                                                     className="h-5 w-5"

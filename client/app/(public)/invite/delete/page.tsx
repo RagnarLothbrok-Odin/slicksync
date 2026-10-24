@@ -151,6 +151,7 @@ export default function DeleteAccountPage() {
                                         backgroundColor: "var(--color-error)",
                                         color: "white",
                                     }}
+                                    type="button"
                                 >
                                     <TrashIcon className="h-5 w-5" />
                                     <span>Delete My Account</span>
@@ -236,6 +237,7 @@ export default function DeleteAccountPage() {
                                     backgroundColor: "var(--color-surface-hover)",
                                     color: "var(--color-text)",
                                 }}
+                                type="button"
                             >
                                 Try Again
                             </button>

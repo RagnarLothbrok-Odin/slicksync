@@ -137,6 +137,7 @@ export const TopItemsSection = memo(function TopItemsSection({
                                 <button
                                     className="rounded-lg p-1 hover:bg-surface-hover"
                                     onClick={() => setSelectedItem(null)}
+                                    type="button"
                                 >
                                     <XMarkIcon className="h-5 w-5" />
                                 </button>

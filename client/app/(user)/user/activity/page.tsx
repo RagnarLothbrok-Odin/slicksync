@@ -24,6 +24,7 @@ import {
 import { Avatar, Card, ViewModeToggle } from "@/components/ui";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
 import { startAdaptivePoll } from "@/lib/adaptivePoll";
+import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
 import { type UserActivityData, userActivity, type WatchSession } from "@/lib/user-api";
@@ -635,11 +636,11 @@ export default function UserActivityPage() {
             try {
                 const result = await userActivity.getActivity(userId, authKey || undefined, 200);
                 setActivityData(result);
-            } catch (err: any) {
+            } catch (err) {
                 console.error("Failed to load activity data:", err);
                 // Only set error if we don't have data yet
                 if (!isPolling) {
-                    setError(err.message || "Failed to load activity");
+                    setError(readErrorMessage(err, "Failed to load activity"));
                 }
             } finally {
                 if (!isPolling) {

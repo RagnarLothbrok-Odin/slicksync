@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // Signing in to a Jellyfin-compatible server - a real Jellyfin, the media
 // server an AIOStreams configuration runs, or AIOMetadata's. One flow for
@@ -20,15 +21,15 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 export interface JellyfinServerInfo {
-    serverUrl: string;
-    serverName: string;
+    display: string;
     kind: "jellyfin" | "aiostreams" | "aiometadata";
     kindLabel: string;
-    version?: string | null;
-    users: { id: string; name: string; hasPassword?: boolean }[];
-    quickConnect: boolean;
     pinSignIn?: boolean;
-    display: string;
+    quickConnect: boolean;
+    serverName: string;
+    serverUrl: string;
+    users: { id: string; name: string; hasPassword?: boolean }[];
+    version?: string | null;
 }
 
 export type JellyfinCredentials =
@@ -37,25 +38,25 @@ export type JellyfinCredentials =
 
 export interface JellyfinSignInApi {
     probe: (serverUrl: string) => Promise<JellyfinServerInfo>;
-    startQuickConnect: (
-        serverUrl: string
-    ) => Promise<{ code: string; secret: string; device: string; serverUrl: string }>;
     quickConnectStatus: (params: {
         serverUrl: string;
         secret: string;
         device: string;
     }) => Promise<{ authenticated: boolean; expired?: boolean }>;
+    startQuickConnect: (
+        serverUrl: string
+    ) => Promise<{ code: string; secret: string; device: string; serverUrl: string }>;
 }
 
 interface Props {
     api: JellyfinSignInApi;
-    onSubmit: (credentials: JellyfinCredentials, server: JellyfinServerInfo) => Promise<void>;
-    submitLabel?: string;
+    compact?: boolean;
     // Lets the parent prefill and remember the address, e.g. "add another
     // person from the same server".
     initialServerUrl?: string;
     onServerChange?: (server: JellyfinServerInfo | null) => void;
-    compact?: boolean;
+    onSubmit: (credentials: JellyfinCredentials, server: JellyfinServerInfo) => Promise<void>;
+    submitLabel?: string;
 }
 
 const inputStyle = {
@@ -138,8 +139,8 @@ export default function JellyfinSignIn({
             setLoginName("");
             setMethod("password");
             onServerChange?.(info);
-        } catch (e: any) {
-            setError(e?.message || "Could not reach the server");
+        } catch (e) {
+            setError(readErrorMessage(e, "Could not reach the server"));
         } finally {
             setChecking(false);
         }
@@ -219,8 +220,8 @@ export default function JellyfinSignIn({
                             },
                             server
                         );
-                    } catch (err: any) {
-                        setError(err?.message || "Could not sign in");
+                    } catch (err) {
+                        setError(readErrorMessage(err, "Could not sign in"));
                         setQuickStatus("expired");
                     } finally {
                         setSubmitting(false);
@@ -229,9 +230,9 @@ export default function JellyfinSignIn({
                     /* keep waiting; a blip is not a failure */
                 }
             }, 3000);
-        } catch (e: any) {
+        } catch (e) {
             setQuickStatus("idle");
-            setError(e?.message || "Could not start Quick Connect");
+            setError(readErrorMessage(e, "Could not start Quick Connect"));
         }
     };
 

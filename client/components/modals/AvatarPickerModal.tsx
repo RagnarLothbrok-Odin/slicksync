@@ -7,6 +7,7 @@ import { Avatar, AvatarColorSwatches, avatarColorFill } from "@/components/ui/Av
 import { toast } from "@/components/ui/Toast";
 import { api, type NuvioCommunityCover } from "@/lib/api";
 import { diceBearSelection } from "@/lib/dicebear";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsMobile } from "@/lib/hooks/useIsMobile";
 import { DiceBearPicker } from "./DiceBearPicker";
 
@@ -187,8 +188,8 @@ export function AvatarPickerModal({
                 setNuvioCovers((prev) => (replace ? data.items : [...prev, ...data.items]));
                 setNuvioHasMore(!!data.pagination?.hasNextPage);
                 setNuvioPage(page);
-            } catch (err: any) {
-                setNuvioCoversError(err.message || "Failed to load Nuvio covers");
+            } catch (err) {
+                setNuvioCoversError(readErrorMessage(err, "Failed to load Nuvio covers"));
             } finally {
                 setNuvioCoversLoading(false);
             }
@@ -248,8 +249,8 @@ export function AvatarPickerModal({
             setPreviewUrl(result.url);
             setUrlInput(result.url);
             toast.success("Image uploaded — click Save to apply it");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to upload image");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to upload image"));
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) {
@@ -264,8 +265,8 @@ export function AvatarPickerModal({
             await onSave({ avatarUrl: null, colorIndex: selectedColor, ...serverPart });
             toast.success("Avatar updated");
             onClose();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update avatar");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update avatar"));
         } finally {
             setIsSaving(false);
         }
@@ -282,8 +283,8 @@ export function AvatarPickerModal({
             await onSave({ avatarUrl: imageUrl.trim(), ...serverPart });
             toast.success("Avatar updated");
             onClose();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update avatar");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update avatar"));
         } finally {
             setIsSaving(false);
         }
@@ -295,8 +296,8 @@ export function AvatarPickerModal({
             await onSave({ avatarUrl: null, ...serverPart });
             toast.success("Reverted to default avatar");
             onClose();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update avatar");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update avatar"));
         } finally {
             setIsSaving(false);
         }

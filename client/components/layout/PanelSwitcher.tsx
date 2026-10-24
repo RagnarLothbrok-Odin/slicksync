@@ -312,6 +312,7 @@ export function PanelSwitcher({
                             className="nav-item-hover-pill flex w-full items-center gap-3 rounded-lg px-4 py-3 focus-visible:outline-2 focus-visible:outline-primary focus-visible:-outline-offset-2"
                             onClick={handleSwitchPanel}
                             style={{ color: "var(--color-text)" }}
+                            type="button"
                         >
                             <div
                                 className="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -356,6 +357,7 @@ export function PanelSwitcher({
                                     setIsOpen(false);
                                     onSwitchProfile();
                                 }}
+                                type="button"
                             >
                                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-hover">
                                     <ArrowsRightLeftIcon className="nav-item-icon h-4 w-4 text-muted" />
@@ -381,6 +383,7 @@ export function PanelSwitcher({
                                                 router.push("/tasks");
                                             }}
                                             style={{ color: "var(--color-text)" }}
+                                            type="button"
                                         >
                                             <div
                                                 className="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -402,6 +405,7 @@ export function PanelSwitcher({
                                                 router.push("/settings");
                                             }}
                                             style={{ color: "var(--color-text)" }}
+                                            type="button"
                                         >
                                             <div
                                                 className="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -423,6 +427,7 @@ export function PanelSwitcher({
                                                 router.push("/changelog");
                                             }}
                                             style={{ color: "var(--color-text)" }}
+                                            type="button"
                                         >
                                             <div
                                                 className="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -456,6 +461,7 @@ export function PanelSwitcher({
                                         setAccountModalOpen(true);
                                     }}
                                     style={{ color: "var(--color-text)" }}
+                                    type="button"
                                 >
                                     <div
                                         className="flex h-8 w-8 items-center justify-center rounded-lg"
@@ -490,6 +496,7 @@ export function PanelSwitcher({
                             className="hov-error flex w-full items-center gap-3 px-4 py-3 transition-all duration-200"
                             onClick={handleLogout}
                             style={{ color: "var(--color-error)" }}
+                            type="button"
                         >
                             <div
                                 className="flex h-8 w-8 items-center justify-center rounded-lg"

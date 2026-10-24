@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/ui/Toast";
 import { api, type WatchlistItem } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 
 export interface WatchlistToggleItem {
     id: string;
@@ -65,10 +66,10 @@ export function useWatchlistState() {
                     await api.removeFromWatchlist(item.id);
                     toast.success(`Removed "${item.name}" from Watchlist`);
                 }
-            } catch (e: any) {
+            } catch (e) {
                 // Revert on failure.
                 refreshWatchlist();
-                toast.error(e?.message || "Failed to update watchlist");
+                toast.error(readErrorMessage(e, "Failed to update watchlist"));
             }
         },
         [refreshWatchlist]

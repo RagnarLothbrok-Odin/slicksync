@@ -134,10 +134,10 @@ function Logo({ kind, size = 40 }: { kind: string; size?: number }) {
 
 type Profile = WatchCopySide["profiles"][number];
 interface Choice {
+    profile: Profile | null;
+    profileName: string | null;
     side: string;
     sideInfo: WatchCopySide;
-    profileName: string | null;
-    profile: Profile | null;
 }
 
 function choiceFor(sides: WatchCopySide[], side: string): Choice | null {
@@ -1641,12 +1641,16 @@ export function WatchSyncView({
                                                                                 const n = new Set(
                                                                                     sel
                                                                                 );
-                                                                                keys.forEach((k) =>
-                                                                                    allOn
-                                                                                        ? n.delete(
-                                                                                              k
-                                                                                          )
-                                                                                        : n.add(k)
+                                                                                keys.forEach(
+                                                                                    (k) => {
+                                                                                        allOn
+                                                                                            ? n.delete(
+                                                                                                  k
+                                                                                              )
+                                                                                            : n.add(
+                                                                                                  k
+                                                                                              );
+                                                                                    }
                                                                                 );
                                                                                 return n;
                                                                             })

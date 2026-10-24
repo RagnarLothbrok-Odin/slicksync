@@ -21,6 +21,7 @@ import { SlickSyncLogo } from "@/components/ui/SlickSyncLogo";
 import { VerificationCode } from "@/components/ui/VerificationCode";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage, readErrorName } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { UserAuthProvider, useUserAuth } from "@/lib/hooks/useUserAuth";
 import { userAuth as userAuthApi, userOAuth } from "@/lib/user-api";
@@ -355,8 +356,8 @@ function LoginContent() {
                                 setAdminError("Failed to link Stremio account to admin");
                                 setIsAuthenticating(false);
                             }
-                        } catch (err: any) {
-                            setAdminError(err.message || "Stremio login failed");
+                        } catch (err) {
+                            setAdminError(readErrorMessage(err, "Stremio login failed"));
                             setIsAuthenticating(false);
                         }
                     } else {
@@ -409,11 +410,11 @@ function LoginContent() {
             setOAuthCode(result.code);
             setOAuthExpiresAt(result.expiresAt);
             setIsPolling(true);
-        } catch (err: any) {
+        } catch (err) {
             if (mode === "admin") {
-                setAdminError(err?.message || "Failed to generate link");
+                setAdminError(readErrorMessage(err, "Failed to generate link"));
             } else {
-                setUserError(err?.message || "Failed to generate OAuth link");
+                setUserError(readErrorMessage(err, "Failed to generate OAuth link"));
             }
         } finally {
             setIsGenerating(false);
@@ -534,8 +535,8 @@ function LoginContent() {
                                 setNuvioError("Failed to link Nuvio account to admin");
                                 setIsNuvioAuthenticating(false);
                             }
-                        } catch (err: any) {
-                            setNuvioError(err.message || "Nuvio login failed");
+                        } catch (err) {
+                            setNuvioError(readErrorMessage(err, "Nuvio login failed"));
                             setIsNuvioAuthenticating(false);
                         }
                     } else {
@@ -560,8 +561,8 @@ function LoginContent() {
                     // Silently handle polling errors, same as the Stremio flow above
                 }
             }, intervalMs);
-        } catch (err: any) {
-            setNuvioError(err?.message || "Failed to start Nuvio login");
+        } catch (err) {
+            setNuvioError(readErrorMessage(err, "Failed to start Nuvio login"));
         } finally {
             setIsNuvioGenerating(false);
         }
@@ -708,12 +709,15 @@ function LoginContent() {
                 return;
             }
             setAdminError(failureLine(verifyRes, data, "That passkey was not accepted"));
-        } catch (e: any) {
+        } catch (e) {
             // Cancelling the browser prompt is a choice, not an error.
-            if (e?.name === "NotAllowedError" || /cancel|abort/i.test(e?.message || "")) {
+            if (
+                readErrorName(e) === "NotAllowedError" ||
+                /cancel|abort/i.test(readErrorMessage(e, ""))
+            ) {
                 return;
             }
-            setAdminError(e?.message || "Passkey sign-in failed");
+            setAdminError(readErrorMessage(e, "Passkey sign-in failed"));
         } finally {
             setPasskeyLoading(false);
         }
@@ -1264,6 +1268,7 @@ function LoginContent() {
                                                             ? 0.5
                                                             : 1,
                                                 }}
+                                                type="button"
                                             >
                                                 {isAuthenticating ? (
                                                     <>
@@ -1416,6 +1421,7 @@ function LoginContent() {
                                                             ? 0.5
                                                             : 1,
                                                 }}
+                                                type="button"
                                             >
                                                 {isNuvioAuthenticating ? (
                                                     <>
@@ -1635,6 +1641,7 @@ function LoginContent() {
                                                             ? 0.5
                                                             : 1,
                                                 }}
+                                                type="button"
                                             >
                                                 {isAuthenticating ? (
                                                     <>
@@ -1741,6 +1748,7 @@ function LoginContent() {
                                                     disabled={isGenerating}
                                                     onClick={generateOAuthLink}
                                                     style={{ color: "var(--color-text-muted)" }}
+                                                    type="button"
                                                 >
                                                     <ArrowPathIcon
                                                         className={`h-4 w-4 ${isGenerating ? "animate-spin" : ""}`}
@@ -1842,6 +1850,7 @@ function LoginContent() {
                                                             ? 0.5
                                                             : 1,
                                                 }}
+                                                type="button"
                                             >
                                                 {isNuvioAuthenticating ? (
                                                     <>

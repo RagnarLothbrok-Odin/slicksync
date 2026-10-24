@@ -45,10 +45,13 @@ import {
 } from "@/components/ui";
 import { showToast, toast } from "@/components/ui/Toast";
 import { decodeAddonConfig } from "@/lib/addonConfig";
+import type { StremioAddon } from "@/lib/api";
 import { type Addon, api, type Group } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage, readErrorName } from "@/lib/errors";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { configKindOf, type SharedPeer, sharedConfigPeers } from "@/lib/sharedConfig";
+import type { StremioCatalog, StremioManifest, StremioResource } from "@/lib/stremio-manifest";
 
 // Helper to compute configure URL from manifest URL
 function getConfigureUrl(addon: any): string | null {
@@ -82,47 +85,55 @@ interface AddonWithGroups extends Addon {
         name: string;
         users?: number;
         addonCount?: number;
+        addons?: number;
+        color?: string;
     }>;
     healthCheckError?: string;
     isActive?: boolean;
     lastHealthCheck?: string;
     logo?: string;
-    manifest?: any;
-    originalManifest?: any;
+    manifest?: Partial<StremioManifest>;
+    originalManifest?: Partial<StremioManifest>;
 }
 
-// Helper function to generate unique catalog keys
-const getCatalogKey = (catalog: any) => {
+// Both provider manifests and saved catalog selections use these keys.
+const getCatalogKey = (catalog: unknown) => {
     if (!catalog || typeof catalog !== "object") {
         return "unknown:unknown";
     }
-    const type = catalog.type || "unknown";
-    const id = catalog.id || "unknown";
-    // Use catalogHasSearch to handle both manifest (extra array) and saved (search boolean) formats
-    const isSearch = catalogHasSearch(catalog);
-    return isSearch ? `${type}:${id}:search` : `${type}:${id}`;
+    const type = "type" in catalog && typeof catalog.type === "string" ? catalog.type : "unknown";
+    const id = "id" in catalog && typeof catalog.id === "string" ? catalog.id : "unknown";
+    return catalogHasSearch(catalog) ? `${type}:${id}:search` : `${type}:${id}`;
 };
 
-// Check if a catalog has search functionality
-const catalogHasSearch = (catalog: any) => {
+const catalogHasSearch = (catalog: unknown) => {
     if (!catalog || typeof catalog !== "object") {
         return false;
     }
-    if (Array.isArray(catalog.extra)) {
-        return catalog.extra.some((e: any) => e && e.name === "search");
+    if ("extra" in catalog && Array.isArray(catalog.extra)) {
+        return catalog.extra.some(
+            (extra: unknown) =>
+                typeof extra === "object" &&
+                extra !== null &&
+                "name" in extra &&
+                extra.name === "search"
+        );
     }
-    return catalog.search === true;
+    return "search" in catalog && catalog.search === true;
 };
 
 // Build a unified manifest diff where catalog/resource items are highlighted as complete blocks
 interface DiffLine {
-    type: "same" | "add" | "del";
     text: string;
+    type: "same" | "add" | "del";
 }
-function buildManifestUnifiedDiff(orig: any, curr: any): DiffLine[] {
+function buildManifestUnifiedDiff(
+    orig: Partial<StremioManifest>,
+    curr: Partial<StremioManifest>
+): DiffLine[] {
     const result: DiffLine[] = [];
-    const catKey = (c: any) => `${c.type}:${c.id}`;
-    const resName = (r: any) => (typeof r === "string" ? r : (r?.name ?? ""));
+    const catKey = (c: StremioCatalog) => `${c.type}:${c.id}`;
+    const resName = (r: StremioResource) => (typeof r === "string" ? r : (r?.name ?? ""));
     const currCatKeys = new Set((curr.catalogs || []).map(catKey));
     const origCatKeys = new Set((orig.catalogs || []).map(catKey));
     const currResNames = new Set((curr.resources || []).map(resName));
@@ -130,22 +141,22 @@ function buildManifestUnifiedDiff(orig: any, curr: any): DiffLine[] {
     const push = (type: DiffLine["type"], text: string) => result.push({ text, type });
 
     const allCats = [
-        ...(orig.catalogs || []).map((c: any) => ({
+        ...(orig.catalogs || []).map((c) => ({
             c,
             t: (currCatKeys.has(catKey(c)) ? "same" : "del") as DiffLine["type"],
         })),
         ...(curr.catalogs || [])
-            .filter((c: any) => !origCatKeys.has(catKey(c)))
-            .map((c: any) => ({ c, t: "add" as DiffLine["type"] })),
+            .filter((c) => !origCatKeys.has(catKey(c)))
+            .map((c) => ({ c, t: "add" as DiffLine["type"] })),
     ];
     const allRes = [
-        ...(orig.resources || []).map((r: any) => ({
+        ...(orig.resources || []).map((r: StremioResource) => ({
             r,
             t: (currResNames.has(resName(r)) ? "same" : "del") as DiffLine["type"],
         })),
         ...(curr.resources || [])
-            .filter((r: any) => !origResNames.has(resName(r)))
-            .map((r: any) => ({ r, t: "add" as DiffLine["type"] })),
+            .filter((r: StremioResource) => !origResNames.has(resName(r)))
+            .map((r: StremioResource) => ({ r, t: "add" as DiffLine["type"] })),
     ];
 
     push("same", "{");
@@ -157,20 +168,20 @@ function buildManifestUnifiedDiff(orig: any, curr: any): DiffLine[] {
 
         if (key === "resources") {
             push("same", `  "resources": [`);
-            allRes.forEach(({ r, t }, ri) =>
-                push(t, `    ${JSON.stringify(r)}${ri < allRes.length - 1 ? "," : ""}`)
-            );
+            allRes.forEach(({ r, t }, ri) => {
+                push(t, `    ${JSON.stringify(r)}${ri < allRes.length - 1 ? "," : ""}`);
+            });
             push("same", `  ]${trail}`);
         } else if (key === "catalogs") {
             push("same", `  "catalogs": [`);
             allCats.forEach(({ c, t }, ci) => {
                 const lines = JSON.stringify(c, null, 2).split("\n");
-                lines.forEach((line, li) =>
+                lines.forEach((line, li) => {
                     push(
                         t,
                         `    ${line}${li === lines.length - 1 && ci < allCats.length - 1 ? "," : ""}`
-                    )
-                );
+                    );
+                });
             });
             push("same", `  ]${trail}`);
         } else if (!inOrig) {
@@ -263,18 +274,18 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
             }
 
             return { data, valid: true };
-        } catch (err: any) {
+        } catch (err) {
             const isCorsError =
-                err?.message?.includes("CORS") ||
-                err?.message?.includes("Failed to fetch") ||
-                err?.name === "TypeError";
+                readErrorMessage(err)?.includes("CORS") ||
+                readErrorMessage(err)?.includes("Failed to fetch") ||
+                readErrorName(err) === "TypeError";
             if (isCorsError) {
                 return {
                     error: "Cannot validate manifest (CORS error). Server will handle it.",
                     valid: false,
                 };
             }
-            return { error: err?.message || "Failed to validate manifest", valid: false };
+            return { error: readErrorMessage(err, "Failed to validate manifest"), valid: false };
         }
     };
 
@@ -304,9 +315,9 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
                     setUrlBeforeLastUpdate(currentSavedUrl);
                     setCurrentSavedUrl(trimmedValue);
                     toast.success("Manifest URL updated successfully");
-                } catch (err: any) {
+                } catch (err) {
                     setLocalValue(currentSavedUrl);
-                    toast.error(err.message || "Failed to update manifest URL");
+                    toast.error(readErrorMessage(err, "Failed to update manifest URL"));
                 } finally {
                     setIsSaving(false);
                 }
@@ -339,9 +350,9 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
             setUrlBeforeLastUpdate(currentSavedUrl);
             setCurrentSavedUrl(trimmedValue);
             toast.success("Manifest URL updated successfully");
-        } catch (err: any) {
+        } catch (err) {
             setLocalValue(currentSavedUrl);
-            toast.error(err.message || "Failed to update manifest URL");
+            toast.error(readErrorMessage(err, "Failed to update manifest URL"));
         } finally {
             setIsSaving(false);
         }
@@ -377,7 +388,7 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
                 <button
                     className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-hover hover:text-default"
                     onClick={handleRevert}
-                    title={`Revert to: ${urlBeforeLastUpdate.substring(0, 40)}${urlBeforeLastUpdate.length > 40 ? "..." : ""}`}
+                    title={`Revert to: ${urlBeforeLastUpdate.slice(0, 40)}${urlBeforeLastUpdate.length > 40 ? "..." : ""}`}
                     type="button"
                 >
                     <ArrowUturnLeftIcon className="h-4 w-4" />
@@ -509,10 +520,11 @@ export default function AddonDetailPage() {
     // Resources / catalogs editing
     const [selectedResources, setSelectedResources] = useState<Set<string>>(new Set());
     const [selectedCatalogs, setSelectedCatalogs] = useState<Set<string>>(new Set());
-    const [orderedRegularCatalogs, setOrderedRegularCatalogs] = useState<any[]>([]);
-    const [orderedSearchCatalogs, setOrderedSearchCatalogs] = useState<any[]>([]);
-    const [manifestData, setManifestData] = useState<any>(null);
-    const [originalManifestData, setOriginalManifestData] = useState<any>(null);
+    const [orderedRegularCatalogs, setOrderedRegularCatalogs] = useState<StremioCatalog[]>([]);
+    const [orderedSearchCatalogs, setOrderedSearchCatalogs] = useState<StremioCatalog[]>([]);
+    const [manifestData, setManifestData] = useState<Partial<StremioManifest> | null>(null);
+    const [originalManifestData, setOriginalManifestData] =
+        useState<Partial<StremioManifest> | null>(null);
     const [loadingManifest, setLoadingManifest] = useState(false);
     // In-place config editor (AddonConfigModal) - decodes the settings inside
     // the manifest URL into editable fields.
@@ -547,7 +559,7 @@ export default function AddonDetailPage() {
         }
         setIsVaultifying(true);
         try {
-            if ((addon as any).vaultified) {
+            if (addon.vaultified) {
                 await api.unvaultifyAddon(addon.id);
                 setAddon((prev: any) => (prev ? { ...prev, vaultified: false } : prev));
                 toast.success("Addon URL restored with the current secrets");
@@ -568,8 +580,8 @@ export default function AddonDetailPage() {
                     `Keys now live only in the Vault${d.entries?.length ? ` (${d.entries.join(", ")})` : ""} - users pick up the proxy URL on their next sync`
                 );
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update vault-injection");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update vault-injection"));
         } finally {
             setIsVaultifying(false);
         }
@@ -587,7 +599,7 @@ export default function AddonDetailPage() {
             setError(null);
             try {
                 const addonData = await api.getAddon(params.id as string);
-                const anyAddon = addonData as any;
+                const anyAddon = addonData;
 
                 const logo =
                     anyAddon.customLogo ||
@@ -620,7 +632,7 @@ export default function AddonDetailPage() {
                     groupsWithAddon.push(group);
                     let userIds: string[] = [];
                     try {
-                        const raw = (group as any)?.userIds;
+                        const raw = group?.userIds;
                         if (typeof raw === "string") {
                             userIds = JSON.parse(raw);
                         } else if (Array.isArray(raw)) {
@@ -638,9 +650,9 @@ export default function AddonDetailPage() {
                     logo,
                 });
                 setTotalUsers(userCount);
-                setSelectedResources(new Set((addonData as any).resources || []));
-                const savedCatalogs = (addonData as any).catalogs || [];
-                const catalogKeys = savedCatalogs.map((c: any) => getCatalogKey(c)).filter(Boolean);
+                setSelectedResources(new Set(addonData.resources || []));
+                const savedCatalogs = addonData.catalogs || [];
+                const catalogKeys = savedCatalogs.map((c) => getCatalogKey(c)).filter(Boolean);
                 setSelectedCatalogs(new Set(catalogKeys));
                 setAllGroups(groupsData);
                 setLogoError(false);
@@ -675,7 +687,7 @@ export default function AddonDetailPage() {
         try {
             await api.reloadAddon(params.id as string);
             const addonData = await api.getAddon(params.id as string);
-            const anyAddon = addonData as any;
+            const anyAddon = addonData;
 
             const logo =
                 anyAddon.customLogo ||
@@ -689,7 +701,7 @@ export default function AddonDetailPage() {
             setAddon((prev) => (prev ? { ...prev, ...addonData, logo } : null));
             setSelectedResources(new Set(anyAddon.resources || []));
             const savedCatalogs = anyAddon.catalogs || [];
-            const catalogKeys = savedCatalogs.map((c: any) => getCatalogKey(c)).filter(Boolean);
+            const catalogKeys = savedCatalogs.map((c) => getCatalogKey(c)).filter(Boolean);
             setSelectedCatalogs(new Set(catalogKeys));
 
             if (anyAddon.originalManifest) {
@@ -700,8 +712,8 @@ export default function AddonDetailPage() {
             }
 
             toast.success("Addon reloaded successfully");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reload addon");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reload addon"));
         } finally {
             setIsReloading(false);
         }
@@ -713,8 +725,8 @@ export default function AddonDetailPage() {
             await api.deleteAddon(params.id as string);
             toast.success("Addon deleted successfully");
             router.push("/addons");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to delete addon");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete addon"));
             setIsDeleting(false);
             setIsDeleteModalOpen(false);
         }
@@ -731,8 +743,8 @@ export default function AddonDetailPage() {
             await api.toggleAddonStatus(addon.id, newStatus);
             setAddon({ ...addon, isActive: newStatus });
             toast.success(newStatus ? "Addon enabled" : "Addon disabled");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to toggle status");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to toggle status"));
         } finally {
             setIsTogglingStatus(false);
         }
@@ -759,10 +771,10 @@ export default function AddonDetailPage() {
 
         setIsTogglingProxy(true);
         try {
-            const anyAddon = addon as any;
+            const anyAddon = addon;
             if (anyAddon.proxyEnabled) {
                 await api.disableProxy(addon.id);
-                setAddon({ ...addon, proxyEnabled: false } as any);
+                setAddon({ ...addon, proxyEnabled: false });
                 toast.success("Proxy disabled");
             } else {
                 const result = await api.enableProxy(addon.id);
@@ -771,11 +783,11 @@ export default function AddonDetailPage() {
                     proxyEnabled: true,
                     proxyManifestUrl: proxyUrlFor(result.proxyUuid, result.proxyManifestUrl),
                     proxyUuid: result.proxyUuid,
-                } as any);
+                });
                 toast.success("Proxy enabled");
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to toggle proxy");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to toggle proxy"));
         } finally {
             setIsTogglingProxy(false);
         }
@@ -794,10 +806,10 @@ export default function AddonDetailPage() {
                 ...addon,
                 proxyManifestUrl: proxyUrlFor(result.proxyUuid, result.proxyManifestUrl),
                 proxyUuid: result.proxyUuid,
-            } as any);
+            });
             toast.success("Proxy URL regenerated");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to regenerate proxy URL");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to regenerate proxy URL"));
         } finally {
             setIsRegeneratingProxy(false);
         }
@@ -813,8 +825,8 @@ export default function AddonDetailPage() {
                 await api.updateAddon(addon.id, { name: newName });
                 setAddon({ ...addon, name: newName });
                 toast.success("Addon name updated");
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update name");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update name"));
             }
         },
         [addon]
@@ -830,8 +842,8 @@ export default function AddonDetailPage() {
                 await api.updateAddon(addon.id, { description: newDescription || undefined });
                 setAddon({ ...addon, description: newDescription });
                 toast.success("Addon description updated");
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update description");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update description"));
             }
         },
         [addon]
@@ -846,7 +858,7 @@ export default function AddonDetailPage() {
         const loadManifest = async () => {
             setLoadingManifest(true);
             try {
-                const manifestUrl = (addon as any).url || (addon as any).manifestUrl;
+                const manifestUrl = addon.url || addon.manifestUrl;
                 if (manifestUrl) {
                     let fetchUrl = manifestUrl;
                     if (fetchUrl.startsWith("stremio://")) {
@@ -865,7 +877,7 @@ export default function AddonDetailPage() {
             }
         };
 
-        const apiManifest = (addon as any).manifest || (addon as any).originalManifest;
+        const apiManifest = addon.manifest || addon.originalManifest;
         if (apiManifest) {
             setManifestData(apiManifest);
         } else if (addon.manifestUrl) {
@@ -879,11 +891,11 @@ export default function AddonDetailPage() {
             return null;
         }
         const base = originalManifestData;
-        const resources = (base.resources || []).filter((r: any) => {
+        const resources = (base.resources || []).filter((r: StremioResource) => {
             const name = typeof r === "string" ? r : r?.name;
             return name && selectedResources.has(name);
         });
-        const catalogs = (base.catalogs || []).filter((c: any) =>
+        const catalogs = (base.catalogs || []).filter((c) =>
             selectedCatalogs.has(getCatalogKey(c))
         );
         return { ...base, catalogs, resources };
@@ -894,11 +906,11 @@ export default function AddonDetailPage() {
         const catalogs =
             originalManifestData?.catalogs ||
             manifestData?.catalogs ||
-            (addon as any)?.manifest?.catalogs ||
+            addon?.manifest?.catalogs ||
             [];
 
         // Regular catalogs: those without search functionality
-        const regularCatalogs = catalogs.filter((c: any) => {
+        const regularCatalogs = catalogs.filter((c) => {
             if (!c || typeof c !== "object") {
                 return true;
             }
@@ -906,29 +918,32 @@ export default function AddonDetailPage() {
         });
 
         // Search catalogs: any catalog with search functionality (even if it has other extras)
-        const searchCatalogs = catalogs.filter((c: any) => {
+        const searchCatalogs = catalogs.filter((c) => {
             if (!c || typeof c !== "object") {
                 return false;
             }
             return catalogHasSearch(c);
         });
 
-        const savedCatalogs = (addon as any)?.catalogs || [];
-        const savedKeys = new Set(savedCatalogs.map((c: any) => getCatalogKey(c)));
+        const savedCatalogs = addon?.catalogs || [];
+        const savedKeys = new Set(savedCatalogs.map((c) => getCatalogKey(c)));
 
         const selectedRegular = savedCatalogs
-            .filter((c: any) => {
+            .filter((c) => {
                 const key = getCatalogKey(c);
-                return key && regularCatalogs.some((rc: any) => getCatalogKey(rc) === key);
-            })
-            .map((c: any) => {
-                const fullCatalog = regularCatalogs.find(
-                    (rc: any) => getCatalogKey(rc) === getCatalogKey(c)
+                return (
+                    key && regularCatalogs.some((rc: StremioCatalog) => getCatalogKey(rc) === key)
                 );
-                return fullCatalog || c;
-            });
+            })
+            .map((c) => {
+                const fullCatalog = regularCatalogs.find(
+                    (rc: StremioCatalog) => getCatalogKey(rc) === getCatalogKey(c)
+                );
+                return fullCatalog;
+            })
+            .filter((catalog): catalog is StremioCatalog => catalog !== undefined);
 
-        const unselectedRegular = regularCatalogs.filter((c: any) => {
+        const unselectedRegular = regularCatalogs.filter((c) => {
             const key = getCatalogKey(c);
             return key && !savedKeys.has(key);
         });
@@ -936,18 +951,21 @@ export default function AddonDetailPage() {
         const orderedRegular = [...selectedRegular, ...unselectedRegular];
 
         const selectedSearch = savedCatalogs
-            .filter((c: any) => {
+            .filter((c) => {
                 const key = getCatalogKey(c);
-                return key && searchCatalogs.some((sc: any) => getCatalogKey(sc) === key);
-            })
-            .map((c: any) => {
-                const fullCatalog = searchCatalogs.find(
-                    (sc: any) => getCatalogKey(sc) === getCatalogKey(c)
+                return (
+                    key && searchCatalogs.some((sc: StremioCatalog) => getCatalogKey(sc) === key)
                 );
-                return fullCatalog || c;
-            });
+            })
+            .map((c) => {
+                const fullCatalog = searchCatalogs.find(
+                    (sc: StremioCatalog) => getCatalogKey(sc) === getCatalogKey(c)
+                );
+                return fullCatalog;
+            })
+            .filter((catalog): catalog is StremioCatalog => catalog !== undefined);
 
-        const unselectedSearch = searchCatalogs.filter((c: any) => {
+        const unselectedSearch = searchCatalogs.filter((c) => {
             const key = getCatalogKey(c);
             return key && !savedKeys.has(key);
         });
@@ -962,13 +980,13 @@ export default function AddonDetailPage() {
     useEffect(() => {
         if (addon) {
             // Initialize resources
-            if ((addon as any)?.resources) {
-                let savedResources = (addon as any).resources;
+            if (addon?.resources) {
+                let savedResources = addon.resources;
 
                 // Auto-add "search" resource if any catalog has search functionality and wasn't already saved
-                if ((addon as any)?.catalogs) {
-                    const savedCatalogs = (addon as any).catalogs;
-                    const hasSearchCatalog = savedCatalogs.some((c: any) => c?.search);
+                if (addon?.catalogs) {
+                    const savedCatalogs = addon.catalogs;
+                    const hasSearchCatalog = savedCatalogs.some((c) => c?.search);
                     if (hasSearchCatalog && !savedResources.includes("search")) {
                         savedResources = [...savedResources, "search"];
                     }
@@ -978,9 +996,9 @@ export default function AddonDetailPage() {
             }
 
             // Initialize catalogs
-            if ((addon as any)?.catalogs) {
-                const savedCatalogs = (addon as any).catalogs;
-                const catalogKeys = savedCatalogs.map((c: any) => getCatalogKey(c)).filter(Boolean);
+            if (addon?.catalogs) {
+                const savedCatalogs = addon.catalogs;
+                const catalogKeys = savedCatalogs.map((c) => getCatalogKey(c)).filter(Boolean);
                 setSelectedCatalogs(new Set(catalogKeys));
             }
         }
@@ -989,11 +1007,11 @@ export default function AddonDetailPage() {
     // Combine manifest resources with addon's saved resources to show all available resources
     const allResources = useMemo(() => {
         const manifestResources = manifestData?.resources || [];
-        const savedResources = (addon as any)?.resources || [];
+        const savedResources = addon?.resources || [];
 
         // Create a set of resource names from manifest to avoid duplicates
         const manifestNames = new Set(
-            manifestResources.map((r: any) => (typeof r === "string" ? r : r.name))
+            manifestResources.map((r: StremioResource) => (typeof r === "string" ? r : r.name))
         );
 
         // Start with manifest resources
@@ -1007,8 +1025,8 @@ export default function AddonDetailPage() {
         }
 
         // Auto-add "search" resource if any catalog has search functionality
-        const hasSearchCatalog = (manifestData?.catalogs || []).some((c: any) =>
-            c?.extra?.some((e: any) => e.name === "search")
+        const hasSearchCatalog = (manifestData?.catalogs || []).some((c) =>
+            c?.extra?.some((e) => e.name === "search")
         );
         if (
             hasSearchCatalog &&
@@ -1034,8 +1052,8 @@ export default function AddonDetailPage() {
                 setIsSavingResources(true);
                 try {
                     await api.updateAddon(addon.id, { resources: Array.from(resources) });
-                } catch (err: any) {
-                    toast.error(err.message || "Failed to update resources");
+                } catch (err) {
+                    toast.error(readErrorMessage(err, "Failed to update resources"));
                 } finally {
                     setIsSavingResources(false);
                 }
@@ -1045,7 +1063,11 @@ export default function AddonDetailPage() {
     );
 
     const autoSaveCatalogs = useCallback(
-        (selectedCats: Set<string>, regularCats: any[], searchCats: any[]) => {
+        (
+            selectedCats: Set<string>,
+            regularCats: NonNullable<StremioAddon["manifest"]["catalogs"]>,
+            searchCats: NonNullable<StremioAddon["manifest"]["catalogs"]>
+        ) => {
             if (!addon) {
                 return;
             }
@@ -1081,14 +1103,14 @@ export default function AddonDetailPage() {
                     await api.updateAddon(addon.id, { catalogs: finalCatalogs });
 
                     // Auto-add "search" resource if any search catalog is enabled
-                    const currentResources = (addon as any)?.resources || [];
+                    const currentResources = addon?.resources || [];
                     if (hasSearchCatalog && !currentResources.includes("search")) {
                         const newResources = [...currentResources, "search"];
                         await api.updateAddon(addon.id, { resources: newResources });
                         setSelectedResources(new Set(newResources));
                     }
-                } catch (err: any) {
-                    toast.error(err.message || "Failed to update catalogs");
+                } catch (err) {
+                    toast.error(readErrorMessage(err, "Failed to update catalogs"));
                 } finally {
                     setIsSavingCatalogs(false);
                 }
@@ -1144,19 +1166,23 @@ export default function AddonDetailPage() {
     // Check if all catalogs selected
     const allRegularSelected =
         orderedRegularCatalogs.length > 0 &&
-        orderedRegularCatalogs.every((c: any) => selectedCatalogs.has(getCatalogKey(c)));
+        orderedRegularCatalogs.every((c) => selectedCatalogs.has(getCatalogKey(c)));
 
     const allSearchSelected =
         orderedSearchCatalogs.length > 0 &&
-        orderedSearchCatalogs.every((c: any) => selectedCatalogs.has(getCatalogKey(c)));
+        orderedSearchCatalogs.every((c) => selectedCatalogs.has(getCatalogKey(c)));
 
     // Toggle all catalogs
     const handleToggleAllRegular = () => {
         const newSelected = new Set(selectedCatalogs);
         if (allRegularSelected) {
-            orderedRegularCatalogs.forEach((c: any) => newSelected.delete(getCatalogKey(c)));
+            orderedRegularCatalogs.forEach((c) => {
+                newSelected.delete(getCatalogKey(c));
+            });
         } else {
-            orderedRegularCatalogs.forEach((c: any) => newSelected.add(getCatalogKey(c)));
+            orderedRegularCatalogs.forEach((c) => {
+                newSelected.add(getCatalogKey(c));
+            });
         }
         setSelectedCatalogs(newSelected);
         autoSaveCatalogs(newSelected, orderedRegularCatalogs, orderedSearchCatalogs);
@@ -1165,9 +1191,13 @@ export default function AddonDetailPage() {
     const handleToggleAllSearch = () => {
         const newSelected = new Set(selectedCatalogs);
         if (allSearchSelected) {
-            orderedSearchCatalogs.forEach((c: any) => newSelected.delete(getCatalogKey(c)));
+            orderedSearchCatalogs.forEach((c) => {
+                newSelected.delete(getCatalogKey(c));
+            });
         } else {
-            orderedSearchCatalogs.forEach((c: any) => newSelected.add(getCatalogKey(c)));
+            orderedSearchCatalogs.forEach((c) => {
+                newSelected.add(getCatalogKey(c));
+            });
         }
         setSelectedCatalogs(newSelected);
         autoSaveCatalogs(newSelected, orderedRegularCatalogs, orderedSearchCatalogs);
@@ -1182,25 +1212,23 @@ export default function AddonDetailPage() {
         const { active, over } = event;
         if (over && active.id !== over.id) {
             const activeKey = active.id as string;
-            const isRegular = orderedRegularCatalogs.some(
-                (c: any) => getCatalogKey(c) === activeKey
-            );
+            const isRegular = orderedRegularCatalogs.some((c) => getCatalogKey(c) === activeKey);
             if (isRegular) {
                 const oldIndex = orderedRegularCatalogs.findIndex(
-                    (c: any) => getCatalogKey(c) === activeKey
+                    (c) => getCatalogKey(c) === activeKey
                 );
                 const newIndex = orderedRegularCatalogs.findIndex(
-                    (c: any) => getCatalogKey(c) === over.id
+                    (c) => getCatalogKey(c) === over.id
                 );
                 const newOrder = arrayMove(orderedRegularCatalogs, oldIndex, newIndex);
                 setOrderedRegularCatalogs(newOrder);
                 autoSaveCatalogs(selectedCatalogs, newOrder, orderedSearchCatalogs);
             } else {
                 const oldIndex = orderedSearchCatalogs.findIndex(
-                    (c: any) => getCatalogKey(c) === activeKey
+                    (c) => getCatalogKey(c) === activeKey
                 );
                 const newIndex = orderedSearchCatalogs.findIndex(
-                    (c: any) => getCatalogKey(c) === over.id
+                    (c) => getCatalogKey(c) === over.id
                 );
                 const newOrder = arrayMove(orderedSearchCatalogs, oldIndex, newIndex);
                 setOrderedSearchCatalogs(newOrder);
@@ -1214,9 +1242,9 @@ export default function AddonDetailPage() {
     // Shared by the raw URL input AND the Configure modal - both end in
     // "the manifest URL changed, refresh everything derived from it".
     const handleManifestUrlSave = async (updateData: { manifestUrl: string }) => {
-        await api.updateAddon(params.id as string, updateData as any);
+        await api.updateAddon(params.id as string, updateData);
         const addonData = await api.getAddon(params.id as string);
-        const anyAddon = addonData as any;
+        const anyAddon = addonData;
         const logo =
             anyAddon.customLogo ||
             anyAddon.manifest?.logo ||
@@ -1237,7 +1265,7 @@ export default function AddonDetailPage() {
         // Initialize resources, auto-add "search" if search catalogs enabled
         let savedResources = anyAddon.resources || [];
         const savedCatalogs = anyAddon.catalogs || [];
-        const hasSearchCatalog = savedCatalogs.some((c: any) => c?.search);
+        const hasSearchCatalog = savedCatalogs.some((c) => c?.search);
         if (hasSearchCatalog && !savedResources.includes("search")) {
             savedResources = [...savedResources, "search"];
             // Update addon with the search resource
@@ -1245,7 +1273,7 @@ export default function AddonDetailPage() {
         }
         setSelectedResources(new Set(savedResources));
 
-        const catalogKeys = savedCatalogs.map((c: any) => getCatalogKey(c)).filter(Boolean);
+        const catalogKeys = savedCatalogs.map((c) => getCatalogKey(c)).filter(Boolean);
         setSelectedCatalogs(new Set(catalogKeys));
     };
 
@@ -1258,10 +1286,10 @@ export default function AddonDetailPage() {
                 customLogo: editForm.customLogo,
                 description: editForm.description,
                 name: editForm.name,
-            } as any);
+            });
 
             // Compute the new logo URL using the same logic as fetchAddon
-            const anyAddon = addon as any;
+            const anyAddon = addon;
             const newLogoUrl =
                 editForm.customLogo ||
                 addon.logo ||
@@ -1284,8 +1312,8 @@ export default function AddonDetailPage() {
 
             setIsEditModalOpen(false);
             toast.success("Addon updated successfully");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update addon");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update addon"));
         }
     };
 
@@ -1311,10 +1339,10 @@ export default function AddonDetailPage() {
                 customLogo: resetLogo,
                 description: resetDescription,
                 name: resetName,
-            } as any);
+            });
 
             // Compute the logo using the same logic as fetchAddon
-            const anyAddon = addon as any;
+            const anyAddon = addon;
             const resetLogoUrl =
                 resetLogo ||
                 manifest?.logo ||
@@ -1338,10 +1366,10 @@ export default function AddonDetailPage() {
             // Reset resources
             const manifestResources = manifest?.resources || [];
             const resourceNames = manifestResources
-                .map((r: any) => (typeof r === "string" ? r : r.name))
+                .map((r: StremioResource) => (typeof r === "string" ? r : r.name))
                 .filter(Boolean);
-            const hasSearch = (manifest?.catalogs || []).some((c: any) =>
-                c.extra?.some((e: any) => e.name === "search")
+            const hasSearch = (manifest?.catalogs || []).some((c) =>
+                c.extra?.some((e) => e.name === "search")
             );
             if (hasSearch && !resourceNames.includes("search")) {
                 resourceNames.push("search");
@@ -1351,20 +1379,20 @@ export default function AddonDetailPage() {
 
             // Reset catalogs
             const catalogs = manifest?.catalogs || [];
-            const regularCatalogs = catalogs.filter((c: any) => {
+            const regularCatalogs = catalogs.filter((c) => {
                 if (!c || typeof c !== "object") {
                     return true;
                 }
                 return !catalogHasSearch(c);
             });
-            const searchCatalogs = catalogs.filter((c: any) => {
+            const searchCatalogs = catalogs.filter((c) => {
                 if (!c || typeof c !== "object") {
                     return false;
                 }
                 return catalogHasSearch(c);
             });
 
-            const finalCatalogs = catalogs.map((c: any) => ({
+            const finalCatalogs = catalogs.map((c) => ({
                 id: c.id,
                 search: catalogHasSearch(c),
                 type: c.type,
@@ -1373,7 +1401,7 @@ export default function AddonDetailPage() {
 
             setOrderedRegularCatalogs(regularCatalogs);
             setOrderedSearchCatalogs(searchCatalogs);
-            const allKeys = catalogs.map((c: any) => getCatalogKey(c)).filter(Boolean);
+            const allKeys = catalogs.map((c) => getCatalogKey(c)).filter(Boolean);
             setSelectedCatalogs(new Set(allKeys));
 
             // Update edit form
@@ -1384,8 +1412,8 @@ export default function AddonDetailPage() {
             });
 
             showToast.info("Reset to manifest defaults");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reset addon");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reset addon"));
         }
     };
 
@@ -1398,8 +1426,8 @@ export default function AddonDetailPage() {
             await api.removeAddonFromGroup(groupId, addon.id);
             toast.success(`Removed from ${groupName}`);
             await fetchAddon();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to remove from group");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to remove from group"));
         }
     };
 
@@ -1447,7 +1475,7 @@ export default function AddonDetailPage() {
         );
     }
 
-    const anyAddon = addon as any;
+    const anyAddon = addon;
 
     const detailActions = (
         <div className="flex flex-wrap items-center justify-end gap-3">
@@ -1607,6 +1635,7 @@ export default function AddonDetailPage() {
                                                         }
                                                     }}
                                                     title="Open configure page"
+                                                    type="button"
                                                 >
                                                     <Cog6ToothIcon className="h-5 w-5 text-muted" />
                                                 </button>
@@ -1736,13 +1765,12 @@ export default function AddonDetailPage() {
                             <div className="flex items-center gap-2">
                                 <ManifestUrlInput
                                     onSave={handleManifestUrlSave}
-                                    value={(addon as any).url || (addon as any).manifestUrl || ""}
+                                    value={addon.url || addon.manifestUrl || ""}
                                 />
                                 <Button
                                     aria-label="Copy manifest URL"
                                     onClick={async () => {
-                                        const url =
-                                            (addon as any).url || (addon as any).manifestUrl;
+                                        const url = addon.url || addon.manifestUrl;
                                         if (url) {
                                             try {
                                                 await copyToClipboard(url);
@@ -1940,14 +1968,13 @@ export default function AddonDetailPage() {
                                             const manifest = originalManifestData || manifestData;
                                             const manifestResources = manifest?.resources || [];
                                             const resourceNames = manifestResources
-                                                .map((r: any) =>
+                                                .map((r: StremioResource) =>
                                                     typeof r === "string" ? r : r.name
                                                 )
                                                 .filter(Boolean);
 
-                                            const hasSearch = (manifest?.catalogs || []).some(
-                                                (c: any) =>
-                                                    c.extra?.some((e: any) => e.name === "search")
+                                            const hasSearch = (manifest?.catalogs || []).some((c) =>
+                                                c.extra?.some((e) => e.name === "search")
                                             );
                                             if (hasSearch && !resourceNames.includes("search")) {
                                                 resourceNames.push("search");
@@ -2044,13 +2071,13 @@ export default function AddonDetailPage() {
                                             const manifest = originalManifestData || manifestData;
                                             const catalogs = manifest?.catalogs || [];
 
-                                            const regularCatalogs = catalogs.filter((c: any) => {
+                                            const regularCatalogs = catalogs.filter((c) => {
                                                 if (!c || typeof c !== "object") {
                                                     return true;
                                                 }
                                                 return !catalogHasSearch(c);
                                             });
-                                            const searchCatalogs = catalogs.filter((c: any) => {
+                                            const searchCatalogs = catalogs.filter((c) => {
                                                 if (!c || typeof c !== "object") {
                                                     return false;
                                                 }
@@ -2062,7 +2089,7 @@ export default function AddonDetailPage() {
 
                                             const allKeys = new Set<string>(
                                                 catalogs
-                                                    .map((c: any) => getCatalogKey(c))
+                                                    .map((c) => getCatalogKey(c))
                                                     .filter(Boolean)
                                             );
                                             setSelectedCatalogs(allKeys);
@@ -2104,6 +2131,7 @@ export default function AddonDetailPage() {
                                                 <button
                                                     className="rounded-lg px-2 py-1 font-medium text-primary text-xs transition-colors hover:bg-primary/10 hover:text-primary-hover"
                                                     onClick={handleToggleAllRegular}
+                                                    type="button"
                                                 >
                                                     {allRegularSelected
                                                         ? "Deselect All"
@@ -2112,7 +2140,7 @@ export default function AddonDetailPage() {
                                             </div>
                                             <SortableContext
                                                 items={orderedRegularCatalogs.map(
-                                                    (c: any) => getCatalogKey(c) || ""
+                                                    (c) => getCatalogKey(c) || ""
                                                 )}
                                                 strategy={verticalListSortingStrategy}
                                             >
@@ -2149,6 +2177,7 @@ export default function AddonDetailPage() {
                                                 <button
                                                     className="rounded-lg px-2 py-1 font-medium text-primary text-xs transition-colors hover:bg-primary/10 hover:text-primary-hover"
                                                     onClick={handleToggleAllSearch}
+                                                    type="button"
                                                 >
                                                     {allSearchSelected
                                                         ? "Deselect All"
@@ -2157,7 +2186,7 @@ export default function AddonDetailPage() {
                                             </div>
                                             <SortableContext
                                                 items={orderedSearchCatalogs.map(
-                                                    (c: any) => getCatalogKey(c) || ""
+                                                    (c) => getCatalogKey(c) || ""
                                                 )}
                                                 strategy={verticalListSortingStrategy}
                                             >
@@ -2198,7 +2227,7 @@ export default function AddonDetailPage() {
                                             ...orderedSearchCatalogs,
                                         ];
                                         const activeCatalog = allCatalogs.find(
-                                            (c: any) => getCatalogKey(c) === activeCatalogId
+                                            (c) => getCatalogKey(c) === activeCatalogId
                                         );
                                         if (!activeCatalog) {
                                             return null;
@@ -2264,7 +2293,7 @@ export default function AddonDetailPage() {
                                                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-bold text-sm text-white"
                                                         style={{
                                                             backgroundColor:
-                                                                (group as any).color || "#7c3aed",
+                                                                group.color || "#7c3aed",
                                                         }}
                                                     >
                                                         {group.name?.[0] || "G"}
@@ -2278,7 +2307,7 @@ export default function AddonDetailPage() {
                                                         </div>
                                                         <p className="text-muted text-sm">
                                                             {group.users || 0} users •{" "}
-                                                            {(group as any).addons || 0} addons
+                                                            {group.addons || 0} addons
                                                         </p>
                                                     </div>
 
@@ -2298,10 +2327,12 @@ export default function AddonDetailPage() {
                                                                     toast.success(
                                                                         `Synced ${group.name} successfully`
                                                                     );
-                                                                } catch (err: any) {
+                                                                } catch (err) {
                                                                     toast.error(
-                                                                        err.message ||
+                                                                        readErrorMessage(
+                                                                            err,
                                                                             `Failed to sync ${group.name}`
+                                                                        )
                                                                     );
                                                                 }
                                                             }}
@@ -2357,7 +2388,7 @@ export default function AddonDetailPage() {
 
                     {/* Backup Section */}
                     <AddonBackupSection
-                        addon={addon as any}
+                        addon={addon}
                         addonId={params.id as string}
                         onUpdate={fetchAddon}
                     />
@@ -2400,7 +2431,7 @@ export default function AddonDetailPage() {
                                         Keys stay in the Vault
                                     </p>
                                     <p className="mt-0.5 text-muted text-xs">
-                                        {(anyAddon as any)?.vaultified
+                                        {anyAddon?.vaultified
                                             ? "The stored URL holds a placeholder, not the key. Rotating the Vault entry needs no rewrite and no re-sync - the proxy resolves the current secret on every request."
                                             : "Replace the key inside the addon URL with a Vault reference. The real key then never appears in the stored URL, synced manifests, or on any device."}
                                     </p>
@@ -2409,11 +2440,9 @@ export default function AddonDetailPage() {
                                     isLoading={isVaultifying}
                                     onClick={handleToggleVaultify}
                                     size="sm"
-                                    variant={(anyAddon as any)?.vaultified ? "ghost" : "secondary"}
+                                    variant={anyAddon?.vaultified ? "ghost" : "secondary"}
                                 >
-                                    {(anyAddon as any)?.vaultified
-                                        ? "Restore plain URL"
-                                        : "Vault-inject"}
+                                    {anyAddon?.vaultified ? "Restore plain URL" : "Vault-inject"}
                                 </Button>
                             </div>
 
@@ -2586,8 +2615,10 @@ export default function AddonDetailPage() {
                                             toast.success(`Added to ${group.name}`);
                                             await fetchAddon();
                                             setIsAddToGroupModalOpen(false);
-                                        } catch (err: any) {
-                                            toast.error(err.message || "Failed to add to group");
+                                        } catch (err) {
+                                            toast.error(
+                                                readErrorMessage(err, "Failed to add to group")
+                                            );
                                         }
                                     }}
                                     whileHover={{ x: 4 }}
@@ -2656,7 +2687,7 @@ function BackupAddonPickerModal({
             .then((data) => {
                 // Exclude current addon and all addons in the backup chain
                 const excluded = new Set([currentAddonId, ...excludeIds]);
-                setAddons(data.filter((a: any) => !excluded.has(a.id)));
+                setAddons(data.filter((a) => !excluded.has(a.id)));
                 setLoading(false);
             })
             .catch(() => setLoading(false));
@@ -2910,8 +2941,8 @@ function AddonBackupSection({
             await api.setAddonBackup(targetAddonId, backupId);
             toast.success("Backup addon linked successfully");
             onUpdate();
-        } catch (error: any) {
-            toast.error(error.message || "Failed to link backup");
+        } catch (error) {
+            toast.error(readErrorMessage(error, "Failed to link backup"));
         } finally {
             setLoading(false);
             setIsPickerOpen(false);
@@ -2925,8 +2956,8 @@ function AddonBackupSection({
             toast.success("Backup addon unlinked");
             setIsRemoveModalOpen(false);
             onUpdate();
-        } catch (error: any) {
-            toast.error(error.message || "Failed to unlink backup");
+        } catch (error) {
+            toast.error(readErrorMessage(error, "Failed to unlink backup"));
         } finally {
             setLoading(false);
         }
@@ -3334,8 +3365,8 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
             setLoading(true);
             const data = await api.getAddonHealthHistory(addonId, 50);
             setHistory(data.history);
-        } catch (err: any) {
-            setError(err.message || "Failed to load health history");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to load health history"));
         } finally {
             setLoading(false);
         }
@@ -3359,8 +3390,8 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
                 .then((r) => setAiSummary(r.summary))
                 .catch(() => undefined);
             toast.success("Health check complete");
-        } catch (err: any) {
-            toast.error(err.message || "Health check failed");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Health check failed"));
         } finally {
             setIsChecking(false);
         }
@@ -3526,7 +3557,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
                                         title={group.errors.join(", ")}
                                     >
                                         {group.errors[0].length > 50
-                                            ? `${group.errors[0].substring(0, 50)}...`
+                                            ? `${group.errors[0].slice(0, 50)}...`
                                             : group.errors[0]}
                                         {group.errors.length > 1 &&
                                             ` (+${group.errors.length - 1} more)`}

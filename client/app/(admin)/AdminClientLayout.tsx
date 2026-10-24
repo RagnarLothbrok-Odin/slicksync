@@ -78,13 +78,15 @@ function LayoutDndWrapper({ children }: { children: ReactNode }) {
     const [activeLabel, setActiveLabel] = useState<string | null>(null);
 
     const handleDragStart = (event: DragStartEvent) => {
-        const label = (event.active.data.current as any)?.label;
+        const label = event.active.data.current?.label;
         setActiveLabel(typeof label === "string" ? label : null);
     };
 
     const handleDragEnd = (event: DragEndEvent) => {
         setActiveLabel(null);
-        dragEndHandlersRef.current.forEach((handler) => handler(event));
+        dragEndHandlersRef.current.forEach((handler) => {
+            handler(event);
+        });
     };
 
     return (

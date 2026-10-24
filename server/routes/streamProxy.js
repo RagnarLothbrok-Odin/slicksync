@@ -155,7 +155,7 @@ async function processStreamResponse(data, serverKey, proxyBaseUrl) {
                     if (stream.url && typeof stream.url === "string") {
                         try {
                             console.log(
-                                `[StreamProxy] Resolving redirect for URL: ${stream.url.substring(0, 100)}...`
+                                `[StreamProxy] Resolving redirect for URL: ${stream.url.slice(0, 100)}...`
                             );
                             // Resolve the final URL (follow redirects)
                             const resolvedUrl = await getRedirectedUrl(stream.url);
@@ -163,7 +163,7 @@ async function processStreamResponse(data, serverKey, proxyBaseUrl) {
                             // gave, so the player can still try it from its own network.
                             if (resolvedUrl) {
                                 console.log(
-                                    `[StreamProxy] Resolved to: ${resolvedUrl.substring(0, 100)}...`
+                                    `[StreamProxy] Resolved to: ${resolvedUrl.slice(0, 100)}...`
                                 );
 
                                 const encryptedUrl = encryptStreamUrl(resolvedUrl, serverKey);
@@ -257,7 +257,7 @@ module.exports = ({ getServerKey }) => {
         res.on("finish", logRequest);
 
         console.log(
-            `[StreamProxy] Received request for encrypted URL: ${encryptedUrl.substring(0, 50)}...`
+            `[StreamProxy] Received request for encrypted URL: ${encryptedUrl.slice(0, 50)}...`
         );
 
         try {
@@ -266,7 +266,7 @@ module.exports = ({ getServerKey }) => {
             // Decrypt the target URL
             try {
                 targetUrl = decryptStreamUrl(encryptedUrl, serverKey);
-                console.log(`[StreamProxy] Decrypted URL: ${targetUrl.substring(0, 100)}...`);
+                console.log(`[StreamProxy] Decrypted URL: ${targetUrl.slice(0, 100)}...`);
             } catch (e) {
                 errorMessage = "Invalid or expired stream URL";
                 console.error("[StreamProxy] Error decrypting stream URL:", e.message);
@@ -274,7 +274,7 @@ module.exports = ({ getServerKey }) => {
             }
 
             // Proxy the request to the target URL
-            console.log(`[StreamProxy] Proxying content from: ${targetUrl.substring(0, 100)}...`);
+            console.log(`[StreamProxy] Proxying content from: ${targetUrl.slice(0, 100)}...`);
 
             const fetchHeaders = {
                 Accept: req.get("Accept") || "*/*",
@@ -322,7 +322,7 @@ module.exports = ({ getServerKey }) => {
                 // Capture the final URL (after redirects)
                 resolvedUrl = upstreamResponse.url;
                 if (resolvedUrl !== targetUrl) {
-                    console.log(`[StreamProxy] Redirected to: ${resolvedUrl.substring(0, 100)}...`);
+                    console.log(`[StreamProxy] Redirected to: ${resolvedUrl.slice(0, 100)}...`);
                 }
 
                 // Forward status code

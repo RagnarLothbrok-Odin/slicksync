@@ -1,15 +1,15 @@
 const express = require("express");
 const { publicMessage } = require("../utils/publicError");
-const { decrypt } = require("../utils/encryption");
+const { decrypt: _decrypt } = require("../utils/encryption");
 const {
     parseAddonIds,
     parseProtectedAddons,
     canonicalizeManifestUrl,
 } = require("../utils/validation");
 const { StremioAPIClient } = require("stremio-api-client");
-const { handleDatabaseError, sendError } = require("../utils/handlers");
+const { handleDatabaseError: _handleDatabaseError, sendError } = require("../utils/handlers");
 const { findGroupById } = require("../utils/helpers");
-const { responseUtils, dbUtils } = require("../utils/routeUtils");
+const { responseUtils, dbUtils: _dbUtils } = require("../utils/routeUtils");
 const { createdAtFromCuid } = require("../utils/dateUtils");
 const { removeUserFromGroup, setGroupMembers } = require("../utils/helpers/database");
 
@@ -20,8 +20,8 @@ module.exports = ({
     scopedWhere,
     INSTANCE_TYPE,
     assignUserToGroup,
-    getDecryptedManifestUrl,
-    manifestUrlHmac,
+    getDecryptedManifestUrl: _getDecryptedManifestUrl,
+    manifestUrlHmac: _manifestUrlHmac,
     decrypt,
     createProvider,
 }) => {

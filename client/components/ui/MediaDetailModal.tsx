@@ -21,7 +21,7 @@ import {
 } from "@heroicons/react/24/solid";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { TVFocusable } from "@/components/tv/TVFocusable";
 import { ScrollRow } from "@/components/ui/ScrollRow";
 import { buildAioStreamsAppUrl } from "@/lib/aiostreamsLink";
@@ -204,7 +204,7 @@ export function MediaDetailModal({
     // the effect near trailerId below for why a raw <iframe src> alone can't
     // do this).
     const trailerIframeRef = useRef<HTMLIFrameElement>(null);
-    const trailerPlayerRef = useRef<any>(null);
+    const trailerPlayerRef = useRef<YouTubePlayer | null>(null);
 
     const buildTrailerSrc = useCallback((id: string, muted: boolean) => {
         const origin =
@@ -451,6 +451,7 @@ export function MediaDetailModal({
         enableWatchTogether,
     } = usePersonalFeatures();
     const isTV = useIsTV();
+    const inheritedFocusKey = useContext(FocusContext);
 
     // usePersonalFeatures resolves asynchronously (starts from a default of
     // true, then updates once the real Settings value loads) - the
@@ -1310,20 +1311,17 @@ export function MediaDetailModal({
         let cancelled = false;
 
         function attach() {
-            if (cancelled || !trailerIframeRef.current) {
+            if (cancelled || !trailerIframeRef.current || !window.YT?.Player) {
                 return;
             }
             try {
-                trailerPlayerRef.current = new (window as any).YT.Player(
-                    trailerIframeRef.current,
-                    {}
-                );
+                trailerPlayerRef.current = new window.YT.Player(trailerIframeRef.current, {});
             } catch {
                 // This browser capability may be unavailable in the current environment.
             }
         }
 
-        if ((window as any).YT?.Player) {
+        if (window.YT?.Player) {
             attach();
         } else {
             if (!document.getElementById("youtube-iframe-api")) {
@@ -1332,8 +1330,8 @@ export function MediaDetailModal({
                 tag.src = "https://www.youtube.com/iframe_api";
                 document.body.appendChild(tag);
             }
-            const previous = (window as any).onYouTubeIframeAPIReady;
-            (window as any).onYouTubeIframeAPIReady = () => {
+            const previous = window.onYouTubeIframeAPIReady;
+            window.onYouTubeIframeAPIReady = () => {
                 previous?.();
                 attach();
             };
@@ -1422,9 +1420,6 @@ export function MediaDetailModal({
     );
     const hasPersonalPills = enableWatchlist || (enableWatchedIndicators && selfWatched !== null);
 
-    const TVScope = isTV ? FocusContext.Provider : Fragment;
-    const tvScopeProps = isTV ? { value: modalFocusKey } : {};
-
     // Stop the trailer THE INSTANT a close is triggered (X/backdrop/Escape all
     // route through Modal's onClose uniformly), not just when reopening for a
     // new item. Otherwise the YouTube iframe stays live and keeps decoding
@@ -1462,7 +1457,7 @@ export function MediaDetailModal({
             onClose={handleClose}
             size="full"
         >
-            <TVScope {...(tvScopeProps as any)}>
+            <FocusContext.Provider value={isTV ? modalFocusKey : inheritedFocusKey}>
                 <div className="-mx-6 -mt-6" ref={isTV ? modalRef : undefined}>
                     {isTrailerPlaying && trailerId && trailerSrc ? (
                         // aspect-video (not a fixed height like the static hero below) -
@@ -3188,7 +3183,7 @@ export function MediaDetailModal({
                         )}
                     </div>
                 </div>
-            </TVScope>
+            </FocusContext.Provider>
         </Modal>
     );
 }

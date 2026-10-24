@@ -25,7 +25,7 @@ export function TVBackButton() {
         if (!isTV || typeof window === "undefined") {
             return;
         }
-        const cap = (window as any).Capacitor;
+        const cap = window.Capacitor;
         const AppPlugin = cap?.Plugins?.App;
         if (!AppPlugin?.addListener) {
             return;

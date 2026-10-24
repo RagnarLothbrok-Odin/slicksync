@@ -70,6 +70,7 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
                 <button
                     className="rounded-full bg-primary px-5 py-2 font-medium text-primary-foreground"
                     onClick={() => window.location.reload()}
+                    type="button"
                 >
                     Try again
                 </button>
@@ -133,6 +134,7 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
                             background: "var(--color-primary)",
                             color: "white",
                         }}
+                        type="button"
                     >
                         Back to Login
                     </button>

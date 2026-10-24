@@ -94,6 +94,7 @@ import {
     type User,
 } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useLayoutMode } from "@/lib/layout-mode";
 import {
     displayEmail,
@@ -402,11 +403,11 @@ export default function UserDetailPage() {
                         unresolvedTitles.push(t);
                     }
                 }
-            } catch (err: any) {
+            } catch (err) {
                 // A file this endpoint cannot use at all (wrong format, or one of
                 // the non-history Trakt files) - counted, not fatal to the batch.
                 filesUnusable.push(file.name);
-                lastError = err?.message || "Failed to import";
+                lastError = readErrorMessage(err, "Failed to import");
             }
             setHistoryImportProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : null));
         }
@@ -453,8 +454,8 @@ export default function UserDetailPage() {
             a.click();
             URL.revokeObjectURL(url);
             toast.success("History exported");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to export history");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to export history"));
         } finally {
             setIsExportingHistory(false);
         }
@@ -491,8 +492,8 @@ export default function UserDetailPage() {
             const preview = await api.getMergePreview(params.id as string, candidate.id);
             setMergePreview(preview);
             setIsMergeModalOpen(true);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to load merge preview");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to load merge preview"));
         }
     };
 
@@ -512,8 +513,8 @@ export default function UserDetailPage() {
             ]);
             setUser(userData);
             setMergeInfo(infoRes.info);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to merge accounts");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to merge accounts"));
         } finally {
             setIsMerging(false);
         }
@@ -559,8 +560,8 @@ export default function UserDetailPage() {
             const userData = await api.getUser(params.id as string);
             setUser(userData);
             setMergeCandidate(null);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to undo merge");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to undo merge"));
         } finally {
             setIsUndoing(false);
         }
@@ -654,8 +655,8 @@ export default function UserDetailPage() {
             toast.success(`Cinemeta patched - ${r.summary}`);
             setCinemetaOpen(false);
             await loadCinemeta();
-        } catch (e: any) {
-            toast.error(e?.message || "Could not patch Cinemeta");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not patch Cinemeta"));
         } finally {
             setCinemetaBusy(false);
         }
@@ -671,8 +672,8 @@ export default function UserDetailPage() {
             toast.success("Cinemeta restored to its original state");
             setCinemetaOpen(false);
             await loadCinemeta();
-        } catch (e: any) {
-            toast.error(e?.message || "Could not restore Cinemeta");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not restore Cinemeta"));
         } finally {
             setCinemetaBusy(false);
         }
@@ -697,8 +698,8 @@ export default function UserDetailPage() {
             } else {
                 toast.success("SlickTrax Addon disabled - the next sync removes it");
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to toggle SlickTrax Addon");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to toggle SlickTrax Addon"));
         } finally {
             setIsTogglingTrax(false);
         }
@@ -735,9 +736,9 @@ export default function UserDetailPage() {
         try {
             const plan = await api.getUserSyncPlan(params.id as string);
             setSyncPlan(plan);
-        } catch (err: any) {
+        } catch (err) {
             console.error("Failed to fetch sync plan:", err);
-            setSyncPlanError(err?.message || "Failed to fetch sync plan");
+            setSyncPlanError(readErrorMessage(err, "Failed to fetch sync plan"));
         } finally {
             setSyncPlanLoading(false);
         }
@@ -955,8 +956,8 @@ export default function UserDetailPage() {
                 setGroupAddons(groupAddonsData || []);
 
                 // Set total watch time from absolute user total (minutes -> seconds)
-                if ((userData as any)?.watchTime !== undefined) {
-                    setTotalWatchTimeSeconds((userData as any).watchTime * 60);
+                if (userData?.watchTime !== undefined) {
+                    setTotalWatchTimeSeconds(userData.watchTime * 60);
                 } else if (watchTime) {
                     setTotalWatchTimeSeconds(watchTime.totalWatchTimeSeconds || 0);
                 }
@@ -978,7 +979,7 @@ export default function UserDetailPage() {
                         (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()
                     );
 
-                    const transformed = periods.map((p: any) => ({
+                    const transformed = periods.map((p) => ({
                         date: p.date,
                         minutes: Math.round((p.watchTimeSeconds || 0) / 60),
                         movies: p.movies || 0,
@@ -1076,8 +1077,8 @@ export default function UserDetailPage() {
             try {
                 await api.updateUser(params.id as string, { colorIndex });
                 toast.success("User color updated");
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update user color");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update user color"));
                 // Refresh to revert
                 const userData = await api.getUser(params.id as string);
                 setUser(userData);
@@ -1095,8 +1096,8 @@ export default function UserDetailPage() {
                 // Refresh user data
                 const userData = await api.getUser(params.id as string);
                 setUser(userData);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update username");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update username"));
             }
         },
         [params.id]
@@ -1112,8 +1113,8 @@ export default function UserDetailPage() {
                 // Refresh user data
                 const userData = await api.getUser(params.id as string);
                 setUser(userData);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update expiration date");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update expiration date"));
             }
         },
         [params.id]
@@ -1156,8 +1157,8 @@ export default function UserDetailPage() {
                 // Refresh user data
                 const userData = await api.getUser(params.id as string);
                 setUser(userData);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update group");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update group"));
             }
         },
         [params.id]
@@ -1172,8 +1173,8 @@ export default function UserDetailPage() {
             // Refresh user data
             const userData = await api.getUser(params.id as string);
             setUser(userData);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to toggle user status");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to toggle user status"));
         }
     }, [params.id, user?.isActive]);
 
@@ -1195,8 +1196,8 @@ export default function UserDetailPage() {
             // Refresh user data
             const stremioAddonsData = await api.getUserStremioAddons(params.id as string);
             setStremioAddons(stremioAddonsData || []);
-        } catch (err: any) {
-            toast.error(err.message || "Could not clear their addons");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Could not clear their addons"));
         }
     }, [params.id, stremioAddons]);
 
@@ -1217,7 +1218,7 @@ export default function UserDetailPage() {
             try {
                 await api.updateUserExcludedAddons(params.id as string, Array.from(newExcluded));
                 toast.success(wasExcluded ? "Addon included" : "Addon excluded");
-            } catch (err: any) {
+            } catch (err) {
                 // Revert on error
                 if (wasExcluded) {
                     newExcluded.add(addonId);
@@ -1225,7 +1226,7 @@ export default function UserDetailPage() {
                     newExcluded.delete(addonId);
                 }
                 setExcludedAddonIds(newExcluded);
-                toast.error(err.message || "Failed to update addon");
+                toast.error(readErrorMessage(err, "Failed to update addon"));
             }
         },
         [params.id, excludedAddonIds]
@@ -1244,8 +1245,8 @@ export default function UserDetailPage() {
                 }
                 setProtectedAddonNames(newProtected);
                 toast.success(result.message);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to update addon protection");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to update addon protection"));
             }
         },
         [params.id, protectedAddonNames]
@@ -1261,8 +1262,8 @@ export default function UserDetailPage() {
                     prev.filter((a) => a.transportUrl !== addonRef && a.manifest?.name !== addonRef)
                 );
                 toast.success("Addon removed from account");
-            } catch (err: any) {
-                toast.error(err.message || "Failed to remove addon");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to remove addon"));
             }
         },
         [params.id]
@@ -1295,8 +1296,8 @@ export default function UserDetailPage() {
             } catch (e) {
                 console.error("Failed to refresh addons after import", e);
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to import addons");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to import addons"));
         }
     }, [user, params.id]);
 
@@ -1327,9 +1328,9 @@ export default function UserDetailPage() {
                     await api.reorderGroupAddons(groupId, stringIds);
                     toast.success("Group addon order updated");
                 }
-            } catch (err: any) {
+            } catch (err) {
                 setGroupAddons(groupAddons);
-                toast.error(err.message || "Failed to update addon order");
+                toast.error(readErrorMessage(err, "Failed to update addon order"));
             }
         },
         [groupAddons, user]
@@ -1367,10 +1368,10 @@ export default function UserDetailPage() {
                 const orderedNames = newAddons.map((a) => a.manifest?.name || "Unknown");
                 await api.reorderUserStremioAddons(params.id as string, orderedNames);
                 toast.success("Addon order updated");
-            } catch (err: any) {
+            } catch (err) {
                 // Revert on error
                 setStremioAddons(stremioAddons);
-                toast.error(err.message || "Failed to update addon order");
+                toast.error(readErrorMessage(err, "Failed to update addon order"));
             }
         },
         [params.id, stremioAddons]
@@ -1575,10 +1576,12 @@ export default function UserDetailPage() {
                                                                     toast.success(
                                                                         `Synced ${user.username || user.name} successfully`
                                                                     );
-                                                                } catch (err: any) {
+                                                                } catch (err) {
                                                                     toast.error(
-                                                                        err.message ||
+                                                                        readErrorMessage(
+                                                                            err,
                                                                             `Failed to sync ${user.username || user.name}`
+                                                                        )
                                                                     );
                                                                 } finally {
                                                                     setIsSyncing(false);
@@ -1698,6 +1701,7 @@ export default function UserDetailPage() {
                                                             }
                                                             setShowSyncDebug(!showSyncDebug);
                                                         }}
+                                                        type="button"
                                                     >
                                                         {showSyncDebug ? "Hide" : "Debug"}
                                                     </button>
@@ -1717,6 +1721,7 @@ export default function UserDetailPage() {
                                                                     ? "Hide email"
                                                                     : "Show email"
                                                             }
+                                                            type="button"
                                                         >
                                                             {showEmail ? (
                                                                 <EyeSlashIcon className="h-4 w-4" />
@@ -1732,6 +1737,7 @@ export default function UserDetailPage() {
                                                     <button
                                                         className="group flex items-center gap-2 transition-colors"
                                                         onClick={() => setIsEditDetailsOpen(true)}
+                                                        type="button"
                                                     >
                                                         <UsersIcon className="h-4 w-4 text-secondary group-hover:text-primary md:h-5 md:w-5" />
                                                         <span className="font-medium text-default text-sm md:text-base">
@@ -1747,6 +1753,7 @@ export default function UserDetailPage() {
                                                     <button
                                                         className="group flex items-center gap-2 transition-colors"
                                                         onClick={() => setIsEditDetailsOpen(true)}
+                                                        type="button"
                                                     >
                                                         <ClockIcon className="h-4 w-4 text-secondary group-hover:text-primary md:h-5 md:w-5" />
                                                         <span className="text-muted text-sm md:text-base">
@@ -1836,7 +1843,7 @@ export default function UserDetailPage() {
                                                                         title={addon.fingerprint}
                                                                     >
                                                                         FP:{" "}
-                                                                        {addon.fingerprint.substring(
+                                                                        {addon.fingerprint.slice(
                                                                             0,
                                                                             50
                                                                         )}
@@ -1867,7 +1874,7 @@ export default function UserDetailPage() {
                                                                         title={addon.fingerprint}
                                                                     >
                                                                         FP:{" "}
-                                                                        {addon.fingerprint.substring(
+                                                                        {addon.fingerprint.slice(
                                                                             0,
                                                                             50
                                                                         )}
@@ -1881,6 +1888,7 @@ export default function UserDetailPage() {
                                                 <button
                                                     className="mt-3 mr-2 rounded bg-surface-hover px-3 py-1 text-xs transition-colors hover:bg-primary hover:text-white"
                                                     onClick={refreshSyncPlan}
+                                                    type="button"
                                                 >
                                                     Refresh
                                                 </button>
@@ -1898,6 +1906,7 @@ export default function UserDetailPage() {
                                                         copyToClipboard(text);
                                                         toast.success("Copied to clipboard");
                                                     }}
+                                                    type="button"
                                                 >
                                                     Copy
                                                 </button>
@@ -1994,10 +2003,12 @@ export default function UserDetailPage() {
                                                                     ? `${user.username} is left out of household numbers`
                                                                     : `${user.username} counts in household numbers again`
                                                             );
-                                                        } catch (err: any) {
+                                                        } catch (err) {
                                                             toast.error(
-                                                                err?.message ||
+                                                                readErrorMessage(
+                                                                    err,
                                                                     "Could not change that"
+                                                                )
                                                             );
                                                         }
                                                     }}
@@ -2108,10 +2119,12 @@ export default function UserDetailPage() {
                                                                                   }
                                                                                 : prev
                                                                         );
-                                                                    } catch (err: any) {
+                                                                    } catch (err) {
                                                                         toast.error(
-                                                                            err.message ||
+                                                                            readErrorMessage(
+                                                                                err,
                                                                                 "Failed to disconnect SIMKL"
+                                                                            )
                                                                         );
                                                                     } finally {
                                                                         setIsDisconnectingSimkl(
@@ -2984,14 +2997,12 @@ export default function UserDetailPage() {
                                                                     }
                                                                 >
                                                                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-muted">
-                                                                        {(addon as any)
-                                                                            .customLogo ? (
+                                                                        {addon.customLogo ? (
                                                                             <img
                                                                                 alt={addon.name}
                                                                                 className="h-6 w-6 object-contain"
                                                                                 src={
-                                                                                    (addon as any)
-                                                                                        .customLogo
+                                                                                    addon.customLogo
                                                                                 }
                                                                             />
                                                                         ) : addon.logo ? (
@@ -3019,11 +3030,10 @@ export default function UserDetailPage() {
                                                                                     }
                                                                                 />
                                                                             )}
-                                                                            {(addon as any)
-                                                                                .isBackup && (
+                                                                            {addon.isBackup && (
                                                                                 <Badge
                                                                                     size="sm"
-                                                                                    title={`Primary (${(addon as any).primaryAddonName}) is offline`}
+                                                                                    title={`Primary (${addon.primaryAddonName}) is offline`}
                                                                                     variant="warning"
                                                                                 >
                                                                                     Backup
@@ -3038,16 +3048,12 @@ export default function UserDetailPage() {
                                                                                 </Badge>
                                                                             )}
                                                                         </div>
-                                                                        {(addon as any).isBackup &&
-                                                                            (addon as any)
-                                                                                .primaryAddonName && (
+                                                                        {addon.isBackup &&
+                                                                            addon.primaryAddonName && (
                                                                                 <p className="mb-1 truncate text-warning text-xs">
                                                                                     Primary offline:{" "}
                                                                                     {
-                                                                                        (
-                                                                                            addon as any
-                                                                                        )
-                                                                                            .primaryAddonName
+                                                                                        addon.primaryAddonName
                                                                                     }
                                                                                 </p>
                                                                             )}
@@ -3107,6 +3113,7 @@ export default function UserDetailPage() {
                                                                             addon.id
                                                                         )
                                                                     }
+                                                                    type="button"
                                                                 >
                                                                     {isExcluded ? (
                                                                         <ArrowPathIcon className="h-4 w-4" />
@@ -3225,9 +3232,9 @@ export default function UserDetailPage() {
                                                         const matchedAddon = groupAddons.find(
                                                             (ga) =>
                                                                 gatedId
-                                                                    ? (ga as any).id === gatedId
+                                                                    ? ga.id === gatedId
                                                                     : canonicalizeManifestUrl(
-                                                                          (ga as any).transportUrl
+                                                                          ga.transportUrl
                                                                       ) === canonicalTransportUrl
                                                         );
                                                         const content = (
@@ -3323,27 +3330,23 @@ export default function UserDetailPage() {
                                                                             <div className="mt-1 flex flex-wrap gap-1.5">
                                                                                 {addon.manifest.resources
                                                                                     .slice(0, 4)
-                                                                                    .map(
-                                                                                        (
-                                                                                            res: any
-                                                                                        ) => {
-                                                                                            const resName =
-                                                                                                typeof res ===
-                                                                                                "string"
-                                                                                                    ? res
-                                                                                                    : res.name;
-                                                                                            return (
-                                                                                                <ResourceBadge
-                                                                                                    key={
-                                                                                                        resName
-                                                                                                    }
-                                                                                                    resource={
-                                                                                                        resName
-                                                                                                    }
-                                                                                                />
-                                                                                            );
-                                                                                        }
-                                                                                    )}
+                                                                                    .map((res) => {
+                                                                                        const resName =
+                                                                                            typeof res ===
+                                                                                            "string"
+                                                                                                ? res
+                                                                                                : res.name;
+                                                                                        return (
+                                                                                            <ResourceBadge
+                                                                                                key={
+                                                                                                    resName
+                                                                                                }
+                                                                                                resource={
+                                                                                                    resName
+                                                                                                }
+                                                                                            />
+                                                                                        );
+                                                                                    })}
                                                                                 {addon.manifest
                                                                                     .resources
                                                                                     .length > 4 && (
@@ -3409,6 +3412,7 @@ export default function UserDetailPage() {
                                                                                 name
                                                                             )
                                                                         }
+                                                                        type="button"
                                                                     >
                                                                         <ShieldCheckIcon className="h-4 w-4" />
                                                                     </button>
@@ -3420,6 +3424,7 @@ export default function UserDetailPage() {
                                                                                 addon.transportUrl
                                                                             )
                                                                         }
+                                                                        type="button"
                                                                     >
                                                                         <XMarkIcon className="h-4 w-4" />
                                                                     </button>
@@ -3544,6 +3549,7 @@ export default function UserDetailPage() {
                                         className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors hover:bg-surface-hover"
                                         key={u.id}
                                         onClick={() => handlePickMergeCandidate(u)}
+                                        type="button"
                                     >
                                         <UserAvatar
                                             colorIndex={u.colorIndex ?? undefined}
@@ -3871,14 +3877,14 @@ function SimklLinkModal({
                     // transient poll error - keep trying until expiry
                 }
             }, intervalMs);
-        } catch (err: any) {
+        } catch (err) {
             // Surfaced as a toast and the modal closed, rather than a modal whose
             // entire content is an error message. Matches how the Trakt row on the
             // same card reports the identical class of problem ("this integration
             // isn't configured on this instance") - previously SIMKL opened a
             // modal containing red text while Trakt toasted, which read as two
             // unrelated error systems for the same situation.
-            toast.error(err.message || "Failed to start SIMKL authorization");
+            toast.error(readErrorMessage(err, "Failed to start SIMKL authorization"));
             onClose();
         }
     };

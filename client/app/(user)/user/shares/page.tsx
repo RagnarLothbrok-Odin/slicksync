@@ -24,6 +24,7 @@ import { ViewModeToggle } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
 import { buildNuvioAppUrl, buildStremioAppUrl } from "@/lib/appLinks";
+import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { type GroupMember, type Share, userLibrary, userShares } from "@/lib/user-api";
 
@@ -33,7 +34,7 @@ type ViewMode = "grid" | "list";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export default function UserSharesPage() {
-    const { userId, userInfo, provider } = useUserAuth();
+    const { userId, userInfo: _userInfo, provider } = useUserAuth();
     const { authKey } = useUserAuthHeaders();
     const [sentShares, setSentShares] = useState<Share[]>([]);
     const [receivedShares, setReceivedShares] = useState<Share[]>([]);
@@ -89,7 +90,7 @@ export default function UserSharesPage() {
 
                 // Build set of library item IDs for quick lookup
                 const libraryIds = new Set<string>();
-                (libraryResult.library || []).forEach((item: any) => {
+                (libraryResult.library || []).forEach((item) => {
                     const id = item._id || item.id;
                     if (id && item.removed !== true) {
                         libraryIds.add(id);
@@ -101,8 +102,8 @@ export default function UserSharesPage() {
                     }
                 });
                 setLibraryItemIds(libraryIds);
-            } catch (err: any) {
-                setError(err.message || "Failed to load shares");
+            } catch (err) {
+                setError(readErrorMessage(err, "Failed to load shares"));
             } finally {
                 setLoading(false);
             }
@@ -199,8 +200,8 @@ export default function UserSharesPage() {
                 )
             );
             toast.success("Marked as viewed");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to mark as viewed");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to mark as viewed"));
         } finally {
             setActionLoading(null);
         }
@@ -223,8 +224,8 @@ export default function UserSharesPage() {
             selectedShares.delete(shareId);
             setSelectedShares(new Set(selectedShares));
             toast.success("Share removed");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to remove share");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to remove share"));
         } finally {
             setActionLoading(null);
         }
@@ -245,8 +246,8 @@ export default function UserSharesPage() {
             setReceivedShares((prev) => prev.filter((s) => !selectedShares.has(s.id)));
             toast.success(`${selectedShares.size} share(s) removed`);
             setSelectedShares(new Set());
-        } catch (err: any) {
-            toast.error(err.message || "Failed to delete shares");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete shares"));
         } finally {
             setActionLoading(null);
         }
@@ -287,8 +288,8 @@ export default function UserSharesPage() {
                 return newSet;
             });
             toast.success(`Added "${share.itemName}" to library`);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to add to library");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to add to library"));
         } finally {
             setActionLoading(null);
         }
@@ -332,13 +333,15 @@ export default function UserSharesPage() {
             // Update local state
             setLibraryItemIds((prev) => {
                 const newSet = new Set(prev);
-                sharesToAdd.forEach((s) => newSet.add(s.itemId));
+                sharesToAdd.forEach((s) => {
+                    newSet.add(s.itemId);
+                });
                 return newSet;
             });
             toast.success(`${sharesToAdd.length} item(s) added to library`);
             setSelectedShares(new Set());
-        } catch (err: any) {
-            toast.error(err.message || "Failed to add to library");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to add to library"));
         } finally {
             setActionLoading(null);
         }
@@ -470,6 +473,7 @@ export default function UserSharesPage() {
                         disabled={actionLoading === share.id}
                         onClick={() => handleAddToLibrary(share)}
                         title={inLibrary ? "In library" : "Add to library"}
+                        type="button"
                     >
                         {inLibrary ? (
                             <BookmarkIconSolid className="h-4 w-4" />
@@ -484,6 +488,7 @@ export default function UserSharesPage() {
                             onClick={() => handleMarkViewed(share.id)}
                             style={{ color: "var(--color-success)" }}
                             title="Mark as viewed"
+                            type="button"
                         >
                             <CheckIcon className="h-4 w-4" />
                         </button>
@@ -494,6 +499,7 @@ export default function UserSharesPage() {
                         onClick={() => handleRemoveShare(share.id, type)}
                         style={{ color: "var(--color-error)" }}
                         title="Remove"
+                        type="button"
                     >
                         <TrashIcon className="h-4 w-4" />
                     </button>
@@ -634,6 +640,7 @@ export default function UserSharesPage() {
                             background: "var(--color-surface-elevated)",
                         }}
                         title={inLibrary ? "In library" : "Add to library"}
+                        type="button"
                     >
                         {inLibrary ? (
                             <BookmarkIconSolid className="h-5 w-5" />
@@ -651,6 +658,7 @@ export default function UserSharesPage() {
                                 color: "var(--color-success)",
                             }}
                             title="Mark as viewed"
+                            type="button"
                         >
                             <CheckIcon className="h-5 w-5" />
                         </button>
@@ -664,6 +672,7 @@ export default function UserSharesPage() {
                             color: "var(--color-error)",
                         }}
                         title="Remove"
+                        type="button"
                     >
                         <TrashIcon className="h-5 w-5" />
                     </button>
@@ -700,6 +709,7 @@ export default function UserSharesPage() {
                             setActiveTab("received");
                             setSelectedShares(new Set());
                         }}
+                        type="button"
                     >
                         <InboxIcon className="h-4 w-4" />
                         Received
@@ -717,6 +727,7 @@ export default function UserSharesPage() {
                             setActiveTab("sent");
                             setSelectedShares(new Set());
                         }}
+                        type="button"
                     >
                         <PaperAirplaneIcon className="h-4 w-4" />
                         Sent ({sentShares.length})
@@ -756,6 +767,7 @@ export default function UserSharesPage() {
                                 border: "1px solid var(--color-surface-border)",
                                 color: "var(--color-text)",
                             }}
+                            type="button"
                         >
                             <FunnelIcon className="h-4 w-4" />
                             {userFilter === "all" ? "All Users" : userFilter}
@@ -786,6 +798,7 @@ export default function UserSharesPage() {
                                                     ? "var(--color-primary)"
                                                     : "var(--color-text)",
                                         }}
+                                        type="button"
                                     >
                                         All Users
                                     </button>
@@ -803,6 +816,7 @@ export default function UserSharesPage() {
                                                         ? "var(--color-primary)"
                                                         : "var(--color-text)",
                                             }}
+                                            type="button"
                                         >
                                             {user.username}
                                         </button>
@@ -832,6 +846,7 @@ export default function UserSharesPage() {
                         className="text-sm underline"
                         onClick={handleSelectAll}
                         style={{ color: "var(--color-primary)" }}
+                        type="button"
                     >
                         Select All
                     </button>
@@ -839,6 +854,7 @@ export default function UserSharesPage() {
                         className="text-sm underline"
                         onClick={handleDeselectAll}
                         style={{ color: "var(--color-text-muted)" }}
+                        type="button"
                     >
                         Deselect All
                     </button>
@@ -849,6 +865,7 @@ export default function UserSharesPage() {
                             disabled={actionLoading === "bulk"}
                             onClick={handleBulkAddToLibrary}
                             style={{ background: "var(--color-primary)", color: "white" }}
+                            type="button"
                         >
                             <BookmarkIcon className="h-4 w-4" />
                             Add to Library
@@ -859,6 +876,7 @@ export default function UserSharesPage() {
                         disabled={actionLoading === "bulk"}
                         onClick={handleBulkDelete}
                         style={{ background: "var(--color-error)", color: "white" }}
+                        type="button"
                     >
                         <TrashIcon className="h-4 w-4" />
                         Delete
@@ -891,6 +909,7 @@ export default function UserSharesPage() {
                     <button
                         className="ml-2 underline hover:no-underline"
                         onClick={() => setError(null)}
+                        type="button"
                     >
                         Dismiss
                     </button>

@@ -1,16 +1,16 @@
 const express = require("express");
 const { publicMessage } = require("../utils/publicError");
 const jwt = require("jsonwebtoken");
-const { StremioAPIClient } = require("stremio-api-client");
+const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
 const { validateStremioAuthKey } = require("../utils/stremio");
 const {
     startNuvioTvLogin,
     pollNuvioTvLogin,
     exchangeNuvioTvLogin,
-    isTokenExpired,
+    isTokenExpired: _isTokenExpired,
 } = require("../providers/nuvioAuth");
 const { makeCreateProvider } = require("../providers");
-const { encrypt, decrypt } = require("../utils/encryption");
+const { encrypt: _encrypt, decrypt: _decrypt } = require("../utils/encryption");
 const { canonicalizeManifestUrl } = require("../utils/validation");
 const { getAccountDateString, resolveAccountTimezone } = require("../utils/dateUtils");
 

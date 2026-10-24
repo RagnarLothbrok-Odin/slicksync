@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { runInactivityCheck } = require("../server/utils/automation/inactivity");
 const { ACTIONS, TRIGGERS } = require("../server/utils/automation/registry");
-const { validateRule } = (() => {
+const { validateRule: _validateRule } = (() => {
     try {
         return require("../server/utils/automation/engine");
     } catch {

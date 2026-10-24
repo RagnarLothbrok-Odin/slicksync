@@ -249,8 +249,8 @@ async function getDesiredAddons(
         getAccountId,
         decrypt,
         parseAddonIds,
-        parseProtectedAddons,
-        canonicalizeManifestUrl,
+        parseProtectedAddons: _parseProtectedAddons,
+        canonicalizeManifestUrl: _canonicalizeManifestUrl,
         StremioAPIClient,
         createProvider,
         unsafeMode = false,
@@ -495,7 +495,7 @@ function createGetUserSyncStatus({
     decrypt,
     parseAddonIds,
     parseProtectedAddons,
-    getDecryptedManifestUrl,
+    getDecryptedManifestUrl: _getDecryptedManifestUrl,
     canonicalizeManifestUrl,
     StremioAPIClient,
     createProvider,
@@ -519,7 +519,7 @@ function createGetUserSyncStatus({
     // function immediately re-fetching the identical list from the provider.
     const computeUserSyncStatus = async (
         userId,
-        { groupId, unsafe = false, _prefetchedUserAddons = null } = {},
+        { groupId: _groupId, unsafe = false, _prefetchedUserAddons = null } = {},
         req
     ) => {
         const user = await prisma.user.findFirst({

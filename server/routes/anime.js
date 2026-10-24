@@ -9,7 +9,7 @@ const { publicMessage } = require("../utils/publicError");
 // anime metadata is strictly additive - Cinemeta still provides the base
 // record, and a bad day at AniList must never break a page.
 
-module.exports = ({ getAccountId }) => {
+module.exports = ({ getAccountId: _getAccountId }) => {
     const router = express.Router();
 
     // This season's airing anime - the seasonal chart row.

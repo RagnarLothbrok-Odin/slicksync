@@ -6,6 +6,7 @@ import { Badge, Button } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { api, type WatchStateView } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 
 /**
  * The AIOStreams half of watch tracking. People watching through AIOStreams'
@@ -64,8 +65,8 @@ export function WatchStateRow({ userId }: { userId: string }) {
                         : "AIOStreams watch history off"
                 );
             }
-        } catch (err: any) {
-            toast.error(err?.message || "Could not change that");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Could not change that"));
         } finally {
             setBusy(false);
         }
@@ -85,8 +86,8 @@ export function WatchStateRow({ userId }: { userId: string }) {
                         : "It’s already in their AIOStreams"
                 );
             }
-        } catch (err: any) {
-            toast.error(err?.message || "Couldn’t add it to AIOStreams");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Couldn’t add it to AIOStreams"));
         } finally {
             setInstalling(false);
         }
@@ -107,8 +108,8 @@ export function WatchStateRow({ userId }: { userId: string }) {
                         : "Their AIOStreams catalog order is left as they set it"
                 );
             }
-        } catch (err: any) {
-            toast.error(err?.message || "Could not change that");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Could not change that"));
         } finally {
             setMovingFirst(false);
         }
@@ -124,8 +125,8 @@ export function WatchStateRow({ userId }: { userId: string }) {
                       ? "Profile linked"
                       : "Profile unlinked"
             );
-        } catch (err: any) {
-            toast.error(err?.message || "Could not link that profile");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Could not link that profile"));
         }
     };
 

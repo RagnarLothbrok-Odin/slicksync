@@ -42,7 +42,7 @@ interface Release {
     version: string;
 }
 
-interface GithubReleaseResponse {
+interface _GithubReleaseResponse {
     body: string | null;
     created_at: string | null;
     draft: boolean;
@@ -399,6 +399,7 @@ export default function ChangelogPage() {
                                             <button
                                                 className="flex w-full items-center justify-between px-6 py-4 transition-colors hover:bg-surface-hover"
                                                 onClick={() => toggleVersion(release.version)}
+                                                type="button"
                                             >
                                                 <div className="flex items-center gap-4">
                                                     <TagIcon className="h-5 w-5 shrink-0 text-default" />
@@ -424,6 +425,7 @@ export default function ChangelogPage() {
                                                                                 e.stopPropagation();
                                                                                 copyUpdateCommand();
                                                                             }}
+                                                                            type="button"
                                                                         >
                                                                             {copied ? (
                                                                                 <CheckIcon className="h-3 w-3" />

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "@/components/ui/Toast";
 import { api, type WatchTrackingSettings as Settings } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 
 const FINISHED_CHOICES = [75, 80, 85, 90, 95, 98];
 const UNFINISHED_CHOICES = [14, 30, 45, 60, 90, 180];
@@ -31,8 +32,8 @@ export function WatchTrackingSettings() {
         try {
             setValue(await api.saveWatchTrackingSettings(patch));
             toast.success("Saved");
-        } catch (e: any) {
-            toast.error(e?.message || "Could not save that");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not save that"));
             api.getWatchTrackingSettings()
                 .then(setValue)
                 .catch(() => undefined);

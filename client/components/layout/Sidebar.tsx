@@ -237,6 +237,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                         aria-label="Close navigation"
                         className="rounded-lg p-2 transition-colors hover:bg-surface-hover"
                         onClick={onClose}
+                        type="button"
                     >
                         <XMarkIcon className="h-5 w-5 text-muted" />
                     </button>

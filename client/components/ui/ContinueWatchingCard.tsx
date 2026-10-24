@@ -291,6 +291,7 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCard({
                             );
                         }
                     }}
+                    type="button"
                 >
                     <XCircleIcon className="h-4 w-4" />
                     Remove from Continue Watching

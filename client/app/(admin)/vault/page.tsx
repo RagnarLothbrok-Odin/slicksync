@@ -51,6 +51,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
 import { api, type VaultCategory, type VaultEntry, type VaultTestType } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLongPress } from "@/lib/hooks/useLongPress";
@@ -257,8 +258,8 @@ function DebridUsageBadge({
         try {
             await api.updateVaultEntry(entry.id, { autoRemoveEnabled: next });
             onEntryUpdated(entry.id, { autoRemoveEnabled: next });
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update auto-remove");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update auto-remove"));
         } finally {
             setSavingAutoRemove(false);
         }
@@ -271,8 +272,8 @@ function DebridUsageBadge({
         try {
             await api.updateVaultEntry(entry.id, { autoRemoveAfterDays: days });
             onEntryUpdated(entry.id, { autoRemoveAfterDays: days });
-        } catch (err: any) {
-            toast.error(err.message || "Failed to update auto-remove");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to update auto-remove"));
         }
     };
 
@@ -381,8 +382,8 @@ function BackupKeySelect({
             await api.updateVaultEntry(entry.id, { backupEntryId: value || null });
             onEntryUpdated(entry.id, { backupEntryId: value || null });
             toast.success(value ? "Backup key set" : "Backup key cleared");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to set backup key");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to set backup key"));
         } finally {
             setSaving(false);
         }
@@ -548,6 +549,7 @@ function SortableEntryCard({
                         close();
                         onTest(entry);
                     }}
+                    type="button"
                 >
                     <ArrowPathIcon className="h-4 w-4" />
                     Run Check Now
@@ -558,6 +560,7 @@ function SortableEntryCard({
                         close();
                         onEdit(entry);
                     }}
+                    type="button"
                 >
                     <PencilIcon className="h-4 w-4" />
                     Edit
@@ -587,6 +590,7 @@ function SortableEntryCard({
                             onEdit(entry);
                         }}
                         title="Open the provider's dashboard and this entry's edit form together"
+                        type="button"
                     >
                         <ArrowPathIcon className="h-4 w-4" />
                         Rotate Now
@@ -599,6 +603,7 @@ function SortableEntryCard({
                         close();
                         onMoveToAddons(entry);
                     }}
+                    type="button"
                 >
                     <PuzzlePieceIcon className="h-4 w-4" />
                     Move to Addons
@@ -610,6 +615,7 @@ function SortableEntryCard({
                         close();
                         onDelete(entry);
                     }}
+                    type="button"
                 >
                     <TrashIcon className="h-4 w-4" />
                     Delete
@@ -719,8 +725,8 @@ function VaultPageContent() {
         setCurrency(next);
         try {
             await api.updateSyncSettings({ vaultCurrency: next });
-        } catch (e: any) {
-            toast.error(e.message || "Failed to update currency");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update currency"));
         }
     };
 
@@ -780,8 +786,8 @@ function VaultPageContent() {
             // Keep the (all-category) cost summary in sync with any edit that
             // triggered this reload.
             setCostRefreshKey((k) => k + 1);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to load vault entries");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to load vault entries"));
         } finally {
             setIsLoading(false);
         }
@@ -988,8 +994,8 @@ function VaultPageContent() {
             }
             setIsAddOpen(false);
             load();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to save vault entry");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to save vault entry"));
         } finally {
             setIsSaving(false);
         }
@@ -1007,8 +1013,8 @@ function VaultPageContent() {
             await api.deleteVaultEntry(entry.id);
             toast.success("Deleted");
             load();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to delete");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete"));
         }
     };
 
@@ -1025,12 +1031,12 @@ function VaultPageContent() {
                 );
                 return;
             }
-            await api.createAddon({ manifestUrl: secret.trim(), name: entry.name } as any);
+            await api.createAddon({ manifestUrl: secret.trim(), name: entry.name });
             await api.deleteVaultEntry(entry.id);
             toast.success(`Moved "${entry.name}" to Addons`);
             load();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to move to Addons");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to move to Addons"));
         } finally {
             setMovingToAddonsId(null);
         }
@@ -1048,8 +1054,8 @@ function VaultPageContent() {
                 `Moved "${entry.name}" to ${CATEGORY_LABELS[newCategory as VaultCategory] || newCategory}`
             );
             load();
-        } catch (err: any) {
-            toast.error(err.message || "Failed to recategorize");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to recategorize"));
             load();
         }
     };
@@ -1121,8 +1127,8 @@ function VaultPageContent() {
                 toast(result.message);
             }
             load();
-        } catch (err: any) {
-            toast.error(err.message || "Test failed");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Test failed"));
         } finally {
             setTestingId(null);
         }
@@ -1140,8 +1146,8 @@ function VaultPageContent() {
         try {
             const result = await api.revealVaultSecret(entry.id);
             setRevealed((prev) => ({ ...prev, [entry.id]: result.secret }));
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reveal secret");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reveal secret"));
         }
     };
 
@@ -1157,8 +1163,8 @@ function VaultPageContent() {
         try {
             const result = await api.revealVaultSecret(editingId);
             setForm((f) => ({ ...f, secret: result.secret }));
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reveal secret");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reveal secret"));
         }
     };
 
@@ -1170,8 +1176,8 @@ function VaultPageContent() {
             const value = revealed[entry.id] ?? (await api.revealVaultSecret(entry.id)).secret;
             await copyToClipboard(value);
             toast.success("Copied to clipboard");
-        } catch (err: any) {
-            toast.error(err.message || "Failed to copy");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to copy"));
         }
     };
 
@@ -1188,8 +1194,8 @@ function VaultPageContent() {
                 )
             );
             toast.success(`Snoozed "${entry.name}" for 7 days`);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to snooze");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to snooze"));
         }
     };
 
@@ -1255,6 +1261,7 @@ function VaultPageContent() {
                                 onClick={() => handleSnooze(entry)}
                                 style={{ color: "var(--color-text-muted)" }}
                                 title="Snooze this expiry alert for 7 days"
+                                type="button"
                             >
                                 <BellSlashIcon className="h-3.5 w-3.5" />
                             </button>
@@ -1284,6 +1291,7 @@ function VaultPageContent() {
                                 onClick={() => handleCopy(entry)}
                                 style={{ color: "var(--color-text-muted)" }}
                                 title="Copy to clipboard"
+                                type="button"
                             >
                                 <DocumentDuplicateIcon className="h-4 w-4" />
                             </button>
@@ -1301,6 +1309,7 @@ function VaultPageContent() {
                                 onClick={() => handleReveal(entry)}
                                 style={{ color: "var(--color-text-muted)" }}
                                 title={revealed[entry.id] ? "Hide value" : "Reveal value"}
+                                type="button"
                             >
                                 {revealed[entry.id] ? (
                                     <EyeSlashIcon className="h-4 w-4" />
@@ -1357,6 +1366,7 @@ function VaultPageContent() {
                                     ? "No automated check configured"
                                     : "Run check now"
                             }
+                            type="button"
                         >
                             <ArrowPathIcon
                                 className={`h-4 w-4 ${testingId === entry.id ? "animate-spin" : ""}`}
@@ -1378,6 +1388,7 @@ function VaultPageContent() {
                             onClick={() => openEditModal(entry)}
                             style={{ background: "var(--color-surface-hover)" }}
                             title="Edit"
+                            type="button"
                         >
                             <PencilIcon
                                 className="h-4 w-4"
@@ -1431,6 +1442,7 @@ function VaultPageContent() {
                             onClick={() => handleMoveToAddons(entry)}
                             style={{ background: "var(--color-surface-hover)" }}
                             title="Move to Addons"
+                            type="button"
                         >
                             <PuzzlePieceIcon
                                 className="h-4 w-4"
@@ -1454,6 +1466,7 @@ function VaultPageContent() {
                             onClick={() => handleDelete(entry)}
                             style={{ background: "var(--color-surface-hover)" }}
                             title="Delete"
+                            type="button"
                         >
                             <TrashIcon
                                 className="h-4 w-4"

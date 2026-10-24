@@ -65,7 +65,14 @@ async function tellGroupMissing(prisma, accountId, { username, userId, groupName
     }
 }
 
-module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assignUserToGroup }) => {
+module.exports = ({
+    prisma,
+    getAccountId,
+    INSTANCE_TYPE: _INSTANCE_TYPE,
+    encrypt: _encrypt,
+    decrypt,
+    assignUserToGroup: _assignUserToGroup,
+}) => {
     const router = express.Router();
 
     router.get("/", async (req, res) => {
@@ -172,7 +179,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assig
                 if (attempts > 10) {
                     return res.status(500).json({ error: "Failed to generate unique invite code" });
                 }
-            } while (true);
+            } while (attempts <= 10);
 
             // Normalize numeric fields
             // When left empty, treat as 0 = unlimited
@@ -1115,7 +1122,7 @@ module.exports.INVITE_CODE_LENGTH = INVITE_CODE_LENGTH;
 module.exports.createPublicRouter = ({
     prisma,
     encrypt,
-    assignUserToGroup,
+    assignUserToGroup: _assignUserToGroup,
     decrypt,
     INSTANCE_TYPE,
     PRIVATE_AUTH_ENABLED,

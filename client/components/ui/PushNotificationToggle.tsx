@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 
 // Turns the browser's Push API subscription into a one-button toggle. Enabling
 // registers the service worker, asks for notification permission, subscribes
@@ -80,8 +81,8 @@ export function PushNotificationToggle() {
             await api.savePushSubscription(sub.toJSON(), navigator.userAgent);
             setSubscribed(true);
             toast.success("Phone notifications enabled on this device");
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to enable notifications");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to enable notifications"));
         } finally {
             setBusy(false);
         }
@@ -98,8 +99,8 @@ export function PushNotificationToggle() {
             }
             setSubscribed(false);
             toast.success("Notifications disabled on this device");
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to disable notifications");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to disable notifications"));
         } finally {
             setBusy(false);
         }

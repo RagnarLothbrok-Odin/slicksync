@@ -96,7 +96,7 @@ function isMac() {
     // navigator.platform is deprecated but still the most broadly-supported
     // synchronous signal; userAgentData.platform (where available) is
     // checked first since it's the non-deprecated replacement.
-    const uaData = (navigator as any).userAgentData;
+    const uaData = navigator.userAgentData;
     if (uaData?.platform) {
         return /mac/i.test(uaData.platform);
     }
@@ -438,6 +438,7 @@ export function CommandPalette() {
                                                     className="font-medium text-xs transition-opacity hover:opacity-80"
                                                     onClick={browseAllHelp}
                                                     style={{ color: "var(--color-secondary)" }}
+                                                    type="button"
                                                 >
                                                     Browse all guides →
                                                 </button>
@@ -462,6 +463,7 @@ export function CommandPalette() {
                                                         key={r.id}
                                                         onClick={() => handleSelect(r)}
                                                         onMouseEnter={() => setActiveIndex(i)}
+                                                        type="button"
                                                     >
                                                         {r.poster ? (
                                                             <img
@@ -535,6 +537,7 @@ export function CommandPalette() {
                                                         key={h.id}
                                                         onClick={() => handleSelectHelp(h)}
                                                         onMouseEnter={() => setActiveIndex(idx)}
+                                                        type="button"
                                                     >
                                                         <SparklesIcon
                                                             className="mt-0.5 h-4 w-4 shrink-0"
@@ -586,6 +589,7 @@ export function CommandPalette() {
                                             <button
                                                 className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-surface-hover"
                                                 onClick={browseAllHelp}
+                                                type="button"
                                             >
                                                 <BookOpenIcon
                                                     className="h-4 w-4 shrink-0"

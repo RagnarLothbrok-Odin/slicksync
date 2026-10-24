@@ -60,6 +60,7 @@ import {
     type SmartCatalogRule,
 } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { usePersonalFeatures } from "@/lib/hooks/usePersonalFeatures";
 import { useRatingsBatch } from "@/lib/hooks/useRatingsBatch";
@@ -577,8 +578,8 @@ export default function ListDetailPage() {
             setShowExportConfirm(false);
             setExportResult(result);
             toast.success(`Exported "${list.name}" to MDBList`);
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to export to MDBList");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to export to MDBList"));
         } finally {
             setExporting(false);
         }
@@ -612,8 +613,8 @@ export default function ListDetailPage() {
             toast.success(
                 `Added ${result.added} title${result.added === 1 ? "" : "s"} to ${result.username}'s SIMKL Plan to Watch`
             );
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to export to SIMKL");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to export to SIMKL"));
         } finally {
             setExportingSimkl(false);
         }
@@ -632,8 +633,8 @@ export default function ListDetailPage() {
                 removed: result.removed,
                 unchanged: result.unchanged,
             });
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to check the source list");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to check the source list"));
         } finally {
             setLoadingRefreshDiff(false);
         }
@@ -651,8 +652,8 @@ export default function ListDetailPage() {
             setList(updated);
             setRefreshDiff(null);
             toast.success(`Refreshed "${list.name}" from source`);
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to refresh from source");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to refresh from source"));
         } finally {
             setApplyingRefresh(false);
         }
@@ -674,8 +675,8 @@ export default function ListDetailPage() {
                     ? `This catalog will now refresh from its source ${freq}`
                     : "Auto-refresh turned off"
             );
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to update auto-refresh");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update auto-refresh"));
         } finally {
             setSavingAutoRefresh(false);
         }
@@ -690,8 +691,8 @@ export default function ListDetailPage() {
             const updated = await api.updateList(list.id, { autoRefreshFrequency: frequency });
             setList(updated);
             toast.success(`Auto-refresh set to ${frequency}`);
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to update auto-refresh schedule");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update auto-refresh schedule"));
         } finally {
             setSavingAutoRefresh(false);
         }
@@ -712,8 +713,8 @@ export default function ListDetailPage() {
                     ? "This catalog is now visible (read-only) to other accounts on this instance"
                     : "No longer shared"
             );
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to update sharing");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to update sharing"));
         } finally {
             setSavingShared(false);
         }
@@ -894,8 +895,8 @@ export default function ListDetailPage() {
         setPreviewing(true);
         try {
             setPreviewResult(await api.previewContentRating(list.id, draftRatings));
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to preview content rating");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to preview content rating"));
         } finally {
             setPreviewing(false);
         }
@@ -922,8 +923,8 @@ export default function ListDetailPage() {
                       ? `Removed ${removedCount} title${removedCount === 1 ? "" : "s"} - use "Restore last removal" to undo`
                       : "Policy saved - nothing to remove"
             );
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to apply content rating");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to apply content rating"));
         } finally {
             setApplying(false);
         }
@@ -939,8 +940,8 @@ export default function ListDetailPage() {
             const updated = await api.restoreContentRatingRemoval(list.id);
             setList(updated);
             toast.success("Restored the last content-rating removal");
-        } catch (e: any) {
-            toast.error(e?.message || "Failed to restore");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to restore"));
         } finally {
             setRestoring(false);
         }
@@ -1043,9 +1044,9 @@ export default function ListDetailPage() {
                     list.id,
                     reordered.map((i) => i.id)
                 );
-            } catch (e: any) {
+            } catch (e) {
                 setList(previous);
-                toast.error(e?.message || "Failed to save new order");
+                toast.error(readErrorMessage(e, "Failed to save new order"));
             }
         },
         [list, canReorder]
@@ -1064,8 +1065,8 @@ export default function ListDetailPage() {
             // Pre-select everything - reviewing and unchecking the odd miss is
             // faster than starting from nothing and checking each one.
             setSelectedSuggestionIds(new Set(res.suggestions.map((s) => s.id)));
-        } catch (e: any) {
-            toast.error(e.message || "Failed to get suggestions");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Failed to get suggestions"));
             setSuggesting(false);
         } finally {
             setLoadingSuggestions(false);
@@ -1672,6 +1673,7 @@ export default function ListDetailPage() {
                             <button
                                 className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover"
                                 onClick={exitSelectMode}
+                                type="button"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>

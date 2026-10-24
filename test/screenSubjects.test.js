@@ -1,7 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const st = require("../server/utils/screenTime");
-const { getAccountDateString } = require("../server/utils/dateUtils");
 
 const TZ = "America/Los_Angeles";
 const NOW = new Date("2026-10-05T19:00:00Z"); // Monday noon in Los Angeles
@@ -29,7 +28,6 @@ function family({
         providerType: "nuvio",
         username: "Dad",
     };
-    const day = new Date(getAccountDateString(NOW, TZ));
     const prisma = {
         appAccount: {
             findFirst: async () => ({ sync: JSON.stringify(sync) }),
@@ -59,11 +57,9 @@ function family({
         },
         watchActivity: {
             groupBy: async ({ by, where }) => {
+                // These fixtures describe today's activity; date boundaries are covered separately.
                 const rows = activity.filter(
-                    (a) =>
-                        where.userId.in.includes(a.userId) &&
-                        day <= day &&
-                        (!where.profileLabel || a.label)
+                    (a) => where.userId.in.includes(a.userId) && (!where.profileLabel || a.label)
                 );
                 const key = (a) =>
                     by.includes("profileLabel") ? `${a.userId}|${a.label}` : a.userId;

@@ -484,7 +484,7 @@ async function sendActivityNotification(webhookUrl, activities, prisma, accountI
                     name: "Overview",
                     value:
                         overviewText.length > 1024
-                            ? `${overviewText.substring(0, 1021)}...`
+                            ? `${overviewText.slice(0, 1021)}...`
                             : overviewText,
                 });
             }
@@ -624,7 +624,7 @@ async function sendShareNotification(
                 name: "Overview",
                 value:
                     metadata.description.length > 1024
-                        ? `${metadata.description.substring(0, 1021)}...`
+                        ? `${metadata.description.slice(0, 1021)}...`
                         : metadata.description,
             });
         }
@@ -739,7 +739,7 @@ async function sendShareNotification(
 function createSyncEmbed({
     groupsCount,
     usersCount,
-    syncMode,
+    syncMode: _syncMode,
     diffs = [],
     sourceLabel,
     sourceLogo,
@@ -757,16 +757,24 @@ function createSyncEmbed({
             const catLines = [];
 
             if (Array.isArray(d.addedResources)) {
-                d.addedResources.forEach((r) => resLines.push(`+ ${r}`));
+                d.addedResources.forEach((r) => {
+                    resLines.push(`+ ${r}`);
+                });
             }
             if (Array.isArray(d.removedResources)) {
-                d.removedResources.forEach((r) => resLines.push(`- ${r}`));
+                d.removedResources.forEach((r) => {
+                    resLines.push(`- ${r}`);
+                });
             }
             if (Array.isArray(d.addedCatalogs)) {
-                d.addedCatalogs.forEach((label) => catLines.push(`+ ${label}`));
+                d.addedCatalogs.forEach((label) => {
+                    catLines.push(`+ ${label}`);
+                });
             }
             if (Array.isArray(d.removedCatalogs)) {
-                d.removedCatalogs.forEach((label) => catLines.push(`- ${label}`));
+                d.removedCatalogs.forEach((label) => {
+                    catLines.push(`- ${label}`);
+                });
             }
 
             if (resLines.length) {

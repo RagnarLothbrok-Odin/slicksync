@@ -466,6 +466,7 @@ export function OnboardingWizard() {
                                     onClick={closeForNow}
                                     style={{ color: "var(--color-text-muted)" }}
                                     title="Close for now - you can pick this back up from the topbar"
+                                    type="button"
                                 >
                                     <XMarkIcon className="h-5 w-5" />
                                 </button>
@@ -530,6 +531,7 @@ export function OnboardingWizard() {
                                             className="inline-flex items-center gap-1.5 font-medium text-xs transition-opacity hover:opacity-80"
                                             onClick={() => goTo(`/guides/${current.helpId}`)}
                                             style={{ color: "var(--color-secondary)" }}
+                                            type="button"
                                         >
                                             <BookOpenIcon className="h-3.5 w-3.5" />
                                             Read the full guide
@@ -570,6 +572,7 @@ export function OnboardingWizard() {
                                                 color: "var(--color-text-muted)",
                                             }}
                                             title="Back"
+                                            type="button"
                                         >
                                             <ArrowLeftIcon className="h-4 w-4" />
                                         </button>
@@ -583,6 +586,7 @@ export function OnboardingWizard() {
                                                 border: "1px solid var(--color-surface-border)",
                                                 color: "var(--color-text)",
                                             }}
+                                            type="button"
                                         >
                                             {current.actionLabel}
                                         </button>
@@ -594,6 +598,7 @@ export function OnboardingWizard() {
                                             background: "var(--color-primary)",
                                             color: "var(--color-bg)",
                                         }}
+                                        type="button"
                                     >
                                         {isLast ? "Get started" : "Next"}
                                         {!isLast && <ArrowRightIcon className="h-4 w-4" />}

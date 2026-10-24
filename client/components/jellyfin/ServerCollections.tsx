@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // A household's own Jellyfin server, as shown on Catalogs -> Jellyfin |
 // AIOStreams: tap catalogs to switch them on, each becoming a Jellyfin
@@ -121,8 +122,8 @@ export function ServerCollections({
     const load = useCallback(async () => {
         try {
             setView(await api.getJellyfinCollections(server.key));
-        } catch (e: any) {
-            toast.error(e?.message || "Could not load the collections");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not load the collections"));
         }
     }, [server.key]);
     useEffect(() => {
@@ -148,8 +149,8 @@ export function ServerCollections({
                         : `${c.name} is off ${next.server.name}`
                 );
             }
-        } catch (e: any) {
-            toast.error(e?.message || "Could not change it");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not change it"));
         } finally {
             setBusy(null);
         }
@@ -159,8 +160,8 @@ export function ServerCollections({
         setSyncing(true);
         try {
             setView(await api.syncJellyfinCollections(server.key));
-        } catch (e: any) {
-            toast.error(e?.message || "Could not sync");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not sync"));
         } finally {
             setSyncing(false);
         }

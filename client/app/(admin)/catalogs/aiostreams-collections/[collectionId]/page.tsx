@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // One AIOStreams collection, as its own page (/catalogs/aiostreams-collections/
 // <id>, or /new) - the same shape as a Nuvio collection: open it and you see
@@ -75,9 +76,9 @@ function toPosterItem(t: {
 // `order` is only used by a collection built from several catalogs - one
 // built from a single catalog takes that catalog's own order.
 interface Form {
-    name: string;
-    coverUrl: string;
     catalogIds: string[];
+    coverUrl: string;
+    name: string;
     order: string[];
 }
 
@@ -321,8 +322,8 @@ export default function AiostreamsCollectionPage() {
                             )
                         );
                     }
-                } catch (e: any) {
-                    toast.error(e?.message || "Could not save that change");
+                } catch (e) {
+                    toast.error(readErrorMessage(e, "Could not save that change"));
                 }
             });
         },
@@ -416,8 +417,8 @@ export default function AiostreamsCollectionPage() {
                     home.id,
                     items.map((i) => i.id)
                 );
-            } catch (err: any) {
-                toast.error(err?.message || "Could not save the new order");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Could not save the new order"));
                 setLists((prev) => (prev ?? []).map((l) => (l.id === before.id ? before : l)));
             }
             return;
@@ -456,8 +457,8 @@ export default function AiostreamsCollectionPage() {
                 })
             );
             toast.success(`Added ${item.name}`);
-        } catch (e: any) {
-            toast.error(e?.message || "Could not add it");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not add it"));
         } finally {
             setBusyTitle(null);
         }
@@ -473,8 +474,8 @@ export default function AiostreamsCollectionPage() {
                     replaceList(await api.removeFromList(id, item.id));
                 }
             }
-        } catch (e: any) {
-            toast.error(e?.message || "Could not take it out");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not take it out"));
         } finally {
             setBusyTitle(null);
         }
@@ -508,8 +509,8 @@ export default function AiostreamsCollectionPage() {
                 profileId
             );
             router.replace(`${LIST}/${id}?${scope}`);
-        } catch (e: any) {
-            toast.error(e?.message || "Could not make the collection");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not make the collection"));
             setCreating(false);
         }
     };
@@ -524,8 +525,8 @@ export default function AiostreamsCollectionPage() {
             );
             toast.success("Collection removed");
             router.push(listPath);
-        } catch (e: any) {
-            toast.error(e?.message || "Could not remove it");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not remove it"));
         }
     };
 

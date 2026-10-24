@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // The household on one AIOStreams or AIOMetadata sign-in, as profiles - the
 // Jellyfin counterpart of the Nuvio profiles card (components/user/
@@ -234,8 +235,8 @@ export function HouseholdCard({
             if (peopleChange) {
                 onPeopleChanged?.();
             }
-        } catch (e: any) {
-            toast.error(e?.message || "Could not change that");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not change that"));
         } finally {
             setBusy(false);
             setPending(null);
@@ -292,8 +293,8 @@ export function HouseholdCard({
             setSigningIn(null);
             setPassword("");
             setPin("");
-        } catch (e: any) {
-            toast.error(e?.message || "Could not sign that profile in");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not sign that profile in"));
         } finally {
             setBusy(false);
         }
@@ -329,8 +330,8 @@ export function HouseholdCard({
                     setAddressFor(added);
                 }
             }
-        } catch (e: any) {
-            toast.error(e?.message || "Could not add them");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not add them"));
         } finally {
             setBusy(false);
         }
@@ -350,8 +351,8 @@ export function HouseholdCard({
             }
             setPinFor(null);
             setChangedPin("");
-        } catch (e: any) {
-            toast.error(e?.message || "Could not change the PIN");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not change the PIN"));
         } finally {
             setBusy(false);
         }
@@ -372,8 +373,8 @@ export function HouseholdCard({
                       ? `${p.name} has a new address`
                       : `${p.name} is kept separate`
             );
-        } catch (e: any) {
-            toast.error(e?.message || "Could not change that");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not change that"));
         } finally {
             setBusy(false);
             setPending(null);
@@ -624,6 +625,7 @@ export function HouseholdCard({
                                     closeMenu();
                                     separate(sel);
                                 }}
+                                type="button"
                             >
                                 <UserPlusIcon className="h-4 w-4 text-muted" /> Separate
                             </button>
@@ -636,6 +638,7 @@ export function HouseholdCard({
                                     closeMenu();
                                     mergeBack(sel);
                                 }}
+                                type="button"
                             >
                                 <ArrowsPointingInIcon className="h-4 w-4 text-muted" />{" "}
                                 <span className="truncate">Merge back into {personName}</span>
@@ -648,6 +651,7 @@ export function HouseholdCard({
                                     closeMenu();
                                     stopTracking(sel);
                                 }}
+                                type="button"
                             >
                                 <EyeSlashIcon className="h-4 w-4 text-muted" /> Stop tracking
                             </button>
@@ -662,6 +666,7 @@ export function HouseholdCard({
                                         `${sel.name} is tracked again`
                                     )
                                 }
+                                type="button"
                             >
                                 <EyeIcon className="h-4 w-4 text-muted" /> Track it again
                             </button>
@@ -674,6 +679,7 @@ export function HouseholdCard({
                                     closeMenu();
                                     setSigningIn(sel);
                                 }}
+                                type="button"
                             >
                                 <KeyIcon className="h-4 w-4 text-muted" /> Sign in
                             </button>
@@ -685,6 +691,7 @@ export function HouseholdCard({
                                     closeMenu();
                                     setPinFor(sel);
                                 }}
+                                type="button"
                             >
                                 <LockClosedIcon className="h-4 w-4 text-muted" /> Change PIN
                             </button>
@@ -696,6 +703,7 @@ export function HouseholdCard({
                                     closeMenu();
                                     setAddressFor(sel);
                                 }}
+                                type="button"
                             >
                                 <LinkIcon className="h-4 w-4 text-muted" /> Own sign-in address
                             </button>

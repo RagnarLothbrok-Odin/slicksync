@@ -10,9 +10,9 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 interface Synced {
-    userId: string;
     name: string;
     places: string[];
+    userId: string;
 }
 
 const joinNames = (names: string[]) =>

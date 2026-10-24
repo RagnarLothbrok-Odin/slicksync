@@ -164,7 +164,7 @@ module.exports = ({
             readBackupFrequencyDays,
             writeBackupFrequencyDays,
             performBackupOnce,
-            clearBackupSchedule,
+            clearBackupSchedule: _clearBackupSchedule,
             scheduleBackups,
         } = require("../utils/backup");
 

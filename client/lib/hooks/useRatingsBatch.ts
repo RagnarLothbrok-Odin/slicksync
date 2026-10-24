@@ -32,7 +32,9 @@ export function useRatingsBatch(
             return;
         }
 
-        unknownIds.forEach((id) => knownIds.add(id));
+        unknownIds.forEach((id) => {
+            knownIds.add(id);
+        });
 
         let cancelled = false;
         (fetchRatings ? fetchRatings(unknownIds) : api.getRatingsBatch(unknownIds))
@@ -49,7 +51,9 @@ export function useRatingsBatch(
 
         return () => {
             cancelled = true;
-            unknownIds.forEach((id) => knownIds.delete(id));
+            unknownIds.forEach((id) => {
+                knownIds.delete(id);
+            });
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dedupedKey, fetchRatings]);

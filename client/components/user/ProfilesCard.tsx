@@ -19,6 +19,7 @@ import { Button, Card, ConfirmModal, UserAvatar } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { LimitsButton } from "@/components/user/LimitsButton";
 import { api, type LimitsSummary, type ProfilesView } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 
 type Profile = ProfilesView["profiles"][number];
 type Person = ProfilesView["persons"][number];
@@ -224,8 +225,8 @@ export function ProfilesCard({
             if (peopleChange) {
                 onPeopleChanged?.();
             }
-        } catch (e: any) {
-            toast.error(e?.message || "Could not change that");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not change that"));
         } finally {
             setBusy(false);
             setPending(null);
@@ -560,6 +561,7 @@ export function ProfilesCard({
                                             closeMenu();
                                             makeOwnPerson(sel);
                                         }}
+                                        type="button"
                                     >
                                         <ArrowUturnLeftIcon className="h-4 w-4 text-muted" />{" "}
                                         Separate
@@ -573,6 +575,7 @@ export function ProfilesCard({
                                             closeMenu();
                                             makeOwnPerson(sel);
                                         }}
+                                        type="button"
                                     >
                                         <UserPlusIcon className="h-4 w-4 text-muted" /> Separate
                                     </button>
@@ -586,6 +589,7 @@ export function ProfilesCard({
                                                 closeMenu();
                                                 mergeInto(sel, p.id);
                                             }}
+                                            type="button"
                                         >
                                             <ArrowsPointingInIcon className="h-4 w-4 text-muted" />{" "}
                                             <span className="truncate">
@@ -602,6 +606,7 @@ export function ProfilesCard({
                                             closeMenu();
                                             stopTracking(sel);
                                         }}
+                                        type="button"
                                     >
                                         <EyeSlashIcon className="h-4 w-4 text-muted" /> Stop
                                         tracking
@@ -621,6 +626,7 @@ export function ProfilesCard({
                                                 `${profileName(sel)} is tracked again`
                                             )
                                         }
+                                        type="button"
                                     >
                                         <EyeIcon className="h-4 w-4 text-muted" /> Track it again
                                     </button>

@@ -1,7 +1,15 @@
+import type { ErrorPayload } from "@/lib/errors";
+import type { StremioManifest } from "@/lib/stremio-manifest";
 // API client for connecting to SlickSync backend
 // Use relative path if NEXT_PUBLIC_API_URL is not set (Next.js will proxy via rewrites)
 // Otherwise use the explicit URL (useful for production or different ports)
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
+
+export class ApiError extends Error {
+    data?: ErrorPayload;
+    originalError?: unknown;
+    response?: { data: ErrorPayload; status: number };
+}
 
 // One entry in a cast member's filmography, as /api/discover/person returns it.
 /** One of a person's SlickTrax rows - see server/routes/traxAddon.js orderedTraxRows. */
@@ -147,8 +155,8 @@ class ApiClient {
     // own 30s natural refresh cadence - nothing here is ever meaningfully
     // stale. Failures are never cached (evicted immediately) so a transient
     // error can't get replayed onto callers that would've otherwise succeeded.
-    private readonly inFlightGets = new Map<string, Promise<any>>();
-    private readonly recentGets = new Map<string, { value: any; at: number }>();
+    private readonly inFlightGets = new Map<string, Promise<unknown>>();
+    private readonly recentGets = new Map<string, { value: unknown; at: number }>();
     private static readonly DEDUPE_WINDOW_MS = 2000;
 
     // Instant navigation: the last successful response of every GET, kept for
@@ -359,12 +367,12 @@ class ApiClient {
 
         const inFlight = this.inFlightGets.get(key);
         if (inFlight) {
-            return inFlight;
+            return inFlight as Promise<T>;
         }
 
         const recent = this.recentGets.get(key);
         if (recent && Date.now() - recent.at < ApiClient.DEDUPE_WINDOW_MS) {
-            return Promise.resolve(recent.value);
+            return Promise.resolve(recent.value as T);
         }
 
         const promise = this.fetchImpl<T>(endpoint, options)
@@ -410,7 +418,7 @@ class ApiClient {
             });
 
             if (!response.ok) {
-                let errorData: any;
+                let errorData: ErrorPayload;
                 try {
                     errorData = await response.json();
                 } catch {
@@ -419,7 +427,7 @@ class ApiClient {
 
                 const errorMessage =
                     errorData.message || errorData.error || `HTTP ${response.status}`;
-                const apiError = new Error(errorMessage) as any;
+                const apiError = new ApiError(errorMessage);
                 apiError.response = { data: errorData, status: response.status };
                 // Attach the original error data for easier access
                 apiError.data = errorData;
@@ -479,25 +487,25 @@ class ApiClient {
             }
 
             return response.json();
-        } catch (fetchError: any) {
+        } catch (fetchError) {
             // Handle network errors, CORS errors, etc.
-            if (fetchError.name === "TypeError" && fetchError.message.includes("fetch")) {
-                const networkError = new Error("Network error: Unable to reach the server") as any;
+            if (fetchError instanceof TypeError && fetchError.message.includes("fetch")) {
+                const networkError = new ApiError("Network error: Unable to reach the server");
                 networkError.response = { data: { message: "Network error" }, status: 0 };
                 networkError.originalError = fetchError;
                 throw networkError;
             }
 
             // If it's already our API error, re-throw it
-            if (fetchError.response) {
+            if (fetchError instanceof ApiError) {
                 throw fetchError;
             }
 
             // Otherwise, wrap it
-            const wrappedError = new Error(fetchError.message || "Request failed") as any;
+            const wrappedError = new ApiError(fetchError instanceof Error ? fetchError.message : "Request failed");
             wrappedError.originalError = fetchError;
             wrappedError.response = {
-                data: { message: fetchError.message || "Unknown error" },
+                data: { message: fetchError instanceof Error ? fetchError.message : "Unknown error" },
                 status: 0,
             };
             throw wrappedError;
@@ -534,7 +542,7 @@ class ApiClient {
     }
 
     async stremioLogin(authKey: string) {
-        const data = await this.fetch<{ token: string; account: any }>("/auth/stremio-login", {
+        const data = await this.fetch<{ token: string; account: { id: string; uuid: string; email: string | null } }>("/auth/stremio-login", {
             body: JSON.stringify({ authKey }),
             method: "POST",
         });
@@ -566,7 +574,7 @@ class ApiClient {
     }
 
     async nuvioLogin(params: { code: string; deviceNonce: string; anonToken: string }) {
-        const data = await this.fetch<{ token: string; account: any }>("/auth/nuvio-login", {
+        const data = await this.fetch<{ token: string; account: { id: string; uuid: string; email: string | null } }>("/auth/nuvio-login", {
             body: JSON.stringify(params),
             method: "POST",
         });
@@ -1423,7 +1431,18 @@ class ApiClient {
     }
 
     async getAddon(id: string) {
-        return this.fetch<Addon>(`/addons/${id}`);
+        return this.fetch<
+            Addon & {
+                groups?: {
+                    id: string;
+                    name: string;
+                    color?: string;
+                    users?: number;
+                    addonCount?: number;
+                    addons?: number;
+                }[];
+            }
+        >(`/addons/${id}`);
     }
 
     /** Browse the public Stremio addon directory (proxied + cached by
@@ -3594,7 +3613,7 @@ class ApiClient {
         });
 
         if (!response.ok) {
-            let errorData: any;
+            let errorData: ErrorPayload;
             try {
                 errorData = await response.json();
             } catch {
@@ -5254,7 +5273,9 @@ export interface User {
     /** Which Nuvio profile's addon list this user manages (1 is the primary). */
     nuvioProfileId?: number;
     protectedAddons?: string[];
+    providerConnectionError?: string | null;
     providerType?: "stremio" | "nuvio" | "jellyfin";
+    secondaryProviderType?: "stremio" | "nuvio" | "jellyfin" | null;
     simklConnected?: boolean;
     simklConnectedAt?: string | null;
     status?: "active" | "inactive";
@@ -5268,6 +5289,7 @@ export interface User {
     /** They switched Gravatar on, so an avatar of them may look their email up there. */
     useGravatar?: boolean;
     username: string;
+    watchTime?: number;
 }
 
 export interface MergeCandidate {
@@ -5332,6 +5354,7 @@ export interface Group {
 
 export interface CreateGroupData {
     color?: string;
+    colorIndex?: number;
     description?: string;
     name: string;
 }
@@ -5507,12 +5530,25 @@ export interface Addon {
     backupAddonId?: string;
     catalogs: Array<string | { type: string; id: string; search?: boolean }>;
     createdAt: string;
+    customLogo?: string | null;
     customTag?: string | null;
     description?: string;
+    groups?:
+        | number
+        | {
+              id: string;
+              name: string;
+              color?: string;
+              users?: number;
+              addonCount?: number;
+              addons?: number;
+          }[];
     hasBackup?: boolean;
     healthCheckError?: string;
     healthConfig?: AddonHealthConfig | null;
+    iconUrl?: string;
     id: string;
+    isActive?: boolean;
     // Set by getGroupAddons when primary is offline and backup is used
     isBackup?: boolean;
     // Health check fields
@@ -5522,13 +5558,23 @@ export interface Addon {
     isProtected?: boolean;
     lastHealthCheck?: string;
     logo?: string;
+    manifest?: Partial<StremioManifest>;
     manifestUrl: string;
     name: string;
+    originalManifest?: Partial<StremioManifest>;
     primaryAddonId?: string;
     primaryAddonName?: string;
+    proxyEnabled?: boolean;
+    proxyManifestUrl?: string | null;
+    proxyUuid?: string | null;
     resources: string[];
+    status?: string;
     stremioAddonId?: string;
+    transportUrl?: string;
     updatedAt: string;
+    url?: string;
+    users?: number;
+    vaultified?: boolean;
     version?: string;
 }
 
@@ -5624,7 +5670,7 @@ export interface StremioAddon {
         version: string;
         description?: string;
         logo?: string;
-        resources: string[];
+        resources: (string | { name: string; types?: string[]; idPrefixes?: string[] })[];
         types: string[];
         catalogs?: {
             id: string;

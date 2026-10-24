@@ -51,6 +51,7 @@ export function AlertBanner({ alerts }: AlertBannerProps) {
                         <button
                             className="rounded-lg p-1 text-error hover:bg-error/10"
                             onClick={() => setDismissed(true)}
+                            type="button"
                         >
                             <XMarkIcon className="h-5 w-5" />
                         </button>

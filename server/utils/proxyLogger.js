@@ -44,7 +44,7 @@ function logProxyRequest({
         timestamp,
         upstreamUrl: upstreamUrl || null,
         url: url || null,
-        userAgent: userAgent ? userAgent.substring(0, 200) : null, // Truncate long UA strings
+        userAgent: userAgent ? userAgent.slice(0, 200) : null, // Truncate long UA strings
     };
 
     const logLine = `${JSON.stringify(logEntry)}\n`;

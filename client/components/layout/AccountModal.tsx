@@ -15,6 +15,7 @@ import { PasswordToggleButton } from "@/components/ui/Input";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { providerTypeLabel } from "@/lib/providers";
 
 interface AccountModalProps {
@@ -106,8 +107,8 @@ export function AccountModal({
             setView("success");
             onAccountUpdated();
             toast.success(`${providerLabel} unlinked — UUID only`);
-        } catch (err: any) {
-            setError(err.message || "Failed to unlink Stremio");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to unlink Stremio"));
         } finally {
             setIsLoading(false);
         }
@@ -123,8 +124,8 @@ export function AccountModal({
             setView("success");
             onAccountUpdated();
             toast.success(`UUID removed — ${providerLabel} only`);
-        } catch (err: any) {
-            setError(err.message || "Failed to remove UUID");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to remove UUID"));
         } finally {
             setIsLoading(false);
         }
@@ -149,8 +150,8 @@ export function AccountModal({
             setView("success");
             onAccountUpdated();
             toast.success(hasUuid ? "Password updated" : "UUID & password set");
-        } catch (err: any) {
-            setError(err.message || "Failed to set credentials");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to set credentials"));
         } finally {
             setIsLoading(false);
         }
@@ -255,6 +256,7 @@ export function AccountModal({
                             border: "1px solid var(--color-surface-border)",
                             color: "var(--color-text)",
                         }}
+                        type="button"
                     >
                         <ExclamationTriangleIcon
                             className="h-5 w-5"
@@ -288,6 +290,7 @@ export function AccountModal({
                             border: "1px solid var(--color-surface-border)",
                             color: "var(--color-text)",
                         }}
+                        type="button"
                     >
                         <KeyIcon className="h-5 w-5" style={{ color: "var(--color-primary)" }} />
                         <div className="text-left">
@@ -323,6 +326,7 @@ export function AccountModal({
                         border: "1px solid var(--color-surface-border)",
                         color: "var(--color-text)",
                     }}
+                    type="button"
                 >
                     <KeyIcon className="h-5 w-5" style={{ color: "var(--color-primary)" }} />
                     <div className="text-left">
@@ -352,6 +356,7 @@ export function AccountModal({
                         border: "1px solid var(--color-surface-border)",
                         color: "var(--color-text)",
                     }}
+                    type="button"
                 >
                     <LinkIcon
                         className="h-5 w-5 shrink-0"
@@ -387,6 +392,7 @@ export function AccountModal({
                             border: "1px solid var(--color-surface-border)",
                             color: "var(--color-text)",
                         }}
+                        type="button"
                     >
                         <LinkIcon
                             className="h-5 w-5 shrink-0"
@@ -428,6 +434,7 @@ export function AccountModal({
                         border: "1px solid var(--color-surface-border)",
                         color: "var(--color-text)",
                     }}
+                    type="button"
                 >
                     <KeyIcon className="h-5 w-5" style={{ color: "var(--color-text-muted)" }} />
                     <div className="text-left">
@@ -516,6 +523,7 @@ export function AccountModal({
                         border: "1px solid var(--color-surface-border)",
                         color: "var(--color-text)",
                     }}
+                    type="button"
                 >
                     Cancel
                 </button>
@@ -528,6 +536,7 @@ export function AccountModal({
                         color: "#fff",
                         opacity: isLoading || !password ? 0.6 : 1,
                     }}
+                    type="button"
                 >
                     {isLoading ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -581,6 +590,7 @@ export function AccountModal({
                         border: "1px solid var(--color-surface-border)",
                         color: "var(--color-text)",
                     }}
+                    type="button"
                 >
                     Cancel
                 </button>
@@ -593,6 +603,7 @@ export function AccountModal({
                         color: "var(--color-bg)",
                         opacity: isLoading ? 0.6 : 1,
                     }}
+                    type="button"
                 >
                     {isLoading ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -690,6 +701,7 @@ export function AccountModal({
                         border: "1px solid var(--color-surface-border)",
                         color: "var(--color-text)",
                     }}
+                    type="button"
                 >
                     Cancel
                 </button>
@@ -702,6 +714,7 @@ export function AccountModal({
                         color: "var(--color-bg)",
                         opacity: isLoading || !password || !confirmPassword ? 0.6 : 1,
                     }}
+                    type="button"
                 >
                     {isLoading ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -750,6 +763,7 @@ export function AccountModal({
                         className="flex-shrink-0 rounded-lg p-2 transition-all"
                         onClick={() => handleCopyUuid(resultUuid)}
                         style={{ backgroundColor: "var(--color-surface-hover)" }}
+                        type="button"
                     >
                         {copied ? (
                             <CheckIcon
@@ -770,6 +784,7 @@ export function AccountModal({
                 className="w-full rounded-xl py-2.5 font-medium text-sm transition-all"
                 onClick={handleClose}
                 style={{ backgroundColor: "var(--color-primary)", color: "var(--color-bg)" }}
+                type="button"
             >
                 Done
             </button>
@@ -841,6 +856,7 @@ export function AccountModal({
                                     className="hov-surface rounded-lg p-1.5 transition-all"
                                     onClick={handleClose}
                                     style={{ color: "var(--color-text-muted)" }}
+                                    type="button"
                                 >
                                     <XMarkIcon className="h-5 w-5" />
                                 </button>

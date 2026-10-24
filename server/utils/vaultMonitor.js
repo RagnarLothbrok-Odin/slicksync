@@ -86,7 +86,7 @@ function wasNotifiedToday(lastNotifiedAt) {
     return now.toDateString() === last.toDateString();
 }
 
-async function runVaultChecks({ prisma, decrypt, getAccountId }) {
+async function runVaultChecks({ prisma, decrypt, getAccountId: _getAccountId }) {
     try {
         const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } });
 

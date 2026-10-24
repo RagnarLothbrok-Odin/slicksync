@@ -149,7 +149,7 @@ function getClientIp(req) {
     return req.ip;
 }
 
-module.exports = ({ prisma, decrypt, getAccountId, getServerKey }) => {
+module.exports = ({ prisma, decrypt, getAccountId: _getAccountId, getServerKey }) => {
     const router = express.Router();
     const { processStreamResponse } = streamProxyFactory({ getServerKey });
 

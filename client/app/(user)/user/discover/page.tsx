@@ -26,19 +26,19 @@ import { personalRequest } from "@/lib/user-api";
 
 interface Title {
     id: string;
-    type: "movie" | "series";
+    imdbRating?: string;
     name: string;
     poster: string | null;
     releaseInfo?: string;
-    imdbRating?: string;
+    type: "movie" | "series";
 }
 interface TitleState {
     itemId: string;
     itemType: "movie" | "series";
     name: string;
     poster: string | null;
-    saved: boolean;
     reaction: "like" | "dislike" | null;
+    saved: boolean;
 }
 
 interface Page {

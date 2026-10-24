@@ -49,6 +49,7 @@ export default function AppError({
                         className="rounded-lg px-4 py-2 font-medium text-sm text-white"
                         onClick={reset}
                         style={{ background: "var(--color-primary)" }}
+                        type="button"
                     >
                         Try again
                     </button>

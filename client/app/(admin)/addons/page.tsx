@@ -63,6 +63,7 @@ import { useSortableDragState } from "@/components/ui/DragSortable";
 import { toast } from "@/components/ui/Toast";
 import { showDeletedWithUndo } from "@/components/ui/undoToast";
 import { type Addon, api } from "@/lib/api";
+import { readErrorMessage, readErrorName } from "@/lib/errors";
 import { useIsMobile } from "@/lib/hooks/useIsMobile";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
@@ -236,7 +237,7 @@ export default function AddonsPage() {
     const isTV = useIsTV();
     const Wrapper = isTV ? TVPageProvider : Fragment;
     const [searchQuery, setSearchQuery] = useState("");
-    const { viewMode, setViewMode } = useDefaultViewMode();
+    const { viewMode, setViewMode: _setViewMode } = useDefaultViewMode();
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [isDirectoryOpen, setIsDirectoryOpen] = useState(false);
     const [activeFilter, setActiveFilter] = useState("all");
@@ -322,9 +323,12 @@ export default function AddonsPage() {
     // Transform addons for display
     const addonsDisplay = useMemo<AddonDisplay[]>(() => {
         return addons.map((addon) => {
-            const anyAddon = addon as any;
+            const anyAddon = addon;
             // Count groups that use this addon (from API response)
-            const groupCount = anyAddon.groups || 0;
+            const groupCount =
+                typeof anyAddon.groups === "number"
+                    ? anyAddon.groups
+                    : anyAddon.groups?.length || 0;
 
             // Extract logo - backend returns customLogo and manifest.logo
             // Priority: customLogo > manifest.logo > fallback icon service
@@ -517,36 +521,32 @@ export default function AddonsPage() {
     // routes/addons.js's /:id/protect for why this is account-wide, not
     // per-user). Optimistic local flip, revert on failure.
     const handleToggleProtect = useCallback(async (addon: AddonDisplay, next: boolean) => {
-        setAddons((prev) =>
-            prev.map((a) => (a.id === addon.id ? ({ ...a, isProtected: next } as any) : a))
-        );
+        setAddons((prev) => prev.map((a) => (a.id === addon.id ? { ...a, isProtected: next } : a)));
         try {
             await api.setAddonProtected(addon.id, next);
             toast.success(next ? `Protected "${addon.name}"` : `Unprotected "${addon.name}"`);
-        } catch (err: any) {
+        } catch (err) {
             setAddons((prev) =>
-                prev.map((a) => (a.id === addon.id ? ({ ...a, isProtected: !next } as any) : a))
+                prev.map((a) => (a.id === addon.id ? { ...a, isProtected: !next } : a))
             );
-            toast.error(err.message || "Failed to update protection");
+            toast.error(readErrorMessage(err, "Failed to update protection"));
         }
     }, []);
 
     // Drag an addon card onto a tag pill to tag it (or clear via context menu).
     const handleSetTag = useCallback(async (addon: AddonDisplay, tag: string | null) => {
         const previous = addon.customTag;
-        setAddons((prev) =>
-            prev.map((a) => (a.id === addon.id ? ({ ...a, customTag: tag } as any) : a))
-        );
+        setAddons((prev) => prev.map((a) => (a.id === addon.id ? { ...a, customTag: tag } : a)));
         try {
             await api.setAddonTag(addon.id, tag);
             toast.success(
                 tag ? `Tagged "${addon.name}" as ${tag}` : `Removed tag from "${addon.name}"`
             );
-        } catch (err: any) {
+        } catch (err) {
             setAddons((prev) =>
-                prev.map((a) => (a.id === addon.id ? ({ ...a, customTag: previous } as any) : a))
+                prev.map((a) => (a.id === addon.id ? { ...a, customTag: previous } : a))
             );
-            toast.error(err.message || "Failed to update tag");
+            toast.error(readErrorMessage(err, "Failed to update tag"));
         }
     }, []);
 
@@ -561,8 +561,8 @@ export default function AddonsPage() {
             setNewTagName("");
             setIsAddingTag(false);
             toast.success(`Created tag "${name}"`);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to create tag");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to create tag"));
         }
     }, [newTagName]);
 
@@ -586,8 +586,8 @@ export default function AddonsPage() {
                     result.tags.find((t: string) => t.toLowerCase() === trimmed.toLowerCase()) ||
                     trimmed;
                 await handleSetTag(addon, canonical);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to create label");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to create label"));
             }
         },
         [handleSetTag]
@@ -605,16 +605,14 @@ export default function AddonsPage() {
                 });
                 // Any addon that had this tag just lost it server-side — reflect locally.
                 setAddons((prev) =>
-                    prev.map((a) =>
-                        (a as any).customTag === name ? ({ ...a, customTag: null } as any) : a
-                    )
+                    prev.map((a) => (a.customTag === name ? { ...a, customTag: null } : a))
                 );
                 if (activeTag === name) {
                     setActiveTag(null);
                 }
                 toast.success(`Deleted tag "${name}"`);
-            } catch (err: any) {
-                toast.error(err.message || "Failed to delete tag");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to delete tag"));
             }
         },
         [activeTag]
@@ -636,7 +634,7 @@ export default function AddonsPage() {
             });
             try {
                 await api.setAddonTagColor(name, color);
-            } catch (err: any) {
+            } catch (err) {
                 setAddonTagColors((prev) => {
                     const next = { ...prev };
                     if (previous) {
@@ -646,7 +644,7 @@ export default function AddonsPage() {
                     }
                     return next;
                 });
-                toast.error(err.message || "Failed to set label color");
+                toast.error(readErrorMessage(err, "Failed to set label color"));
             }
         },
         [addonTagColors]
@@ -735,8 +733,8 @@ export default function AddonsPage() {
             }
             const addonsData = await api.getAddons();
             setAddons(addonsData);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reload all addons");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reload all addons"));
         } finally {
             setIsReloading(false);
         }
@@ -1317,6 +1315,7 @@ export default function AddonsPage() {
                             <button
                                 className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover"
                                 onClick={deselectAll}
+                                type="button"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
@@ -1334,6 +1333,7 @@ export default function AddonsPage() {
                     boxShadow:
                         "0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
                 }}
+                type="button"
             >
                 <PlusIcon className="h-6 w-6" />
             </button>
@@ -1469,8 +1469,10 @@ export default function AddonsPage() {
                                         prev.filter((a) => a.id !== moveToVaultTarget.id)
                                     );
                                     setMoveToVaultTarget(null);
-                                } catch (err: any) {
-                                    toast.error(err.message || "Failed to move addon to Vault");
+                                } catch (err) {
+                                    toast.error(
+                                        readErrorMessage(err, "Failed to move addon to Vault")
+                                    );
                                 } finally {
                                     setIsMovingToVault(false);
                                 }
@@ -1838,6 +1840,7 @@ function AddonCard({
                                 onClick={handleOpenConfigure}
                                 onPointerDown={(e) => e.stopPropagation()}
                                 title="Open configure page"
+                                type="button"
                             >
                                 {nameHead}
                                 {nameTail}
@@ -1863,8 +1866,10 @@ function AddonCard({
                                         `Addon ${newStatus ? "activated" : "deactivated"}`
                                     );
                                     onToggleStatus?.(addon.id, newStatus);
-                                } catch (err: any) {
-                                    toast.error(err.message || `Failed to toggle ${addon.name}`);
+                                } catch (err) {
+                                    toast.error(
+                                        readErrorMessage(err, `Failed to toggle ${addon.name}`)
+                                    );
                                 }
                             }}
                             title={`Activate ${addon.name}`}
@@ -1947,6 +1952,7 @@ function AddonCard({
                                 onClick={handleOpenConfigure}
                                 onPointerDown={(e) => e.stopPropagation()}
                                 title="Open configure page"
+                                type="button"
                             >
                                 {addon.name}
                             </button>
@@ -2037,8 +2043,10 @@ function AddonCard({
                                 await api.toggleAddonStatus(addon.id, newStatus);
                                 toast.success(`Addon ${newStatus ? "activated" : "deactivated"}`);
                                 onToggleStatus?.(addon.id, newStatus);
-                            } catch (err: any) {
-                                toast.error(err.message || `Failed to toggle ${addon.name}`);
+                            } catch (err) {
+                                toast.error(
+                                    readErrorMessage(err, `Failed to toggle ${addon.name}`)
+                                );
                             }
                         }}
                         title={`Activate ${addon.name}`}
@@ -2086,6 +2094,7 @@ function AddonCard({
                                     close();
                                     handleOpenConfigure(e);
                                 }}
+                                type="button"
                             >
                                 <Cog6ToothIcon className="h-4 w-4" />
                                 Open Configure
@@ -2094,6 +2103,7 @@ function AddonCard({
                         <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                             onClick={handleReload}
+                            type="button"
                         >
                             <ArrowPathIcon className="h-4 w-4" />
                             Reload Addon
@@ -2101,6 +2111,7 @@ function AddonCard({
                         <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                             onClick={handleClone}
+                            type="button"
                         >
                             <DocumentDuplicateIcon className="h-4 w-4" />
                             Clone Addon
@@ -2117,10 +2128,13 @@ function AddonCard({
                                         `Addon ${newStatus ? "activated" : "deactivated"}`
                                     );
                                     onToggleStatus?.(addon.id, newStatus);
-                                } catch (err: any) {
-                                    toast.error(err.message || `Failed to toggle ${addon.name}`);
+                                } catch (err) {
+                                    toast.error(
+                                        readErrorMessage(err, `Failed to toggle ${addon.name}`)
+                                    );
                                 }
                             }}
+                            type="button"
                         >
                             {addon.isActive ? (
                                 <>
@@ -2142,6 +2156,7 @@ function AddonCard({
                                 close();
                                 onToggleProtect?.(!addon.isProtected);
                             }}
+                            type="button"
                         >
                             <ShieldCheckIcon className="h-4 w-4" />
                             {addon.isProtected ? "Unprotect" : "Protect"}
@@ -2152,6 +2167,7 @@ function AddonCard({
                                 e.stopPropagation();
                                 setMenuView("label");
                             }}
+                            type="button"
                         >
                             <span className="flex items-center gap-2 truncate">
                                 <TagIcon
@@ -2180,6 +2196,7 @@ function AddonCard({
                                 close();
                                 onMoveToVault();
                             }}
+                            type="button"
                         >
                             <ShieldCheckIcon className="h-4 w-4" />
                             Move to Vault
@@ -2188,6 +2205,7 @@ function AddonCard({
                         <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-error text-sm transition-colors hover:bg-error-muted"
                             onClick={handleDelete}
+                            type="button"
                         >
                             <TrashIcon className="h-4 w-4" />
                             Delete
@@ -2205,6 +2223,7 @@ function AddonCard({
                                 e.stopPropagation();
                                 setMenuView("main");
                             }}
+                            type="button"
                         >
                             <ArrowLeftIcon className="h-4 w-4" />
                             Back
@@ -2238,6 +2257,7 @@ function AddonCard({
                                             }
                                             close();
                                         }}
+                                        type="button"
                                     >
                                         <span className="flex items-center gap-2 truncate">
                                             <span
@@ -2263,6 +2283,7 @@ function AddonCard({
                                     onClearTag?.();
                                     close();
                                 }}
+                                type="button"
                             >
                                 <XCircleIcon className="h-4 w-4" />
                                 Clear label
@@ -2309,6 +2330,7 @@ function AddonCard({
                                     e.stopPropagation();
                                     setIsCreatingLabel(true);
                                 }}
+                                type="button"
                             >
                                 <PlusIcon className="h-4 w-4" />
                                 New label
@@ -2386,15 +2408,15 @@ function AddAddonModal({
                 const data = await response.json();
                 setManifestData(data);
                 setUrlError("");
-            } catch (err: any) {
+            } catch (err) {
                 const isCorsError =
-                    err?.message?.includes("CORS") ||
-                    err?.message?.includes("Failed to fetch") ||
-                    err?.name === "TypeError";
+                    readErrorMessage(err)?.includes("CORS") ||
+                    readErrorMessage(err)?.includes("Failed to fetch") ||
+                    readErrorName(err) === "TypeError";
                 setUrlError(
                     isCorsError
                         ? "Cannot preview (CORS). Server will fetch it."
-                        : err?.message || "Failed to load"
+                        : readErrorMessage(err, "Failed to load")
                 );
                 setManifestData(null);
             } finally {
@@ -2443,9 +2465,9 @@ function AddAddonModal({
                     window.location.reload();
                 }
             }, 800);
-        } catch (err: any) {
-            setError(err.message || "Failed to add addon");
-            toast.error(err.message || "Failed to add addon");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to add addon"));
+            toast.error(readErrorMessage(err, "Failed to add addon"));
         } finally {
             setIsLoading(false);
         }
@@ -2922,13 +2944,13 @@ function CloneAddonForm({ addon, onClose }: { addon: AddonDisplay; onClose: () =
             });
             toast.success("Addon cloned successfully");
             onClose();
-            if ((created as any)?.id) {
-                window.location.href = `/addons/${(created as any).id}`;
+            if (created?.id) {
+                window.location.href = `/addons/${created.id}`;
             } else {
                 window.location.reload();
             }
-        } catch (err: any) {
-            toast.error(err.message || "Failed to clone addon");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to clone addon"));
         } finally {
             setIsLoading(false);
         }

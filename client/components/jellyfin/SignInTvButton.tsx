@@ -1,4 +1,5 @@
 "use client";
+import { readErrorMessage } from "@/lib/errors";
 
 // "Sign in a TV": a Jellyfin app on a TV (or anywhere) offers Quick Connect
 // and shows a short code. Typed here, SlickSync approves it with the chosen
@@ -18,10 +19,10 @@ import { type PopupPlacement, placePopup, popupStyle, useFitPopup } from "@/lib/
 import { api, type HouseholdProfile } from "@/lib/api";
 
 interface Who {
+    hint?: string;
     id: string | null;
     name: string;
     ready: boolean;
-    hint?: string;
 }
 
 export function SignInTvButton({ userId, name }: { userId: string; name: string }) {
@@ -126,8 +127,8 @@ export function SignInTvButton({ userId, name }: { userId: string; name: string 
             const r = await api.authorizeQuickConnect(userId, digits, chosen.id);
             toast.success(`The TV is signing in as ${r.who}`);
             close();
-        } catch (e: any) {
-            toast.error(e?.message || "That didn't work");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "That didn't work"));
         } finally {
             setBusy(false);
         }

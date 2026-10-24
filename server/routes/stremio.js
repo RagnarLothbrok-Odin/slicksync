@@ -1,10 +1,14 @@
 const { createDefaultAvatar } = require("../utils/defaultAvatar");
 const express = require("express");
 const { publicMessage } = require("../utils/publicError");
-const { StremioAPIStore, StremioAPIClient } = require("stremio-api-client");
-const { handleStremioError, handleDatabaseError, StremioAPIUtils } = require("../utils/handlers");
+const { StremioAPIStore, StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
+const {
+    handleStremioError,
+    handleDatabaseError: _handleDatabaseError,
+    StremioAPIUtils,
+} = require("../utils/handlers");
 const { validateStremioAuthKey } = require("../utils/stremio");
-const { validateStremioCredentials, sanitizeUrl } = require("../utils/helpers");
+const { validateStremioCredentials, sanitizeUrl: _sanitizeUrl } = require("../utils/helpers");
 
 module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, INSTANCE_TYPE }) => {
     const router = express.Router();

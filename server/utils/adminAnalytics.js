@@ -32,7 +32,9 @@ async function calculateAddonAnalytics(prisma, accountId) {
             if (ga.group.userIds) {
                 try {
                     const ids = JSON.parse(ga.group.userIds);
-                    ids.forEach((id) => userIds.add(id));
+                    ids.forEach((id) => {
+                        userIds.add(id);
+                    });
                 } catch {
                     // Invalid JSON, skip
                 }

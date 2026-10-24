@@ -25,6 +25,7 @@ import { SwipeToDismiss } from "@/components/ui/SwipeToDismiss";
 import { toast } from "@/components/ui/Toast";
 import { startAdaptivePoll } from "@/lib/adaptivePoll";
 import { api } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useCoarsePointer } from "@/lib/hooks/useCoarsePointer";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 
@@ -382,8 +383,8 @@ export function NotificationsDropdown({
             await api.acceptInviteRequest(reqId);
             toast.success("Request accepted");
             setPendingRequests((prev) => prev.filter((r) => r.id !== reqId));
-        } catch (err: any) {
-            toast.error(err.message || "Failed to accept request");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to accept request"));
         }
     };
 
@@ -393,8 +394,8 @@ export function NotificationsDropdown({
             await api.rejectInviteRequest(reqId);
             toast.success("Request rejected");
             setPendingRequests((prev) => prev.filter((r) => r.id !== reqId));
-        } catch (err: any) {
-            toast.error(err.message || "Failed to reject request");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reject request"));
         }
     };
 
@@ -601,7 +602,9 @@ export function NotificationsDropdown({
     // which actually empties the list.
     const handleMarkAllRead = () => {
         const next = new Set(readIds);
-        notifications.forEach((n) => next.add(n.id));
+        notifications.forEach((n) => {
+            next.add(n.id);
+        });
         persistReadIds(next);
         // Persist read state server-side for the stored subset so it stays read
         // across devices / reloads, not just in this browser's localStorage.

@@ -58,6 +58,7 @@ import { CatchUpButton } from "@/components/user/CatchUpButton";
 import { LimitsButton } from "@/components/user/LimitsButton";
 import { ProfilesCard } from "@/components/user/ProfilesCard";
 import { api, type Group, type LimitsSummary, type MetricsData, type User } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLongPress } from "@/lib/hooks/useLongPress";
@@ -133,7 +134,7 @@ export default function UsersPage() {
     const { hideSensitive } = useTheme();
     const [searchQuery, setSearchQuery] = useState("");
     const [peopleFilter, setPeopleFilter] = useState<"all" | "dormant">("all");
-    const { viewMode, setViewMode } = useDefaultViewMode();
+    const { viewMode, setViewMode: _setViewMode } = useDefaultViewMode();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     // Data state
@@ -242,7 +243,7 @@ export default function UsersPage() {
             // Determine status
             let status: "active" | "expired" | "pending" = "active";
             if (user.status) {
-                status = user.status === "inactive" ? "expired" : (user.status as any);
+                status = user.status === "inactive" ? "expired" : user.status;
             } else if (user.expiresAt) {
                 const expiresAt = new Date(user.expiresAt);
                 if (expiresAt < new Date()) {
@@ -264,7 +265,7 @@ export default function UsersPage() {
 
             return {
                 addonCount: user.stremioAddonsCount || user.addons || 0,
-                avatarUrl: (user as any).avatarUrl,
+                avatarUrl: user.avatarUrl,
                 colorIndex: user.colorIndex,
                 dormant: isDormant(user.lastActive, user.createdAt),
                 email: user.email,
@@ -277,12 +278,12 @@ export default function UsersPage() {
                 lastSync,
                 name: userName,
                 nuvioProfileId: user.nuvioProfileId ?? 1,
-                providerConnectionError: (user as any).providerConnectionError || null,
+                providerConnectionError: user.providerConnectionError || null,
                 providerType: user.providerType || "stremio",
-                secondaryProviderType: (user as any).secondaryProviderType || null,
+                secondaryProviderType: user.secondaryProviderType || null,
                 status,
                 useGravatar: user.useGravatar,
-                watchTime: (user as any).watchTime || 0, // Use watchTime from API
+                watchTime: user.watchTime || 0, // Use watchTime from API
             };
         });
     }, [users, groups]);
@@ -594,8 +595,8 @@ export default function UsersPage() {
             }
             const usersData = await api.getUsers();
             setUsers(usersData);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to sync all users");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to sync all users"));
         } finally {
             setIsSyncing(false);
             setSyncingUserIds(new Set());
@@ -1194,10 +1195,12 @@ export default function UsersPage() {
                                                                                             toast.success(
                                                                                                 `Synced ${user.name} successfully`
                                                                                             );
-                                                                                        } catch (err: any) {
+                                                                                        } catch (err) {
                                                                                             toast.error(
-                                                                                                err.message ||
+                                                                                                readErrorMessage(
+                                                                                                    err,
                                                                                                     `Failed to sync ${user.name}`
+                                                                                                )
                                                                                             );
                                                                                         }
                                                                                     }}
@@ -1354,6 +1357,7 @@ export default function UsersPage() {
                             <button
                                 className="rounded-lg p-2 text-muted transition-colors hover:bg-surface-hover"
                                 onClick={deselectAll}
+                                type="button"
                             >
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
@@ -1371,6 +1375,7 @@ export default function UsersPage() {
                     boxShadow:
                         "0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
                 }}
+                type="button"
             >
                 <PlusIcon className="h-6 w-6" />
             </button>
@@ -1520,7 +1525,7 @@ function UserCard({
     /** Their Limits pill's state, from the page's overview. */
     limits?: LimitsSummary | null;
 }) {
-    const { hideSensitive } = useTheme();
+    const { hideSensitive: _hideSensitive } = useTheme();
     const { isOpen, position, handleContextMenu, close } = useContextMenu();
     const [showActions, setShowActions] = useState(false);
 
@@ -1561,8 +1566,8 @@ function UserCard({
         try {
             await api.syncUser(user.id);
             toast.success(`Synced ${user.name} successfully`);
-        } catch (err: any) {
-            toast.error(err.message || `Failed to sync ${user.name}`);
+        } catch (err) {
+            toast.error(readErrorMessage(err, `Failed to sync ${user.name}`));
         } finally {
             setIsSyncing(false);
         }
@@ -1584,8 +1589,8 @@ function UserCard({
                 result.message ||
                     `Successfully imported ${result.importedCount} addon${result.importedCount === 1 ? "" : "s"}`
             );
-        } catch (err: any) {
-            toast.error(err.message || `Failed to import addons from ${user.name}`);
+        } catch (err) {
+            toast.error(readErrorMessage(err, `Failed to import addons from ${user.name}`));
         }
     };
 
@@ -1677,8 +1682,8 @@ function UserCard({
                             try {
                                 await api.syncUser(id);
                                 toast.success(`Synced ${user.name} successfully`);
-                            } catch (err: any) {
-                                toast.error(err.message || `Failed to sync ${user.name}`);
+                            } catch (err) {
+                                toast.error(readErrorMessage(err, `Failed to sync ${user.name}`));
                             } finally {
                                 onSyncEnd(id);
                             }
@@ -1696,8 +1701,8 @@ function UserCard({
                                 await api.toggleUserStatus(user.id, newStatus);
                                 toast.success(`User ${newStatus ? "activated" : "deactivated"}`);
                                 onToggleStatus?.(user.id, newStatus);
-                            } catch (err: any) {
-                                toast.error(err.message || "Failed to toggle user status");
+                            } catch (err) {
+                                toast.error(readErrorMessage(err, "Failed to toggle user status"));
                             }
                         }}
                         title={`Activate ${user.name}`}
@@ -1788,6 +1793,7 @@ function UserCard({
                         <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                             onClick={handleSync}
+                            type="button"
                         >
                             <ArrowPathIcon className="h-4 w-4" />
                             Sync User
@@ -1795,6 +1801,7 @@ function UserCard({
                         <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                             onClick={handleReload}
+                            type="button"
                         >
                             <ArrowPathIcon className="h-4 w-4" />
                             Reload Addons
@@ -1802,6 +1809,7 @@ function UserCard({
                         <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-default text-sm transition-colors hover:bg-surface-hover"
                             onClick={handleImport}
+                            type="button"
                         >
                             <ArrowDownTrayIcon className="h-4 w-4" />
                             Import Addons
@@ -1812,6 +1820,7 @@ function UserCard({
                 <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-error text-sm transition-colors hover:bg-error-muted"
                     onClick={handleDelete}
+                    type="button"
                 >
                     <TrashIcon className="h-4 w-4" />
                     Delete

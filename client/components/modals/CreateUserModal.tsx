@@ -20,6 +20,7 @@ import { Button, PasswordToggleButton, SlickSyncLogo } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 
 // Provider sign-in and reconnect share the same flow and account handlers.
@@ -246,10 +247,10 @@ export function CreateUserModal({
                         if (onReconnectSuccess) {
                             onReconnectSuccess();
                         }
-                    } catch (err: any) {
+                    } catch (err) {
                         console.error("Failed to reconnect:", err);
                         setOauthStatus("error");
-                        setOauthError(err.message || "Failed to reconnect");
+                        setOauthError(readErrorMessage(err, "Failed to reconnect"));
                     }
                 } else {
                     // Added straight away: the server names them after their Stremio
@@ -263,16 +264,16 @@ export function CreateUserModal({
                                 username: "",
                             })
                         );
-                    } catch (err: any) {
+                    } catch (err) {
                         setOauthStatus("error");
-                        setOauthError(err.message || "Could not add them");
+                        setOauthError(readErrorMessage(err, "Could not add them"));
                     }
                 }
-            } catch (err: any) {
+            } catch (err) {
                 console.error("Error while polling Stremio OAuth:", err);
                 stopPolling();
                 setOauthStatus("error");
-                setOauthError(err.message || "Connection failed");
+                setOauthError(readErrorMessage(err, "Connection failed"));
             }
         }, 2500);
     };
@@ -326,10 +327,10 @@ export function CreateUserModal({
             }
 
             startPolling(data.code, data.expiresAt || null);
-        } catch (err: any) {
+        } catch (err) {
             console.error("Failed to start Stremio OAuth:", err);
             setOauthStatus("error");
-            setOauthError(err.message || "Failed to connect");
+            setOauthError(readErrorMessage(err, "Failed to connect"));
             preOpenedTab?.close();
         }
     };
@@ -351,8 +352,8 @@ export function CreateUserModal({
                 if (onReconnectSuccess) {
                     onReconnectSuccess();
                 }
-            } catch (err: any) {
-                toast.error(err.message || "Failed to reconnect");
+            } catch (err) {
+                toast.error(readErrorMessage(err, "Failed to reconnect"));
             } finally {
                 setIsSubmitting(false);
             }
@@ -390,8 +391,8 @@ export function CreateUserModal({
                 });
             }
             finishAdding(created);
-        } catch (err: any) {
-            toast.error(err.message || "Failed to create user");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to create user"));
         } finally {
             setIsSubmitting(false);
         }
@@ -489,18 +490,18 @@ export function CreateUserModal({
                             username: "",
                         })
                     );
-                } catch (err: any) {
+                } catch (err) {
                     stopNuvioPolling();
                     if (nuvioCountdownRef.current) {
                         clearInterval(nuvioCountdownRef.current);
                     }
                     setNuvioOauthStatus("error");
-                    setNuvioOauthError(err.message || "Nuvio approval failed or expired");
+                    setNuvioOauthError(readErrorMessage(err, "Nuvio approval failed or expired"));
                 }
             }, intervalMs);
-        } catch (err: any) {
+        } catch (err) {
             setNuvioOauthStatus("error");
-            setNuvioOauthError(err.message || "Failed to start Nuvio login");
+            setNuvioOauthError(readErrorMessage(err, "Failed to start Nuvio login"));
         }
     };
 
@@ -520,8 +521,8 @@ export function CreateUserModal({
                     username: username.trim(),
                 })
             );
-        } catch (err: any) {
-            toast.error(err.message || "Failed to create Nuvio user");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to create Nuvio user"));
         } finally {
             setIsSubmitting(false);
         }
@@ -574,8 +575,8 @@ export function CreateUserModal({
             ...list,
             {
                 household: created?.household || [],
-                id: (created as any)?.id,
-                username: (created as any)?.username,
+                id: created?.id,
+                username: created?.username,
             },
         ]);
         setJellyfinDisplayName("");

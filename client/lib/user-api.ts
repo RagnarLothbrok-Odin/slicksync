@@ -1,3 +1,6 @@
+import type { JellyfinSignInApi } from "@/components/jellyfin/JellyfinSignIn";
+import type { StremioManifest } from "./stremio-manifest";
+
 /**
  * User Panel API Client
  *
@@ -76,10 +79,13 @@ export interface UserInfo {
 
 export interface LibraryItem {
     _id: string;
+    _mtime?: string | number;
     background?: string;
+    id?: string;
     name: string;
     poster?: string;
     progress?: number;
+    removed?: boolean | 0 | 1 | null;
     state?: {
         timeOffset?: number;
         overallTimeWatched?: number;
@@ -437,20 +443,29 @@ export const userAuth = {
     /** The steps before a Jellyfin sign-in: checking the address and Quick Connect. */
     jellyfinSignIn: {
         probe: (serverUrl: string) =>
-            request<any>("/public-library/jellyfin-probe", {
-                body: JSON.stringify({ serverUrl }),
-                method: "POST",
-            }),
+            request<Awaited<ReturnType<JellyfinSignInApi["probe"]>>>(
+                "/public-library/jellyfin-probe",
+                {
+                    body: JSON.stringify({ serverUrl }),
+                    method: "POST",
+                }
+            ),
         quickConnectStatus: (params: { serverUrl: string; secret: string; device: string }) =>
-            request<any>("/public-library/jellyfin-quick-connect-status", {
-                body: JSON.stringify(params),
-                method: "POST",
-            }),
+            request<Awaited<ReturnType<JellyfinSignInApi["quickConnectStatus"]>>>(
+                "/public-library/jellyfin-quick-connect-status",
+                {
+                    body: JSON.stringify(params),
+                    method: "POST",
+                }
+            ),
         startQuickConnect: (serverUrl: string) =>
-            request<any>("/public-library/jellyfin-quick-connect", {
-                body: JSON.stringify({ serverUrl }),
-                method: "POST",
-            }),
+            request<Awaited<ReturnType<JellyfinSignInApi["startQuickConnect"]>>>(
+                "/public-library/jellyfin-quick-connect",
+                {
+                    body: JSON.stringify({ serverUrl }),
+                    method: "POST",
+                }
+            ),
     },
 
     /**
@@ -765,7 +780,7 @@ export const userSync = {
     async sync(
         userId: string,
         authKey?: string
-    ): Promise<{ success: boolean; message: string; details?: any }> {
+    ): Promise<{ success: boolean; message: string; details?: unknown }> {
         return request("/public-library/sync", {
             authKey,
             body: JSON.stringify({ userId }),
@@ -819,7 +834,7 @@ export const userAddons = {
     async addAddon(
         userId: string,
         addonUrl: string,
-        manifestData?: any,
+        manifestData?: Partial<StremioManifest>,
         authKey?: string
     ): Promise<{
         success: boolean;

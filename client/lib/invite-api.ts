@@ -1,3 +1,4 @@
+import type { JellyfinSignInApi } from "@/components/jellyfin/JellyfinSignIn";
 /**
  * Public Invite API
  *
@@ -70,7 +71,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
             headers,
         });
 
-        let data: any;
+        let data: unknown;
         try {
             data = await response.json();
         } catch {
@@ -78,12 +79,23 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         }
 
         if (!response.ok) {
-            const message = data?.message || data?.error || `HTTP ${response.status}`;
-            const code = data?.error || data?.code;
+            const payload = typeof data === "object" && data !== null ? data : {};
+            const message =
+                "message" in payload && typeof payload.message === "string"
+                    ? payload.message
+                    : "error" in payload && typeof payload.error === "string"
+                      ? payload.error
+                      : `HTTP ${response.status}`;
+            const code =
+                "error" in payload && typeof payload.error === "string"
+                    ? payload.error
+                    : "code" in payload && typeof payload.code === "string"
+                      ? payload.code
+                      : undefined;
             throw new InviteApiError(message, response.status, code);
         }
 
-        return data;
+        return data as T;
     } catch (error) {
         if (error instanceof InviteApiError) {
             throw error;
@@ -126,7 +138,7 @@ export const inviteApi = {
         username: string,
         authKey: string,
         groupName?: string
-    ): Promise<{ message: string; user?: any }> {
+    ): Promise<{ message: string; user?: { id: string; username: string; email?: string } }> {
         return request(`/${inviteCode}/complete`, {
             body: JSON.stringify({ authKey, email, groupName, username }),
             method: "POST",
@@ -181,20 +193,29 @@ export const inviteApi = {
     jellyfinSignIn(inviteCode: string) {
         return {
             probe: (serverUrl: string) =>
-                request<any>(`/${inviteCode}/jellyfin/probe`, {
-                    body: JSON.stringify({ serverUrl }),
-                    method: "POST",
-                }),
+                request<Awaited<ReturnType<JellyfinSignInApi["probe"]>>>(
+                    `/${inviteCode}/jellyfin/probe`,
+                    {
+                        body: JSON.stringify({ serverUrl }),
+                        method: "POST",
+                    }
+                ),
             quickConnectStatus: (params: { serverUrl: string; secret: string; device: string }) =>
-                request<any>(`/${inviteCode}/jellyfin/quick-connect-status`, {
-                    body: JSON.stringify(params),
-                    method: "POST",
-                }),
+                request<Awaited<ReturnType<JellyfinSignInApi["quickConnectStatus"]>>>(
+                    `/${inviteCode}/jellyfin/quick-connect-status`,
+                    {
+                        body: JSON.stringify(params),
+                        method: "POST",
+                    }
+                ),
             startQuickConnect: (serverUrl: string) =>
-                request<any>(`/${inviteCode}/jellyfin/quick-connect`, {
-                    body: JSON.stringify({ serverUrl }),
-                    method: "POST",
-                }),
+                request<Awaited<ReturnType<JellyfinSignInApi["startQuickConnect"]>>>(
+                    `/${inviteCode}/jellyfin/quick-connect`,
+                    {
+                        body: JSON.stringify({ serverUrl }),
+                        method: "POST",
+                    }
+                ),
         };
     },
 
@@ -233,7 +254,7 @@ export const inviteApi = {
         inviteCode: string,
         username: string,
         jellyfin: Record<string, string>
-    ): Promise<{ message?: string; email?: string; [key: string]: any }> {
+    ): Promise<{ message?: string; email?: string; [key: string]: unknown }> {
         return request(`/${inviteCode}/request`, {
             body: JSON.stringify({ jellyfin, username }),
             method: "POST",
@@ -245,7 +266,7 @@ export const inviteApi = {
         inviteCode: string,
         username: string,
         password: string
-    ): Promise<{ message?: string; email?: string; [key: string]: any }> {
+    ): Promise<{ message?: string; email?: string; [key: string]: unknown }> {
         return request(`/${inviteCode}/request`, {
             body: JSON.stringify({ jellyfinNew: { password }, username }),
             method: "POST",
@@ -261,7 +282,7 @@ export const inviteApi = {
         inviteCode: string,
         username: string,
         nuvioCode: string
-    ): Promise<{ message: string; email?: string; [key: string]: any }> {
+    ): Promise<{ message: string; email?: string; [key: string]: unknown }> {
         return request(`/${inviteCode}/request`, {
             body: JSON.stringify({ nuvioCode, username }),
             method: "POST",
@@ -275,7 +296,7 @@ export const inviteApi = {
         inviteCode: string,
         username: string,
         authKey: string
-    ): Promise<{ message: string; email?: string; [key: string]: any }> {
+    ): Promise<{ message: string; email?: string; [key: string]: unknown }> {
         return request(`/${inviteCode}/request`, {
             body: JSON.stringify({ authKey, username }),
             method: "POST",

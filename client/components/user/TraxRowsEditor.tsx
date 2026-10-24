@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { api, type TraxRow } from "@/lib/api";
+import { readErrorMessage } from "@/lib/errors";
 
 /**
  * Which SlickTrax rows this person gets inside Stremio and Nuvio, and in
@@ -63,8 +64,8 @@ export function TraxRowsEditor({ userId }: { userId: string }) {
             setRows(v.rows);
             setSaved(JSON.stringify(v.rows));
             toast.success("Rows saved - their apps update with the sync that just started");
-        } catch (e: any) {
-            toast.error(e?.message || "Could not save the rows");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not save the rows"));
         } finally {
             setBusy(false);
         }
@@ -77,8 +78,8 @@ export function TraxRowsEditor({ userId }: { userId: string }) {
             setRows(v.rows);
             setSaved(JSON.stringify(v.rows));
             toast.success("Back to every row, in the usual order");
-        } catch (e: any) {
-            toast.error(e?.message || "Could not reset the rows");
+        } catch (e) {
+            toast.error(readErrorMessage(e, "Could not reset the rows"));
         } finally {
             setBusy(false);
         }

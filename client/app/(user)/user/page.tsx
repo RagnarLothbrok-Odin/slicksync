@@ -21,6 +21,7 @@ import { PersonalCalendar } from "@/components/user/PersonalCalendar";
 import { PersonalContinueWatching } from "@/components/user/PersonalContinueWatching";
 import { usePersonalPreferences } from "@/components/user/PersonalPreferences";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
+import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
 import {
@@ -174,9 +175,9 @@ export default function UserHomePage() {
                     console.error("Failed to load risk status:", riskResult.reason);
                     // Don't set error for risk status - it's optional
                 }
-            } catch (err: any) {
+            } catch (err) {
                 console.error("Failed to load data:", err);
-                setError(err?.message || "Failed to load data");
+                setError(readErrorMessage(err, "Failed to load data"));
             } finally {
                 setLoading(false);
             }
@@ -200,8 +201,8 @@ export default function UserHomePage() {
             // Refresh at-risk status after sync
             const riskStatus = await userSync.getAtRiskStatus(userId, authKey || undefined);
             setAtRiskStatus(riskStatus);
-        } catch (err: any) {
-            setSyncMessage(err.message || "Sync failed");
+        } catch (err) {
+            setSyncMessage(readErrorMessage(err, "Sync failed"));
         } finally {
             setSyncing(false);
             // Clear message after 3 seconds
@@ -321,6 +322,7 @@ export default function UserHomePage() {
                                 background: "var(--color-primary)",
                                 color: "white",
                             }}
+                            type="button"
                         >
                             <ArrowPathIcon className={`h-5 w-5 ${syncing ? "animate-spin" : ""}`} />
                             <span>{syncing ? "Syncing..." : "Sync Now"}</span>
@@ -387,6 +389,7 @@ export default function UserHomePage() {
                             background: "var(--color-primary)",
                             color: "white",
                         }}
+                        type="button"
                     >
                         Try Again
                     </button>
