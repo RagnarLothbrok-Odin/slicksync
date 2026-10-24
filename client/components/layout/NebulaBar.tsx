@@ -111,9 +111,11 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
               <motion.nav
                 id={navId}
                 aria-label="Main navigation"
-                initial={reduceMotion || isTV ? false : { opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
+                // Navigation shares a responsive grid with the brand and account.
+                // Avoid retaining a measured height across hydration and reloads.
+                initial={false}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 transition={reduceMotion ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.3 }}
                 className="interface-main-nav overflow-hidden"
               >
