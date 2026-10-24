@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useRef } from 'react';
+import { memo, useRef, useState } from 'react';
 import { PlayIcon, InformationCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { Badge } from './Badge';
 import { ContextMenu, useContextMenu } from './ContextMenu';
@@ -59,6 +59,11 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCard({
   // (needed to suppress the native menu) blocked the FIRST card's "close on
   // outside click" listener from ever firing, orphaning it open. A single
   // shared "which card owns the open menu" value fixes that by construction.
+  const artwork = [...new Set([item.nextEpisode?.thumbnail, item.background, item.poster].filter((url): url is string => !!url))];
+  const artworkKey = artwork.join('|');
+  const [failedArtwork, setFailedArtwork] = useState<{ key: string; count: number }>({ key: '', count: 0 });
+  const artworkIndex = failedArtwork.key === artworkKey ? failedArtwork.count : 0;
+  const artworkUrl = artwork[artworkIndex];
   const { position, handleContextMenu, setExternalClose } = useContextMenu();
   // Registers the REAL close (onClose below) for cross-section/cross-page
   // closing - onMenuOpenChange is the lifted state that actually drives
@@ -129,11 +134,12 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCard({
               and only then the portrait poster as a last resort - a portrait
               poster forced into a 16:9 frame is what caused the "too zoomed
               in" hard crop. */}
-          {(item.nextEpisode?.thumbnail || item.background || item.poster) ? (
+          {artworkUrl ? (
             <img
               // Through the server's image cache at the card's size, like
               // every poster grid - not the full-size original each launch.
-              src={(cacheImages ? cachedImageUrl(item.nextEpisode?.thumbnail || item.background || item.poster) : item.nextEpisode?.thumbnail || item.background || item.poster) || ''}
+              src={(cacheImages ? cachedImageUrl(artworkUrl) : artworkUrl) || ''}
+              onError={() => setFailedArtwork({ key: artworkKey, count: artworkIndex + 1 })}
               alt={item.showName}
               draggable={false}
               loading={priority ? 'eager' : 'lazy'}
