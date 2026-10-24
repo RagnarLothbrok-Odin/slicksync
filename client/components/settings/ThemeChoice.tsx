@@ -7,7 +7,6 @@ import { themeMeta, type ThemeId } from '@/lib/theme';
 
 // Memoized theme card component
 export const ThemeCard = memo(function ThemeCard({
-  themeId,
   meta,
   isSelected,
   onSelect,
