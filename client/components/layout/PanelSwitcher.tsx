@@ -266,7 +266,7 @@ export function PanelSwitcher({ mode, userInfo, onLogout, onSwitchProfile, colla
             {/* Switch Panel Button */}
             <button
               onClick={handleSwitchPanel}
-              className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 hover:bg-surface-hover"
+              className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
               style={{ color: 'var(--color-text)' }}
             >
               <div
@@ -276,17 +276,17 @@ export function PanelSwitcher({ mode, userInfo, onLogout, onSwitchProfile, colla
                 }}
               >
                 <TargetIcon
-                  className="w-4 h-4"
+                  className="nav-item-icon w-4 h-4"
                   style={{ color: isAdmin ? 'var(--color-success)' : 'var(--color-primary)' }}
                 />
               </div>
               <div className="flex-1 text-left">
-                <p className="text-sm font-medium">Switch to {targetPanel} Panel</p>
-                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="nav-item-label text-sm font-medium">Switch to {targetPanel} Panel</p>
+                <p className="nav-item-label text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {isAdmin ? 'Access your library and settings' : 'Manage users and system'}
                 </p>
               </div>
-              <ArrowsRightLeftIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
+              <ArrowsRightLeftIcon className="nav-item-icon w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
             </button>
 
             {onSwitchProfile && <button onClick={() => { setIsOpen(false); onSwitchProfile(); }} className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg text-default"><div className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-hover"><ArrowsRightLeftIcon className="nav-item-icon w-4 h-4 text-muted" /></div><span className="nav-item-label text-sm font-medium">Switch profile</span></button>}
