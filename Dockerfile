@@ -124,9 +124,9 @@ COPY --from=builder --chown=appuser:nodejs /app/client/next.config.ts ./client/
 # The standalone server serves its static assets from .next/static and the
 # public folder from public, both beside its own server.js - Next leaves
 # copying them there to the deployment.
-RUN test -f /app/client/.next/standalone/server.js && \
-    cp -r /app/client/.next/static /app/client/.next/standalone/.next/static && \
-    cp -r /app/client/public /app/client/.next/standalone/public && \
+RUN test -f /app/client/.next/standalone/client/server.js && \
+    cp -r /app/client/.next/static /app/client/.next/standalone/client/.next/static && \
+    cp -r /app/client/public /app/client/.next/standalone/client/public && \
     chown -R appuser:nodejs /app/client/.next/standalone
 
 # Use maintained startup script that selects Prisma schema based on DATABASE_URL

@@ -122,8 +122,8 @@ else
   echo "🚀 Running Next.js in PRODUCTION mode"
   # The standalone server (output: 'standalone') reads its port from PORT,
   # not a -p flag, and finds its files beside itself.
-  if [ -f "/app/client/.next/standalone/server.js" ]; then
-    cd /app/client/.next/standalone && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun server.js &
+  if [ -f "/app/client/.next/standalone/client/server.js" ]; then
+    cd /app/client/.next/standalone/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun server.js &
   else
     cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun run start &
   fi

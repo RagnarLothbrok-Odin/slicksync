@@ -60,11 +60,10 @@ const nextConfig: NextConfig = {
   // node_modules - about 760 MB of a 2 GB image - just to run `next start`.
   // scripts/start.sh runs the standalone server when it is there.
   output: 'standalone',
-  // The repo root has a lockfile of its own, so Next would otherwise take
-  // the repo as the project and nest the server a folder down
-  // (.next/standalone/client/server.js). Both roots are this folder.
-  outputFileTracingRoot: __dirname,
-  turbopack: { root: __dirname },
+  // Bun hoists workspace dependencies to the repository root. Resolution and
+  // standalone tracing must include that root so production builds include them.
+  outputFileTracingRoot: path.join(__dirname, '..'),
+  turbopack: { root: path.join(__dirname, '..') },
   // Requests to the backend go through Next's rewrite proxy, whose default
   // patience is 30 seconds. Describe-it search waits up to 45 seconds for a
   // model to answer (slower and free-tier models genuinely take that long),
