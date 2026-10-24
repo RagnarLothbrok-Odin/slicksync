@@ -3473,11 +3473,18 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
   // A provider login owns its registered profiles, but never another Nuvio
   // identity or another household. Each selected profile gets its own token.
+  const availableNuvioProfiles = async user => {
+    const groups = await prisma.group.findMany({ where: { accountId: user.accountId, isActive: true }, select: { userIds: true } })
+    const members = new Set()
+    for (const group of groups) { try { for (const id of JSON.parse(group.userIds || '[]')) members.add(id) } catch { /* Ignore invalid legacy memberships. */ } }
+    const profiles = await prisma.user.findMany({ where: { accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, username: true, nuvioProfileId: true, avatarUrl: true, colorIndex: true }, orderBy: { nuvioProfileId: 'asc' } })
+    return profiles.filter(profile => members.has(profile.id))
+  }
   router.get('/profiles', async (req, res) => {
     try {
       const user = await personAsking(req, req.query.userId)
       if (user.providerType !== 'nuvio') return res.json({ profiles: [] })
-      const profiles = await prisma.user.findMany({ where: { accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, username: true, nuvioProfileId: true, avatarUrl: true, colorIndex: true }, orderBy: { nuvioProfileId: 'asc' } })
+      const profiles = await availableNuvioProfiles(user)
       res.json({ profiles })
     } catch (error) { pushError(res, error, 'Could not load your profiles') }
   })
@@ -3486,7 +3493,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       const user = await personAsking(req, req.body?.userId)
       if (user.providerType !== 'nuvio' || typeof req.body.targetId !== 'string') return res.status(400).json({ error: 'Choose one of your Nuvio profiles' })
       const target = await prisma.user.findFirst({ where: { id: req.body.targetId, accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, nuvioRefreshToken: true } })
-      if (!target) return res.status(404).json({ error: 'Profile not found' })
+      if (!target || !(await availableNuvioProfiles(user)).some(profile => profile.id === target.id)) return res.status(404).json({ error: 'Profile not found' })
       if (!target.nuvioRefreshToken) return res.status(409).json({ error: 'This profile needs to be reconnected by your administrator' })
       res.json({ userId: target.id, sessionToken: issueNuvioSessionToken(target.id) })
     } catch (error) { pushError(res, error, 'Could not switch profiles') }

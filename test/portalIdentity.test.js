@@ -369,6 +369,9 @@ test('Nuvio profile selection stays within the authenticated login and household
   const sibling = person('nSibling', 'acc1', { providerType: 'nuvio', nuvioUserId: 'nuvio-1', nuvioProfileId: 2, nuvioRefreshToken: 'refresh-1' })
   const unrelated = person('nOther', 'acc1', { providerType: 'nuvio', nuvioUserId: 'nuvio-other', nuvioRefreshToken: 'refresh-other' })
   data.user.rows.push(sibling, unrelated)
+  const group = data.group.rows.find(row => row.id === 'g1')
+  const previousMembers = group.userIds
+  group.userIds = JSON.stringify([...JSON.parse(group.userIds), sibling.id])
   try {
     const key = session('nA', 'nuvio')
     const listing = await call('GET', '/profiles', { key, query: { userId: 'nA' } })
@@ -384,5 +387,5 @@ test('Nuvio profile selection stays within the authenticated login and household
     assert.equal(jwt.verify(switched.body.sessionToken, SECRET).sub, 'nSibling')
     assert.equal((await call('GET', '/user-info', { key, query: { userId: 'nSibling' } })).status, 401)
     assert.equal((await call('GET', '/user-info', { key: switched.body.sessionToken, query: { userId: 'nSibling' } })).status, 200)
-  } finally { for (const id of ['nSibling', 'nOther']) data.user.rows.splice(data.user.rows.findIndex(row => row.id === id), 1) }
+  } finally { group.userIds = previousMembers; for (const id of ['nSibling', 'nOther']) data.user.rows.splice(data.user.rows.findIndex(row => row.id === id), 1) }
 })

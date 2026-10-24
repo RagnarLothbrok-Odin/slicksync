@@ -19,6 +19,7 @@ type Provider = 'stremio' | 'nuvio' | 'jellyfin';
 interface StoredAuth {
   userId: string;
   provider: Provider;
+  profileSelected?: boolean;
   authKey?: string;
   userInfo: UserInfo;
 }
@@ -111,6 +112,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
               provider: dataProvider,
               authKey: currentAuthKey,
               userInfo: freshInfo,
+              profileSelected: data.profileSelected === true,
             }));
           } catch {
             // Use cached info if refresh fails
@@ -141,12 +143,14 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
   const fillInfoAfterSignIn = useCallback(async (signedInId: string, signedInProvider: Provider, key: string) => {
     try {
       const freshInfo = await userAuth.getUserInfo(signedInId, key);
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
       setUserInfo(freshInfo);
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         userId: signedInId,
         provider: signedInProvider,
         authKey: key,
         userInfo: freshInfo,
+        profileSelected: stored.userId === signedInId && stored.profileSelected === true,
       }));
     } catch {
       // Keep the basics from the sign-in; the next load fills the rest.
@@ -220,6 +224,7 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
           userId: result.userId,
           provider: 'nuvio',
+          profileSelected: false,
           authKey: result.sessionToken,
           userInfo: result.userInfo,
         }));
@@ -296,10 +301,12 @@ export function UserAuthProvider({ children }: UserAuthProviderProps) {
       const freshInfo = await userAuth.getUserInfo(userId, authKey || undefined);
       setUserInfo(freshInfo);
 
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
       // Update storage
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         userId,
         provider: provider || 'stremio',
+        profileSelected: stored.profileSelected === true,
         authKey,
         userInfo: freshInfo,
       }));

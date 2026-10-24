@@ -943,3 +943,15 @@ export function personalRequest<T>(userId: string, authKey: string, path: string
   const separator = path.includes('?') ? '&' : '?';
   return request<T>(`/public-library/personal${path}${separator}userId=${encodeURIComponent(userId)}`, { ...options, authKey });
 }
+
+export interface PersonalProfile {
+  id: string;
+  username: string;
+  nuvioProfileId: number;
+  avatarUrl: string | null;
+  colorIndex: number;
+}
+export const personalProfiles = {
+  list: (userId: string, authKey: string) => request<{ profiles: PersonalProfile[] }>(`/public-library/profiles?userId=${encodeURIComponent(userId)}`, { authKey }),
+  switch: (userId: string, authKey: string, targetId: string) => request<{ userId: string; sessionToken: string }>('/public-library/switch-profile', { authKey, method: 'POST', body: JSON.stringify({ userId, targetId }) }),
+};

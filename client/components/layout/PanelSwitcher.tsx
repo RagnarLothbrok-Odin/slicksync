@@ -34,6 +34,7 @@ interface PanelSwitcherProps {
   } | null;
   /** Called when logout is clicked */
   onLogout?: () => void;
+  onSwitchProfile?: () => void;
   /** Whether the component is collapsed (for sidebar) */
   collapsed?: boolean;
   /** 'compact' renders a small icon-only trigger (topbar use) instead of the
@@ -58,7 +59,7 @@ interface PanelSwitcherProps {
  * Panel switcher component for switching between Admin and User panels
  * Appears in the sidebar of both panels
  */
-export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, variant = 'full', dropdownPosition = 'up', align = 'right' }: PanelSwitcherProps) {
+export function PanelSwitcher({ mode, userInfo, onLogout, onSwitchProfile, collapsed = false, variant = 'full', dropdownPosition = 'up', align = 'right' }: PanelSwitcherProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
@@ -287,6 +288,8 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
               </div>
               <ArrowsRightLeftIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
             </button>
+
+            {onSwitchProfile && <button onClick={() => { setIsOpen(false); onSwitchProfile(); }} className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg text-default"><div className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-hover"><ArrowsRightLeftIcon className="nav-item-icon w-4 h-4 text-muted" /></div><span className="nav-item-label text-sm font-medium">Switch profile</span></button>}
 
             {isAdmin && (
               <>

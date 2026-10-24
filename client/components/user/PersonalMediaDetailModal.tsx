@@ -2,13 +2,13 @@
 
 import { useMemo } from 'react';
 import { MediaDetailModal, type MediaDetailClient } from '@/components/ui/MediaDetailModal';
-import type { MediaDetails, WatchlistItem } from '@/lib/api';
+import type { MediaDetails, WatchlistItem, RatingsBatchEntry } from '@/lib/api';
 import type { PosterCardItem } from '@/components/ui/PosterCard';
 import { personalRequest } from '@/lib/user-api';
 
 type TitleState = { itemId: string; itemType: 'movie' | 'series'; name: string; poster: string | null; saved: boolean; reaction: 'like' | 'dislike' | null; createdAt?: string };
 
-export function PersonalMediaDetailModal({ item, userId, authKey, onClose, onChange }: { item: PosterCardItem; userId: string; authKey: string; onClose: () => void; onChange: () => void }) {
+export function PersonalMediaDetailModal({ item, ratings, userId, authKey, onClose, onChange }: { item: PosterCardItem; ratings?: RatingsBatchEntry; userId: string; authKey: string; onClose: () => void; onChange: () => void }) {
   const client = useMemo<MediaDetailClient>(() => {
     const read = (id: string, type: string = item.type) => personalRequest<{ metadata: MediaDetails | null; state: TitleState | null }>(userId, authKey, `/discover/titles/${id}?type=${type}`);
     const write = async (id: string, patch: Partial<TitleState>, type: string = item.type) => {
@@ -45,5 +45,5 @@ export function PersonalMediaDetailModal({ item, userId, authKey, onClose, onCha
       saveWatchTogether: unavailable, deleteWatchTogether: unavailable,
     };
   }, [userId, authKey, item, onChange]);
-  return <MediaDetailModal isOpen onClose={onClose} itemId={item.id} itemType={item.type} fallbackTitle={item.name} fallbackPoster={item.poster} fallbackRating={item.imdbRating} fallbackReleaseInfo={item.releaseInfo} client={client} householdActions={false} cacheImages={false} />;
+  return <MediaDetailModal isOpen onClose={onClose} itemId={item.id} itemType={item.type} fallbackTitle={item.name} fallbackPoster={item.poster} fallbackRating={item.imdbRating} fallbackReleaseInfo={item.releaseInfo} fallbackRottenTomatoes={ratings?.rottenTomatoes} fallbackMetacritic={ratings?.metacritic} client={client} householdActions={false} cacheImages={false} />;
 }

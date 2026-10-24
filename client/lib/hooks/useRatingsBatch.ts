@@ -10,11 +10,13 @@ import { api, RatingsBatchEntry } from '@/lib/api';
  * same items, or a superset of previously-seen items, doesn't re-request
  * anything already known.
  */
-export function useRatingsBatch(imdbIds: (string | null | undefined)[]): Record<string, RatingsBatchEntry> {
+export function useRatingsBatch(imdbIds: (string | null | undefined)[], fetchRatings?: (ids: string[]) => Promise<{ ratings: Record<string, RatingsBatchEntry> }>): Record<string, RatingsBatchEntry> {
   const [ratings, setRatings] = useState<Record<string, RatingsBatchEntry>>({});
   const knownIdsRef = useRef<Set<string>>(new Set());
 
   const dedupedKey = [...new Set(imdbIds.filter((id): id is string => !!id))].sort().join(',');
+
+  useEffect(() => { knownIdsRef.current.clear(); setRatings({}); }, [fetchRatings]);
 
   useEffect(() => {
     const ids = dedupedKey ? dedupedKey.split(',') : [];
@@ -24,7 +26,7 @@ export function useRatingsBatch(imdbIds: (string | null | undefined)[]): Record<
     unknownIds.forEach((id) => knownIdsRef.current.add(id));
 
     let cancelled = false;
-    api.getRatingsBatch(unknownIds).then((result) => {
+    (fetchRatings ? fetchRatings(unknownIds) : api.getRatingsBatch(unknownIds)).then((result) => {
       if (cancelled) return;
       setRatings((prev) => ({ ...prev, ...result.ratings }));
     }).catch(() => {
@@ -34,9 +36,10 @@ export function useRatingsBatch(imdbIds: (string | null | undefined)[]): Record<
 
     return () => {
       cancelled = true;
+      unknownIds.forEach(id => knownIdsRef.current.delete(id));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dedupedKey]);
+  }, [dedupedKey, fetchRatings]);
 
   return ratings;
 }

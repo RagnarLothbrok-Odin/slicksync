@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Button, Card, PosterCard, type PosterCardItem } from '@/components/ui';
 import { DiscoverControls, DiscoverFilters, DiscoverHeading } from '@/components/ui/DiscoverControls';
 import { useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
+import { useRatingsBatch } from '@/lib/hooks/useRatingsBatch';
+import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
+import type { RatingsBatchEntry } from '@/lib/api';
 import { personalRequest } from '@/lib/user-api';
 import { GENRES, DECADES, RATINGS, LENGTHS, SORTS, type Kind, type SortKey } from '@/lib/discoverWords';
 import { toast } from '@/components/ui/Toast';
@@ -16,6 +19,13 @@ type Page = { items: Title[]; nextSkip: number | null };
 
 export default function PersonalDiscoverPage() {
   const { userId, authKey, isReady } = useUserAuthHeaders();
+  const { preferences } = usePersonalPreferences();
+  const fetchRatings = useCallback(async (ids: string[]) => {
+    if (!userId || !authKey) return { ratings: {} };
+    const batches = [];
+    for (let index = 0; index < ids.length; index += 60) batches.push(personalRequest<{ ratings: Record<string, RatingsBatchEntry> }>(userId, authKey, '/discover/ratings', { method: 'POST', body: JSON.stringify({ imdbIds: ids.slice(index, index + 60) }) }));
+    return { ratings: Object.assign({}, ...(await Promise.all(batches)).map(batch => batch.ratings)) as Record<string, RatingsBatchEntry> };
+  }, [userId, authKey]);
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -39,6 +49,7 @@ export default function PersonalDiscoverPage() {
   // a newer search, and double taps cannot request the same cursor twice.
   const generation = useRef(0);
   const paging = useRef(false);
+  const ratingsById = useRatingsBatch(preferences.posterRatings ? items.map(item => item.id) : [], fetchRatings);
   const params = useMemo(() => new URLSearchParams({ type: kind, catalog: SORTS.find(item => item.key === sort)?.catalog || 'top', ...(search ? { query: search } : {}), ...(genre ? { genre } : {}), ...(decade ? { decade } : {}), ...(minRating ? { minRating } : {}), ...(length ? { length } : {}), paged: '1' }).toString(), [kind, sort, search, genre, decade, minRating, length]);
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 300); return () => clearTimeout(timer); }, [query]);
   useEffect(() => {
@@ -104,11 +115,11 @@ export default function PersonalDiscoverPage() {
     <h2 className="text-lg sm:text-xl font-semibold font-display text-default mb-4">{lens === 'watchlist' ? 'Your watchlist' : search ? `Results for “${search}”` : SORTS.find(item => item.key === sort)?.label}</h2>
     {error && <div role="alert" className="flex gap-3 items-center text-sm text-error mb-5"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => next !== null ? loadMore() : setRevision(value => value + 1)}>Try again</Button></div>}
     {!busy && !error && !items.length && <Card padding="lg"><p className="text-sm text-muted">{lens === 'watchlist' ? 'Your watchlist is empty. Open a title and save it for later.' : 'No titles match these filters. Try another search or reset your filters.'}</p></Card>}
-    <div className="discovery-poster-grid">{sorted.map((item, index) => <PosterCard key={item.id} item={item} priority={index < 16} onOpenDetails={item => setSelected({ ...item, releaseInfo: item.releaseInfo || undefined, imdbRating: item.imdbRating || undefined })} onToggleWatchlist={toggleSaved} onToggleWatched={() => {}} showWatchedMenu={false} showWatchedBadge={false} showCatalogMenu={false} cacheImages={false} inWatchlist={savedIds.has(item.id)} onPrefetchDetails={prefetch} isMenuOpen={openMenuKey === item.id} onMenuOpenChange={(open, key) => setOpenMenuKey(open ? key : null)} />)}</div>
+    <div className="discovery-poster-grid">{sorted.map((item, index) => <PosterCard key={item.id} item={item} ratings={ratingsById[item.id]} priority={index < 16} onOpenDetails={item => setSelected({ ...item, releaseInfo: item.releaseInfo || undefined, imdbRating: item.imdbRating || undefined })} onToggleWatchlist={toggleSaved} onToggleWatched={() => {}} showWatchedMenu={false} showWatchedBadge={false} showCatalogMenu={false} cacheImages={false} inWatchlist={savedIds.has(item.id)} onPrefetchDetails={prefetch} isMenuOpen={openMenuKey === item.id} onMenuOpenChange={(open, key) => setOpenMenuKey(open ? key : null)} />)}</div>
     {busy && <p role="status" className="text-sm text-muted py-6">Loading titles...</p>}
     {next !== null && !search && lens === 'titles' && <div className="flex justify-center mt-6"><Button variant="secondary" disabled={busy} onClick={loadMore}>Load more</Button></div>}
     {attribution && <p className="text-xs text-muted mt-8">{attribution}</p>}
-    {selected && userId && authKey && <PersonalMediaDetailModal key={`${userId}:${selected.id}`} item={selected} userId={userId} authKey={authKey} onClose={() => setSelected(null)} onChange={refreshSaved} />}
+    {selected && userId && authKey && <PersonalMediaDetailModal key={`${userId}:${selected.id}`} item={selected} ratings={ratingsById[selected.id]} userId={userId} authKey={authKey} onClose={() => setSelected(null)} onChange={refreshSaved} />}
 
   </div>;
 }
