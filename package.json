@@ -74,6 +74,8 @@
     "ultracite": "7.12.4"
   },
   "overrides": {
-    "node-fetch": "2.7.0"
+    "node-fetch": "2.7.0",
+    "deepmerge-ts": "8.0.0",
+    "zod": "4.6.7"
   }
 }
