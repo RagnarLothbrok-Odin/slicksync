@@ -3471,6 +3471,27 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
     }
   });
 
+  // A provider login owns its registered profiles, but never another Nuvio
+  // identity or another household. Each selected profile gets its own token.
+  router.get('/profiles', async (req, res) => {
+    try {
+      const user = await personAsking(req, req.query.userId)
+      if (user.providerType !== 'nuvio') return res.json({ profiles: [] })
+      const profiles = await prisma.user.findMany({ where: { accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, username: true, nuvioProfileId: true, avatarUrl: true, colorIndex: true }, orderBy: { nuvioProfileId: 'asc' } })
+      res.json({ profiles })
+    } catch (error) { pushError(res, error, 'Could not load your profiles') }
+  })
+  router.post('/switch-profile', async (req, res) => {
+    try {
+      const user = await personAsking(req, req.body?.userId)
+      if (user.providerType !== 'nuvio' || typeof req.body.targetId !== 'string') return res.status(400).json({ error: 'Choose one of your Nuvio profiles' })
+      const target = await prisma.user.findFirst({ where: { id: req.body.targetId, accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, nuvioRefreshToken: true } })
+      if (!target) return res.status(404).json({ error: 'Profile not found' })
+      if (!target.nuvioRefreshToken) return res.status(409).json({ error: 'This profile needs to be reconnected by your administrator' })
+      res.json({ userId: target.id, sessionToken: issueNuvioSessionToken(target.id) })
+    } catch (error) { pushError(res, error, 'Could not switch profiles') }
+  })
+
   router.use('/personal', require('./portalFeatures')({ prisma, personAsking, decrypt, createProvider, JWT_SECRET }));
 
   return router;

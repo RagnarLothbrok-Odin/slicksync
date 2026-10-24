@@ -80,6 +80,7 @@ function makeData() {
     movieWatchHistory: table([]),
     episodeWatchHistory: table([]),
     watchlistItem: table([]),
+    personalTitleState: table([]),
     watchActivity: table([]),
   }
 }
@@ -361,4 +362,27 @@ test('own profile reports exact group membership, including a solo member', asyn
     assert.deepEqual(response.body.groups, [{ id: group.id, name: 'Household' }])
     assert.equal(response.body.groupName, 'Household')
   } finally { group.userIds = previous }
+})
+
+
+test('Nuvio profile selection stays within the authenticated login and household', async () => {
+  const sibling = person('nSibling', 'acc1', { providerType: 'nuvio', nuvioUserId: 'nuvio-1', nuvioProfileId: 2, nuvioRefreshToken: 'refresh-1' })
+  const unrelated = person('nOther', 'acc1', { providerType: 'nuvio', nuvioUserId: 'nuvio-other', nuvioRefreshToken: 'refresh-other' })
+  data.user.rows.push(sibling, unrelated)
+  try {
+    const key = session('nA', 'nuvio')
+    const listing = await call('GET', '/profiles', { key, query: { userId: 'nA' } })
+    assert.equal(listing.status, 200)
+    assert.deepEqual(listing.body.profiles.map(profile => profile.id).sort(), ['nA', 'nSibling'])
+    assert.equal(listing.body.profiles[0].nuvioRefreshToken, undefined)
+    for (const targetId of ['nA2', 'nOther', 'sA']) {
+      assert.equal((await call('POST', '/switch-profile', { key, body: { userId: 'nA', targetId } })).status, 404)
+    }
+    assert.equal((await call('GET', '/profiles', { key: session('nA2', 'nuvio'), query: { userId: 'nA' } })).status, 401)
+    const switched = await call('POST', '/switch-profile', { key, body: { userId: 'nA', targetId: 'nSibling' } })
+    assert.equal(switched.status, 200)
+    assert.equal(jwt.verify(switched.body.sessionToken, SECRET).sub, 'nSibling')
+    assert.equal((await call('GET', '/user-info', { key, query: { userId: 'nSibling' } })).status, 401)
+    assert.equal((await call('GET', '/user-info', { key: switched.body.sessionToken, query: { userId: 'nSibling' } })).status, 200)
+  } finally { for (const id of ['nSibling', 'nOther']) data.user.rows.splice(data.user.rows.findIndex(row => row.id === id), 1) }
 })

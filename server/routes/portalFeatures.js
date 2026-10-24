@@ -27,7 +27,10 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     const user = await prisma.user.findUnique({ where: { id: req.person.id }, select: { portalPreferences: true } })
     let stored = {}
     try { stored = JSON.parse(user.portalPreferences || '{}') } catch { /* Older preferences are replaced on the next save. */ }
-    res.json({ ...PREFERENCES, ...stored })
+    const account = await prisma.appAccount.findUnique({ where: { id: req.person.accountId }, select: { sync: true } })
+    let settings = account?.sync || {}
+    if (typeof settings === 'string') { try { settings = JSON.parse(settings) } catch { settings = {} } }
+    res.json({ ...PREFERENCES, posterRatings: settings.enablePosterRatings === true, ...stored })
   }))
   router.patch('/preferences', handle(async (req, res) => {
     const patch = req.body.preferences
@@ -100,6 +103,16 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
       return added
     }, { timeout: 30000 })
     res.json({ imported, skipped: preview.rows.length - imported })
+  }))
+  router.post('/discover/ratings', handle(async (req, res) => {
+    if (!Array.isArray(req.body.imdbIds) || req.body.imdbIds.length > 60 || req.body.imdbIds.some(id => typeof id !== 'string' || !/^tt\d+$/.test(id))) return res.status(400).json({ error: 'Send up to 60 IMDb IDs' })
+    const key = await require('../utils/listImport').resolveOmdbKeyForAccount(prisma, req.person.accountId)
+    const ratings = {}
+    await Promise.all([...new Set(req.body.imdbIds)].map(async id => {
+      const value = await require('../utils/omdb').fetchOmdbRatings(id, key)
+      if (value) ratings[id] = value
+    }))
+    res.json({ ratings })
   }))
   router.get('/discover/saved', handle(async (req, res) => { res.json({ items: await prisma.personalTitleState.findMany({ where: { ...scope(req), saved: true }, orderBy: { createdAt: 'desc' } }) }) }))
   router.put('/discover/titles/:id', handle(async (req, res) => {
