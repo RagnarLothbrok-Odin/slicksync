@@ -287,35 +287,9 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
               <ArrowsRightLeftIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
             </button>
 
-            {/* TorBox referral - always shown for both layouts (previously a
-                floating badge fixed to a screen corner, which needed its own
-                positioning/sizing pass on every layout and viewport size and
-                still read inconsistently across deployments - one stable
-                spot here instead). Tasks/Settings/Changelog below are (Themes now
-                lives inside Settings as its own section)
-                Nebula's "System" group, dropped from its topbar entirely
-                since there's no room to spare there - Original's own
-                Sidebar already has these same 4 directly in the nav, so
-                showing them here too on Original was pure duplication. */}
             {isAdmin && (
               <>
                 <div className="h-px" style={{ background: 'var(--color-surface-border)' }} />
-                <a
-                  href="https://torbox.app/subscription?referral=790ccd5b-646d-43d7-9072-aef7a6eb1de8"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setIsOpen(false)}
-                  className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg"
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center p-1.5"
-                    style={{ background: 'var(--color-surface-hover)' }}
-                  >
-                    <img src="https://torbox.app/assets/logo-bb7a9579.svg" alt="TorBox" className="w-full h-full" />
-                  </div>
-                  <span className="nav-item-label text-sm font-medium">Torbox Referral</span>
-                </a>
                 {showSystemLinks && (
                   <>
                     <button
