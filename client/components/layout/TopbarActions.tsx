@@ -129,7 +129,11 @@ export function TopbarActions({
     // runs on each scroll frame, and returning a fresh object each time
     // would re-render the whole cluster (and the bell's subtree) for the
     // entire length of a scroll even when nothing moved.
-    if (natural.top < floatTop) {
+    // The expanded desktop row uses the space next to the account button
+    // for destinations. Dock only after those links have collapsed; until
+    // then the inline controls scroll behind the bar with their heading.
+    const canDock = !bar || (bar.getAttribute('data-navigation-expanded') !== 'true' && !bar.querySelector('.interface-main-nav'));
+    if (natural.top < floatTop && canDock) {
       // Centred on the logo row, near the bar card's right edge.
       const row = document.querySelector('[data-nebula-logo-row]');
       const rr = row?.getBoundingClientRect();
@@ -185,7 +189,18 @@ export function TopbarActions({
     // containers, not just the window.
     window.addEventListener('scroll', onChange, { passive: true, capture: true });
     window.addEventListener('resize', onChange);
+    // Collapse, menu and viewport changes can move the target without a
+    // new scroll event. Follow the bar's actual geometry and nav state.
+    const bar = document.querySelector('[data-nebula-topbar]');
+    const resize = new ResizeObserver(onChange);
+    const mutation = new MutationObserver(onChange);
+    if (bar) {
+      resize.observe(bar);
+      mutation.observe(bar, { attributes: true, attributeFilter: ['data-navigation-expanded'], childList: true, subtree: true });
+    }
     return () => {
+      resize.disconnect();
+      mutation.disconnect();
       cancelAnimationFrame(frame);
       window.removeEventListener('scroll', onChange, { capture: true } as EventListenerOptions);
       window.removeEventListener('resize', onChange);
@@ -235,6 +250,7 @@ export function TopbarActions({
   const buttons = (
     <div
       ref={buttonsRef}
+      data-topbar-actions={pinned ? 'pinned' : 'inline'}
       className={`flex items-center ${floating ? 'gap-2' : 'gap-0.5'}`}
       // Above the bar (z-30) so docked buttons show on it.
       style={pinned ? { position: 'fixed', top: pinned.top, right: pinned.right, zIndex: 35 } : undefined}

@@ -82,7 +82,7 @@ export function NebulaBar({ sections, homeHref, menu, account }: {
     <>
       {/* The action cluster measures these two anchors when the page title
           scrolls out of view. Keep the logo row clear at the right edge. */}
-      <header data-nebula-topbar data-menu-open={isOpen} className={`interface-topbar sticky top-0 z-30 ${isTV ? 'interface-topbar-tv' : ''}`}>
+      <header data-nebula-topbar data-navigation-expanded={navVisible} data-menu-open={isOpen} className={`interface-topbar sticky top-0 z-30 ${isTV ? 'interface-topbar-tv' : ''}`}>
         <div className="nebula-bar-panel interface-nav-material">
           <div data-nebula-logo-row className="interface-brand-row relative flex items-center">
             {showMenu && (
