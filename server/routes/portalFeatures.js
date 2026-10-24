@@ -56,6 +56,16 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     if (!result.count) return res.status(404).json({ error: 'Device not found' })
     res.json({ success: true })
   }))
+  router.get('/continue-watching', handle(async (req, res) => {
+    const items = await require('../utils/continueWatching').getContinueWatching(prisma, req.person.accountId, 12, req.person.id)
+    res.json({ items })
+  }))
+  router.post('/continue-watching/dismiss', handle(async (req, res) => {
+    const { showId } = req.body || {}
+    if (typeof showId !== 'string' || !/^[A-Za-z0-9:._-]{1,160}$/.test(showId)) return res.status(400).json({ error: 'Invalid title' })
+    await require('../utils/continueWatching').dismissContinueWatching(prisma, req.person.accountId, req.person.id, showId)
+    res.json({ success: true })
+  }))
   router.get('/sync-status', handle(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.person.id }, select: { lastSyncedAt: true, syncStatus: true, syncErrorMessage: true, providerConnectionErrorAt: true, providerType: true } })
     // Provider errors can contain credential-bearing URLs. Expose a helpful
