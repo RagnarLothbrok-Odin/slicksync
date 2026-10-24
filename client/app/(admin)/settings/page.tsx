@@ -1335,7 +1335,7 @@ export default function SettingsPage() {
                   Change Picture
                 </Button>
                 <p className="text-xs text-muted mt-2">
-                  Upload an image, paste a URL, or pick a color
+                  Choose an avatar, upload an image, or paste a link.
                 </p>
               </div>
             </div>

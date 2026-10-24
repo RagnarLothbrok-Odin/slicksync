@@ -60,8 +60,9 @@ export interface UserInfo {
   /** They switched Gravatar on, so their avatar may look their email up there. */
   useGravatar?: boolean;
   activityVisibility: 'public' | 'private';
-  groupName?: string;
-  groupId?: string;
+  groups?: Array<{ id: string; name: string }>;
+  groupName?: string | null;
+  groupId?: string | null;
   createdAt: string;
   expiresAt?: string;
   discordWebhookUrl?: string | null;
@@ -209,8 +210,9 @@ export const userAuth = {
         colorIndex?: number;
         createdAt?: string;
         expiresAt?: string;
-        groupId?: string;
-        groupName?: string;
+        groupId?: string | null;
+        groups?: Array<{ id: string; name: string }>;
+  groupName?: string | null;
         activityVisibility?: 'public' | 'private';
       };
       isNewUser?: boolean;

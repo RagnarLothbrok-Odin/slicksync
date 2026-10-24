@@ -20,7 +20,7 @@ import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { copyToClipboard } from '@/lib/clipboard';
 import { userAuth, userExport, getUserApiKey } from '@/lib/user-api';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
-import { ToggleSwitch, Avatar, ConfirmModal } from '@/components/ui';
+import { ToggleSwitch, Avatar, ConfirmModal, Button } from '@/components/ui';
 import { useTheme, themeMeta, themeIds } from '@/lib/theme';
 import { toast } from '@/components/ui/Toast';
 import { providerTypeLabel } from '@/lib/providers';
@@ -405,7 +405,7 @@ export default function UserSettingsPage() {
                 Profile Information
               </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Your account details. Select your picture to change it.
+                Your account details
               </p>
             </div>
           </div>
@@ -435,6 +435,8 @@ export default function UserSettingsPage() {
                 <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
                   {userInfo?.email}
                 </p>
+                <Button variant="secondary" size="sm" className="mt-3" onClick={() => setAvatarPickerOpen(true)}>Change Picture</Button>
+                <p className="text-xs text-muted mt-2">Choose an avatar, upload an image, or paste a link.</p>
               </div>
             </div>
 
@@ -442,10 +444,10 @@ export default function UserSettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
               <div>
                 <p className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-subtle)' }}>
-                  Group
+                  Groups
                 </p>
                 <p className="font-medium" style={{ color: 'var(--color-text)' }}>
-                  {userInfo?.groupName || 'No group'}
+                  {userInfo?.groups ? (userInfo.groups.map(group => group.name).join(', ') || 'No groups') : (userInfo?.groupName || 'Loading groups...')}
                 </p>
               </div>
               <div>
