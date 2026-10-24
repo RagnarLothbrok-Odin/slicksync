@@ -3,21 +3,19 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useState, ReactNode } from 'react';
 import { useIsTV } from './hooks/useIsTV';
 
-// Layout mode is independent of Theme (lib/theme.tsx) - Theme picks colors,
-// layout mode picks structure (sidebar vs top nav, card arrangement, etc).
-// Currently scoped to Dashboard + Activity; other pages always render their
-// one existing layout regardless of this setting.
+// Layout mode is independent of Theme: it selects the navigation and
+// arrangement of pages while the theme supplies colors and typography.
 export const layoutModeIds = ['current', 'nebula'] as const;
 export type LayoutModeId = (typeof layoutModeIds)[number];
 
 export const layoutModeMeta: Record<LayoutModeId, { name: string; description: string }> = {
   current: {
-    name: 'Original',
-    description: 'Sidebar navigation with card-based dashboard',
+    name: 'Sidebar',
+    description: 'Keep every destination beside your workspace',
   },
   nebula: {
-    name: 'Top Navi',
-    description: 'Glass panels over a nebula-cloud background, top nav instead of a sidebar',
+    name: 'Top navigation',
+    description: 'A compact floating bar above your content',
   },
 };
 

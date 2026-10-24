@@ -1,7 +1,7 @@
 'use client';
 
 import { WatchSyncCard } from '@/components/user/WatchSyncCard';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Children, isValidElement } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Header } from '@/components/layout/Header';
@@ -33,6 +33,7 @@ import {
   Cog6ToothIcon,
   ExclamationTriangleIcon,
   DocumentArrowDownIcon,
+  DocumentTextIcon,
   DocumentArrowUpIcon,
   ArchiveBoxIcon,
   CalendarDaysIcon,
@@ -63,8 +64,13 @@ function TaskCard({
   description: string;
   children: React.ReactNode;
 }) {
+  const actions = Children.toArray(children);
+  const isRemoval = (child: React.ReactNode) => isValidElement<{ variant?: string }>(child)
+    && child.type === ActionButton && child.props.variant === 'danger';
+  const removalActions = actions.filter(isRemoval);
+  const primaryActions = actions.filter((child) => !isRemoval(child));
   return (
-    <Card padding="lg" className="mb-6">
+    <Card padding="lg" className="task-action-card mb-6">
       <div className="flex items-center gap-3 mb-4">
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconBg}`}>
           {icon}
@@ -74,9 +80,13 @@ function TaskCard({
           <p className="text-xs text-muted">{description}</p>
         </div>
       </div>
-      <div className="flex flex-wrap gap-3">
-        {children}
-      </div>
+      <div className="flex flex-wrap gap-3">{primaryActions}</div>
+      {removalActions.length > 0 && (
+        <details className="task-removal-actions mt-5">
+          <summary className="text-xs text-muted cursor-pointer py-1">Reset &amp; removal</summary>
+          <div className="flex flex-wrap gap-2 pt-3">{removalActions}</div>
+        </details>
+      )}
     </Card>
   );
 }
@@ -114,6 +124,7 @@ function ActionButton({
 }
 
 export default function TasksPage() {
+  const [taskCategory, setTaskCategory] = useState<'daily' | 'data' | 'backup' | 'schedule'>('daily');
   const { layoutMode } = useLayoutMode();
   // State for loading indicators
   const [syncingUsers, setSyncingUsers] = useState(false);
@@ -1093,15 +1104,34 @@ export default function TasksPage() {
       {layoutMode !== 'nebula' && (
         <Header
           title="Tasks"
-          subtitle="Manage and export all your SlickSync data"
+          subtitle="Keep things running. The right tool, right where you need it."
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-6 lg:p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={{ maxWidth: layoutMode === 'nebula' ? 'min(120rem, 92vw)' : '768px' }}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={{ maxWidth: layoutMode === 'nebula' ? 'min(92rem, 92vw)' : '70rem' }}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading title="Tasks" subtitle="Manage and export all your SlickSync data" />
+        <NebulaPageHeading title="Tasks" subtitle="Keep things running. The right tool, right where you need it." />
       )}
+        <nav className="task-category-nav mb-8" aria-label="Task categories">
+          {[
+            { key: 'daily', label: 'Everyday tools', description: 'People, addons, and automation', icon: BoltIcon },
+            { key: 'data', label: 'Data & templates', description: 'Libraries, history, and configuration', icon: DocumentTextIcon },
+            { key: 'backup', label: 'Backup & recovery', description: 'Keep a copy. Pick up where you left off.', icon: ArchiveBoxIcon },
+            { key: 'schedule', label: 'Schedules & health', description: 'Maintenance that runs for you', icon: ClockIcon },
+          ].map((category) => {
+            const Icon = category.icon;
+            return <button key={category.key} type="button" aria-pressed={taskCategory === category.key}
+              onClick={() => setTaskCategory(category.key as typeof taskCategory)}
+              className="task-category-button rounded-2xl flex items-start gap-3 text-left p-4">
+              <Icon className="w-5 h-5 shrink-0 mt-0.5" />
+              <span><span className="block text-sm font-semibold">{category.label}</span><span className="block text-xs mt-1.5 leading-relaxed task-category-description">{category.description}</span></span>
+            </button>;
+          })}
+        </nav>
+        {/* Sections stay mounted so switching categories preserves selected
+            users, pending imports, and the file-input references. */}
+        <div hidden={taskCategory !== 'daily'} className="tasks-catalog-grid">
         {/* Users */}
         <PageSection>
           <TaskCard
@@ -1244,25 +1274,8 @@ export default function TasksPage() {
           <WatchSyncCard />
         </PageSection>
 
-        {/* Maintenance - off-site backup targets, database upkeep, and
-            applying updates. All set-once-and-forget, which is why they
-            live behind one card rather than as three more things on the
-            page. */}
-        <PageSection delay={0.115}>
-          <TaskCard
-            icon={<WrenchScrewdriverIcon className="w-5 h-5 text-primary" />}
-            iconBg="bg-primary-muted"
-            title="Maintenance"
-            description="Off-site backups, database upkeep, and updates"
-          >
-            <ActionButton
-              onClick={() => setIsMaintenanceOpen(true)}
-              icon={<WrenchScrewdriverIcon className="w-4 h-4" />}
-              label="Open Maintenance"
-            />
-          </TaskCard>
-        </PageSection>
-
+        </div>
+        <div hidden={taskCategory !== 'data'} className="tasks-data-group">
         {/* Addon Templates - the backend (/api/snapshots) already existed
             fully built (save a user's/group's current addon set, deploy it
             to any user later) but had no UI anywhere calling it. */}
@@ -1555,6 +1568,8 @@ export default function TasksPage() {
           />
         </PageSection>
 
+        </div>
+        <div hidden={taskCategory !== 'backup'} className="tasks-backup-group">
         {/* Automatic Backups */}
         <PageSection delay={0.3}>
           <Card padding="lg" className="mb-6">
@@ -1803,6 +1818,27 @@ export default function TasksPage() {
           </Card>
         </PageSection>
 
+        </div>
+        <div hidden={taskCategory !== 'schedule'} className="tasks-schedule-group">
+        {/* Maintenance - off-site backup targets, database upkeep, and
+            applying updates. All set-once-and-forget, which is why they
+            live behind one card rather than as three more things on the
+            page. */}
+        <PageSection delay={0.115}>
+          <TaskCard
+            icon={<WrenchScrewdriverIcon className="w-5 h-5 text-primary" />}
+            iconBg="bg-primary-muted"
+            title="Maintenance"
+            description="Off-site backups, database upkeep, and updates"
+          >
+            <ActionButton
+              onClick={() => setIsMaintenanceOpen(true)}
+              icon={<WrenchScrewdriverIcon className="w-4 h-4" />}
+              label="Open Maintenance"
+            />
+          </TaskCard>
+        </PageSection>
+
         {/* Automatic Sync */}
         <PageSection delay={0.35}>
           <Card padding="lg" className="mb-6">
@@ -2003,6 +2039,7 @@ export default function TasksPage() {
         <PageSection delay={0.4}>
           <ScheduledTasksSection syncFrequency={syncFrequency} backupDays={backupDays} healthCheckMinutes={healthCheckMinutes} />
         </PageSection>
+        </div>
       </div>
       </div>
 

@@ -78,10 +78,14 @@ function nextUpcomingEpisode(allEpisodes, todayDayNumber) {
  * date is today or later (a small back-buffer so "airs today" stays visible
  * between the 6h polls that would otherwise roll it forward).
  */
-async function getUpcomingEpisodes(prisma, accountId, limit = 24) {
+async function getUpcomingEpisodes(prisma, accountId, limit = 24, userId = null) {
+  // Filter to this profile's watched shows before applying the calendar limit.
+  const history = userId ? await prisma.episodeWatchHistory.findMany({
+    where: { accountId, userId }, select: { showId: true }, distinct: ['showId'],
+  }) : null
   const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000)
   const rows = await prisma.showEpisodeAlertState.findMany({
-    where: { accountId, nextAirDate: { gte: cutoff } },
+    where: { accountId, ...(history ? { showId: { in: history.map(row => row.showId) } } : {}), nextAirDate: { gte: cutoff } },
     orderBy: { nextAirDate: 'asc' },
     take: limit,
   })

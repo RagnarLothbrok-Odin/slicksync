@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { api, Addon, Group } from '@/lib/api';
 import { copyToClipboard } from '@/lib/clipboard';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
+import { DetailToolbar } from '@/components/layout/DetailToolbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button, Card, Badge, ResourceBadge, Modal, ConfirmModal, Input, ToggleSwitch, VersionBadge, InlineEdit, SyncBadge } from '@/components/ui';
 import { AddonConfigModal } from '@/components/addons/AddonConfigModal';
@@ -314,6 +314,7 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
     >
       <LinkIcon className="w-5 h-5 text-muted shrink-0" />
       <input
+        aria-label="Manifest URL"
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
         onFocus={() => setIsFocused(true)}
@@ -1288,6 +1289,7 @@ export default function AddonDetailPage() {
         <span className="text-sm text-muted">Active</span>
         <ToggleSwitch
           checked={addon.isActive !== false}
+              title="Activate addon"
           onChange={handleToggleStatus}
           size="sm"
           disabled={isTogglingStatus}
@@ -1350,23 +1352,25 @@ export default function AddonDetailPage() {
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading title={addon.name} subtitle="Addons" actions={detailActions} />
+        <DetailToolbar title={addon.name} backHref="/addons" backLabel="Addons" actions={detailActions} />
       )}
         {/* Hero Section */}
         <PageSection className="mb-8">
-          <Card padding="lg">
+          <Card padding="lg" className="profile-hero">
             <div className="relative">
-              <div className="flex items-start gap-6">
+              <div className="profile-hero-layout flex flex-col sm:flex-row items-start gap-4 sm:gap-6">
                 {/* Addon Logo - Large and clickable */}
                 <motion.div
-                  initial={{ scale: 0.8, opacity: 0 }}
+                  initial={false}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 200 }}
-                  className="relative shrink-0"
+                  className="profile-hero-avatar relative shrink-0"
                 >
-                  <div
+                  <button
+                    type="button"
+                    aria-label="Edit addon appearance"
                     onClick={() => {
                       setEditForm({
                         name: addon.name,
@@ -1389,7 +1393,7 @@ export default function AddonDetailPage() {
                         <PuzzlePieceIcon className="w-12 h-12 text-primary" />
                       )}
                     </div>
-                  </div>
+                  </button>
                 </motion.div>
 
                 {/* Info */}
@@ -1433,7 +1437,7 @@ export default function AddonDetailPage() {
                       onSave={handleDescriptionUpdate}
                       placeholder="Enter description..."
                       maxLength={200}
-                      className="text-muted"
+                      className="profile-description text-muted"
                     />
                   </div>
 
@@ -1516,6 +1520,7 @@ export default function AddonDetailPage() {
               <Button
                 variant="ghost"
                 size="sm"
+                aria-label="Copy manifest URL"
                 onClick={async () => {
                   const url = (addon as any).url || (addon as any).manifestUrl;
                   if (url) {
@@ -1582,6 +1587,7 @@ export default function AddonDetailPage() {
               <button
                 type="button"
                 onClick={() => setIsManifestExpanded((prev: boolean) => !prev)}
+                aria-expanded={isManifestExpanded}
                 className="w-full flex items-center justify-between gap-3"
               >
                 <div className="flex items-center gap-3">
@@ -1652,7 +1658,7 @@ export default function AddonDetailPage() {
         {/* Resources Section */}
         <PageSection delay={0.2} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-purple-500/20">
                   <CubeIcon className="w-5 h-5 text-purple-400" />
@@ -1744,7 +1750,7 @@ export default function AddonDetailPage() {
         {/* Catalogs Section */}
         <PageSection delay={0.3} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-green-500/20">
                   <BookOpenIcon className="w-5 h-5 text-green-400" />
@@ -1892,7 +1898,7 @@ export default function AddonDetailPage() {
         {/* Groups Section */}
         <PageSection delay={0.4} className="mb-8">
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
+            <div className="detail-section-header flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/20">
                   <UsersIcon className="w-5 h-5 text-blue-400" />
@@ -1945,10 +1951,11 @@ export default function AddonDetailPage() {
                          {/* Sync Status Badge */}
                          <SyncBadge groupId={group.id} size="sm" />
 
-                         <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
+                         <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity" onClick={(e) => e.preventDefault()}>
                            <Button
                              variant="ghost"
                              size="sm"
+                             aria-label={`Sync ${group.name}`}
                              onClick={async (e) => {
                                e.preventDefault();
                                try {
@@ -1964,6 +1971,7 @@ export default function AddonDetailPage() {
                            <Button
                              variant="ghost"
                              size="sm"
+                             aria-label={`Remove addon from ${group.name}`}
                              onClick={(e) => {
                                e.preventDefault();
                                handleRemoveFromGroup(group.id, group.name);
@@ -2024,6 +2032,7 @@ export default function AddonDetailPage() {
                 </span>
                 <ToggleSwitch
                   checked={anyAddon?.proxyEnabled || false}
+                  title="Proxy streams"
                   onChange={handleToggleProxy}
                   disabled={isTogglingProxy}
                 />
@@ -2476,7 +2485,7 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
     <PageSection delay={0.5} className="mb-8">
       <Card padding="lg">
         {/* Section Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="detail-section-header flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -2587,7 +2596,7 @@ function AddonBackupSection({ addonId, addon, onUpdate }: { addonId: string; add
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setIsRemoveModalOpen(true)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-lg"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity p-1 rounded-lg"
                   style={{ color: 'var(--color-error)' }}
                   title="Remove backup chain"
                 >
@@ -2767,7 +2776,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
   if (loading) {
     return (
       <Card padding="lg">
-        <div className="flex items-center justify-between mb-6">
+        <div className="detail-section-header flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-500/20">
               <HeartIcon className="w-5 h-5 text-rose-400" />
@@ -2825,7 +2834,7 @@ function AddonHealthHistorySection({ addonId }: { addonId: string }) {
 
   return (
     <Card padding="lg">
-      <div className="flex items-center justify-between mb-6">
+      <div className="detail-section-header flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-500/20">
             <HeartIcon className="w-5 h-5 text-rose-400" />

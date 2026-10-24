@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('./defaultAvatar')
 // AIOStreams and AIOMetadata household users, as profiles.
 //
 // An AIOStreams or AIOMetadata configuration is a Jellyfin-compatible server
@@ -241,6 +242,7 @@ async function separateProfile(prisma, { profile, owner }) {
   await runMembershipTransaction(prisma, accountId, async (tx) => {
     created = await tx.user.create({
       data: {
+        avatarUrl: createDefaultAvatar(),
         accountId,
         username,
         email: jfAuth.identityEmail(owner.jellyfinServerUrl, profile.jellyfinUserId),

@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express');
 const { publicMessage } = require('../utils/publicError');
 const { StremioAPIStore, StremioAPIClient } = require('stremio-api-client');
@@ -133,6 +134,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
           // Create user in current account
           const newUser = await prisma.user.create({
             data: {
+              avatarUrl: createDefaultAvatar(),
               accountId: accId,
               username: finalUsername,
               email,
@@ -434,6 +436,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
         // Create new user
         newUser = await prisma.user.create({
           data: {
+            avatarUrl: createDefaultAvatar(),
             // Scope to current AppAccount when auth is enabled
             accountId: getAccountId(req),
             username: finalUsername,
@@ -597,6 +600,7 @@ module.exports = ({ prisma, getAccountId, encrypt, decrypt, assignUserToGroup, I
       } else {
         targetUser = await prisma.user.create({
           data: {
+            avatarUrl: createDefaultAvatar(),
             accountId,
             username: finalUsername,
             email: normalizedEmail || `${Date.now()}@example.invalid`,

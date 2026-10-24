@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useState, InputHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { forwardRef, useState, useId, InputHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { MagnifyingGlassIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
@@ -25,6 +25,9 @@ interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'>
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, leftIcon, rightIcon, size = 'md', className, onRevealClick, ...props }, ref) => {
+    const generatedId = useId();
+    const inputId = props.id || generatedId;
+    const messageId = `${inputId}-message`;
     const sizeStyles = {
       sm: 'px-3 py-1.5 text-sm',
       md: 'px-4 py-3',
@@ -48,7 +51,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const effectiveRightIcon = isPassword ? (
       <button
         type="button"
-        tabIndex={-1}
         onClick={() => {
           if (!passwordVisible) onRevealClick?.();
           setPasswordVisible((v) => !v);
@@ -65,6 +67,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       <div className="w-full">
         {label && (
           <label
+            htmlFor={inputId}
             className="block text-sm font-medium mb-2"
             style={{ color: 'var(--color-text-muted)' }}
           >
@@ -82,8 +85,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
           <input
             ref={ref}
+            id={inputId}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error || hint ? messageId : undefined}
             className={clsx(
-              'slicksync-input w-full rounded-xl transition-all duration-300',
+              'slicksync-input w-full rounded-xl transition-colors duration-150',
               sizeStyles[size],
               'focus:outline-none focus:ring-0 focus:shadow-none focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none',
               'border',
@@ -95,7 +101,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               className
             )}
             style={{
-              backgroundColor: 'var(--color-surface-hover)',
+              backgroundColor: 'var(--color-bg-subtle)',
               color: 'var(--color-text)',
               borderColor: 'var(--color-surface-border)',
               ...props.style,
@@ -114,6 +120,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         </div>
         {(error || hint) && (
           <p
+            id={messageId}
+            role={error ? 'alert' : undefined}
             className={`mt-2 text-sm ${error ? 'text-error' : 'text-subtle'}`}
           >
             {error || hint}
@@ -160,10 +168,13 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, hint, className, ...props }, ref) => {
+    const generatedId = useId();
+    const inputId = props.id || generatedId;
+    const messageId = `${inputId}-message`;
     return (
       <div className="w-full">
         {label && (
-          <label 
+          <label htmlFor={inputId}
             className="block text-sm font-medium mb-2"
             style={{ color: 'var(--color-text-muted)' }}
           >
@@ -172,8 +183,11 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         <textarea
           ref={ref}
+          id={inputId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error || hint ? messageId : undefined}
           className={clsx(
-            'w-full px-4 py-3 rounded-xl transition-all duration-300 resize-none',
+            'interface-field w-full px-4 py-3 rounded-xl transition-all duration-300 resize-none',
             'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
             'border',
             error 
@@ -188,7 +202,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           {...props}
         />
         {(error || hint) && (
-          <p 
+          <p id={messageId} role={error ? 'alert' : undefined}
             className={`mt-2 text-sm ${error ? 'text-error' : 'text-subtle'}`}
           >
             {error || hint}
@@ -244,10 +258,11 @@ interface SelectProps {
 }
 
 export function Select({ label, options, value, onChange, placeholder, error }: SelectProps) {
+  const inputId = useId();
   return (
     <div className="w-full">
       {label && (
-        <label 
+        <label htmlFor={inputId}
           className="block text-sm font-medium mb-2"
           style={{ color: 'var(--color-text-muted)' }}
         >
@@ -255,10 +270,12 @@ export function Select({ label, options, value, onChange, placeholder, error }: 
         </label>
       )}
       <select
+        id={inputId}
+        aria-invalid={error ? true : undefined}
         value={value}
         onChange={e => onChange?.(e.target.value)}
         className={clsx(
-          'w-full px-4 py-3 rounded-xl transition-all duration-300',
+          'interface-field w-full px-4 py-3 rounded-xl transition-all duration-300',
           'appearance-none cursor-pointer',
           'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
           'border',

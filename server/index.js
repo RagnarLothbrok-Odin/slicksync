@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('./utils/defaultAvatar')
 // Restart trigger: 2026-01-29 - Refreshing backend state for library cache fixes
 const express = require('express');
 const cors = require('cors');
@@ -68,6 +69,7 @@ async function ensureDefaultAccount(prismaClient) {
     const passwordHash = await bcrypt.hash(defaultPassword, 12)
     await prismaClient.appAccount.create({
       data: {
+        avatarUrl: createDefaultAvatar(),
         id: DEFAULT_ACCOUNT_ID,
         uuid: DEFAULT_ACCOUNT_UUID,
         passwordHash,
@@ -557,7 +559,7 @@ app.use('/api/invitations', invitationsRouter({ prisma, getAccountId, INSTANCE_T
 app.use('/invite', invitationsRouter.createPublicRouter({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }));
 // Public library router (no auth required)
 const { getCachedLibrary, setCachedLibrary } = require('./utils/libraryCache');
-app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET }));
+app.use('/api/public-library', publicLibraryRouter({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET, imageUpload }));
 
 // Addon proxy router (no auth required - UUID serves as bearer token)
 app.use('/proxy', proxyRouter({ prisma, decrypt, getAccountId, getServerKey }));

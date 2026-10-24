@@ -1,6 +1,6 @@
 'use client';
 
-import { motion, HTMLMotionProps } from 'framer-motion';
+import { motion, HTMLMotionProps, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import { useLayoutMode } from '@/lib/layout-mode';
 
@@ -39,10 +39,11 @@ export function Card({
 
   return (
     <motion.div
-      whileHover={isInteractive ? { scale: 1.015, y: -2 } : undefined}
-      transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+      whileHover={undefined}
+      transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
       className={clsx(
-        'rounded-2xl relative overflow-hidden',
+        'interface-card rounded-2xl relative overflow-hidden',
+        isInteractive && 'interface-card-interactive',
         paddingStyles[padding],
         variant === 'bordered' && 'accent-border',
         !isAurora && (isNebula ? 'card-bg-nebula' : 'card-bg-plain'),
@@ -52,23 +53,16 @@ export function Card({
         background: isAurora
           ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
           : undefined,
-        backdropFilter: isNebula ? 'blur(18px)' : undefined,
-        WebkitBackdropFilter: isNebula ? 'blur(18px)' : undefined,
+
+
         border: isAurora ? 'none' : '1px solid var(--color-surface-border)',
         boxShadow: isAurora
           ? '0 12px 32px -12px var(--color-primary)'
-          : '0 1px 0 0 rgba(255,255,255,0.02) inset, 0 8px 24px -16px rgba(0,0,0,0.4)',
+          : '0 1px 2px rgb(0 0 0 / 0.04)',
         ...style,
       }}
       {...props}
     >
-      {!isAurora && (
-        <div
-          aria-hidden
-          className="absolute top-0 left-0 right-0 h-[3px]"
-          style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))' }}
-        />
-      )}
       {children}
     </motion.div>
   );
@@ -86,30 +80,27 @@ interface StatCardProps {
 
 export function StatCard({ label, value, icon, trend, delay = 0, onClick }: StatCardProps) {
   const { layoutMode } = useLayoutMode();
+  const reduceMotion = useReducedMotion();
   const isNebula = layoutMode === 'nebula';
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay }}
-      whileHover={{ y: -2, scale: onClick ? 1.02 : 1 }}
+      whileHover={onClick && !reduceMotion ? { y: -2 } : undefined}
       onClick={onClick}
-      className={`rounded-xl p-4 relative overflow-hidden h-[100px] group ${onClick ? 'cursor-pointer' : ''} ${isNebula ? 'card-bg-nebula' : 'card-bg-plain'}`}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } } : undefined}
+      className={`interface-card rounded-2xl p-5 relative overflow-hidden min-h-[112px] group ${onClick ? 'cursor-pointer' : ''} ${isNebula ? 'card-bg-nebula' : 'card-bg-plain'}`}
       style={{
-        backdropFilter: isNebula ? 'blur(18px)' : undefined,
-        WebkitBackdropFilter: isNebula ? 'blur(18px)' : undefined,
+
+
         border: '1px solid var(--color-surface-border)',
       }}
     >
-      {isNebula && (
-        <div
-          aria-hidden
-          className="absolute top-0 left-0 right-0 h-[2px]"
-          style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-secondary))' }}
-        />
-      )}
       {/* Hover glow */}
-      <div 
+      <div
         className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
         style={{ background: 'var(--color-primaryMuted)' }}
       />
@@ -123,14 +114,14 @@ export function StatCard({ label, value, icon, trend, delay = 0, onClick }: Stat
             <motion.p
               className="text-2xl font-bold font-display"
               style={{ color: 'var(--color-text)' }}
-              initial={{ scale: 0.8 }}
+              initial={false}
               animate={{ scale: 1 }}
               transition={{ type: 'spring', stiffness: 200, delay: delay + 0.1 }}
             >
               {typeof value === 'number' ? value.toLocaleString() : value}
             </motion.p>
             {trend ? (
-              <div 
+              <div
                 className={`flex items-center gap-1 text-xs font-medium mt-0.5 ${trend.isPositive ? 'text-success' : 'text-error'}`}
               >
                 <span>{trend.isPositive ? '↑' : '↓'}</span>
@@ -142,9 +133,9 @@ export function StatCard({ label, value, icon, trend, delay = 0, onClick }: Stat
           </div>
         </div>
         {icon && (
-          <div 
+          <div
             className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ 
+            style={{
               background: 'var(--color-primaryMuted)',
               color: 'var(--color-primary)'
             }}

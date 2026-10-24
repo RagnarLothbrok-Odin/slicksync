@@ -2,12 +2,13 @@
 
 import { useState, memo, useMemo, useEffect, useCallback, Fragment } from 'react';
 import { motion } from 'framer-motion';
+import { MetricStrip } from '@/components/ui/MetricStrip';
 import { Header } from '@/components/layout/Header';
 import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVPageProvider } from '@/components/tv/TVPageProvider';
-import { Card, StatCard, Badge, Button, UserAvatar, PageToolbar, YearInReviewCard } from '@/components/ui';
+import { Card, Badge, Button, UserAvatar, PageToolbar, YearInReviewCard } from '@/components/ui';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
 import { api, MetricsData, AtRiskUser, TasteOverlapPair, TasteProfile, HealthStatus } from '@/lib/api';
 import { useLastKnown } from '@/lib/hooks/useLastKnown';
@@ -489,23 +490,24 @@ export default function MetricsPage() {
       {layoutMode !== 'nebula' && (
         <Header
           title="Metrics"
-          subtitle="Track watch time, content consumption, and user activity"
+          subtitle="A clearer picture of your household’s viewing."
           actions={<div className="flex items-center gap-3">{periodSelect}</div>}
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
         <NebulaPageHeading
           title="Metrics"
-          subtitle="Track watch time, content consumption, and user activity"
+          subtitle="A clearer picture of your household’s viewing."
           actions={periodSelect}
         />
       )}
         {/* View Mode Toggle - Centered */}
         <PageSection className="mb-6">
           <PageToolbar
+            className="metrics-view-navigation"
             animate={false}
             filterTabs={{
               options: [
@@ -537,12 +539,12 @@ export default function MetricsPage() {
           <div className="space-y-6">
             {/* Hero: the period's total, its trend, and the shape of it. */}
             <PageSection className="mb-6">
-              <Card padding="lg">
+              <Card padding="lg" className="metrics-overview-hero">
                 <div className="flex flex-wrap items-end justify-between gap-4 mb-5">
                   <div className="min-w-0">
                     <p className="text-xs uppercase tracking-wider text-muted mb-1">Watch time · last {period === '7d' ? '7 days' : period === '30d' ? '30 days' : period === '90d' ? '90 days' : 'all time'}</p>
                     <div className="flex items-end gap-3 flex-wrap">
-                      <p className="text-3xl md:text-4xl font-bold text-default leading-none">
+                      <p className="metrics-watch-time interface-stat-value font-semibold text-default leading-none">
                         {isLoading ? '…' : formatMinutes(Math.round(watchTimeChartData.reduce((sum, d) => sum + (d.hours || 0), 0) * 60))}
                       </p>
                       {metricsData?.watchTime?.trend && metricsData.watchTime.trend.percentage > 0 && (
@@ -795,36 +797,16 @@ export default function MetricsPage() {
           <div className="space-y-6">
             {/* Stats Grid for Content Tab */}
             <PageSection className="mb-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard
-                  label="Movies Watched"
-                  value={isLoading ? '...' : (metricsData?.summary?.totalMovies || 0)}
-                  icon={<FilmIcon className="w-6 h-6" />}
-                  delay={0}
-                />
-                <StatCard
-                  label="Series Watched"
-                  value={isLoading ? '...' : (metricsData?.summary?.totalShows || 0)}
-                  icon={<TvIcon className="w-6 h-6" />}
-                  delay={0.05}
-                />
-                <StatCard
-                  label="Most Watched"
-                  value={isLoading ? '...' : (() => {
+              <MetricStrip items={[
+                  { label: 'Movies Watched', value: isLoading ? '...' : (metricsData?.summary?.totalMovies || 0), icon: <FilmIcon className="w-6 h-6" /> },
+                  { label: 'Series Watched', value: isLoading ? '...' : (metricsData?.summary?.totalShows || 0), icon: <TvIcon className="w-6 h-6" /> },
+                  { label: 'Most Watched', value: isLoading ? '...' : (() => {
                     const name = metricsData?.admin?.topItems?.series?.[0]?.name;
                     if (!name) return 'N/A';
-                    return name.length > 15 ? name.substring(0, 15) + '...' : name;
-                  })()}
-                  icon={<TrophyIcon className="w-6 h-6" />}
-                  delay={0.1}
-                />
-                <StatCard
-                  label="Binge Sessions"
-                  value={isLoading ? '...' : (metricsData?.admin?.interestingMetrics?.totalBingeSessions || 0)}
-                  icon={<FireIcon className="w-6 h-6" />}
-                  delay={0.15}
-                />
-              </div>
+                    return name;
+                  })(), icon: <TrophyIcon className="w-6 h-6" /> },
+                  { label: 'Binge Sessions', value: isLoading ? '...' : (metricsData?.admin?.interestingMetrics?.totalBingeSessions || 0), icon: <FireIcon className="w-6 h-6" /> }
+                ]} />
             </PageSection>
 
             {/* Top Row: Top Items + Watch Velocity side by side */}
@@ -943,32 +925,12 @@ export default function MetricsPage() {
           <div className="space-y-6">
             {/* Stats Grid for Admin Tab */}
             <PageSection className="mb-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatCard
-                  label="Most Active Hour"
-                  value={isLoading ? '...' : `${metricsData?.admin?.interestingMetrics?.mostActiveHour || 0}:00`}
-                  icon={<ClockIcon className="w-6 h-6" />}
-                  delay={0}
-                />
-                <StatCard
-                  label="Weekend Watching"
-                  value={isLoading ? '...' : `${(metricsData?.admin?.interestingMetrics?.weekendWatchPercentage || 0).toFixed(1)}%`}
-                  icon={<CalendarIcon className="w-6 h-6" />}
-                  delay={0.05}
-                />
-                <StatCard
-                  label="Completion Rate"
-                  value={isLoading ? '...' : `${(metricsData?.admin?.interestingMetrics?.completionRate || 0).toFixed(1)}%`}
-                  icon={<ChartBarIcon className="w-6 h-6" />}
-                  delay={0.1}
-                />
-                <StatCard
-                  label="Avg Session"
-                  value={isLoading ? '...' : formatMinutes(Math.round(metricsData?.admin?.interestingMetrics?.avgSessionDuration || 0))}
-                  icon={<PlayIcon className="w-6 h-6" />}
-                  delay={0.15}
-                />
-              </div>
+              <MetricStrip items={[
+                  { label: 'Most Active Hour', value: isLoading ? '...' : `${metricsData?.admin?.interestingMetrics?.mostActiveHour || 0}:00`, icon: <ClockIcon className="w-6 h-6" /> },
+                  { label: 'Weekend Watching', value: isLoading ? '...' : `${(metricsData?.admin?.interestingMetrics?.weekendWatchPercentage || 0).toFixed(1)}%`, icon: <CalendarIcon className="w-6 h-6" /> },
+                  { label: 'Completion Rate', value: isLoading ? '...' : `${(metricsData?.admin?.interestingMetrics?.completionRate || 0).toFixed(1)}%`, icon: <ChartBarIcon className="w-6 h-6" /> },
+                  { label: 'Avg Session', value: isLoading ? '...' : formatMinutes(Math.round(metricsData?.admin?.interestingMetrics?.avgSessionDuration || 0)), icon: <PlayIcon className="w-6 h-6" /> }
+                ]} />
             </PageSection>
 
             {/* User Joins Over Time Chart */}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
 import { Card, Button, Modal, PosterThumb, Badge, MediaDetailModal, ContextMenu, useContextMenu } from '@/components/ui';
 import { showDeletedWithUndo } from '@/components/ui/undoToast';
@@ -224,86 +225,17 @@ export default function ListsPage() {
     setLists((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
   };
 
-  const heading = { title: 'Catalogs', subtitle: 'Your custom collections of movies and shows.' };
+  const heading = { title: 'Catalogs', subtitle: 'Your taste, collected. Movies and shows worth keeping together.' };
 
-  // Nuvio Collections entry point - deliberately not a card in the page
-  // body (was too easy to miss as a full-width button there, then too
-  // long as a full-width card). Lives in the header's `leading` slot
-  // instead - opposite side from the bell/actions, compact, always visible
-  // regardless of scroll position. Colors mirror the app's existing
-  // two-tone Nuvio identity (Badge's `nuvio` variant) rather than the
-  // generic primary/secondary palette, since this manages a connected
-  // Nuvio account's own real external data, not a local catalog.
-  const nuvioCollectionsButton = (
-    <button
-      type="button"
-      onClick={() => router.push('/catalogs/nuvio-collections')}
-      className="flex-[0_1_19rem] min-w-0 flex items-center gap-3 pl-3 pr-6 py-2.5 rounded-full transition-transform hover:scale-105"
-      style={{
-        // A logo lockup (icon chip + wordmark), same shape as the app's own
-        // Sidebar branding, sized up and given real breathing room per
-        // feedback that the old plain-text pill read as an afterthought.
-        // Dark fill + amber glow (rather than the theme's own primary/
-        // secondary gradient) so this reads as Nuvio's own identity, not a
-        // generic SlickSync nav pill - same reasoning as Badge's dedicated
-        // `nuvio` variant elsewhere.
-        background: 'linear-gradient(180deg, rgba(12,8,4,0.92), rgba(24,14,4,0.92))',
-        border: '1.5px solid rgba(255,152,0,0.55)',
-        boxShadow: '0 0 20px -4px rgba(255,152,0,0.45)',
-      }}
-    >
-      <span
-        className="flex items-center justify-center rounded-2xl shrink-0"
-        style={{
-          width: 44,
-          height: 44,
-          background: 'linear-gradient(135deg, #2E9FE0 0%, #6C5CE7 55%, #C24FE0 100%)',
-        }}
-      >
-        <PlayIcon className="w-5 h-5 text-white ml-0.5" />
-      </span>
-      <span className="font-display font-bold text-lg sm:text-xl tracking-tight truncate" style={{ color: 'rgb(147, 197, 253)' }}>
-        Nuvio Collections
-      </span>
-    </button>
-  );
-
-  // Jellyfin | AIOStreams collections, next to Nuvio's: which catalogs show
-  // up as collections in AIOStreams' apps and on a household's own Jellyfin
-  // server. Jellyfin's mark and colours, with "AIOStreams" in AIOStreams' own
-  // lavender and indigo.
-  const aiostreamsCollectionsButton = (
-    <button
-      type="button"
-      onClick={() => router.push('/catalogs/aiostreams-collections')}
-      className="flex-[0_1_19rem] min-w-0 flex items-center gap-3 pl-3 pr-6 py-2.5 rounded-full transition-transform hover:scale-105"
-      style={{
-        background: 'linear-gradient(rgba(0, 11, 37, 0.94), rgba(6, 16, 46, 0.94)) padding-box, linear-gradient(115deg, rgba(170, 92, 195, 0.75), rgba(0, 164, 220, 0.75)) border-box',
-        border: '1.5px solid transparent',
-        boxShadow: '-6px 0 20px -6px rgba(170, 92, 195, 0.35), 6px 0 20px -6px rgba(0, 164, 220, 0.35)',
-      }}
-    >
-      <span
-        className="flex items-center justify-center rounded-2xl shrink-0"
-        style={{ width: 44, height: 44, background: '#000B25', border: '1px solid rgba(120, 130, 220, 0.35)' }}
-      >
-        <JellyfinLogo />
-      </span>
-      <span className="font-display font-bold text-lg sm:text-xl tracking-tight truncate">
-        <span style={{ background: 'linear-gradient(90deg, #C58BDA, #4CC3EE)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>Jellyfin</span>{' '}
-        <span style={{ color: 'rgb(212, 208, 255)' }}>| AIO</span>
-        <span style={{ color: 'rgb(159, 146, 255)' }}>Streams</span>
-      </span>
-    </button>
-  );
-
-  // The pills share one width so they read as a set: side by side when the
-  // header's left column has room, wrapping and left-aligned when it doesn't
-  // (half-width windows, phones), shrinking on the narrowest phones.
+  // Connected collections share the same secondary action style as local catalogs.
   const collectionsButtons = (
-    <div className="w-full flex flex-wrap items-center gap-3">
-      {nuvioCollectionsButton}
-      {aiostreamsCollectionsButton}
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="secondary" size="sm" leftIcon={<PlayIcon className="w-4 h-4" />} onClick={() => router.push('/catalogs/nuvio-collections')}>
+        Nuvio Collections
+      </Button>
+      <Button variant="secondary" size="sm" leftIcon={<JellyfinLogo size={18} />} onClick={() => router.push('/catalogs/aiostreams-collections')}>
+        Jellyfin / AIOStreams
+      </Button>
     </div>
   );
 
@@ -313,14 +245,20 @@ export default function ListsPage() {
         <Header
           title={<Breadcrumbs items={[{ label: 'Catalogs' }]} className="text-xl font-semibold" />}
           subtitle={heading.subtitle}
-          leading={collectionsButtons}
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
-        {layoutMode === 'nebula' && <NebulaPageHeading title={heading.title} subtitle={heading.subtitle} leading={collectionsButtons} />}
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
+        {layoutMode === 'nebula' && <NebulaPageHeading title={heading.title} subtitle={heading.subtitle} />}
 
+        <section aria-label="Connected collections" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-default bg-surface px-4 py-3 mb-6">
+          <div>
+            <h2 className="text-sm font-semibold text-default">Connected collections</h2>
+            <p className="text-xs text-muted mt-0.5">Organize the collections shown in your apps.</p>
+          </div>
+          {collectionsButtons}
+        </section>
         <BeginnerHint guideId="catalog-create">Catalogs are your own named lists of titles - separate from the Watchlist - that you can share with a code or push to a user's app.</BeginnerHint>
         <PageSection>
           {/* Wraps on a phone: the three buttons are wider than one line there. */}
@@ -345,11 +283,18 @@ export default function ListsPage() {
           </div>
 
           {loaded && lists.length === 0 && (
-            <Card padding="lg" className="text-center">
-              <RectangleStackIcon className="w-10 h-10 mx-auto text-subtle mb-3" />
-              <p className="text-sm text-muted">No catalogs yet.</p>
-              <p className="text-xs text-subtle mt-1">Create one, then add titles from any movie or show&apos;s details.</p>
-            </Card>
+            <div className="catalog-starter interface-panel rounded-2xl">
+              <EmptyState icon={<RectangleStackIcon className="w-6 h-6" />} title="A collection with your name on it"
+                description="Gather movies and shows for a mood, a movie night, or someone you love sharing with."
+                action={<Button variant="primary" size="md" leftIcon={<PlusIcon className="w-4 h-4" />} onClick={() => setShowCreate(true)}>Create a catalog</Button>} />
+              <div className="catalog-starter-ideas flex items-center justify-center gap-2 flex-wrap px-5 pb-7">
+                <span className="text-xs text-muted mr-1">Start with an idea</span>
+                {['Movie night', 'Worth a rewatch', 'Next up'].map((name) => (
+                  <button key={name} type="button" onClick={() => { setNewName(name); setShowCreate(true); }}
+                    className="rounded-full px-3 py-2 text-xs font-medium text-muted bg-surface-hover">{name}</button>
+                ))}
+              </div>
+            </div>
           )}
 
           {lists.length > 0 && (() => {

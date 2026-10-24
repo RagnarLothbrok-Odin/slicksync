@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express');
 const { publicMessage } = require('../utils/publicError');
 const { StremioAPIClient } = require('stremio-api-client');
@@ -4047,6 +4048,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
 
       const created = await prisma.user.create({
         data: {
+          avatarUrl: createDefaultAvatar(),
           accountId,
           username,
           email: user.email,
@@ -4178,6 +4180,7 @@ module.exports = ({ prisma, getAccountId, scopedWhere, INSTANCE_TYPE, decrypt, e
     }
     return prisma.user.create({
       data: {
+        avatarUrl: createDefaultAvatar(),
         accountId,
         username,
         email: baseUser.email,

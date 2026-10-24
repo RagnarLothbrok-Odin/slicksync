@@ -1,13 +1,15 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { motion } from 'framer-motion';
 import { Header } from '@/components/layout/Header';
 import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
-import { Button, Card, Badge, Modal, ConfirmModal, Avatar, ComboBox, ProviderKeyHealthBadge, ProviderKeyHealthUnchecked } from '@/components/ui';
+import { Button, Card, Badge, Modal, ConfirmModal, ComboBox, ProviderKeyHealthBadge, ProviderKeyHealthUnchecked } from '@/components/ui';
 import { PageSection } from '@/components/layout/PageContainer';
 import { useTheme } from '@/lib/theme';
 import { copyToClipboard } from '@/lib/clipboard';
+import { ToggleSwitch, SettingRow } from '@/components/settings/SettingRow';
+import { ProfilePictureSettings } from '@/components/settings/ProfilePictureSettings';
+import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { api, SyncSettings, AccountStats, PushDevice, PasskeyRow } from '@/lib/api';
 import { toast, showToast } from '@/components/ui/Toast';
@@ -46,8 +48,8 @@ import {
   Squares2X2Icon,
   ArrowTopRightOnSquareIcon,
   InformationCircleIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline';
-import { ScrollRow } from '@/components/ui/ScrollRow';
 import { LumiereDbField } from '@/components/settings/LumiereDbField';
 import { AboutPanel } from '@/components/settings/AboutPanel';
 
@@ -114,69 +116,6 @@ function formatLastSeen(dateStr: string | null): string {
 }
 
 // Toggle switch component
-function ToggleSwitch({
-  enabled,
-  onChange,
-  label,
-  disabled,
-}: {
-  enabled: boolean;
-  onChange: (value: boolean) => void;
-  label?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      onClick={() => !disabled && onChange(!enabled)}
-      className={`flex items-center gap-3 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      disabled={disabled}
-    >
-      <div
-        className={`relative w-10 h-5 rounded-full transition-colors ${
-          enabled ? 'bg-primary' : 'bg-muted'
-        }`}
-      >
-        <motion.div
-          initial={false}
-          animate={{ x: enabled ? 20 : 2 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-          className="absolute top-0.5 w-4 h-4 rounded-full shadow-md bg-surface"
-          style={{ backgroundColor: 'var(--color-text)' }}
-        />
-      </div>
-    </button>
-  );
-}
-
-// Setting row component
-function SettingRow({
-  label,
-  description,
-  children,
-  disabled,
-}: {
-  label: string;
-  description: string;
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    // data-setting carries the visible label verbatim so the command
-    // palette's settings deep-search (lib/settingsIndex.ts) can scroll to
-    // and flash this exact row via /settings?highlight=<label>.
-    <div data-setting={label} className={`flex items-center justify-between p-4 rounded-lg bg-subtle ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
-      <div>
-        <p className="font-medium text-sm text-default">{label}</p>
-        <p className="text-xs text-muted">{description}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
 // Locates the on-page element for a settings deep-link target: exact
 // data-setting match first (every SettingRow), then a text scan over the
 // labelled blocks and section headers that aren't SettingRows. Returns the
@@ -185,7 +124,7 @@ function findSettingElement(target: string): HTMLElement | null {
   const exact = document.querySelector(`[data-setting="${CSS.escape(target)}"]`);
   if (exact) return exact as HTMLElement;
   const t = target.trim().toLowerCase();
-  for (const el of Array.from(document.querySelectorAll('label, h3'))) {
+  for (const el of Array.from(document.querySelectorAll('label, h3, p'))) {
     const txt = (el.textContent || '').trim().toLowerCase();
     if (txt === t || txt.startsWith(t)) return (el.closest('div') || el) as HTMLElement;
   }
@@ -474,15 +413,11 @@ export default function SettingsPage() {
   // Mirrors the localStorage flag so the switch reflects reality after mount
   // (reading it during render would disagree with the server render).
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  // The rail's hover is tracked here instead of in CSS, for two reasons that
-  // both bit this rail. The rows carry inline styles, and an inline
-  // background silently beats any :hover rule that isn't !important - so the
-  // CSS hover never actually painted anything. And a CSS :hover STICKS after
-  // a tap on a touch screen (there is no hover-out event to end it), which is
-  // exactly the "the last one I clicked stays lit" symptom. State can only
-  // hold one key, and only a real mouse can set it, so at most one row is
-  // ever lit and a tap can never leave one behind.
-  const [hoveredTab, setHoveredTab] = useState<SettingsTab | null>(null);
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const currentSection = SETTINGS_TABS.find((tab) => tab.key === activeTab)!;
+  const settingsMatches = settingsQuery.trim() ? SETTINGS_INDEX.filter((entry) =>
+    `${entry.label} ${entry.section} ${entry.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase())
+  ).slice(0, 12) : [];
   // Nebula puts the app's own nav across the top, so settings can own the
   // left rail. Original already has a sidebar - a second one beside it is
   // the clutter this avoids.
@@ -1267,129 +1202,59 @@ export default function SettingsPage() {
       {layoutMode !== 'nebula' && (
         <Header
           title="Settings"
-          subtitle="Customize your SlickSync experience"
+          subtitle="Make yourself at home. Your preferences, connections, and account."
         />
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-6 lg:p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={{ maxWidth: layoutMode === 'nebula' ? 'min(120rem, 92vw)' : '896px' }}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={{ maxWidth: layoutMode === 'nebula' ? 'min(92rem, 92vw)' : '70rem' }}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading title="Settings" subtitle="Customize your SlickSync experience" />
+        <NebulaPageHeading title="Settings" subtitle="Make yourself at home. Your preferences, connections, and account." />
       )}
-        {/* Settings navigation takes the axis the APP's own layout is not
-            using. In Nebula (top nav) that is a left rail; in Original (which
-            already has a sidebar) a second vertical nav beside the first just
-            reads as clutter, so the groups run along the top instead. Narrow
-            screens always get the horizontal row - a rail there would eat the
-            width the settings themselves need. */}
-        {/* Row only where the rail actually exists. The rail is hidden below
-            md, but this container stayed a flex row there - so the phone laid
-            the tab strip and the settings out SIDE BY SIDE, the strip took
-            the width, and every setting ended up off-screen to the right of
-            it. Below md this has to be plain block flow: strip on top,
-            settings under it. */}
-        <div className={useSettingsRail ? 'md:flex md:gap-6 md:items-start' : ''}>
-          {useSettingsRail && (
-          <nav
-            className="hidden md:block w-56 shrink-0 sticky top-4"
-            // Safety net for the pointer that leaves the rail fast enough to
-            // skip a row's own leave event (or leaves the window entirely).
-            onPointerLeave={() => setHoveredTab(null)}
-          >
-            <div className="rounded-2xl p-2" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-surface-border)' }}>
-              {SETTINGS_TABS.map((t) => {
-                const active = activeTab === t.key;
-                const hovered = !active && hoveredTab === t.key;
-                const Icon = t.icon;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    // Clearing the hover on click matters as much as setting
-                    // it: after a tap the finger is gone but the pointer
-                    // never "leaves", so without this the row you just
-                    // chose would keep its hover tint on top of everything.
-                    onClick={(e) => { setActiveTab(t.key); setHoveredTab(null); e.currentTarget.blur(); }}
-                    onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHoveredTab(t.key); }}
-                    onPointerLeave={() => setHoveredTab((k) => (k === t.key ? null : k))}
-                    // One of three mutually exclusive classes, never a mix,
-                    // and each is !important (see globals.css) - so a row
-                    // that is not the selected one cannot be painted by a
-                    // leftover :hover, a theme rule, or anything else. The
-                    // selected row is a solid fill rather than the 20% tint
-                    // it used to be: the tint sat too close to the card
-                    // behind it to read as "this one and none of the others".
-                    className={`relative w-full flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl text-left mb-0.5 focus:outline-none rail-item ${active ? 'rail-item-on' : hovered ? 'rail-item-warm' : 'rail-item-off'}`}
-                  >
-                    <Icon className={`w-4 h-4 shrink-0 ${active ? 'rail-ico-on' : 'text-muted'}`} />
-                    <span className="min-w-0">
-                      <span className={`block text-sm ${active ? 'font-semibold' : 'font-medium'}`}>{t.label}</span>
-                      <span className={`block text-[11px] leading-tight ${active ? 'rail-blurb-on' : 'text-muted'}`}>{t.blurb}</span>
-                    </span>
-                  </button>
-                );
-              })}
+        <div className={`settings-workspace ${useSettingsRail ? 'settings-with-rail' : ''}`}>
+          <SettingsNavigation sections={SETTINGS_TABS.map(tab => ({ ...tab, group: ['general', 'themes', 'notifications'].includes(tab.key) ? 'Your experience' : 'Your setup' }))}
+            activeKey={activeTab} onChange={key => { setActiveTab(key as SettingsTab); setSettingsQuery(''); }} query={settingsQuery} onQueryChange={setSettingsQuery} />
+
+          <div className="settings-content min-w-0">
+            {settingsQuery.trim() ? (
+              <section className="settings-search-results mb-7" aria-label="Settings search results">
+                <h2 className="text-xl font-semibold text-default mb-2">Find your setting</h2>
+                <p className="text-sm text-muted mb-5">{settingsMatches.length ? 'Choose a result to jump straight to its control.' : 'No matching settings. Try a different name, like notifications or timezone.'}</p>
+                <div className="interface-panel rounded-2xl overflow-hidden">
+                  {settingsMatches.map((entry) => (
+                    <button key={`${entry.section}-${entry.label}`} type="button"
+                      onClick={() => { setSettingsQuery(''); window.dispatchEvent(new CustomEvent('slicksync:settings-highlight', { detail: entry.label })); }}
+                      className="settings-result flex items-center justify-between gap-4 w-full text-left px-5 py-4">
+                      <span><span className="block text-sm font-medium text-default">{entry.label}</span><span className="block text-xs text-muted mt-1">{entry.section}</span></span>
+                      <ChevronRightIcon className="w-4 h-4 text-muted shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            <div hidden={!!settingsQuery.trim()}>
+            <div className="settings-section-heading mb-6">
+              <p className="text-xs font-medium text-primary mb-2">Settings</p>
+              <h2 className="text-2xl font-semibold text-default">{currentSection.label}</h2>
+              <p className="text-sm text-muted mt-2">{currentSection.blurb}</p>
             </div>
-          </nav>
-          )}
-
-          <div className={`${useSettingsRail ? 'md:hidden' : ''} -mx-1 px-1 pb-3 sticky top-0 z-20`} style={{ background: 'linear-gradient(180deg, var(--color-bg) 70%, transparent)' }}>
-            <ScrollRow className="flex gap-1.5">
-              {SETTINGS_TABS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setActiveTab(t.key)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap focus:outline-none ${
-                    activeTab === t.key ? 'bg-primary text-white' : 'bg-surface-hover text-muted nav-item-hover-pill'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </ScrollRow>
-          </div>
-
-          <div className={useSettingsRail ? 'flex-1 min-w-0' : ''}>
-
 
         {activeTab === 'themes' && <ThemesPanel embedded />}
 
         {activeTab === 'about' && <AboutPanel lumiere={!isPublicInstance && !!syncSettings.lumiereDbUrl} shared={isPublicInstance} />}
 
+        <div className="settings-profile-grid">
         {/* Profile Picture - shown on the account button (bottom-left in
             Nebula, bottom of sidebar in Original) and its dropdown menu. */}
         {activeTab === 'general' && (
         <PageSection className="mb-6">
-          <Card padding="lg">
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-primary-muted">
-                <UserCircleIcon className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="text-base font-semibold font-display text-default">Profile Picture</h3>
-                <p className="text-xs text-muted">Shown on your account button and its menu</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <Avatar
-                name={isPublicInstance ? (accountInfo?.uuid || accountInfo?.email || 'Admin') : 'Administrator'}
-                src={accountInfo?.avatarUrl || undefined}
-                email={accountInfo?.email || undefined}
-                size="xl"
-                fallbackIcon={<ShieldCheckIcon className="w-7 h-7" style={{ color: 'white' }} />}
-              />
-              <div className="flex-1">
-                <Button variant="secondary" size="sm" onClick={() => setAvatarModalOpen(true)}>
-                  Change Picture
-                </Button>
-                <p className="text-xs text-muted mt-2">
-                  Upload an image, paste a URL, or pick a color
-                </p>
-              </div>
-            </div>
-
+          <ProfilePictureSettings
+            name={isPublicInstance ? (accountInfo?.uuid || accountInfo?.email || 'Admin') : 'Administrator'}
+            src={accountInfo?.avatarUrl || undefined}
+            email={accountInfo?.email || undefined}
+            fallbackIcon={<ShieldCheckIcon className="w-7 h-7" style={{ color: 'white' }} />}
+            onChange={() => setAvatarModalOpen(true)}
+          >
             {isPublicInstance && (
               <div className="mt-5 pt-5 border-t border-default">
                 <label className="text-sm font-medium text-default mb-1.5 block">Nickname</label>
@@ -1413,7 +1278,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-          </Card>
+          </ProfilePictureSettings>
         </PageSection>
         )}
 
@@ -1442,6 +1307,8 @@ export default function SettingsPage() {
           </Card>
         </PageSection>
         )}
+
+        </div>
 
         {/* Privacy & Display */}
         {activeTab === 'general' && (
@@ -2941,6 +2808,7 @@ export default function SettingsPage() {
           </Card>
         </PageSection>
         )}
+            </div>
           </div>
         </div>
       </div>

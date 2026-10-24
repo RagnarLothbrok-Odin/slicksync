@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { PersonalPageHint } from '@/components/user/PersonalPageHint';
+import { PersonalPreferencesProvider } from '@/components/user/PersonalPreferences';
 import { UserAuthProvider } from '@/lib/hooks/useUserAuth';
 import { UserAuthGate } from '@/components/user/UserAuthGate';
 import { PersonTopbar } from '@/components/user/PersonTopbar';
@@ -28,7 +30,8 @@ export default function UserLayout({
     const path = pathname || '/user';
 
     let section = 'Home';
-    if (path.startsWith('/user/library')) section = 'Library';
+    if (path.startsWith('/user/discover')) section = 'Discover';
+    else if (path.startsWith('/user/library')) section = 'Library';
     else if (path.startsWith('/user/activity')) section = 'Activity';
     else if (path.startsWith('/user/addons')) section = 'Addons';
     else if (path.startsWith('/user/shares')) section = 'Shares';
@@ -59,16 +62,18 @@ export default function UserLayout({
   return (
     <UserAuthProvider>
       <UserAuthGate>
+      <PersonalPreferencesProvider>
         <UserMobileMenuContext.Provider value={{ isOpen: isMobileMenuOpen, onOpen: handleOpen, onClose: handleClose }}>
           <div className="relative min-h-screen">
             {/* The collapsed nav opens inside the bar, so nothing locks the page
                 behind it the way the old side drawer did. */}
             <PersonTopbar />
-            <UserPageContainer>
+            <UserPageContainer><PersonalPageHint />
               {children}
             </UserPageContainer>
           </div>
         </UserMobileMenuContext.Provider>
+      </PersonalPreferencesProvider>
       </UserAuthGate>
     </UserAuthProvider>
   );

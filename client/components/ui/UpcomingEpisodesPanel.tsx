@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useEffect, useState, memo, useCallback, useRef } from 'react';
 import { CalendarDaysIcon, TvIcon, XCircleIcon, SpeakerXMarkIcon, SpeakerWaveIcon } from '@heroicons/react/24/outline';
 import { Card, MediaDetailModal, ContextMenu, useContextMenu, Modal, Button } from '@/components/ui';
@@ -76,7 +77,11 @@ const UpcomingRow = memo(function UpcomingRow({
   onOpen,
   onDismiss,
   onMute,
+  householdActions = true,
+  cacheImages = true,
 }: {
+  householdActions?: boolean;
+  cacheImages?: boolean;
   item: UpcomingEpisode;
   onOpen: (item: UpcomingEpisode) => void;
   onDismiss: (item: UpcomingEpisode) => void;
@@ -124,8 +129,8 @@ const UpcomingRow = memo(function UpcomingRow({
           if (isOpen) return;
           onOpen(item);
         }}
-        onContextMenu={handleContextMenu}
-        onTouchStart={handleTouchStart}
+        onContextMenu={householdActions ? handleContextMenu : undefined}
+        onTouchStart={householdActions ? handleTouchStart : undefined}
         onTouchEnd={clearPress}
         onTouchCancel={clearPress}
         onTouchMove={handleTouchMove}
@@ -134,7 +139,7 @@ const UpcomingRow = memo(function UpcomingRow({
         <div className="w-10 h-14 rounded-md overflow-hidden bg-surface-hover flex-shrink-0 flex items-center justify-center">
           {item.poster ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={posterUrl({ id: item.showId, poster: item.poster }, rpdbEnabled)} alt="" className="w-full h-full object-cover" />
+            <img src={cacheImages ? posterUrl({ id: item.showId, poster: item.poster }, rpdbEnabled) : item.poster} alt="" className="w-full h-full object-cover" />
           ) : (
             <TvIcon className="w-5 h-5 text-subtle" />
           )}
@@ -154,7 +159,7 @@ const UpcomingRow = memo(function UpcomingRow({
         </div>
       </button>
 
-      <ContextMenu isOpen={isOpen} position={position} onClose={close}>
+      <ContextMenu isOpen={householdActions && isOpen} position={position} onClose={close}>
         <button
           type="button"
           onClick={() => { close(); onDismiss(item); }}
@@ -176,7 +181,9 @@ const UpcomingRow = memo(function UpcomingRow({
   );
 });
 
-export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
+type CalendarClient = Pick<typeof api, 'getUpcomingEpisodes' | 'dismissUpcomingEpisode' | 'muteShow' | 'getMutedShows' | 'unmuteShow'>;
+
+export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel({ client = api, householdActions = true, renderDetail }: { client?: CalendarClient; householdActions?: boolean; renderDetail?: (item: UpcomingEpisode, onClose: () => void) => ReactNode } = {}) {
   const [items, setItems] = useState<UpcomingEpisode[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [detail, setDetail] = useState<UpcomingEpisode | null>(null);
@@ -185,11 +192,11 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   useEffect(() => {
-    api.getUpcomingEpisodes()
+    client.getUpcomingEpisodes()
       .then((r) => setItems(Array.isArray(r) ? r : []))
       .catch(() => setItems([]))
       .finally(() => setLoaded(true));
-  }, []);
+  }, [client]);
 
   // Optimistically removes the row, but only keeps it gone (and only tells
   // the user it worked) once the server call actually confirms it - a
@@ -200,13 +207,13 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
   const handleDismiss = useCallback(async (item: UpcomingEpisode) => {
     setItems((prev) => prev.filter((i) => !(i.showId === item.showId && i.season === item.season && i.episode === item.episode)));
     try {
-      await api.dismissUpcomingEpisode(item.showId, item.season, item.episode);
+      await client.dismissUpcomingEpisode(item.showId, item.season, item.episode);
       toast.success(`Hidden ${item.showName || 'episode'} ${epLabel(item.season, item.episode)}`);
     } catch {
       setItems((prev) => [...prev, item]);
       toast.error(`Failed to hide ${item.showName || 'that episode'} - try again`);
     }
-  }, []);
+  }, [client]);
 
   // Mutes the whole show, not just this one episode - removes every row for
   // it (there's only ever one per show anyway) and stops future new-episode
@@ -215,29 +222,29 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
   const handleMute = useCallback(async (item: UpcomingEpisode) => {
     setItems((prev) => prev.filter((i) => i.showId !== item.showId));
     try {
-      await api.muteShow(item.showId, item.showName || undefined, item.poster || undefined);
+      await client.muteShow(item.showId, item.showName || undefined, item.poster || undefined);
       toast.success(`Won't track new episodes for ${item.showName || 'this show'} anymore`);
     } catch {
       setItems((prev) => [...prev, item]);
       toast.error(`Failed to stop tracking ${item.showName || 'that show'} - try again`);
     }
-  }, []);
+  }, [client]);
 
   const openMutedModal = useCallback(() => {
-    api.getMutedShows().then(setMutedShows).catch(() => setMutedShows([]));
+    client.getMutedShows().then(setMutedShows).catch(() => setMutedShows([]));
     setIsMutedModalOpen(true);
-  }, []);
+  }, [client]);
 
   const handleUnmute = useCallback(async (show: MutedShow) => {
     setMutedShows((prev) => prev.filter((s) => s.id !== show.id));
     try {
-      await api.unmuteShow(show.showId);
+      await client.unmuteShow(show.showId);
       toast.success(`${show.showName || 'Show'} will show up again once it has a new episode`);
     } catch {
       setMutedShows((prev) => [...prev, show]);
       toast.error(`Failed to unmute ${show.showName || 'that show'} - try again`);
     }
-  }, []);
+  }, [client]);
 
   if (!loaded) return null;
 
@@ -258,8 +265,8 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
         <div className="flex items-center gap-2 mb-4">
           <CalendarDaysIcon className="w-5 h-5 text-primary" />
           <h3 className="text-base font-semibold font-display text-default">Coming up</h3>
-          <span className="text-xs text-muted hidden sm:inline">New episodes for shows you&apos;re watching · right-click or long-press to hide</span>
-          <span className="text-xs text-muted sm:hidden">Long-press to hide</span>
+          {householdActions && <span className="text-xs text-muted hidden sm:inline">New episodes for shows you&apos;re watching · right-click or long-press to hide</span>}
+          {householdActions && <span className="text-xs text-muted sm:hidden">Long-press to hide</span>}
           <button
             type="button"
             onClick={() => setIsCalendarOpen(true)}
@@ -267,14 +274,14 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
           >
             Full calendar
           </button>
-          <button
+          {householdActions && <button
             type="button"
             onClick={openMutedModal}
             title="Manage muted shows"
             className="p-1.5 rounded-lg text-muted hover:text-default hover:bg-surface-hover transition-colors"
           >
             <SpeakerXMarkIcon className="w-4 h-4" />
-          </button>
+          </button>}
         </div>
 
         {/* Grid on desktop (two columns from md up) so a healthy watchlist
@@ -283,6 +290,8 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5">
           {items.slice(0, 8).map((item) => (
             <UpcomingRow
+              householdActions={householdActions}
+              cacheImages={householdActions}
               key={`${item.showId}-${item.season}-${item.episode}`}
               item={item}
               onOpen={setDetail}
@@ -304,7 +313,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
       </button>
     )}
 
-      {detail && (
+      {detail && (renderDetail ? renderDetail(detail, () => setDetail(null)) : (
         <MediaDetailModal
           isOpen={!!detail}
           onClose={() => setDetail(null)}
@@ -313,7 +322,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
           fallbackTitle={detail.showName || 'Upcoming episode'}
           fallbackPoster={detail.poster}
         />
-      )}
+      ))}
 
       {/* Full airing calendar: every tracked show's next episode, grouped by
           the day it airs. Reuses the same rows (open detail, hide, mute) as the
@@ -336,6 +345,8 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanel() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
                     {group.items.map((item) => (
                       <UpcomingRow
+              householdActions={householdActions}
+              cacheImages={householdActions}
                         key={`${item.showId}-${item.season}-${item.episode}`}
                         item={item}
                         onOpen={(it) => { setIsCalendarOpen(false); setDetail(it); }}

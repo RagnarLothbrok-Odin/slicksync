@@ -155,20 +155,22 @@ function invalidateContinueWatching(accountId) {
   for (const key of cwBuilding.keys()) if (key.startsWith(prefix)) cwBuilding.delete(key)
 }
 
-async function getContinueWatching(prisma, accountId, limit = 8) {
-  const key = `${accountId || 'default'}:${limit}`
+async function getContinueWatching(prisma, accountId, limit = 8, userId = null) {
+  const key = `${accountId || 'default'}:${limit}:${userId || 'household'}`
   const hit = cwMemo.get(key)
   if (hit && Date.now() - hit.at < CW_MEMO_TTL_MS) return hit.value
   // Several screens opening at once share one computation.
   if (cwBuilding.has(key)) return cwBuilding.get(key)
-  const promise = computeContinueWatching(prisma, accountId, limit)
+  const promise = computeContinueWatching(prisma, accountId, limit, userId)
     .then((value) => { if (cwBuilding.get(key) === promise) cwMemo.set(key, { at: Date.now(), value }); return value })
     .finally(() => { if (cwBuilding.get(key) === promise) cwBuilding.delete(key) })
   cwBuilding.set(key, promise)
   return promise
 }
 
-async function computeContinueWatching(prisma, accountId, limit = 8) {
+async function computeContinueWatching(prisma, accountId, limit = 8, userId = null) {
+  // Filter before selecting candidates or applying limits, and keep personal
+  // results in their own cache entry so household traffic cannot replace them.
   const accountIdValue = accountId || 'default'
   const { resolveOmdbKeyForAccount } = require('./listImport')
   const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountIdValue)
@@ -178,7 +180,7 @@ async function computeContinueWatching(prisma, accountId, limit = 8) {
   // groupBy for "latest row per group with full columns".
   const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000) // 120 days
   const rows = await prisma.episodeWatchHistory.findMany({
-    where: { accountId: accountIdValue, watchedAt: { gte: since } },
+    where: { accountId: accountIdValue, ...(userId ? { userId } : {}), watchedAt: { gte: since } },
     orderBy: { watchedAt: 'desc' }
   })
 
@@ -195,7 +197,7 @@ async function computeContinueWatching(prisma, accountId, limit = 8) {
   const userMap = new Map(users.map((u) => [u.id, u]))
 
   const dismissed = await prisma.dismissedContinueWatching.findMany({
-    where: { accountId: accountIdValue },
+    where: { accountId: accountIdValue, ...(userId ? { userId } : {}) },
     select: { userId: true, showId: true }
   })
   const dismissedKeys = new Set(dismissed.map((d) => `${d.userId}:${d.showId}`))
@@ -328,7 +330,7 @@ async function computeContinueWatching(prisma, accountId, limit = 8) {
   // only qualifies while its WatchSession says it's partway through; finished
   // movies have nothing to continue.
   const movieRows = await prisma.movieWatchHistory.findMany({
-    where: { accountId: accountIdValue, watchedAt: { gte: since } },
+    where: { accountId: accountIdValue, ...(userId ? { userId } : {}), watchedAt: { gte: since } },
     orderBy: { watchedAt: 'desc' }
   })
   const latestPerMovie = new Map()

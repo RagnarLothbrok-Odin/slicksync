@@ -3,7 +3,7 @@
 // them on a person could point that person at someone else's server account
 // and be handed that account's next sign-in. So the one household route that
 // edits a person in place takes the two notification settings and nothing
-// more, and a person changes those two for themselves through the same proof
+// more. A person can also edit their own picture through the same proof
 // of identity the rest of their page uses.
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -144,7 +144,7 @@ test('a person cannot change settings without proof, with someone else\'s, or re
   assert.equal(none.status, 401)
   const other = await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', notifyOnWatch: false }, { 'x-stremio-auth': sessionFor('someone-else') })
   assert.equal(other.status, 401)
-  // Only the two settings are read from the request; the rest is ignored, never written.
+  // Only editable profile settings are read; provider identity fields are never written.
   const headers = { 'x-stremio-auth': sessionFor('j1') }
   const sneaky = await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', notifyOnWatch: true, jellyfinUserId: 'victim', providerType: 'stremio' }, headers)
   assert.equal(sneaky.status, 200)
@@ -153,4 +153,37 @@ test('a person cannot change settings without proof, with someone else\'s, or re
   const empty = await call('PATCH', '/api/public-library/user-settings', { userId: 'j1' }, headers)
   assert.equal(empty.status, 400)
   assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', notifyOnWatch: 'yes' }, headers)).status, 400)
+})
+
+test('a person can choose their own avatar but cannot change someone else or provider identity', async (t) => {
+  const db = fakeDb()
+  const call = await portal(t, db)
+  const avatarUrl = 'https://api.dicebear.com/10.x/voxel-bot/svg?seed=choice'
+  const headers = { 'x-stremio-auth': sessionFor('j1') }
+  assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', avatarUrl, colorIndex: 3 }, headers)).status, 200)
+  assert.equal(db.rows[1].avatarUrl, avatarUrl)
+  assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'p1', avatarUrl }, headers)).status, 401)
+  assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', avatarUrl: 'javascript:bad' }, headers)).status, 400)
+  assert.equal((await call('PATCH', '/api/public-library/user-settings', { userId: 'j1', colorIndex: -1 }, headers)).status, 400)
+})
+
+test('personal uploads verify identity before parsing files and expose no deletion route', async (t) => {
+  const db = fakeDb()
+  let parsed = 0
+  const call = await serve(t, app => {
+    app.use('/api/public-library', makePublicLibraryRouter({
+      prisma: db, DEFAULT_ACCOUNT_ID: 'default', encrypt: v => v, decrypt: v => v,
+      getCachedLibrary: () => [], setCachedLibrary: () => {}, JWT_SECRET: SECRET,
+      imageUpload: { single: () => (_req, _res, next) => { parsed++; next() } },
+    }))
+  })
+  const path = '/api/public-library/avatars/upload?userId=j1'
+  assert.equal((await call('POST', path, {})).status, 401)
+  assert.equal(parsed, 0)
+  assert.equal((await call('POST', path, {}, { 'x-stremio-auth': sessionFor('someone-else') })).status, 401)
+  assert.equal(parsed, 0)
+  // Authenticated, but no image was sent. The shared upload handler rejects it.
+  assert.equal((await call('POST', path, {}, { 'x-stremio-auth': sessionFor('j1') })).status, 400)
+  assert.equal(parsed, 1)
+  assert.equal((await call('DELETE', '/api/public-library/avatars/example.png', {}, { 'x-stremio-auth': sessionFor('j1') })).status, 404)
 })

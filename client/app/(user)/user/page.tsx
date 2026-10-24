@@ -17,6 +17,9 @@ import {
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
 import { Avatar } from '@/components/ui';
+import { PersonalCalendar } from '@/components/user/PersonalCalendar';
+import { PersonalContinueWatching } from '@/components/user/PersonalContinueWatching';
+import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
 import { userActivity, userSync, UserActivityData, AtRiskStatus, getOwnScreenTime } from '@/lib/user-api';
 import { MoonIcon as PausedMoonIcon, PauseCircleIcon as PausedIcon } from '@heroicons/react/24/outline';
 import { providerTypeLabel } from '@/lib/providers';
@@ -66,7 +69,7 @@ function StatCard({ label, value, icon, color = 'var(--color-primary)', delay = 
       <div className="flex items-center gap-3">
         <div 
           className="w-10 h-10 rounded-lg flex items-center justify-center"
-          style={{ background: `${color}20`, color }}
+          style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}
         >
           {icon}
         </div>
@@ -90,6 +93,7 @@ function StatCard({ label, value, icon, color = 'var(--color-primary)', delay = 
 }
 
 export default function UserHomePage() {
+  const { preferences } = usePersonalPreferences();
   const { userId, userInfo, provider } = useUserAuth();
   const providerLabel = providerTypeLabel(provider);
   const { authKey, isReady } = useUserAuthHeaders();
@@ -207,8 +211,8 @@ export default function UserHomePage() {
   return (
     <div className="p-4 sm:p-8">
       <UserPageHeader 
-        title={`Welcome back, ${userInfo?.username || 'User'}!`}
-        subtitle="Here's your activity overview"
+        title={`Hello, ${userInfo?.username || 'User'}.`}
+        subtitle="Your library, your activity, and what’s next."
       />
 
       {/* Profile Card with Sync Button and Risk Badge */}
@@ -227,7 +231,8 @@ export default function UserHomePage() {
           <div className="flex items-center gap-4 sm:gap-6 flex-1 min-w-0">
           <Avatar
             name={userInfo?.username || 'User'}
-            email={userInfo?.email}
+            email={preferences.hideSensitive ? 'Hidden' : userInfo?.email}
+            src={userInfo?.avatarUrl || undefined}
             useGravatar={userInfo?.useGravatar}
             colorIndex={userInfo?.colorIndex || 0}
             size="xl"
@@ -259,9 +264,9 @@ export default function UserHomePage() {
               className="text-sm truncate"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {userInfo?.email}
+              {preferences.hideSensitive ? 'Hidden' : userInfo?.email}
             </p>
-            {userInfo?.groupName && (
+            {!preferences.hideSensitive && userInfo?.groupName && (
               <p 
                 className="text-sm mt-1"
                 style={{ color: 'var(--color-text-subtle)' }}
@@ -373,6 +378,9 @@ export default function UserHomePage() {
           </p>
         </div>
       )}
+
+      <PersonalContinueWatching />
+      <PersonalCalendar />
 
       {/* Stats Grid */}
       {!loading && !error && stats && (

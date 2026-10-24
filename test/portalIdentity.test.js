@@ -80,6 +80,7 @@ function makeData() {
     movieWatchHistory: table([]),
     episodeWatchHistory: table([]),
     watchlistItem: table([]),
+    personalTitleState: table([]),
     watchActivity: table([]),
   }
 }
@@ -339,3 +340,71 @@ for (const type of ['public', 'private']) {
     assert.deepEqual(calls, ['https://addon.example.com/manifest.json'])
   })
 }
+
+test('an authenticated person can read their own profile before joining a group', async () => {
+  const person = data.user.rows.find(row => row.id === 'jA')
+  const previous = person.accountId
+  person.accountId = 'household-without-groups'
+  try {
+    const response = await call('GET', '/user-info', { key: session('jA', 'jellyfin'), query: { userId: 'jA' } })
+    assert.equal(response.status, 200)
+  } finally { person.accountId = previous }
+})
+
+test('own profile reports exact group membership, including a solo member', async () => {
+  const group = data.group.rows[0]
+  const previous = group.userIds
+  group.name = 'Household'
+  group.userIds = JSON.stringify(['jA'])
+  try {
+    const response = await call('GET', '/user-info', { key: session('jA', 'jellyfin'), query: { userId: 'jA' } })
+    assert.equal(response.status, 200)
+    assert.deepEqual(response.body.groups, [{ id: group.id, name: 'Household' }])
+    assert.equal(response.body.groupName, 'Household')
+  } finally { group.userIds = previous }
+})
+
+
+test('Nuvio profile selection stays within the authenticated login and household', async () => {
+  const sibling = person('nSibling', 'acc1', { providerType: 'nuvio', nuvioUserId: 'nuvio-1', nuvioProfileId: 2, nuvioRefreshToken: 'refresh-1' })
+  const unrelated = person('nOther', 'acc1', { providerType: 'nuvio', nuvioUserId: 'nuvio-other', nuvioRefreshToken: 'refresh-other' })
+  data.user.rows.push(sibling, unrelated)
+  const group = data.group.rows.find(row => row.id === 'g1')
+  const previousMembers = group.userIds
+  group.userIds = JSON.stringify([...JSON.parse(group.userIds), sibling.id])
+  try {
+    const key = session('nA', 'nuvio')
+    const listing = await call('GET', '/profiles', { key, query: { userId: 'nA' } })
+    assert.equal(listing.status, 200)
+    assert.deepEqual(listing.body.profiles.map(profile => profile.id).sort(), ['nA', 'nSibling'])
+    assert.equal(listing.body.profiles[0].nuvioRefreshToken, undefined)
+    for (const targetId of ['nA2', 'nOther', 'sA']) {
+      assert.equal((await call('POST', '/switch-profile', { key, body: { userId: 'nA', targetId } })).status, 404)
+    }
+    assert.equal((await call('GET', '/profiles', { key: session('nA2', 'nuvio'), query: { userId: 'nA' } })).status, 401)
+    const switched = await call('POST', '/switch-profile', { key, body: { userId: 'nA', targetId: 'nSibling' } })
+    assert.equal(switched.status, 200)
+    assert.equal(jwt.verify(switched.body.sessionToken, SECRET).sub, 'nSibling')
+    assert.equal((await call('GET', '/user-info', { key, query: { userId: 'nSibling' } })).status, 401)
+    assert.equal((await call('GET', '/user-info', { key: switched.body.sessionToken, query: { userId: 'nSibling' } })).status, 200)
+  } finally { group.userIds = previousMembers; for (const id of ['nSibling', 'nOther']) data.user.rows.splice(data.user.rows.findIndex(row => row.id === id), 1) }
+})
+
+test('rapid Nuvio session restoration never consumes a provider refresh token', async () => {
+  const before = data.user.rows.find(row => row.id === 'nA').nuvioRefreshToken
+  const previousFetch = global.fetch
+  let providerCalls = 0
+  global.fetch = async () => { providerCalls++; throw new Error('Provider unavailable') }
+  try {
+    const key = session('nA', 'nuvio')
+    const results = await Promise.all(Array.from({ length: 4 }, () => call('POST', '/validate-nuvio', { key, body: { userId: 'nA' } })))
+    for (const result of results) {
+      assert.equal(result.status, 200)
+      assert.equal(result.body.valid, true)
+      assert.equal(jwt.verify(result.body.sessionToken, SECRET).sub, 'nA')
+    }
+    assert.equal(providerCalls, 0)
+    assert.equal(data.user.rows.find(row => row.id === 'nA').nuvioRefreshToken, before)
+    assert.equal((await call('POST', '/validate-nuvio', { key: 'invalid', body: { userId: 'nA' } })).status, 401)
+  } finally { global.fetch = previousFetch }
+})

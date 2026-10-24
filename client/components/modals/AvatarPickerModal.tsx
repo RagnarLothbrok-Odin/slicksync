@@ -7,6 +7,8 @@ import { Modal, Button } from '@/components/ui';
 import { Avatar, AvatarColorSwatches, avatarColorFill } from '@/components/ui/Avatar';
 import { toast } from '@/components/ui/Toast';
 import { api, NuvioCommunityCover } from '@/lib/api';
+import { DiceBearPicker } from './DiceBearPicker';
+import { diceBearSelection } from '@/lib/dicebear';
 
 
 interface AvatarPickerModalProps {
@@ -15,6 +17,7 @@ interface AvatarPickerModalProps {
   name: string;
   currentAvatarUrl?: string | null;
   currentColorIndex?: number;
+  onUpload?: (file: File) => Promise<{ url: string }>;
   onSave: (data: { avatarUrl?: string | null; colorIndex?: number; alsoOnServer?: boolean }) => Promise<void>;
   // For someone signed in to a Jellyfin, AIOStreams or AIOMetadata server:
   // its name, which adds "Also use it on their <server>" - the picture is
@@ -44,7 +47,7 @@ interface AvatarPickerModalProps {
   size?: 'md' | 'lg' | 'xl' | 'full';
 }
 
-type Tab = 'color' | 'url' | 'upload' | 'nuvio';
+type Tab = 'dicebear' | 'color' | 'url' | 'upload' | 'nuvio';
 
 export function AvatarPickerModal({
   isOpen,
@@ -53,6 +56,7 @@ export function AvatarPickerModal({
   currentAvatarUrl,
   currentColorIndex,
   onSave,
+  onUpload,
   nuvioCoversUserId,
   title = 'Change Avatar',
   previewShape = 'circle',
@@ -67,7 +71,7 @@ export function AvatarPickerModal({
   // cover is already set (editing an existing folder's cover otherwise
   // landed on the URL tab just because currentAvatarUrl was non-null).
   const [tab, setTab] = useState<Tab>(
-    nuvioCoversUserId ? 'nuvio' : currentAvatarUrl ? 'url' : (previewShape === 'rect' ? 'url' : 'color')
+    nuvioCoversUserId ? 'nuvio' : previewShape === 'circle' && (!currentAvatarUrl || diceBearSelection(currentAvatarUrl)) ? 'dicebear' : 'url'
   );
   const [urlInput, setUrlInput] = useState(currentAvatarUrl || '');
   const [selectedColor, setSelectedColor] = useState(currentColorIndex ?? 0);
@@ -82,6 +86,7 @@ export function AvatarPickerModal({
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen);
     if (isOpen) {
+      setTab(nuvioCoversUserId ? 'nuvio' : previewShape === 'circle' && (!currentAvatarUrl || diceBearSelection(currentAvatarUrl)) ? 'dicebear' : 'url');
       setSelectedColor(currentColorIndex ?? 0);
       setUrlInput(currentAvatarUrl || '');
       setPreviewUrl(currentAvatarUrl || null);
@@ -198,7 +203,7 @@ export function AvatarPickerModal({
     if (!file) return;
     setIsUploading(true);
     try {
-      const result = await api.uploadAvatar(file);
+      const result = await (onUpload ? onUpload(file) : api.uploadAvatar(file));
       setPreviewUrl(result.url);
       setUrlInput(result.url);
       toast.success('Image uploaded — click Save to apply it');
@@ -224,13 +229,14 @@ export function AvatarPickerModal({
   };
 
   const handleSaveImage = async () => {
-    if (!urlInput.trim()) {
+    const imageUrl = tab === 'dicebear' ? previewUrl : urlInput;
+    if (!imageUrl?.trim()) {
       toast.error('Enter an image URL or upload a file first');
       return;
     }
     setIsSaving(true);
     try {
-      await onSave({ avatarUrl: urlInput.trim(), ...serverPart });
+      await onSave({ avatarUrl: imageUrl.trim(), ...serverPart });
       toast.success('Avatar updated');
       onClose();
     } catch (err: any) {
@@ -258,8 +264,8 @@ export function AvatarPickerModal({
   // rect (Catalogs/Nuvio folder cover) callers, not just the circle ones.
   const tabs: Tab[] = previewShape === 'rect'
     ? (nuvioCoversUserId ? ['url', 'upload', 'nuvio'] : ['url', 'upload'])
-    : (nuvioCoversUserId ? ['color', 'url', 'upload', 'nuvio'] : ['color', 'url', 'upload']);
-  const tabLabel: Record<Tab, string> = { color: 'color', url: 'Image/GIF URL', upload: 'upload', nuvio: 'Nuvio Covers' };
+    : (nuvioCoversUserId ? ['dicebear', 'color', 'url', 'upload', 'nuvio'] : ['dicebear', 'color', 'url', 'upload']);
+  const tabLabel: Record<Tab, string> = { dicebear: 'Avatars', color: 'Colour', url: 'Link', upload: 'Upload', nuvio: 'Nuvio Covers' };
 
   const filterButtonClass = (active: boolean) =>
     `px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${active ? '' : 'hover:bg-surface-hover'}`;
@@ -289,7 +295,7 @@ export function AvatarPickerModal({
     : 'grid-cols-2';
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} size={size}>
+    <Modal isOpen={isOpen} onClose={onClose} title={title} size={tab === 'dicebear' && size === 'md' ? 'lg' : size}>
       <div className="space-y-4" ref={modalScrollRef}>
         {/* Sticky only on the Nuvio Covers tab - that's the only tab with
             scrollable content below it. Pinned to the top of the Modal's
@@ -418,11 +424,18 @@ export function AvatarPickerModal({
           </label>
         )}
 
+        {tab === 'dicebear' && previewShape === 'circle' && (
+          <>
+            <DiceBearPicker key={`${isOpen}:${currentAvatarUrl || name}`} name={name} initialUrl={currentAvatarUrl} onChange={setPreviewUrl} />
+            <Button variant="primary" className="w-full" onClick={handleSaveImage} isLoading={isSaving} disabled={!diceBearSelection(previewUrl)}>Save Avatar</Button>
+          </>
+        )}
+
         {tab === 'color' && (
           <div>
             <div className="mb-4"><AvatarColorSwatches value={selectedColor} onChange={setSelectedColor} /></div>
             <Button variant="primary" className="w-full" onClick={handleSaveColor} isLoading={isSaving}>
-              Use Color Avatar
+              {previewShape === 'circle' ? 'Use Default Avatar' : 'Use Color Cover'}
             </Button>
           </div>
         )}

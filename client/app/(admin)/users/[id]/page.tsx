@@ -9,7 +9,7 @@ import { copyToClipboard } from '@/lib/clipboard';
 import { useTheme } from '@/lib/theme';
 import Link from 'next/link';
 import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
+import { DetailToolbar } from '@/components/layout/DetailToolbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { Button, Card, StatCard, Avatar, Badge, StatusBadge, Modal, ConfirmModal, ColorPicker, DateTimePicker, InlineEdit, ToggleSwitch, Select, SyncBadge, Input, VersionBadge, ResourceBadge, UserAvatar } from '@/components/ui';
 import { SyncPreviewDialog } from '@/components/ui/SyncPreviewDialog';
@@ -75,7 +75,7 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
-import { ScrollRow } from '@/components/ui/ScrollRow';
+import { FilterTabs } from '@/components/ui/FilterTabs';
 
 // Watch time data type
 interface WatchTimeDataPoint {
@@ -135,7 +135,7 @@ const WatchTimeChart = memo(function WatchTimeChart({ data }: { data: WatchTimeD
 
   return (
     <Card padding="lg">
-      <div className="flex items-center justify-between mb-6">
+      <div className="detail-section-header flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold text-default font-display">Watch Time</h3>
         <div className="flex items-center gap-2">
           <select 
@@ -204,7 +204,7 @@ const WatchTimeChart = memo(function WatchTimeChart({ data }: { data: WatchTimeD
 const ContentBreakdownChart = memo(function ContentBreakdownChart({ data }: { data: WatchTimeDataPoint[] }) {
   return (
     <Card padding="lg">
-      <div className="flex items-center justify-between mb-6">
+      <div className="detail-section-header flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold text-default font-display">Content Breakdown</h3>
       </div>
 
@@ -572,6 +572,7 @@ export default function UserDetailPage() {
   const [streaks, setStreaks] = useState<any>(null);
   const [metricsData, setMetricsData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [providerAddonsLoading, setProviderAddonsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   // Addons state
@@ -729,11 +730,24 @@ export default function UserDetailPage() {
 
   // Fetch user data
   useEffect(() => {
+    let cancelled = false;
     const fetchData = async () => {
       setIsLoading(true);
       setError(null);
+      setProviderAddonsLoading(true);
+      setStremioAddons([]);
+      // A slow provider must not hold the profile and household data behind
+      // a page-wide spinner. Its own section reports progress separately.
+      api.getUserStremioAddons(params.id as string).then(data => {
+        if (cancelled) return;
+        setStremioAddons(data || []);
+        if (data?.length) console.log('Loaded Stremio addons:', data.length, data);
+        else console.log('No Stremio addons found or empty array');
+      }).catch(err => {
+        console.error('Failed to fetch Stremio addons:', err);
+      }).finally(() => { if (!cancelled) setProviderAddonsLoading(false); });
       try {
-        const [userData, groupsData, watchTime, topItemsData, streaksData, metrics, groupAddonsData, stremioAddonsData] = await Promise.all([
+        const [userData, groupsData, watchTime, topItemsData, streaksData, metrics, groupAddonsData] = await Promise.all([
           api.getUser(params.id as string),
           api.getGroups(),
           api.getUserWatchTime(params.id as string, 'year').catch(() => null),
@@ -741,17 +755,13 @@ export default function UserDetailPage() {
           api.getUserStreaks(params.id as string).catch(() => null),
           api.getMetrics('7d').catch(() => null),
           api.getUserGroupAddons(params.id as string).catch(() => []),
-          api.getUserStremioAddons(params.id as string).catch((err) => {
-            console.error('Failed to fetch Stremio addons:', err);
-            return [];
-          }),
         ]);
+        if (cancelled) return;
         setUser(userData);
         setGroups(groupsData);
         setStreaks(streaksData);
         setMetricsData(metrics);
         setGroupAddons(groupAddonsData || []);
-        setStremioAddons(stremioAddonsData || []);
         
         // Set total watch time from absolute user total (minutes -> seconds)
         if ((userData as any)?.watchTime !== undefined) {
@@ -760,13 +770,6 @@ export default function UserDetailPage() {
           setTotalWatchTimeSeconds(watchTime.totalWatchTimeSeconds || 0);
         }
         
-        // Debug logging
-        if (stremioAddonsData && stremioAddonsData.length > 0) {
-          console.log('Loaded Stremio addons:', stremioAddonsData.length, stremioAddonsData);
-        } else {
-          console.log('No Stremio addons found or empty array');
-        }
-
         // Set excluded and protected addons from user data
         if (userData?.excludedAddons) {
           setExcludedAddonIds(new Set(userData.excludedAddons));
@@ -792,15 +795,16 @@ export default function UserDetailPage() {
           setTotalWatchTimeSeconds(watchTime.totalWatchTimeSeconds || 0);
         }
       } catch (err) {
-        setError(err as Error);
+        if (!cancelled) setError(err as Error);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     if (params.id) {
       fetchData();
     }
+    return () => { cancelled = true; };
   }, [params.id]);
 
   useEffect(() => {
@@ -1123,6 +1127,7 @@ export default function UserDetailPage() {
         <span className="text-sm text-muted">Active</span>
         <ToggleSwitch
           checked={user?.isActive !== false}
+              title="Activate user"
           onChange={handleToggleActive}
           size="sm"
         />
@@ -1174,13 +1179,9 @@ export default function UserDetailPage() {
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
-        <NebulaPageHeading
-          title={isLoading ? 'Loading...' : (user?.username || user?.name || 'User')}
-          subtitle="Users"
-          actions={detailActions}
-        />
+        <DetailToolbar title={isLoading ? 'Loading user' : (user?.username || user?.name || 'User')} backHref="/users" backLabel="Users" actions={detailActions} />
       )}
         {/* Loading state */}
         {isLoading ? (
@@ -1209,18 +1210,18 @@ export default function UserDetailPage() {
           <>
             {/* User Hero Section */}
             <PageSection className="mb-6 md:mb-8">
-              <Card padding="md" className="md:lg:p-6">
+              <Card padding="md" className="profile-hero md:lg:p-6">
                 <div className="relative">
                   <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
                     {/* Avatar with Color Picker */}
                     <motion.div
                       ref={avatarRef}
-                      initial={{ scale: 0.8, opacity: 0 }}
+                      initial={false}
                       animate={{ scale: 1, opacity: 1 }}
                       transition={{ type: 'spring', stiffness: 200 }}
                       className="relative shrink-0"
                     >
-                      <div
+                      <button type="button" aria-label="Change profile picture"
                         onClick={() => setShowAvatarPicker(true)}
                         className="relative transition-transform cursor-pointer hover:scale-105 group"
                       >
@@ -1240,7 +1241,7 @@ export default function UserDetailPage() {
                         <div className="absolute inset-0 rounded-xl md:rounded-2xl bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                           <PencilIcon className="w-4 h-4 md:w-6 md:h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
-                      </div>
+                      </button>
                       <AvatarPickerModal
                         isOpen={showAvatarPicker}
                         onClose={() => setShowAvatarPicker(false)}
@@ -1262,7 +1263,7 @@ export default function UserDetailPage() {
                           onSave={handleUsernameUpdate}
                           placeholder="Enter username..."
                           maxLength={50}
-                          className="text-xl md:text-2xl font-bold font-display"
+                          className="profile-name font-semibold font-display"
                         />
                         <span className="inline-flex items-center gap-1.5 flex-wrap">
                           <Badge
@@ -1484,6 +1485,13 @@ export default function UserDetailPage() {
               </PageSection>
             )}
 
+            <details className="profile-management mb-7">
+              <summary className="flex items-center justify-between gap-4 rounded-2xl px-5 py-4 cursor-pointer">
+                <span><span className="block text-sm font-semibold text-default">Connections &amp; history</span>
+                <span className="block text-xs text-muted mt-1">Linked apps, history imports, and household preferences</span></span>
+                <span aria-hidden className="profile-management-indicator text-xl text-muted">+</span>
+              </summary>
+              <div className="pt-5">
             {/* Manual merge - shown when this account hasn't already
                 absorbed a second provider's account. */}
             {!mergeInfo && (
@@ -1833,45 +1841,26 @@ export default function UserDetailPage() {
               </Card>
             </PageSection>
 
+              </div>
+            </details>
+
             {/* Tab Navigation */}
             <PageSection className="mb-6 md:mb-8">
-              <ScrollRow className="flex items-center gap-2 p-1 rounded-xl bg-surface w-fit max-w-full">
-                <button
-                  onClick={() => setActiveTab('overview')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === 'overview'
-                      ? 'bg-primary text-white'
-                      : 'text-muted hover:text-default hover:bg-surface-hover'
-                  }`}
-                >
-                  Overview
-                </button>
-                {hasAddonList(user) && (
-                <button
-                  onClick={() => setActiveTab('addons')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                    activeTab === 'addons'
-                      ? 'bg-primary text-white'
-                      : 'text-muted hover:text-default hover:bg-surface-hover'
-                  }`}
-                >
-                  <PuzzlePieceIcon className="w-4 h-4" />
-                  Addons
-                  {stremioAddons.length > 0 && (
-                    <span className="px-1.5 py-0.5 text-xs rounded-full bg-surface">
-                      {stremioAddons.length}
-                    </span>
-                  )}
-                </button>
-                )}
-              </ScrollRow>
+              <FilterTabs
+                activeKey={activeTab}
+                onChange={key => { if (key === 'overview' || key === 'addons') setActiveTab(key); }}
+                options={[
+                  { key: 'overview', label: 'Overview' },
+                  ...(hasAddonList(user) ? [{ key: 'addons', label: 'Addons', icon: <PuzzlePieceIcon className="w-4 h-4" />, count: stremioAddons.length || undefined }] : []),
+                ]}
+              />
             </PageSection>
 
             {activeTab === 'overview' && (
               <>
                 {/* Stats Cards */}
                 <PageSection delay={0.1} className="mb-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="profile-summary-grid grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                     <Link href={`/activity?user=${encodeURIComponent(user?.username || '')}&period=today`}>
                       <StatCard
                         label="Watch Time Today"
@@ -1922,7 +1911,7 @@ export default function UserDetailPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Top Items */}
                 <Card padding="lg">
-                  <div className="flex items-center justify-between mb-6">
+                  <div className="detail-section-header flex items-center justify-between mb-6">
                     <h3 className="text-lg font-semibold text-default font-display">Top Watched</h3>
                   </div>
 
@@ -1989,7 +1978,7 @@ export default function UserDetailPage() {
 
                 {/* Activity Timeline */}
                 <Card padding="lg">
-                  <div className="flex items-center justify-between mb-6">
+                  <div className="detail-section-header flex items-center justify-between mb-6">
                     <h3 className="text-lg font-semibold text-default font-display">Recent Activity</h3>
                   </div>
 
@@ -2076,7 +2065,7 @@ export default function UserDetailPage() {
                 {/* Group Addons */}
                 <PageSection delay={0.1} className="mb-8">
                   <Card padding="lg">
-                    <div className="flex items-center justify-between mb-6">
+                    <div className="detail-section-header flex items-center justify-between mb-6">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/20">
                           <PuzzlePieceIcon className="w-5 h-5 text-primary" />
@@ -2155,6 +2144,7 @@ export default function UserDetailPage() {
                                 </div>
                               </Link>
                               <button
+                                aria-label={`${isExcluded ? 'Include' : 'Exclude'} ${addon.name}`}
                                 onClick={() => handleToggleExclude(addon.id)}
                                 className={`p-2 rounded-lg transition-colors ${
                                   isExcluded ? 'text-error bg-error-muted' : 'text-muted hover:text-error hover:bg-error-muted'
@@ -2182,7 +2172,7 @@ export default function UserDetailPage() {
                     this same list renders for Nuvio users too. */}
                 <PageSection delay={0.2}>
                   <Card padding="lg">
-                    <div className="flex items-center justify-between mb-6">
+                    <div className="detail-section-header flex items-center justify-between mb-6">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-secondary/20">
                           <FolderIcon className="w-5 h-5 text-secondary" />
@@ -2190,7 +2180,7 @@ export default function UserDetailPage() {
                         <div>
                           <h3 className="text-lg font-semibold text-default">Account Addons</h3>
                           <p className="text-sm text-muted">
-                            {stremioAddons.length} addon{stremioAddons.length !== 1 ? 's' : ''} in your account
+                            {providerAddonsLoading ? 'Checking connected account...' : `${stremioAddons.length} addon${stremioAddons.length !== 1 ? 's' : ''} in your account`}
                             {stremioAddons.length > 0 && ' • Drag to reorder'}
                           </p>
                         </div>
@@ -2206,7 +2196,9 @@ export default function UserDetailPage() {
                       )}
                     </div>
 
-                    {stremioAddons.length > 0 ? (
+                    {providerAddonsLoading ? (
+                      <p role="status" className="py-6 text-sm text-muted">Loading account addons...</p>
+                    ) : stremioAddons.length > 0 ? (
                       <DraggableList
                         items={stremioAddons.map((addon) => addon.transportUrl)}
                         onDragEnd={handleStremioAddonDragEnd}
@@ -2314,8 +2306,9 @@ export default function UserDetailPage() {
                                   {content}
                                 </div>
                               )}
-                              <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
                                 <button
+                                  aria-label={`${isProtected ? 'Unprotect' : 'Protect'} ${name}`}
                                   onClick={() => handleToggleProtect(name)}
                                   className={`p-2 rounded-lg transition-colors ${
                                     isProtected ? 'text-success hover:bg-success-muted' : 'text-muted hover:text-success hover:bg-success-muted'
@@ -2324,6 +2317,7 @@ export default function UserDetailPage() {
                                   <ShieldCheckIcon className="w-4 h-4" />
                                 </button>
                                 <button
+                                  aria-label={`Remove ${name}`}
                                   onClick={() => handleRemoveStremioAddon(addon.transportUrl)}
                                   className="p-2 rounded-lg text-muted hover:text-error hover:bg-error-muted transition-colors"
                                 >
@@ -2483,6 +2477,7 @@ export default function UserDetailPage() {
               </div>
               <ToggleSwitch
                 checked={cinemetaDraft[row.key]}
+                title={row.label}
                 onChange={() => setCinemetaDraft((prev) => ({ ...prev, [row.key]: !prev[row.key] }))}
               />
             </div>

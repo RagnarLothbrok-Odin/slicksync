@@ -1,15 +1,25 @@
 'use client';
 
-import { useState, useRef, useLayoutEffect, useEffect, useId } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useRef, useLayoutEffect, useEffect, useId, type KeyboardEvent } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useDroppable } from '@dnd-kit/core';
-import {
-  ChevronDownIcon,
-  CheckIcon
-} from '@heroicons/react/24/outline';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVFocusable } from '@/components/tv/TVFocusable';
 import { ScrollRow } from './ScrollRow';
+
+// One tab stop per group, with native focus scrolling the selected tab into view.
+function moveTabFocus(event: KeyboardEvent<HTMLButtonElement>) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tabs = Array.from(event.currentTarget.closest('[role="tablist"]')?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+  if (!tabs.length) return;
+  const current = tabs.indexOf(event.currentTarget);
+  const direction = getComputedStyle(event.currentTarget).direction === 'rtl' ? -1 : 1;
+  const step = event.key === 'ArrowRight' ? direction : -direction;
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + step + tabs.length) % tabs.length;
+  event.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
+}
 
 // Wraps a tab button to make it a dnd-kit drop target when enabled — kept as
 // its own component since useDroppable is a hook and can't be called
@@ -76,6 +86,7 @@ export function FilterTabs({
   enableDropTargets = false,
   dropTargetPrefix = 'vault-category-',
 }: FilterTabsProps) {
+  const reduceMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement>(null);
   const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number } | null>(null);
   const generatedId = useId();
@@ -85,18 +96,19 @@ export function FilterTabs({
   const updateIndicatorPosition = () => {
     if (!containerRef.current) return;
 
-    const activeButton = containerRef.current.querySelector(
-      `[data-tab-key="${activeKey}"]`
-    ) as HTMLButtonElement | null;
+    const container = containerRef.current;
+    const activeButton = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-tab-key]'))
+      .find(button => button.dataset.tabKey === activeKey);
 
     if (activeButton) {
-      const containerRect = containerRef.current.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
       const buttonRect = activeButton.getBoundingClientRect();
-      
-      setIndicatorStyle({
-        left: buttonRect.left - containerRect.left,
-        width: buttonRect.width,
-      });
+      // Measurements must use layout coordinates, even while a containing
+      // dialog is scaling. A transform does not trigger ResizeObserver.
+      const scale = container.offsetWidth ? containerRect.width / container.offsetWidth : 1;
+      if (!scale) return;
+      const next = { left: (buttonRect.left - containerRect.left) / scale, width: buttonRect.width / scale };
+      setIndicatorStyle(previous => previous?.left === next.left && previous.width === next.width ? previous : next);
     }
   };
 
@@ -150,7 +162,7 @@ export function FilterTabs({
     // scrolls sideways (drag, swipe, wheel, or the small edge arrows).
     <ScrollRow
       arrows
-      wrapperClassName={`rounded-xl bg-surface border border-default ${fill ? 'w-full' : 'w-auto max-w-full'} ${className}`}
+      wrapperClassName={`interface-segments rounded-xl bg-surface border border-default ${fill ? 'w-full' : 'w-auto max-w-full'} ${className}`}
       className={styles.pad}
       role="tablist"
       aria-label="Filter options"
@@ -160,19 +172,20 @@ export function FilterTabs({
       {indicatorStyle && (
         <motion.div
           layoutId={uniqueLayoutId}
-          className="absolute top-1 bottom-1 rounded-lg bg-primary-muted"
+          className="interface-segment-indicator absolute left-0 top-0 bottom-0 rounded-lg"
           initial={false}
           animate={{
-            left: indicatorStyle.left,
-            width: indicatorStyle.width,
+            x: indicatorStyle.left,
           }}
           transition={{
-            type: 'spring',
+            duration: reduceMotion ? 0 : 0.3,
+            type: reduceMotion ? 'tween' : 'spring',
             stiffness: 500,
             damping: 35,
             mass: 1,
           }}
           style={{
+            width: indicatorStyle.width,
             zIndex: 0,
           }}
         />
@@ -191,7 +204,8 @@ export function FilterTabs({
                 onClick={() => onChange(option.key)}
                 role="tab"
                 aria-selected={isActive}
-                aria-controls={`panel-${option.key}`}
+                tabIndex={isActive ? 0 : -1}
+                onKeyDown={moveTabFocus}
                 className={`
                   relative z-10 flex items-center justify-center gap-2 w-full whitespace-nowrap ${styles.button} rounded-lg font-medium
                   transition-colors duration-150 ease-out
@@ -279,6 +293,7 @@ export function FilterTabsSimple({
     <div
       className={`flex flex-wrap ${styles.container} rounded-xl bg-surface border border-default ${className}`}
       role="tablist"
+      aria-label="Filter options"
     >
       {options.map((option) => {
         const isActive = activeKey === option.key;
@@ -288,6 +303,8 @@ export function FilterTabsSimple({
             key={option.key}
             onClick={() => onChange(option.key)}
             role="tab"
+            tabIndex={isActive ? 0 : -1}
+            onKeyDown={moveTabFocus}
             aria-selected={isActive}
             className={`
               ${styles.button} rounded-lg font-medium transition-all duration-150
@@ -325,179 +342,28 @@ export function FilterTabsResponsive({
   enableDropTargets = false,
   dropTargetPrefix,
 }: FilterTabsProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const activeOption = options.find(opt => opt.key === activeKey);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen) {
-      const originalStyle = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = originalStyle;
-      };
-    }
-  }, [isOpen]);
-
-  const sizeClasses = {
-    sm: {
-      trigger: 'px-3 py-2 text-sm',
-      option: 'px-3 py-2.5 text-sm',
-      icon: 'w-4 h-4',
-    },
-    md: {
-      trigger: 'px-4 py-2.5 text-sm',
-      option: 'px-4 py-3 text-sm',
-      icon: 'w-5 h-5',
-    },
-  };
-
-  const styles = sizeClasses[size];
-
-  // Full-width tabs slide sideways at every width, phones included, so they
-  // need no drop-down.
+  // A native picker handles focus, dismissal, text scaling, and the platform's
+  // touch interactions without a second modal implementation.
   if (fill) {
-    return (
-      <FilterTabs
-        fill
-        options={options}
-        activeKey={activeKey}
-        onChange={onChange}
-        size={size}
-        className={className}
-        layoutId={layoutId}
-        enableDropTargets={enableDropTargets}
-        dropTargetPrefix={dropTargetPrefix}
-      />
-    );
+    return <FilterTabs fill options={options} activeKey={activeKey} onChange={onChange} size={size} className={className} layoutId={layoutId} enableDropTargets={enableDropTargets} dropTargetPrefix={dropTargetPrefix} />;
   }
-
-  // More than five tabs: the drop-down until a laptop's width, not a tablet's.
   const many = options.length > 5;
-
   return (
-    <div ref={dropdownRef} className={`relative ${many ? 'lg:w-auto' : 'md:w-auto'} ${className}`}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`
-          ${many ? 'lg:hidden' : 'md:hidden'} w-full h-9 flex items-center justify-between
-          ${styles.trigger} rounded-lg font-medium
-          bg-surface border border-default
-          text-default transition-colors duration-150
-          hover:bg-surface-hover
-        `}
-        style={{ minHeight: '36px' }}
+    <div className={`min-w-0 ${className}`}>
+      <select
         aria-label="Select filter"
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
+        value={activeKey}
+        onChange={event => onChange(event.target.value)}
+        className={`interface-field w-full min-h-11 rounded-xl border border-default bg-surface px-3 text-sm text-default ${many ? 'lg:hidden' : 'md:hidden'}`}
       >
-        <span className="flex items-center gap-1.5 truncate">
-          {activeOption?.icon && (
-            <span className={`${styles.icon} shrink-0 text-primary`}>
-              {activeOption.icon}
-            </span>
-          )}
-          <span className="truncate">{activeOption?.label || 'Select'}</span>
-          {activeOption?.count !== undefined && (
-            <span className="text-xs text-muted">({activeOption.count})</span>
-          )}
-        </span>
-        <ChevronDownIcon className={`w-4 h-4 text-muted shrink-0 ml-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      <AnimatePresence>
-        {isOpen && (
-          <>
-            {/* Backdrop - fixed on mobile to cover entire screen */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className={`fixed inset-0 bg-black/60 z-40 ${many ? 'lg:hidden' : 'md:hidden'}`}
-              onClick={() => setIsOpen(false)}
-            />
-            
-            {/* Dropdown panel - fixed on mobile to escape overflow containers */}
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.15 }}
-              className={`fixed left-4 right-4 top-1/2 -translate-y-1/2 z-50 ${many ? 'lg:hidden' : 'md:hidden'}`}
-            >
-              <div className="bg-surface border border-default rounded-xl overflow-hidden shadow-xl max-h-[70vh] overflow-y-auto">
-                {options.map((option) => {
-                  const isActive = activeKey === option.key;
-                  
-                  return (
-                    <button
-                      key={option.key}
-                      onClick={() => {
-                        onChange(option.key);
-                        setIsOpen(false);
-                      }}
-                      role="option"
-                      aria-selected={isActive}
-                      className={`
-                        w-full flex items-center justify-between gap-3
-                        ${styles.option} font-medium
-                        transition-colors duration-150
-                        ${isActive 
-                          ? 'bg-primary-muted text-primary' 
-                          : 'text-default hover:bg-surface-hover'
-                        }
-                      `}
-                    >
-                      <span className="flex items-center gap-2">
-                        {option.icon && (
-                          <span className={`${styles.icon} shrink-0 ${isActive ? 'text-primary' : 'text-muted'}`}>
-                            {option.icon}
-                          </span>
-                        )}
-                        <span>{option.label}</span>
-                        {option.count !== undefined && (
-                          <span className={`text-xs ${isActive ? 'text-primary/60' : 'text-muted'}`}>
-                            ({option.count})
-                          </span>
-                        )}
-                      </span>
-                      {isActive && (
-                        <CheckIcon className="w-4 h-4 text-primary shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
+        {options.map(option => (
+          <option key={option.key} value={option.key}>
+            {option.label}{option.count !== undefined ? ` (${option.count})` : ''}
+          </option>
+        ))}
+      </select>
       <div className={many ? 'hidden lg:block' : 'hidden md:block'}>
-        <FilterTabs
-          fill={fill}
-          options={options}
-          activeKey={activeKey}
-          onChange={onChange}
-          size={size}
-          layoutId={layoutId}
-          enableDropTargets={enableDropTargets}
-          dropTargetPrefix={dropTargetPrefix}
-        />
+        <FilterTabs options={options} activeKey={activeKey} onChange={onChange} size={size} layoutId={layoutId} enableDropTargets={enableDropTargets} dropTargetPrefix={dropTargetPrefix} />
       </div>
     </div>
   );

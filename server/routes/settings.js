@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express');
 const { publicMessage } = require('../utils/publicError');
 const fs = require('fs');
@@ -26,6 +27,7 @@ module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUr
       const passwordHash = await bcrypt.hash(privatePassword, 12)
       account = await prisma.appAccount.create({
         data: {
+          avatarUrl: createDefaultAvatar(),
           id: DEFAULT_ACCOUNT_ID,
           uuid: DEFAULT_ACCOUNT_UUID,
           passwordHash,

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, memo } from 'react';
 import { motion } from 'framer-motion';
+import { ThemeCard } from './ThemeChoice';
 import { Header } from '@/components/layout/Header';
 import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
 import { Button, Card, Badge, ConfirmModal } from '@/components/ui';
@@ -25,123 +26,7 @@ import {
   Squares2X2Icon,
 } from '@heroicons/react/24/outline';
 
-// Memoized theme card component
-const ThemeCard = memo(function ThemeCard({
-  themeId,
-  meta,
-  isSelected,
-  onSelect,
-}: {
-  themeId: ThemeId;
-  meta: typeof themeMeta[ThemeId];
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  const { colors } = meta;
 
-  return (
-    <motion.button
-      whileHover={{ scale: 1.02, y: -2 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onSelect}
-      className={`relative p-3 rounded-xl border-2 transition-all text-left w-full card ${
-        isSelected ? 'border-primary bg-primary-muted' : 'border-default'
-      }`}
-    >
-      {isSelected && (
-        <div className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center bg-primary">
-          <CheckIcon className="w-3 h-3 text-default" style={{ color: 'var(--color-bg)' }} />
-        </div>
-      )}
-
-      {/* Theme preview - mini mockup */}
-      <div
-        className="w-full h-20 rounded-lg mb-2 overflow-hidden border border-default"
-        style={{ backgroundColor: colors.bg }}
-      >
-        {/* Mini sidebar */}
-        <div className="flex h-full">
-          <div
-            className="w-8 h-full flex flex-col gap-1 p-1.5"
-            style={{ backgroundColor: colors.surface }}
-          >
-            <div
-              className="w-full h-1.5 rounded-full"
-              style={{ backgroundColor: colors.primary }}
-            />
-            <div
-              className="w-full h-1 rounded-full opacity-30"
-              style={{ backgroundColor: '#fff' }}
-            />
-            <div
-              className="w-full h-1 rounded-full opacity-30"
-              style={{ backgroundColor: '#fff' }}
-            />
-          </div>
-          {/* Mini content area */}
-          <div className="flex-1 p-2 flex flex-col gap-1.5">
-            {/* Header bar */}
-            <div
-              className="w-12 h-1.5 rounded-full opacity-40"
-              style={{ backgroundColor: '#fff' }}
-            />
-            {/* Cards row */}
-            <div className="flex gap-1 mt-1">
-              <div
-                className="w-6 h-6 rounded"
-                style={{ backgroundColor: colors.surface }}
-              />
-              <div
-                className="w-6 h-6 rounded"
-                style={{ backgroundColor: colors.surface }}
-              />
-              <div
-                className="w-6 h-6 rounded"
-                style={{ backgroundColor: colors.primary, opacity: 0.3 }}
-              />
-            </div>
-            {/* Button */}
-            <div
-              className="w-8 h-2 rounded mt-auto"
-              style={{ backgroundColor: colors.primary }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Color swatches */}
-      <div className="flex gap-1 mb-2">
-        <div
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.bg }}
-          title="Background"
-        />
-        <div
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.surface }}
-          title="Surface"
-        />
-        <div
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.primary }}
-          title="Primary"
-        />
-        <div
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.secondary }}
-          title="Secondary"
-        />
-      </div>
-
-      <p className="font-medium text-sm text-default">
-        {meta.name}
-      </p>
-      <p className="text-xs text-muted">
-        {meta.description}
-      </p>
-    </motion.button>
-  );
-});
 
 // Same visual card shape as ThemeCard, but takes a user-created SavedCustomTheme
 // (which has no themeMeta entry) and adds a delete affordance in the corner —
@@ -162,11 +47,14 @@ const CustomThemeCard = memo(function CustomThemeCard({
   // the card visually resembles the built-in one it's based on.
   const base = themeMeta[theme.base];
   return (
+    <div className="relative">
     <motion.button
-      whileHover={{ scale: 1.02, y: -2 }}
+      whileHover={undefined}
       whileTap={{ scale: 0.98 }}
+      type="button"
+      aria-pressed={isSelected}
       onClick={onSelect}
-      className={`relative p-3 rounded-xl border-2 transition-all text-left w-full card ${
+      className={`theme-choice relative p-4 rounded-2xl border-2 transition-colors text-left w-full ${
         isSelected ? 'border-primary bg-primary-muted' : 'border-default'
       }`}
     >
@@ -175,18 +63,6 @@ const CustomThemeCard = memo(function CustomThemeCard({
           <CheckIcon className="w-3 h-3" style={{ color: 'var(--color-bg)' }} />
         </div>
       )}
-      {/* Delete — stopPropagation so a delete-click doesn't ALSO select the
-          theme on its way to being removed. */}
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        aria-label={`Delete ${theme.name}`}
-        title={`Delete ${theme.name}`}
-        className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center bg-surface-hover hover:bg-red-500/70 hover:text-white text-muted transition-colors"
-      >
-        <TrashIcon className="w-3 h-3" />
-      </button>
-
       {/* Mini mockup — reuses the base theme's structural colors but paints
           the accents from the custom's own primary/secondary. */}
       <div
@@ -221,6 +97,18 @@ const CustomThemeCard = memo(function CustomThemeCard({
       <p className="font-medium text-sm text-default truncate">{theme.name}</p>
       <p className="text-xs text-muted">Custom · based on {base.name}</p>
     </motion.button>
+      {/* Keep deletion separate from the theme selection button. */}
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete ${theme.name}`}
+        title={`Delete ${theme.name}`}
+        className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center bg-surface-hover hover:bg-red-500/70 hover:text-white text-muted transition-colors"
+      >
+        <TrashIcon className="w-3 h-3" />
+      </button>
+
+    </div>
   );
 });
 
@@ -322,10 +210,12 @@ const LayoutModeCard = memo(function LayoutModeCard({
 
   return (
     <motion.button
-      whileHover={{ scale: 1.02, y: -2 }}
+      whileHover={undefined}
       whileTap={{ scale: 0.98 }}
+      type="button"
+      aria-pressed={isSelected}
       onClick={onSelect}
-      className={`relative p-3 rounded-xl border-2 transition-all text-left w-full card ${
+      className={`theme-choice relative p-4 rounded-2xl border-2 transition-colors text-left w-full ${
         isSelected ? 'border-primary bg-primary-muted' : 'border-default'
       }`}
     >
@@ -386,7 +276,7 @@ const LayoutModeCard = memo(function LayoutModeCard({
 // live inside Settings as a section (user's call - it is a preference, and it
 // was the only preference living outside Settings). `embedded` drops the page
 // chrome - header, heading and page padding - since Settings supplies those.
-export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
+export function ThemesPanel({ embedded = false, showLayout = true }: { embedded?: boolean; showLayout?: boolean }) {
   const {
     themeId, setTheme,
     isCustom, activeCustomTheme, savedCustomThemes,
@@ -503,13 +393,13 @@ export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
       )}
 
       <div className={embedded ? '' : (layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-6 lg:p-8')}>
-      <div className={embedded ? '' : (layoutMode === 'nebula' ? 'mx-auto' : 'max-w-4xl')} style={!embedded && layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={embedded ? '' : (layoutMode === 'nebula' ? 'mx-auto' : 'max-w-4xl')} style={!embedded && layoutMode === 'nebula' ? { maxWidth: 'min(84rem, 92vw)' } : undefined}>
       {!embedded && layoutMode === 'nebula' && (
         <NebulaPageHeading title="Themes" subtitle="Pick a built-in theme, or build your own" />
       )}
 
-        {/* Layout - structure, independent of Theme's color choice. Scoped
-            to Dashboard + Activity today; other pages are unaffected. */}
+        {/* Navigation layout is independent of the theme palette. */}
+        {showLayout && (
         <PageSection className="mb-6">
           <Card padding="lg">
             <div className="flex items-center gap-3 mb-5">
@@ -518,7 +408,7 @@ export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
               </div>
               <div>
                 <h3 className="text-base font-semibold font-display text-default">Layout</h3>
-                <p className="text-xs text-muted">Choose how Dashboard and Activity are arranged</p>
+                <p className="text-xs text-muted">Choose how you move through SlickSync</p>
               </div>
             </div>
 
@@ -554,6 +444,7 @@ export function ThemesPanel({ embedded = false }: { embedded?: boolean }) {
             </div>
           </Card>
         </PageSection>
+        )}
 
         {/* Theme Selection */}
         <PageSection delay={0.05} className="mb-6">

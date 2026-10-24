@@ -23,57 +23,6 @@ export function PageContainer({ children, className, noSidebarOffset }: PageCont
       className={`${offsetClass} min-h-screen ${className || ''}`}
       style={{ background: 'var(--color-bg)' }}
     >
-      {/* Background gradient - Nebula gets a soft spotlight glow pooling in
-          each corner (purple top-left, secondary color bottom-right,
-          matching the layout's own namesake and the approved concept
-          mockup) instead of the two small static corner blobs every other
-          page uses. Two earlier attempts at a diagonal linear-gradient
-          "wash" both had one color stop go invisible under certain
-          conditions (an oversized backgroundSize could push it off-screen
-          entirely) - large blurred radial blobs with a gentle transform-only
-          float (translate + scale, gated behind prefers-reduced-motion in
-          globals.css) can't have that failure mode, since they're always
-          anchored by their own position/size regardless of animation
-          frame. */}
-      <div className={`fixed inset-0 ${offsetClass} pointer-events-none overflow-hidden`}>
-        {noSidebarOffset ? (
-          <>
-            {/* opacity-55/50 against the full-strength (non-muted) accent
-                color looked fine for Nebula's own cool violet, but a
-                screen-recording pass found it reads as a genuine blinding
-                flare for warm/saturated themes (Midnight's amber, Ember's
-                red-orange) - confirmed frame-by-frame that this is NOT the
-                sync/lag bug fixed earlier (logo, divider, and glow all
-                change in perfect lockstep, no stale color) - the same
-                opacity just doesn't scale the same way across hues this
-                different. Dropped well below Current layout's already-safe
-                30/20 (which also uses the *muted* variant, not full
-                strength) since Nebula's blobs are 500-560px vs Current's
-                400-500px and this is the more visually dominant layout.
-
-                A 4th report (switching quickly through several themes, esp.
-                custom -> built-in) showed the glow hard-cutting to the new
-                hue the instant --color-primary changes, while everything
-                else (checkmark, cards) updates in step - not a lag, a real
-                jarring flash, worse the further apart two themes' hues are.
-                The background-color transition (.glow in globals.css, all four
-                blobs, both layouts) is the fix: eases the swap instead of
-                snapping it, and as a side effect smooths over any leftover
-                one-frame Firefox compositor lag on this blurred, animated
-                layer specifically (blur filters get their own compositor
-                path) without another forceRepaint()-style hack. */}
-            {/* Drawn without a blur filter - see .glow in globals.css. */}
-            <div className="glow glow-nebula-a animate-float-slow" />
-            <div className="glow glow-nebula-b animate-float-slow-reverse" />
-          </>
-        ) : (
-          <>
-            <div className="glow glow-corner-a" />
-            <div className="glow glow-corner-b" />
-          </>
-        )}
-      </div>
-
       {/* Content */}
       <div className="relative">
         {children}

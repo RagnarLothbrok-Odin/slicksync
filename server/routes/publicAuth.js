@@ -1,3 +1,4 @@
+const { createDefaultAvatar } = require('../utils/defaultAvatar')
 const express = require('express');
 const { SETTINGS_SECRET_FIELDS } = require('../utils/settingsSecrets')
 const bcrypt = require('bcryptjs');
@@ -267,7 +268,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
 
       const passwordHash = await bcrypt.hash(password, 12);
       const account = await prisma.appAccount.create({
-        data: { uuid, passwordHash },
+        data: { avatarUrl: createDefaultAvatar(), uuid, passwordHash },
       });
 
       // Operator-only registration alert - deliberately a separate,
@@ -676,6 +677,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
             // park someone else's address on a new account.
             account = await prisma.appAccount.create({
               data: {
+                avatarUrl: createDefaultAvatar(),
                 uuid: null,
                 email: email && emailVerified && !byEmail ? email : null,
                 displayName: name || null,
@@ -896,6 +898,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         if (!account) {
           account = await prisma.appAccount.create({
             data: {
+              avatarUrl: createDefaultAvatar(),
               uuid: null,
               email,
               passwordHash: null,
@@ -933,6 +936,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         const username = await ensureUniqueUsername(baseUsername, account.id)
         const createdUser = await prisma.user.create({
           data: {
+            avatarUrl: createDefaultAvatar(),
             accountId: account.id,
             email,
             username,
@@ -1175,6 +1179,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         if (!account) {
           account = await prisma.appAccount.create({
             data: {
+              avatarUrl: createDefaultAvatar(),
               uuid: null,
               email,
               passwordHash: null,
@@ -1210,6 +1215,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         const username = await ensureUniqueUsername(baseUsername, account.id)
         const createdUser = await prisma.user.create({
           data: {
+            avatarUrl: createDefaultAvatar(),
             accountId: account.id,
             email,
             username,
@@ -1307,7 +1313,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
         }
         account = current.email ? current : await prisma.appAccount.update({ where: { id: current.id }, data: { email, linkedProvider: 'jellyfin' } })
       } else if (!account) {
-        account = await prisma.appAccount.create({ data: { uuid: null, email, passwordHash: null, linkedProvider: 'jellyfin' } })
+        account = await prisma.appAccount.create({ data: { avatarUrl: createDefaultAvatar(), uuid: null, email, passwordHash: null, linkedProvider: 'jellyfin' } })
         isNewAccount = true
       }
       req.appAccountId = account.id
@@ -1320,7 +1326,7 @@ module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, P
       } else if (isNewAccount) {
         const username = await ensureUniqueUsername(login.userName || 'jellyfin-user', account.id)
         const created = await prisma.user.create({
-          data: { accountId: account.id, email, username, isActive: true, ...fields }
+          data: { avatarUrl: createDefaultAvatar(), accountId: account.id, email, username, isActive: true, ...fields }
         })
         user = { id: created.id, email: created.email, username: created.username }
       }

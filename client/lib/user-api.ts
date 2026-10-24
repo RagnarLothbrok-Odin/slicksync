@@ -44,7 +44,7 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new UserApiError(error.message || `HTTP ${response.status}`, response.status);
+    throw new UserApiError(error.message || error.error || `HTTP ${response.status}`, response.status);
   }
 
   return response.json();
@@ -56,11 +56,13 @@ export interface UserInfo {
   username: string;
   email: string;
   colorIndex?: number;
+  avatarUrl?: string | null;
   /** They switched Gravatar on, so their avatar may look their email up there. */
   useGravatar?: boolean;
   activityVisibility: 'public' | 'private';
-  groupName?: string;
-  groupId?: string;
+  groups?: Array<{ id: string; name: string }>;
+  groupName?: string | null;
+  groupId?: string | null;
   createdAt: string;
   expiresAt?: string;
   discordWebhookUrl?: string | null;
@@ -208,8 +210,9 @@ export const userAuth = {
         colorIndex?: number;
         createdAt?: string;
         expiresAt?: string;
-        groupId?: string;
-        groupName?: string;
+        groupId?: string | null;
+        groups?: Array<{ id: string; name: string }>;
+  groupName?: string | null;
         activityVisibility?: 'public' | 'private';
       };
       isNewUser?: boolean;
@@ -480,6 +483,18 @@ export const userAuth = {
   /**
    * Get current user's info
    */
+  async updateProfile(userId: string, authKey: string, data: { avatarUrl?: string | null; colorIndex?: number }) {
+    return request('/public-library/user-settings', { method: 'PATCH', body: JSON.stringify({ userId, ...data }), authKey });
+  },
+
+  async uploadAvatar(userId: string, authKey: string, file: File): Promise<{ url: string }> {
+    const form = new FormData();
+    form.append('avatar', file);
+    const response = await fetch(`${API_BASE}/public-library/avatars/upload?${new URLSearchParams({ userId })}`, { method: 'POST', headers: { 'x-stremio-auth': authKey }, body: form });
+    if (!response.ok) throw new Error('Could not upload your picture');
+    return response.json();
+  },
+
   async getUserInfo(userId: string, authKey?: string): Promise<UserInfo> {
     const params = new URLSearchParams({ userId });
     return request(`/public-library/user-info?${params.toString()}`, { authKey });
@@ -882,4 +897,61 @@ export const userApi = {
   shares: userShares,
   sync: userSync,
   export: userExport,
+};
+
+export interface PersonalPreferences {
+  beginnerMode: boolean;
+  hideSensitive: boolean;
+  posterRatings: boolean;
+  autoplayTrailer: boolean;
+  trailerSound: boolean;
+}
+export interface PersonalDevice {
+  id: string;
+  label: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastSeenAt: string | null;
+}
+export interface PersonalSyncStatus {
+  lastSyncedAt: string | null;
+  status: string;
+  error: string | null;
+  connectionProblem: boolean;
+  supported: boolean;
+}
+export interface PersonalSyncPlan {
+  supported: boolean;
+  noGroup: boolean;
+  alreadySynced: boolean;
+  current: string[];
+  desired: string[];
+  additions: string[];
+  removals: string[];
+  updates: number;
+}
+export interface HistoryPreview {
+  rows: Array<{ itemId: string; itemName: string; watchedAt: string }>;
+  duplicates: number;
+  skipped: number;
+  total: number;
+  token: string;
+}
+
+/** Every personal request carries both the selected identity and its proof. */
+export function personalRequest<T>(userId: string, authKey: string, path: string, options: RequestInit = {}): Promise<T> {
+  const separator = path.includes('?') ? '&' : '?';
+  return request<T>(`/public-library/personal${path}${separator}userId=${encodeURIComponent(userId)}`, { ...options, authKey });
+}
+
+export interface PersonalProfile {
+  id: string;
+  username: string;
+  nuvioProfileId: number;
+  avatarUrl: string | null;
+  colorIndex: number;
+}
+export const personalProfiles = {
+  list: (userId: string, authKey: string) => request<{ profiles: PersonalProfile[] }>(`/public-library/profiles?userId=${encodeURIComponent(userId)}`, { authKey }),
+  switch: (userId: string, authKey: string, targetId: string) => request<{ userId: string; sessionToken: string }>('/public-library/switch-profile', { authKey, method: 'POST', body: JSON.stringify({ userId, targetId }) }),
 };

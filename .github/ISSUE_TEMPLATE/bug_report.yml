@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a problem with SlickSync.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe one main problem per report. Check existing issues first.
+        Redact passwords, tokens, cookies, Vault values, and credential-bearing addon URLs from logs and screenshots. Do not attach your database or .env file.
+  - type: input
+    id: version
+    attributes:
+      label: SlickSync version
+      description: Include the version and Docker image tag or commit, if known.
+      placeholder: "v1.x.x, image tag or commit"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Installation
+      options:
+        - Docker / Docker Compose
+        - Local source checkout
+        - Hosted instance
+        - Other / not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: instance
+    attributes:
+      label: Instance mode
+      options:
+        - Private / SQLite
+        - Public / PostgreSQL
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected integrations
+      multiple: true
+      options:
+        - Nuvio
+        - Stremio
+        - Jellyfin
+        - AIOStreams
+        - AIOMetadata
+        - Another addon or service
+        - No integration / interface only
+        - Not sure
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Include the affected page or task and any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+      description: Say whether this happens every time, after a refresh, or only with a particular account/profile. Use anonymous names.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Browser and environment
+      description: For UI issues, include browser/version, device, and whether you use the installed app. For server issues, include host OS/architecture and relevant proxy or provider versions, if known.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or recording
+      description: Attach relevant evidence with private values redacted. Include the approximate time of the error and timezone when useful.

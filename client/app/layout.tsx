@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./interface.css";
 import { ToastProvider } from "@/components/ui/Toast";
 import { ThemeProvider } from "@/lib/theme";
 import { LayoutModeProvider } from "@/lib/layout-mode";
 import { UserCacheProvider } from "@/components/providers/UserCacheProvider";
 import { ServiceWorkerRegistrar } from "@/components/pwa/ServiceWorkerRegistrar";
+import { MotionProvider } from "@/components/providers/MotionProvider";
 import { BuildWatcher } from "@/components/pwa/BuildWatcher";
 
 export const metadata: Metadata = {
@@ -57,12 +59,8 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* Space Grotesk (headings) + Outfit (body) power the default UI
-            type. They are self-hosted under /fonts and declared in
-            globals.css - see the note there - so no request leaves this
-            origin before first paint. */}
-        <link rel="preload" href="/fonts/outfit-latin-v15.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
-        <link rel="preload" href="/fonts/space-grotesk-latin-v22.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        {/* Default typography uses the platform font. Optional theme fonts
+            remain available through the theme picker below. */}
         {/* The other 10 families are Build-your-own-theme choices (Settings
             -> Themes) - deliberately picked to span very different
             aesthetics (classic serif, elegant serif, monospace, poster
@@ -89,6 +87,7 @@ export default function RootLayout({
             client-side event-handler functions to a plain DOM element). */}
         <link
           id="optional-theme-fonts"
+          suppressHydrationWarning
           href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700;900&family=Playfair+Display:wght@400;500;600;700;800;900&family=Bungee&family=Bangers&family=Press+Start+2P&family=Permanent+Marker&family=Luckiest+Guy&family=Orbitron:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
           rel="stylesheet"
           media="print"
@@ -149,16 +148,8 @@ export default function RootLayout({
           color: 'var(--color-text)'
         }}
       >
-        <div
-          aria-hidden
-          className="fixed inset-0 pointer-events-none z-0"
-          style={{
-            background:
-              'radial-gradient(ellipse 800px 500px at 15% -10%, var(--color-primary-muted) 0%, transparent 60%),' +
-              'radial-gradient(ellipse 700px 500px at 100% 10%, var(--color-secondary-muted) 0%, transparent 55%)',
-          }}
-        />
         <div className="relative z-10">
+        <MotionProvider>
         <ThemeProvider>
           <LayoutModeProvider>
             <UserCacheProvider>
@@ -170,6 +161,7 @@ export default function RootLayout({
             </UserCacheProvider>
           </LayoutModeProvider>
         </ThemeProvider>
+        </MotionProvider>
         </div>
       </body>
     </html>

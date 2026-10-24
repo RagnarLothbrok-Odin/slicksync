@@ -3,7 +3,7 @@ const { publicMessage } = require('../utils/publicError');
 const jwt = require('jsonwebtoken');
 const { StremioAPIClient } = require('stremio-api-client');
 const { validateStremioAuthKey } = require('../utils/stremio');
-const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin, refreshNuvioToken, isTokenExpired } = require('../providers/nuvioAuth');
+const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin, isTokenExpired } = require('../providers/nuvioAuth');
 const { makeCreateProvider } = require('../providers');
 const { encrypt, decrypt } = require('../utils/encryption');
 const { canonicalizeManifestUrl } = require('../utils/validation');
@@ -13,7 +13,7 @@ const { getAccountDateString, resolveAccountTimezone } = require('../utils/dateU
  * Public Library Router - Allows users to access their library via OAuth
  * without requiring account authentication. Addons added are marked as protected.
  */
-module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET }) => {
+module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibrary, setCachedLibrary, JWT_SECRET, imageUpload }) => {
   const { findLatestEpisode } = require('../utils/libraryHelpers')
   const { getShares, getGroupMembers } = require('../utils/sharesManager')
   const { getAccountId } = require('../utils/helpers')
@@ -857,14 +857,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       const mockReq = { appAccountId: user.accountId || DEFAULT_ACCOUNT_ID };
       const storedRefreshToken = decrypt(user.nuvioRefreshToken, mockReq);
 
-      let refreshed;
-      try {
-        refreshed = await refreshNuvioToken(storedRefreshToken);
-      } catch (err) {
-        return res.status(401).json({ error: 'Validation failed', message: 'Invalid or expired Nuvio session' });
-      }
-
-      const validatedUser = await getPublicUserNuvio(user.nuvioUserId, refreshed.refresh_token || storedRefreshToken, req, userId);
+      // The signed portal session already proves identity. A page reload must
+      // not consume a rotating provider refresh token: concurrent reloads can
+      // otherwise spend the same token and invalidate a valid portal session.
+      const validatedUser = await getPublicUserNuvio(user.nuvioUserId, storedRefreshToken, req, userId);
 
       res.json({
         success: true,
@@ -1020,6 +1016,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
             activityVisibility: true,
             colorIndex: true,
             useGravatar: true,
+            avatarUrl: true,
             createdAt: true,
             expiresAt: true,
             discordWebhookUrl: true,
@@ -1042,13 +1039,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           return res.status(401).json({ error: publicMessage(e, 'Authentication required') });
         }
 
-        // Check if user belongs to at least one active group
-        const { getGroupMembers } = require('../utils/sharesManager');
-        const groupMembers = await getGroupMembers(prisma, foundUser.accountId, foundUser.id);
-        if (groupMembers.length === 0) {
-          return res.status(403).json({ error: 'User is not part of any group' });
-        }
-
+        // Identity proves access to their own profile even before they join a group.
         user = foundUser;
       } else if (authKey) {
         // Legacy fallback for a caller with only a Stremio authKey and no
@@ -1063,6 +1054,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
             activityVisibility: true,
             colorIndex: true,
             useGravatar: true,
+            avatarUrl: true,
             createdAt: true,
             expiresAt: true,
             discordWebhookUrl: true,
@@ -1077,14 +1069,29 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         user = fullUser;
       }
 
+      // A solo member still belongs to their group. Read memberships
+      // directly rather than using the list of other household members.
+      const accountGroups = await prisma.group.findMany({
+        where: { accountId: user.accountId || DEFAULT_ACCOUNT_ID },
+        select: { id: true, name: true, userIds: true }
+      });
+      const groups = accountGroups.filter(group => {
+        try { const ids = JSON.parse(group.userIds || '[]'); return Array.isArray(ids) && ids.includes(user.id); }
+        catch { return false; }
+      }).map(group => ({ id: group.id, name: group.name }));
+
       res.json({
         id: user.id,
+        groups,
+        groupId: groups[0]?.id || null,
+        groupName: groups.map(group => group.name).join(', ') || null,
         username: user.username,
         email: user.email,
         activityVisibility: user.activityVisibility || 'private',
         colorIndex: user.colorIndex || 0,
         // So the portal knows whether to look this person up on Gravatar.
         useGravatar: user.useGravatar === true,
+        avatarUrl: user.avatarUrl || null,
         createdAt: user.createdAt,
         expiresAt: user.expiresAt,
         discordWebhookUrl: user.discordWebhookUrl || null,
@@ -1097,6 +1104,18 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       res.status(500).json({ error: 'Failed to get user info', message: publicMessage(error, 'Failed to get user info') });
     }
   });
+
+  if (imageUpload) {
+    router.use('/avatars', async (req, res, next) => {
+      if (req.method !== 'POST' || req.path !== '/upload') return res.sendStatus(404);
+      try {
+        const user = await prisma.user.findUnique({ where: { id: String(req.query.userId || '') } });
+        if (!user || !user.isActive) return res.sendStatus(401);
+        await verifyProviderIdentity(user, getAuthKey(req), req);
+        next();
+      } catch { res.status(401).json({ error: 'Please sign in again' }); }
+    }, require('./avatars')({ imageUpload, uploadOnly: true }));
+  }
 
   // Update activity visibility
   router.patch('/activity-visibility', async (req, res) => {
@@ -1197,6 +1216,17 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         }
         updateData.notifyOnWatch = req.body.notifyOnWatch;
       }
+      if (req.body.avatarUrl !== undefined) {
+        const value = req.body.avatarUrl;
+        if (value !== null && (typeof value !== 'string' || value.length > 4096 || !(/^https?:\/\//i.test(value) || /^\/uploads\/avatars\/[a-f0-9-]+\.(jpg|png|gif|webp)$/i.test(value)))) {
+          return res.status(400).json({ error: 'Use an image URL or an uploaded avatar' });
+        }
+        updateData.avatarUrl = value;
+      }
+      if (req.body.colorIndex !== undefined) {
+        if (!Number.isInteger(req.body.colorIndex) || req.body.colorIndex < 0 || req.body.colorIndex > 100) return res.status(400).json({ error: 'Invalid avatar colour' });
+        updateData.colorIndex = req.body.colorIndex;
+      }
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ error: 'Nothing to change' });
       }
@@ -1216,6 +1246,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       const updated = await prisma.user.update({ where: { id: userId }, data: updateData });
       res.json({
+        avatarUrl: updated.avatarUrl || null,
+        colorIndex: updated.colorIndex || 0,
         discordWebhookUrl: updated.discordWebhookUrl || null,
         notifyOnWatch: updated.notifyOnWatch !== false
       });
@@ -2550,13 +2582,10 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       console.log('Loading library cache for account:', user.accountId);
       const libraryCache = getCachedLibrary(user.accountId || DEFAULT_ACCOUNT_ID, user) || [];
       console.log('Library cache items:', libraryCache.length);
-      const libraryItemMap = new Map();
-      libraryCache.forEach(item => {
-        if (item._id || item.id) {
-          libraryItemMap.set(item._id || item.id, item);
-        }
-      });
+      const { portalActivityMetadata } = require('../utils/portalActivityMetadata');
+      const libraryItemMap = await portalActivityMetadata(libraryCache, watchActivities);
       console.log('Library item map size:', libraryItemMap.size);
+
 
       // Helper function to extract season/episode from itemId
       function extractSeasonEpisodeFromId(itemId) {
@@ -2621,7 +2650,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           userColorIndex: user.colorIndex || 0,
           itemId: activity.itemId,
           videoId: activity.itemId, // Use itemId as videoId for series
-          itemName: libraryItem?.name || activity.itemId,
+          itemName: libraryItem?.name || 'Unknown title',
           itemType: activity.itemType,
           season: season,
           episode: episode,
@@ -2799,7 +2828,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         if (!itemCounts.has(key)) {
           itemCounts.set(key, { 
             count: 0, 
-            name: libraryItem?.name || a.itemId, 
+            name: libraryItem?.name || 'Unknown title',
             type: a.itemType,
             poster: libraryItem?.poster || null,
             totalDuration: 0
@@ -2834,7 +2863,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         
         if (!seriesActivitiesByDay.has(seriesKey)) {
           seriesActivitiesByDay.set(seriesKey, { 
-            name: libraryItem?.name || a.itemId, 
+            name: libraryItem?.name || 'Unknown title',
             poster: libraryItem?.poster || null,
             episodes: [],
             totalDuration: 0,
@@ -3006,7 +3035,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
 
       const accountId = user.accountId || DEFAULT_ACCOUNT_ID;
 
-      const [movieHistory, episodeHistory, watchlist] = await Promise.all([
+      const [movieHistory, episodeHistory, watchlist, personalWatchlist] = await Promise.all([
         prisma.movieWatchHistory.findMany({
           where: { userId, accountId },
           orderBy: { watchedAt: 'desc' },
@@ -3025,7 +3054,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
           where: { accountId },
           orderBy: { addedAt: 'desc' },
           select: { itemId: true, itemType: true, name: true, poster: true, addedAt: true }
-        })
+        }),
+        prisma.personalTitleState.findMany({ where: { accountId, userId }, select: { itemId: true, itemType: true, name: true, poster: true, saved: true, reaction: true, createdAt: true } })
       ]);
 
       res.json({
@@ -3033,7 +3063,8 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
         user: { username: user.username, email: user.email },
         movieHistory,
         episodeHistory,
-        watchlist
+        watchlist,
+        personalWatchlist
       });
     } catch (error) {
       console.error('Error exporting user data:', error);
@@ -3416,7 +3447,7 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       await prisma.personPushSubscription.upsert({
         where: { userId_endpoint: { userId: user.id, endpoint } },
         create: { accountId: user.accountId || DEFAULT_ACCOUNT_ID, userId: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, userAgent },
-        update: { p256dh: keys.p256dh, auth: keys.auth, userAgent },
+        update: { p256dh: keys.p256dh, auth: keys.auth, userAgent, lastSeenAt: new Date() },
       });
       res.json({ success: true });
     } catch (error) {
@@ -3435,6 +3466,36 @@ module.exports = ({ prisma, DEFAULT_ACCOUNT_ID, encrypt, decrypt, getCachedLibra
       pushError(res, error, 'Could not turn notifications off');
     }
   });
+
+  // A provider login owns its registered profiles, but never another Nuvio
+  // identity or another household. Each selected profile gets its own token.
+  const availableNuvioProfiles = async user => {
+    const groups = await prisma.group.findMany({ where: { accountId: user.accountId, isActive: true }, select: { userIds: true } })
+    const members = new Set()
+    for (const group of groups) { try { const ids = JSON.parse(group.userIds || '[]'); if (Array.isArray(ids)) for (const id of ids) members.add(id) } catch { /* Ignore invalid legacy memberships. */ } }
+    const profiles = await prisma.user.findMany({ where: { accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, username: true, nuvioProfileId: true, avatarUrl: true, colorIndex: true }, orderBy: { nuvioProfileId: 'asc' } })
+    return profiles.filter(profile => members.has(profile.id))
+  }
+  router.get('/profiles', async (req, res) => {
+    try {
+      const user = await personAsking(req, req.query.userId)
+      if (user.providerType !== 'nuvio') return res.json({ profiles: [] })
+      const profiles = await availableNuvioProfiles(user)
+      res.json({ profiles })
+    } catch (error) { pushError(res, error, 'Could not load your profiles') }
+  })
+  router.post('/switch-profile', async (req, res) => {
+    try {
+      const user = await personAsking(req, req.body?.userId)
+      if (user.providerType !== 'nuvio' || typeof req.body.targetId !== 'string') return res.status(400).json({ error: 'Choose one of your Nuvio profiles' })
+      const target = await prisma.user.findFirst({ where: { id: req.body.targetId, accountId: user.accountId, providerType: 'nuvio', nuvioUserId: user.nuvioUserId, isActive: true }, select: { id: true, nuvioRefreshToken: true } })
+      if (!target || !(await availableNuvioProfiles(user)).some(profile => profile.id === target.id)) return res.status(404).json({ error: 'Profile not found' })
+      if (!target.nuvioRefreshToken) return res.status(409).json({ error: 'This profile needs to be reconnected by your administrator' })
+      res.json({ userId: target.id, sessionToken: issueNuvioSessionToken(target.id) })
+    } catch (error) { pushError(res, error, 'Could not switch profiles') }
+  })
+
+  router.use('/personal', require('./portalFeatures')({ prisma, personAsking, decrypt, createProvider, JWT_SECRET }));
 
   return router;
 };

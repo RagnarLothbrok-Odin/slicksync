@@ -18,7 +18,7 @@ import { BeginnerHint } from '@/components/ui/BeginnerHint';
 import { AddonDirectoryModal } from '@/components/addons/AddonDirectoryModal';
 import { Dialog, DialogPanel } from '@headlessui/react';
 import { StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
-import { NebulaPageHeading, NebulaHeaderStats, NebulaCompactStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
+import { NebulaPageHeading, NebulaHeaderStats, NebulaCompactStatCard, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { toast } from '@/components/ui/Toast';
@@ -649,7 +649,7 @@ export default function AddonsPage() {
       )}
 
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
         <NebulaPageHeading
           title="Addons"
@@ -675,7 +675,7 @@ export default function AddonsPage() {
           <NebulaCompactStatCard label="Assignments" value={isLoading ? '...' : totalAddonAssignments} icon={<UsersIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={0} />
         </div>
       )}
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+      <div className="interface-management-content">
       {layoutMode === 'nebula' && <NebulaGlassStripe />}
         {/* Filters */}
         <PageToolbar
@@ -1006,6 +1006,7 @@ export default function AddonsPage() {
       {/* Floating Add Button - Mobile Only */}
       <button
         onClick={() => setIsAddModalOpen(true)}
+        aria-label="Add addon"
         className="lg:hidden fixed bottom-4 right-4 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface border border-default nav-item-hover-pill"
         style={{ boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
       >
@@ -1469,6 +1470,7 @@ function AddonCard({
             <div className="shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
               <ToggleSwitch
                 checked={addon.isActive !== false}
+              title={`Activate ${addon.name}`}
                 onChange={async () => {
                   try {
                     const newStatus = !addon.isActive;
@@ -1618,6 +1620,7 @@ function AddonCard({
         <div className="hidden md:block shrink-0" onClick={(e) => e.stopPropagation()}>
           <ToggleSwitch
             checked={addon.isActive !== false}
+              title={`Activate ${addon.name}`}
             onChange={async () => {
               try {
                 const newStatus = !addon.isActive;

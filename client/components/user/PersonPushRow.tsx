@@ -9,7 +9,7 @@
 // browser itself, which the admin may also be using on this device.
 
 import { useEffect, useState } from 'react';
-import { ToggleSwitch } from '@/components/ui';
+import { ToggleSwitch, SettingRow } from '@/components/settings/SettingRow';
 import { toast } from '@/components/ui/Toast';
 import { userPush } from '@/lib/user-api';
 import { urlBase64ToUint8Array } from '@/components/ui/PushNotificationToggle';
@@ -18,6 +18,8 @@ export function PersonPushRow({ userId, authKey }: { userId: string | null; auth
   const [supported, setSupported] = useState<boolean | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [on, setOn] = useState(false);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => { const refresh = () => setRevision(value => value + 1); window.addEventListener('personal-devices-changed', refresh); return () => window.removeEventListener('personal-devices-changed', refresh); }, []);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export function PersonPushRow({ userId, authKey }: { userId: string | null; auth
         setAvailable(false);
       }
     })();
-  }, [userId, authKey]);
+  }, [userId, authKey, revision]);
 
   const turnOn = async () => {
     if (!userId || !authKey) return;
@@ -50,6 +52,7 @@ export function PersonPushRow({ userId, authKey }: { userId: string | null; auth
         || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(status.publicKey) });
       await userPush.subscribe(userId, authKey, sub.toJSON());
       setOn(true);
+      window.dispatchEvent(new Event('personal-devices-changed'));
       toast.success('Notifications are on for this device');
     } catch (e) {
       toast.error((e as Error)?.message || 'Could not turn notifications on');
@@ -66,6 +69,7 @@ export function PersonPushRow({ userId, authKey }: { userId: string | null; auth
       const sub = await reg?.pushManager.getSubscription();
       if (sub) await userPush.unsubscribe(userId, authKey, sub.endpoint);
       setOn(false);
+      window.dispatchEvent(new Event('personal-devices-changed'));
       toast.success('Notifications are off for this device');
     } catch (e) {
       toast.error((e as Error)?.message || 'Could not turn notifications off');
@@ -78,25 +82,17 @@ export function PersonPushRow({ userId, authKey }: { userId: string | null; auth
   if (supported === null || (supported && available === false)) return null;
 
   return (
-    <div className="flex items-center justify-between gap-4 p-4 rounded-lg mb-4" style={{ background: 'var(--color-surface-elevated)' }}>
-      <div className="flex-1 min-w-0">
-        <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-          Notifications on this device
-        </h3>
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          {supported
-            ? 'If your sign-in stops working, and ten minutes before a daily limit or bedtime pauses your streaming.'
-            : 'This browser can’t show notifications. On an iPhone, add SlickSync to your Home Screen first.'}
-        </p>
-      </div>
+    <SettingRow label="Notifications on this device" description={supported
+      ? 'If your sign-in stops working, and before a daily limit or bedtime pauses your streaming.'
+      : 'This browser cannot show notifications. On an iPhone, add SlickSync to your Home Screen first.'}>
       {supported && (
         <div className="flex items-center gap-3 shrink-0">
           <span className={`text-sm font-medium ${on ? 'text-success' : 'text-muted'}`}>
             {on ? 'On' : 'Off'}
           </span>
-          <ToggleSwitch checked={on} onChange={() => (on ? turnOff() : turnOn())} disabled={busy || available !== true} />
+          <ToggleSwitch label="Notifications on this device" enabled={on} onChange={() => (on ? turnOff() : turnOn())} disabled={busy || available !== true} />
         </div>
       )}
-    </div>
+    </SettingRow>
   );
 }

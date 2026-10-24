@@ -5,20 +5,21 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { MetricStrip } from '@/components/ui/MetricStrip';
 import { Header } from '@/components/layout/Header';
 import { useTheme } from '@/lib/theme';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import { TVPageProvider } from '@/components/tv/TVPageProvider';
 import { TVFocusable } from '@/components/tv/TVFocusable';
 import { TVLink } from '@/components/tv/TVLink';
-import { Button, Card, Badge, Avatar, UserAvatar, StatCard, SearchInput, PageToolbar, MediaDetailModal } from '@/components/ui';
+import { Button, Card, Badge, Avatar, UserAvatar, SearchInput, PageToolbar, MediaDetailModal } from '@/components/ui';
 import { DroppedShowsPanel } from '@/components/activity/DroppedShowsPanel';
 import { ActivityCardMenu, useCardMenuPress, type MenuTarget, type MenuWatcher } from '@/components/activity/ActivityCardMenu';
 import { showDeletedWithUndo } from '@/components/ui/undoToast';
 import { toast } from '@/components/ui/Toast';
 import { ActivityFilterBar, EMPTY_FILTERS, SOURCE_LABELS, SOURCE_ORDER, sourceOf, filtersFromParams, filtersToParams, type ActivityFilters } from '@/components/activity/ActivityFilterBar';
 import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
-import { NebulaPageHeading, NebulaStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
+import { NebulaPageHeading, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { api, MetricsData, Invitation, Group } from '@/lib/api';
 import { useLastKnown } from '@/lib/hooks/useLastKnown';
@@ -700,19 +701,15 @@ const ActivityCardGrid = memo(function ActivityCardGrid({
       whileHover={{ y: -4 }}
       className="group relative cursor-pointer"
     >
-      {/* Nuvio profile - a plain static label ABOVE the poster, not on the
-          avatar. Previously a dot on the avatar that opened a popover on
-          tap; that popover was nested inside the poster's own
-          overflow-hidden container, so it visually clipped/cut off no
-          matter how it was sized (confirmed real case). A label outside
-          the poster's bounds, in normal flow, can't be clipped by it. Only
-          shown for a single watcher - the multi-watcher popover below
-          already lists each person's own profile inline. */}
-      {activity.additionalWatchers?.length ? null : activity.profileLabel && (
-        <p className="mb-1 w-fit max-w-full mx-auto px-1.5 py-0.5 rounded-md bg-surface-hover text-[10px] font-medium text-muted truncate text-center">
-          {activity.profileLabel}
-        </p>
-      )}
+      {/* Reserve the profile row even when the provider supplied no label,
+          so posters and titles stay aligned across mixed activity sources. */}
+      <div className="activity-profile-slot h-6 mb-1 flex items-center justify-center min-w-0">
+        {!activity.additionalWatchers?.length && activity.profileLabel && (
+          <p className="w-fit max-w-full px-1.5 py-0.5 rounded-md bg-surface-hover text-[10px] font-medium text-muted truncate text-center">
+            {activity.profileLabel}
+          </p>
+        )}
+      </div>
 
       {/* Poster Card */}
       <div
@@ -2185,7 +2182,7 @@ function ActivityPageContent() {
           calc a bit further down) that isn't worth the risk of duplicating
           into a second copy right now. */}
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
         <NebulaPageHeading
           title="Activity"
@@ -2215,20 +2212,12 @@ function ActivityPageContent() {
           <>
             {/* Activity Stats (from real metrics data) */}
             <PageSection delay={0.05} className="mb-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
+              <MetricStrip items={[
                   { label: 'Currently Watching', value: isLoading ? '...' : String(currentlyWatchingCount), icon: <PlayIcon className="w-6 h-6" /> },
                   { label: 'Watched Today', value: isLoading ? '...' : String(completedTodayCount), icon: <CheckCircleIcon className="w-6 h-6" /> },
                   { label: 'Watch Time Today', value: isLoading ? '...' : formatHours(liveWatchTimeTodayHours), icon: <ClockIcon className="w-6 h-6" /> },
                   { label: 'Active Users', value: isLoading ? '...' : String(activeUsersCount), icon: <UserIcon className="w-6 h-6" /> },
-                ].map((stat, index) =>
-                  layoutMode === 'nebula' ? (
-                    <NebulaStatCard key={stat.label} label={stat.label} value={stat.value} icon={stat.icon} colorIndex={index} />
-                  ) : (
-                    <StatCard key={stat.label} label={stat.label} value={stat.value} icon={stat.icon} delay={index * 0.05} />
-                  )
-                )}
-              </div>
+                ]} />
             </PageSection>
 
             {metricsData?.nowPlaying && metricsData.nowPlaying.length > 0 && (
@@ -2330,9 +2319,9 @@ function ActivityPageContent() {
                       grid/list of cards inside (ActivityCardGrid/ActivityCard)
                       is completely unchanged either way, only the wrapper
                       differs. */}
-                  <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+                  <div className="activity-day-panel">
                   {layoutMode === 'nebula' && <NebulaGlassStripe />}
-                  <div className="flex items-center gap-3 mb-4">
+                  <div className="activity-day-header flex items-center gap-3 mb-5">
                     <CalendarIcon className={`w-5 h-5 ${group.isToday ? 'text-secondary' : group.isYesterday ? 'text-muted' : 'text-subtle'}`} />
                     <div className="flex items-baseline gap-2">
                       <h2 className="text-lg font-semibold text-default font-display">{group.label}</h2>
@@ -2348,7 +2337,7 @@ function ActivityPageContent() {
                     // (same content/day merged across users - see
                     // buildGridWatchers), not the raw per-event activities
                     // list view uses.
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
+                    <div className="activity-poster-grid" style={isTV ? { gridTemplateColumns: 'repeat(8, minmax(0, 1fr))' } : undefined}>
                       {group.gridActivities.map((activity, idx) => (
                         <ActivityCardGrid
                           key={activity.id}
@@ -2443,20 +2432,12 @@ function ActivityPageContent() {
           <>
             {/* Invitation History Stats */}
             <PageSection delay={0.05} className="mb-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
+              <MetricStrip items={[
                   { label: 'Total Invites', value: isLoading ? '...' : inviteHistory.length, icon: <EnvelopeIcon className="w-6 h-6" /> },
                   { label: 'Created', value: isLoading ? '...' : inviteHistory.filter(i => i.action === 'created').length, icon: <EnvelopeIcon className="w-6 h-6" /> },
                   { label: 'Used', value: isLoading ? '...' : inviteHistory.filter(i => i.action === 'used').length, icon: <CheckCircleIcon className="w-6 h-6" /> },
                   { label: 'Expired', value: isLoading ? '...' : inviteHistory.filter(i => i.action === 'expired').length, icon: <ClockIcon className="w-6 h-6" /> },
-                ].map((stat, index) =>
-                  layoutMode === 'nebula' ? (
-                    <NebulaStatCard key={stat.label} label={stat.label} value={stat.value} icon={stat.icon} colorIndex={index} />
-                  ) : (
-                    <StatCard key={stat.label} label={stat.label} value={stat.value} icon={stat.icon} delay={index * 0.05} />
-                  )
-                )}
-              </div>
+                ]} />
             </PageSection>
 
             {/* Invitation History Feed */}
@@ -2503,7 +2484,7 @@ function ActivityPageContent() {
                       {/* Nebula wraps each date group in its own glass panel,
                           same as the Watch tab - the rows inside
                           (InviteHistoryRow) are identical either way. */}
-                      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+                      <div className="activity-day-panel">
                       {layoutMode === 'nebula' && <NebulaGlassStripe />}
                       <div className="flex items-center gap-3 mb-4">
                         <CalendarIcon className={`w-5 h-5 ${group.icon}`} />
@@ -2534,20 +2515,12 @@ function ActivityPageContent() {
           <>
             {/* Task History Stats */}
             <PageSection delay={0.05} className="mb-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
+              <MetricStrip items={[
                   { label: 'Successful', value: taskHistory.filter(t => t.status === 'success').length, icon: <CheckCircleIcon className="w-6 h-6" /> },
                   { label: 'Partial', value: taskHistory.filter(t => t.status === 'partial').length, icon: <ExclamationTriangleIcon className="w-6 h-6" /> },
                   { label: 'Failed', value: taskHistory.filter(t => t.status === 'failed').length, icon: <ExclamationTriangleIcon className="w-6 h-6" /> },
                   { label: 'Total Tasks', value: taskHistory.length, icon: <ClockIcon className="w-6 h-6" /> },
-                ].map((stat, index) =>
-                  layoutMode === 'nebula' ? (
-                    <NebulaStatCard key={stat.label} label={stat.label} value={stat.value} icon={stat.icon} colorIndex={index} />
-                  ) : (
-                    <StatCard key={stat.label} label={stat.label} value={stat.value} icon={stat.icon} delay={index * 0.05} />
-                  )
-                )}
-              </div>
+                ]} />
             </PageSection>
 
             {/* Task History Feed */}
@@ -2560,9 +2533,9 @@ function ActivityPageContent() {
                 <PageSection key={group.key} delay={group.delay}>
                   {/* Same glass-panel-per-date-group treatment as Watch and
                       Invites - TaskHistoryCard itself is unchanged either way. */}
-                  <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+                  <div className="activity-day-panel">
                   {layoutMode === 'nebula' && <NebulaGlassStripe />}
-                  <div className="flex items-center gap-3 mb-4">
+                  <div className="activity-day-header flex items-center gap-3 mb-5">
                     <CalendarIcon className={`w-5 h-5 ${group.icon}`} />
                     <h2 className="text-lg font-semibold text-default font-display">{group.label}</h2>
                     <Badge variant={group.badge} size="sm">{group.items.length}</Badge>

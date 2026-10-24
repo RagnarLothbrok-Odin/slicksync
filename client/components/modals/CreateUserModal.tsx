@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Dialog, DialogPanel } from '@headlessui/react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { Button, SlickSyncLogo, PasswordToggleButton } from '@/components/ui';
 import { toast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
@@ -10,6 +10,7 @@ import { useIsTV } from '@/lib/hooks/useIsTV';
 import JellyfinSignIn, { type JellyfinCredentials, type JellyfinServerInfo, type JellyfinSignInApi } from '@/components/jellyfin/JellyfinSignIn';
 import {
   UsersIcon,
+  XMarkIcon,
   ArrowPathIcon,
   ClockIcon,
   CheckIcon,
@@ -17,8 +18,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { copyToClipboard } from '@/lib/clipboard';
 
-// Create User Modal - Redesigned with premium aesthetic
-// Can also be used for reconnecting existing users
+// Provider sign-in and reconnect share the same flow and account handlers.
 export function CreateUserModal({
   isOpen,
   onClose,
@@ -42,6 +42,7 @@ export function CreateUserModal({
   // A Nuvio person signs in to Nuvio again - never offered Stremio's options.
   const isNuvioReconnect = isReconnect && providerType === 'nuvio';
   const isTV = useIsTV();
+  const reduceMotion = useReducedMotion();
   const [step, setStep] = useState<'tabs' | 'oauth' | 'success' | 'nuvio-oauth'>('tabs');
   const [provider, setProvider] = useState<'stremio' | 'nuvio' | 'jellyfin'>('stremio');
   // Jellyfin: the name the person gets here (their server name if left
@@ -509,27 +510,27 @@ export function CreateUserModal({
     <AnimatePresence>
       {isOpen && (
         <Dialog open={isOpen} onClose={onClose} className="relative z-50">
-          {/* Backdrop with blur */}
+          {/* A simple scrim keeps attention on the connection flow. */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0"
             style={{
-              background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.85) 100%)',
-              backdropFilter: 'blur(8px)'
+              background: 'rgba(0,0,0,0.55)'
             }}
           />
 
           <div className="fixed inset-0 flex items-center justify-center p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 8 }}
+              transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
+              className="w-full" style={{ maxWidth: '512px' }}
             >
             <DialogPanel
-              className="w-full overflow-hidden flex flex-col max-h-[85vh]"
+              className="interface-connect interface-modal relative w-full overflow-hidden flex flex-col max-h-[85dvh]"
               style={{
                 background: 'var(--color-surface)',
                 borderRadius: '24px',
@@ -538,16 +539,14 @@ export function CreateUserModal({
                 maxWidth: '512px'
               }}
             >
-              {/* Decorative header gradient */}
-              <div
-                className="h-1.5 w-full shrink-0"
-                style={{
-                  background: 'linear-gradient(90deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 60%, var(--color-secondary)) 50%, var(--color-secondary) 100%)'
-                }}
-              />
+              <DialogTitle className="sr-only">{isReconnect ? 'Reconnect user' : 'Add user'}</DialogTitle>
+              <button type="button" onClick={onClose} aria-label="Close add user"
+                className="absolute right-3 top-3 z-20 w-11 h-11 rounded-full flex items-center justify-center text-muted hover:bg-surface-hover">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
 
               {/* Content */}
-              <div className="p-8 overflow-y-auto">
+              <div className="p-6 md:p-8 overflow-y-auto">
                 <AnimatePresence mode="wait">
                   {/* Step: Select Method - 3 Tabs */}
                   {step === 'tabs' && (
@@ -558,25 +557,24 @@ export function CreateUserModal({
                       exit={{ opacity: 0, x: 20 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <div className="text-center mb-6">
+                      <div className="mb-6 pr-6">
                         <motion.div
-                          initial={{ scale: 0 }}
+                          initial={false}
                           animate={{ scale: 1 }}
                           transition={{ type: 'spring', delay: 0.1 }}
-                          className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
+                          className="w-11 h-11 mb-4 rounded-xl flex items-center justify-center"
                           style={{
-                            background: 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 70%, var(--color-secondary)) 100%)',
-                            boxShadow: '0 8px 32px -8px var(--color-primary)'
+                            background: 'var(--color-primary-muted)'
                           }}
                         >
                           {isReconnect ? (
-                            <ArrowPathIcon className="w-8 h-8 text-white" />
+                            <ArrowPathIcon className="w-5 h-5 text-primary" />
                           ) : (
-                            <UsersIcon className="w-8 h-8 text-white" />
+                            <UsersIcon className="w-5 h-5 text-primary" />
                           )}
                         </motion.div>
                         <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                          {isJellyfinReconnect ? 'Reconnect Server Sign-in' : isNuvioReconnect ? 'Reconnect Nuvio Account' : isReconnect ? 'Reconnect Stremio Account' : 'Add New User'}
+                          {isJellyfinReconnect ? 'Reconnect Server Sign-in' : isNuvioReconnect ? 'Reconnect Nuvio Account' : isReconnect ? 'Reconnect Stremio Account' : 'Add a user'}
                         </h2>
                         <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
                           {isJellyfinReconnect
@@ -610,7 +608,7 @@ export function CreateUserModal({
                           like) freezes inline backgrounds it has already rewritten,
                           which left every tab clicked lit up at once in Firefox. */}
                       {!isReconnect && (
-                        <div className="flex gap-2 mb-5 p-1 rounded-xl" style={{ background: 'var(--color-subtle)' }}>
+                        <div className="flex gap-2 mb-5 p-1 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
                           <button
                             type="button"
                             onClick={() => setProvider('stremio')}
@@ -700,7 +698,7 @@ export function CreateUserModal({
                                 else window.location.reload();
                               }}
                               className="w-full py-3 text-sm font-medium rounded-xl"
-                              style={{ background: 'var(--color-subtle)', color: 'var(--color-text)' }}
+                              style={{ background: 'var(--color-bg-muted)', color: 'var(--color-text)' }}
                             >
                               Done
                             </button>
@@ -815,7 +813,7 @@ export function CreateUserModal({
 
                       {/* Show form based on selected auth method (except OAuth which goes to separate step) */}
                       {authMethod !== 'oauth' && (
-                        <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-subtle)' }}>
+                        <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
                           <div className="space-y-4">
                             {!isReconnect && (
                               <div>
@@ -991,7 +989,7 @@ export function CreateUserModal({
                         </div>
 
                         {nuvioAuthMethod === 'credentials' && (
-                          <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-subtle)' }}>
+                          <div className="mt-6 p-4 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
                             <div className="space-y-4">
                               {!isNuvioReconnect && (
                               <div>
@@ -1079,8 +1077,7 @@ export function CreateUserModal({
                           transition={{ type: 'spring', damping: 20 }}
                           className="w-16 h-16 rounded-2xl flex items-center justify-center z-10 overflow-hidden"
                           style={{
-                            background: 'linear-gradient(135deg, var(--color-primary) 0%, color-mix(in srgb, var(--color-primary) 70%, var(--color-secondary)) 100%)',
-                            boxShadow: '0 8px 32px -8px var(--color-primary)'
+                            background: 'var(--color-primary-muted)'
                           }}
                         >
                           <SlickSyncLogo className="w-10 h-10" />
@@ -1176,7 +1173,7 @@ export function CreateUserModal({
                         <div className="mb-6">
                           <div
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm"
-                            style={{ background: 'var(--color-subtle)' }}
+                            style={{ background: 'var(--color-bg-muted)' }}
                           >
                             <ClockIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
                             <span style={{ color: 'var(--color-text-muted)' }}>
@@ -1193,7 +1190,7 @@ export function CreateUserModal({
                           onClick={() => setStep('tabs')}
                           className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
                           style={{
-                            background: 'var(--color-subtle)',
+                            background: 'var(--color-bg-muted)',
                             color: 'var(--color-text)'
                           }}
                         >
@@ -1254,7 +1251,7 @@ export function CreateUserModal({
                       </div>
 
                       {nuvioOauthStatus === 'waiting' && nuvioCode && (
-                        <div className="mb-6 p-4 rounded-xl" style={{ background: 'var(--color-subtle)' }}>
+                        <div className="mb-6 p-4 rounded-xl" style={{ background: 'var(--color-bg-muted)' }}>
                           {/* TV only: scan straight to the approval page
                               instead of typing this code somewhere else with
                               a D-pad remote. */}
@@ -1286,7 +1283,7 @@ export function CreateUserModal({
 
                       {(nuvioOauthStatus === 'waiting' || nuvioOauthStatus === 'connecting') && nuvioCountdown > 0 && (
                         <div className="mb-6">
-                          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm" style={{ background: 'var(--color-subtle)' }}>
+                          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm" style={{ background: 'var(--color-bg-muted)' }}>
                             <ClockIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
                             <span style={{ color: 'var(--color-text-muted)' }}>
                               Expires in <span className="font-mono font-medium" style={{ color: 'var(--color-text)' }}>{formatCountdown(nuvioCountdown)}</span>
@@ -1300,7 +1297,7 @@ export function CreateUserModal({
                           type="button"
                           onClick={() => { stopNuvioPolling(); setStep('tabs'); }}
                           className="flex-1 py-3 text-sm font-medium rounded-xl transition-colors"
-                          style={{ background: 'var(--color-subtle)', color: 'var(--color-text)' }}
+                          style={{ background: 'var(--color-bg-muted)', color: 'var(--color-text)' }}
                         >
                           Back
                         </button>

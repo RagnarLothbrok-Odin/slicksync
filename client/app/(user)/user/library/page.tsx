@@ -16,10 +16,13 @@ import {
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { userLibrary, LibraryItem } from '@/lib/user-api';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
-import { ViewModeToggle } from '@/components/ui';
+import { PersonalMediaDetailModal } from '@/components/user/PersonalMediaDetailModal';
+import type { PosterCardItem } from '@/components/ui/PosterCard';
+import { ViewModeToggle, Button } from '@/components/ui';
 import { buildStremioAppUrl, buildNuvioAppUrl } from '@/lib/appLinks';
 
 type ViewMode = 'grid' | 'list';
+const unchangedLibrary = () => {};
 
 // Format watch time from milliseconds to human-readable string
 function formatWatchTime(ms: number | undefined | null): string | null {
@@ -48,11 +51,12 @@ interface LibraryCardItemProps {
   // nuvio.js's removeLibraryItem stub) - defaults true so every existing
   // Stremio call site is unaffected.
   canDelete?: boolean;
+  selecting?: boolean;
   stremioLink: string | null;
   watchTime: string | null;
 }
 
-function LibraryCardItem({ item, isSelected, isDeleting, onToggle, onDelete, canDelete = true, stremioLink, watchTime }: LibraryCardItemProps) {
+function LibraryCardItem({ item, isSelected, isDeleting, onToggle, onDelete, canDelete = true, selecting = false, stremioLink, watchTime }: LibraryCardItemProps) {
   const [imageError, setImageError] = useState(false);
   
   return (
@@ -61,6 +65,11 @@ function LibraryCardItem({ item, isSelected, isDeleting, onToggle, onDelete, can
       animate={{ opacity: 1, scale: 1 }}
       whileHover={{ y: -4 }}
       onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      aria-label={`${selecting ? 'Select' : 'Open'} ${item.name}`}
+      aria-pressed={selecting ? isSelected : undefined}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle(); } }}
       className="group relative cursor-pointer"
     >
       {/* Poster Card */}
@@ -171,11 +180,12 @@ interface LibraryListItemProps {
   onToggle: () => void;
   onDelete: () => void;
   canDelete?: boolean;
+  selecting?: boolean;
   stremioLink: string | null;
   watchTime: string | null;
 }
 
-function LibraryListItem({ item, isSelected, isDeleting, onToggle, onDelete, canDelete = true, stremioLink, watchTime }: LibraryListItemProps) {
+function LibraryListItem({ item, isSelected, isDeleting, onToggle, onDelete, canDelete = true, selecting = false, stremioLink, watchTime }: LibraryListItemProps) {
   const [imageError, setImageError] = useState(false);
   
   return (
@@ -184,6 +194,11 @@ function LibraryListItem({ item, isSelected, isDeleting, onToggle, onDelete, can
       animate={{ opacity: 1, x: 0 }}
       whileHover={{ x: 4 }}
       onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      aria-label={`${selecting ? 'Select' : 'Open'} ${item.name}`}
+      aria-pressed={selecting ? isSelected : undefined}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle(); } }}
       className={`flex items-start gap-4 p-4 rounded-xl cursor-pointer transition-colors ${isSelected ? 'bd2-sel' : 'bd-ok'}`}
       style={{
         background: 'var(--color-surface)',
@@ -302,6 +317,8 @@ export default function UserLibraryPage() {
   // fail (the server already guards this too, see publicLibrary.js's
   // DELETE /library/:itemId).
   const canDeleteLibraryItems = provider !== 'nuvio';
+  const [selecting, setSelecting] = useState(false);
+  const [detailItem, setDetailItem] = useState<PosterCardItem | null>(null);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -378,12 +395,13 @@ export default function UserLibraryPage() {
 
   // Handle item selection
   const handleItemToggle = useCallback((itemId: string) => {
+    if (!canDeleteLibraryItems || !selecting) return;
     setSelectedItems((prev) =>
       prev.includes(itemId)
         ? prev.filter((id) => id !== itemId)
         : [...prev, itemId]
     );
-  }, []);
+  }, [canDeleteLibraryItems, selecting]);
 
   // Select/Deselect all
   const handleSelectAll = useCallback(() => {
@@ -475,6 +493,7 @@ export default function UserLibraryPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search your library"
             placeholder="Search by title..."
             className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm"
             style={{
@@ -512,7 +531,7 @@ export default function UserLibraryPage() {
                 }}
               >
                 <TrashIcon className="w-4 h-4" />
-                Delete
+                Remove selected
               </button>
             )}
           </div>
@@ -525,9 +544,12 @@ export default function UserLibraryPage() {
         />
       </motion.div>
 
+      {canDeleteLibraryItems && filteredLibrary.length > 0 && <div className="mb-4"><Button variant="secondary" size="sm" onClick={() => { setSelecting(value => !value); setSelectedItems([]); }}>{selecting ? 'Done selecting' : 'Select to remove'}</Button></div>}
+      {detailItem && userId && authKey && <PersonalMediaDetailModal key={detailItem.id} item={detailItem} userId={userId} authKey={authKey} onClose={() => setDetailItem(null)} onChange={unchangedLibrary} />}
+
       {/* Select all / Deselect all - selection only exists to enable bulk
           delete above, which isn't available for Nuvio users */}
-      {canDeleteLibraryItems && filteredLibrary.length > 0 && (
+      {canDeleteLibraryItems && selecting && filteredLibrary.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -538,8 +560,9 @@ export default function UserLibraryPage() {
             className="text-sm font-medium transition-colors hover:opacity-80"
             style={{ color: 'var(--color-primary)' }}
           >
-            {selectedItems.length === filteredLibrary.length ? 'Deselect All' : 'Select All'}
+            {selectedItems.length === filteredLibrary.length ? 'Clear selection' : 'Select all for removal'}
           </button>
+          <p className="text-xs text-muted">Select titles to remove them from your library and connected provider.</p>
         </motion.div>
       )}
 
@@ -590,7 +613,7 @@ export default function UserLibraryPage() {
       {/* Library - flat list, no date grouping */}
       {!loading && !error && filteredLibrary.length > 0 && (
         viewMode === 'grid' ? (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-3">
+          <div className="discovery-poster-grid">
             <AnimatePresence mode="popLayout">
               {filteredLibrary.map((item) => (
                 <LibraryCardItem
@@ -598,9 +621,10 @@ export default function UserLibraryPage() {
                   item={item}
                   isSelected={selectedItems.includes(item._id)}
                   isDeleting={deletingIds.has(item._id)}
-                  onToggle={() => handleItemToggle(item._id)}
+                  onToggle={() => selecting && canDeleteLibraryItems ? handleItemToggle(item._id) : setDetailItem({ id: item._id.split(':')[0], type: item.type, name: item.name, poster: item.poster || null })}
                   onDelete={() => handleDeleteItem(item._id)}
                   canDelete={canDeleteLibraryItems}
+                  selecting={selecting && canDeleteLibraryItems}
                   stremioLink={getStremioLink(item)}
                   watchTime={formatWatchTime(item.state?.overallTimeWatched)}
                 />
@@ -616,9 +640,10 @@ export default function UserLibraryPage() {
                   item={item}
                   isSelected={selectedItems.includes(item._id)}
                   isDeleting={deletingIds.has(item._id)}
-                  onToggle={() => handleItemToggle(item._id)}
+                  onToggle={() => selecting && canDeleteLibraryItems ? handleItemToggle(item._id) : setDetailItem({ id: item._id.split(':')[0], type: item.type, name: item.name, poster: item.poster || null })}
                   onDelete={() => handleDeleteItem(item._id)}
                   canDelete={canDeleteLibraryItems}
+                  selecting={selecting && canDeleteLibraryItems}
                   stremioLink={getStremioLink(item)}
                   watchTime={formatWatchTime(item.state?.overallTimeWatched)}
                 />

@@ -16,7 +16,7 @@ const EXT_BY_MIME = {
   'image/webp': '.webp',
 };
 
-module.exports = ({ imageUpload }) => {
+module.exports = ({ imageUpload, uploadOnly = false }) => {
   const router = express.Router();
 
   // POST /api/avatars/upload - accepts a single image file (field name "avatar"),
@@ -41,6 +41,8 @@ module.exports = ({ imageUpload }) => {
       res.status(500).json({ error: 'Failed to upload image' });
     }
   });
+
+  if (uploadOnly) return router;
 
   // DELETE /api/avatars/:filename - remove a previously uploaded avatar file
   // (best-effort cleanup when a user/group switches to a different image or reverts to a color)

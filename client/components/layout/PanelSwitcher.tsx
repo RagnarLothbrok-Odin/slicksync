@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   UserIcon,
   ShieldCheckIcon,
@@ -34,6 +34,7 @@ interface PanelSwitcherProps {
   } | null;
   /** Called when logout is clicked */
   onLogout?: () => void;
+  onSwitchProfile?: () => void;
   /** Whether the component is collapsed (for sidebar) */
   collapsed?: boolean;
   /** 'compact' renders a small icon-only trigger (topbar use) instead of the
@@ -58,12 +59,15 @@ interface PanelSwitcherProps {
  * Panel switcher component for switching between Admin and User panels
  * Appears in the sidebar of both panels
  */
-export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, variant = 'full', dropdownPosition = 'up', align = 'right' }: PanelSwitcherProps) {
+export function PanelSwitcher({ mode, userInfo, onLogout, onSwitchProfile, collapsed = false, variant = 'full', dropdownPosition = 'up', align = 'right' }: PanelSwitcherProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownId = useId();
+  const reduceMotion = useReducedMotion();
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -80,12 +84,15 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
   // Close on escape
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsOpen(false);
+      if (event.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
     };
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, []);
+  }, [isOpen]);
 
   const handleSwitchPanel = async () => {
     if (mode === 'admin') {
@@ -154,8 +161,13 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
     <div className="relative" ref={menuRef}>
       {/* Trigger Button */}
       <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+        ref={triggerRef}
+        whileTap={reduceMotion ? undefined : { scale: 0.97 }}
+        type="button"
+        aria-label="Account and settings"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? dropdownId : undefined}
+        title="Account and settings"
         onClick={() => setIsOpen(!isOpen)}
         className={`${isCompact
           ? 'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200'
@@ -191,6 +203,7 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
             userInfo ? (
               <Avatar
                 name={userInfo.username || 'U'}
+                src={userInfo.avatarUrl || undefined}
                 email={userInfo.email || undefined}
                 useGravatar={userInfo.useGravatar}
                 colorIndex={userInfo.colorIndex || 0}
@@ -232,24 +245,28 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: dropdownPosition === 'down' ? 10 : -10, scale: 0.95 }}
+            id={dropdownId}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: dropdownPosition === 'down' ? -4 : 4, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: dropdownPosition === 'down' ? 10 : -10, scale: 0.95 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: dropdownPosition === 'down' ? -4 : 4, scale: 0.98 }}
             transition={{ duration: 0.15 }}
             className={
-              `absolute rounded-xl overflow-hidden shadow-xl z-50 ${dropdownPosition === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'} ${
+              `absolute rounded-xl overflow-y-auto shadow-xl z-50 ${dropdownPosition === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'} ${
                 isCompact ? `${align === 'left' ? 'left-0' : 'right-0'} w-72` : 'left-0 right-0'
               }`
             }
             style={{
               background: 'var(--color-surface)',
               border: '1px solid var(--color-surface-border)',
+              maxHeight: 'calc(100dvh - 7rem)',
+              maxWidth: 'calc(100vw - 2rem)',
+              transformOrigin: `${dropdownPosition === 'down' ? 'top' : 'bottom'} ${align}`,
             }}
           >
             {/* Switch Panel Button */}
             <button
               onClick={handleSwitchPanel}
-              className="w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 hover:bg-surface-hover"
+              className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
               style={{ color: 'var(--color-text)' }}
             >
               <div
@@ -259,48 +276,24 @@ export function PanelSwitcher({ mode, userInfo, onLogout, collapsed = false, var
                 }}
               >
                 <TargetIcon
-                  className="w-4 h-4"
+                  className="nav-item-icon w-4 h-4"
                   style={{ color: isAdmin ? 'var(--color-success)' : 'var(--color-primary)' }}
                 />
               </div>
               <div className="flex-1 text-left">
-                <p className="text-sm font-medium">Switch to {targetPanel} Panel</p>
-                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="nav-item-label text-sm font-medium">Switch to {targetPanel} Panel</p>
+                <p className="nav-item-label text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {isAdmin ? 'Access your library and settings' : 'Manage users and system'}
                 </p>
               </div>
-              <ArrowsRightLeftIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
+              <ArrowsRightLeftIcon className="nav-item-icon w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
             </button>
 
-            {/* TorBox referral - always shown for both layouts (previously a
-                floating badge fixed to a screen corner, which needed its own
-                positioning/sizing pass on every layout and viewport size and
-                still read inconsistently across deployments - one stable
-                spot here instead). Tasks/Settings/Changelog below are (Themes now
-                lives inside Settings as its own section)
-                Nebula's "System" group, dropped from its topbar entirely
-                since there's no room to spare there - Original's own
-                Sidebar already has these same 4 directly in the nav, so
-                showing them here too on Original was pure duplication. */}
+            {onSwitchProfile && <button onClick={() => { setIsOpen(false); onSwitchProfile(); }} className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg text-default"><div className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-hover"><ArrowsRightLeftIcon className="nav-item-icon w-4 h-4 text-muted" /></div><span className="nav-item-label text-sm font-medium">Switch profile</span></button>}
+
             {isAdmin && (
               <>
                 <div className="h-px" style={{ background: 'var(--color-surface-border)' }} />
-                <a
-                  href="https://torbox.app/subscription?referral=790ccd5b-646d-43d7-9072-aef7a6eb1de8"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setIsOpen(false)}
-                  className="nav-item-hover-pill w-full flex items-center gap-3 px-4 py-3 rounded-lg"
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center p-1.5"
-                    style={{ background: 'var(--color-surface-hover)' }}
-                  >
-                    <img src="https://torbox.app/assets/logo-bb7a9579.svg" alt="TorBox" className="w-full h-full" />
-                  </div>
-                  <span className="nav-item-label text-sm font-medium">Torbox Referral</span>
-                </a>
                 {showSystemLinks && (
                   <>
                     <button

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Cog6ToothIcon,
@@ -10,148 +10,55 @@ import {
   ShieldCheckIcon,
   ArrowPathIcon,
   PaintBrushIcon,
-  CheckIcon,
   KeyIcon,
   ClipboardDocumentIcon,
   GlobeAltIcon,
   BeakerIcon,
+  BellIcon,
 } from '@heroicons/react/24/outline';
 import { useUserAuth, useUserAuthHeaders } from '@/lib/hooks/useUserAuth';
 import { copyToClipboard } from '@/lib/clipboard';
 import { userAuth, userExport, getUserApiKey } from '@/lib/user-api';
 import { UserPageHeader } from '@/components/user/UserPageContainer';
-import { ToggleSwitch, Avatar, ConfirmModal } from '@/components/ui';
-import { useTheme, themeMeta, themeIds, ThemeId } from '@/lib/theme';
+import { Card, ConfirmModal, Button } from '@/components/ui';
+import { ThemesPanel } from '@/components/settings/ThemesPanel';
+import { ToggleSwitch, SettingRow } from '@/components/settings/SettingRow';
+import { ProfilePictureSettings } from '@/components/settings/ProfilePictureSettings';
 import { toast } from '@/components/ui/Toast';
 import { providerTypeLabel } from '@/lib/providers';
+import { SettingsNavigation } from '@/components/settings/SettingsNavigation';
+import { PersonalDisplayPanel, PersonalSyncPanel, PersonalDevicesPanel, PersonalHistoryPanel, PersonalHelpPanel } from '@/components/user/PersonalSettingsPanels';
+import { usePersonalPreferences } from '@/components/user/PersonalPreferences';
 import { PersonPushRow } from '@/components/user/PersonPushRow';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
 
-// Theme Card component
-const ThemeCard = memo(function ThemeCard({
-  themeId,
-  meta,
-  isSelected,
-  onSelect,
-}: {
-  themeId: ThemeId;
-  meta: typeof themeMeta[ThemeId];
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  const { colors } = meta;
-  
-  return (
-    <motion.button
-      whileHover={{ scale: 1.02, y: -2 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onSelect}
-      className={`relative p-3 rounded-xl border-2 transition-all text-left w-full ${isSelected ? 'opt-card-on' : 'opt-card-off'}`}
-    >
-      {isSelected && (
-        <div 
-          className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center"
-          style={{ background: 'var(--color-primary)' }}
-        >
-          <CheckIcon className="w-3 h-3" style={{ color: 'var(--color-bg)' }} />
-        </div>
-      )}
-      
-      {/* Theme preview - mini mockup */}
-      <div
-        className="w-full h-20 rounded-lg mb-2 overflow-hidden"
-        style={{ backgroundColor: colors.bg, border: `1px solid ${colors.surface}` }}
-      >
-        {/* Mini sidebar */}
-        <div className="flex h-full">
-          <div 
-            className="w-8 h-full flex flex-col gap-1 p-1.5"
-            style={{ backgroundColor: colors.surface }}
-          >
-            <div 
-              className="w-full h-1.5 rounded-full"
-              style={{ backgroundColor: colors.primary }}
-            />
-            <div 
-              className="w-full h-1 rounded-full opacity-30"
-              style={{ backgroundColor: '#fff' }}
-            />
-            <div 
-              className="w-full h-1 rounded-full opacity-30"
-              style={{ backgroundColor: '#fff' }}
-            />
-          </div>
-          {/* Mini content area */}
-          <div className="flex-1 p-2 flex flex-col gap-1.5">
-            {/* Header bar */}
-            <div 
-              className="w-12 h-1.5 rounded-full opacity-40"
-              style={{ backgroundColor: '#fff' }}
-            />
-            {/* Cards row */}
-            <div className="flex gap-1 mt-1">
-              <div 
-                className="w-6 h-6 rounded"
-                style={{ backgroundColor: colors.surface }}
-              />
-              <div 
-                className="w-6 h-6 rounded"
-                style={{ backgroundColor: colors.surface }}
-              />
-              <div 
-                className="w-6 h-6 rounded"
-                style={{ backgroundColor: colors.primary, opacity: 0.3 }}
-              />
-            </div>
-            {/* Button */}
-            <div 
-              className="w-8 h-2 rounded mt-auto"
-              style={{ backgroundColor: colors.primary }}
-            />
-          </div>
-        </div>
-      </div>
-      
-      {/* Color swatches */}
-      <div className="flex gap-1 mb-2">
-        <div 
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.bg }}
-          title="Background"
-        />
-        <div 
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.surface }}
-          title="Surface"
-        />
-        <div 
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.primary }}
-          title="Primary"
-        />
-        <div 
-          className="w-4 h-4 rounded-full border border-white/10"
-          style={{ backgroundColor: colors.secondary }}
-          title="Secondary"
-        />
-      </div>
-      
-      <p className="font-medium text-sm" style={{ color: 'var(--color-text)' }}>
-        {meta.name}
-      </p>
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        {meta.description}
-      </p>
-    </motion.button>
-  );
-});
+
+
+import { AvatarPickerModal } from '@/components/modals/AvatarPickerModal';
+
+const PERSONAL_SECTIONS = [
+  { key: 'general', label: 'General', icon: UserCircleIcon, group: 'Your experience', blurb: 'Profile, privacy, and sharing', keywords: 'avatar picture profile visibility public stats export display beginner private sensitive poster ratings trailer autoplay sound' },
+  { key: 'sync', label: 'Sync', icon: ArrowPathIcon, group: 'Your setup', blurb: 'Your connection and next sync', keywords: 'sync status preview addons connection' },
+  { key: 'history', label: 'History', icon: ClipboardDocumentIcon, group: 'Your setup', blurb: 'Bring your watch history with you', keywords: 'import history csv trakt json export download restore' },
+  { key: 'themes', label: 'Themes', icon: PaintBrushIcon, group: 'Your experience', blurb: 'Make SlickSync feel like home', keywords: 'appearance colours color dark light theme' },
+  { key: 'notifications', label: 'Notifications', icon: BellIcon, group: 'Your experience', blurb: 'Push, watch alerts, and Discord', keywords: 'webhook alerts watch notifications push discord devices rename revoke' },
+  { key: 'integrations', label: 'Integrations', icon: KeyIcon, group: 'Your setup', blurb: 'Connect your apps', keywords: 'api key rotate integrations' },
+  { key: 'security', label: 'Security', icon: ShieldCheckIcon, group: 'Your setup', blurb: 'Manage your account', keywords: 'delete account security' },
+  { key: 'about', label: 'Help & About', icon: GlobeAltIcon, group: 'Your experience', blurb: 'Guides, privacy, and credits', keywords: 'help about guides credits data privacy version support' },
+] as const;
 
 export default function UserSettingsPage() {
+  const [activeSection, setActiveSection] = useState<typeof PERSONAL_SECTIONS[number]['key']>('general');
+  const [settingsQuery, setSettingsQuery] = useState('');
+  useEffect(() => { const section = new URLSearchParams(window.location.search).get('section'); if (PERSONAL_SECTIONS.some(item => item.key === section)) setActiveSection(section as typeof PERSONAL_SECTIONS[number]['key']); }, []);
+  const currentSection = PERSONAL_SECTIONS.find(section => section.key === activeSection)!;
+  const matches = PERSONAL_SECTIONS.filter(section => `${section.label} ${section.blurb} ${section.keywords}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()));
+  const { preferences } = usePersonalPreferences();
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const { userInfo, refreshUserInfo, provider, deleteAccount } = useUserAuth();
   const { userId, authKey, isReady } = useUserAuthHeaders();
   const providerLabel = providerTypeLabel(provider);
-  const { themeId, setTheme } = useTheme();
 
   // Self-service "delete my account" - only this user's own data, not the
   // whole shared instance (that's an admin-only action). Works in both
@@ -461,73 +368,37 @@ export default function UserSettingsPage() {
     : 'No API key';
 
   return (
-    <div className="p-4 sm:p-8">
+    <div className="pt-6 pb-8">
       <UserPageHeader
         title="Settings"
-        subtitle="Manage your account preferences"
+        subtitle="Make yourself at home. Your preferences, connections, and account."
       />
 
-      <div className="space-y-6" style={{ maxWidth: '768px' }}>
-        {/* Profile Info */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
-          <div
-            className="px-6 py-4 flex items-center gap-3"
-            style={{ borderBottom: '1px solid var(--color-surface-border)' }}
-          >
-            <div 
-              className="w-9 h-9 rounded-lg flex items-center justify-center"
-              style={{ background: 'var(--color-primary-muted)' }}
-            >
-              <UserCircleIcon className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
-            </div>
-            <div>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                Profile Information
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Your account details
-              </p>
-            </div>
+      <div className="settings-workspace settings-with-rail">
+        <SettingsNavigation sections={[...PERSONAL_SECTIONS]} activeKey={activeSection} onChange={key => { const section = PERSONAL_SECTIONS.find(item => item.key === key); if (section) setActiveSection(section.key); setSettingsQuery(''); }} query={settingsQuery} onQueryChange={setSettingsQuery} />
+        <div className="settings-content personal-settings-content min-w-0">
+          <div className="settings-section-heading mb-6">
+            <p className="text-xs font-medium text-primary mb-2">Settings</p>
+            <h2 className="text-2xl font-semibold text-default">{settingsQuery.trim() ? 'Find your setting' : currentSection.label}</h2>
+            <p className="text-sm text-muted mt-2">{settingsQuery.trim() ? 'Choose a result to open its section.' : currentSection.blurb}</p>
           </div>
-
-          <div className="p-6 space-y-4">
-            {/* Avatar and name */}
-            <div className="flex items-center gap-4">
-              <Avatar 
-                name={userInfo?.username || 'User'}
-                email={userInfo?.email}
-                useGravatar={userInfo?.useGravatar}
-                colorIndex={userInfo?.colorIndex || 0}
-                size="xl"
-                showRing
-                className="w-16 h-16"
-              />
-              <div>
-                <h3 className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
-                  {userInfo?.username}
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  {userInfo?.email}
-                </p>
-              </div>
-            </div>
-
-            {/* Details grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+          {settingsQuery.trim() && <section aria-label="Settings search results" className="interface-panel rounded-2xl overflow-hidden">
+            {matches.map(section => <button key={section.key} type="button" onClick={() => { setActiveSection(section.key); setSettingsQuery(''); }} className="settings-result block w-full text-left px-5 py-4"><span className="block text-sm font-medium text-default">{section.label}</span><span className="block text-xs text-muted mt-1">{section.blurb}</span></button>)}
+            {!matches.length && <p role="status" className="p-5 text-sm text-muted">No matching settings. Try a different name.</p>}
+          </section>}
+          <div className="space-y-6" hidden={!!settingsQuery.trim()}>
+        <div hidden={activeSection !== 'general'} className="space-y-6">
+        <ProfilePictureSettings name={userInfo?.username || 'User'} email={userInfo?.email} src={userInfo?.avatarUrl || undefined} useGravatar={userInfo?.useGravatar} colorIndex={userInfo?.colorIndex || 0} onChange={() => setAvatarPickerOpen(true)}>
+            {/* Provider details are read-only; picture changes belong to this account. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5 pt-5 border-t border-default">
+              <div><p className="text-xs text-muted mb-1">Name</p><p className="text-sm font-medium text-default">{userInfo?.username}</p></div>
+              <div className="min-w-0"><p className="text-xs text-muted mb-1">Email</p><p className="text-sm font-medium text-default break-all">{preferences.hideSensitive ? 'Hidden' : userInfo?.email}</p></div>
               <div>
                 <p className="text-xs uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-subtle)' }}>
-                  Group
+                  Groups
                 </p>
                 <p className="font-medium" style={{ color: 'var(--color-text)' }}>
-                  {userInfo?.groupName || 'No group'}
+                  {preferences.hideSensitive ? 'Hidden' : userInfo?.groups ? (userInfo.groups.map(group => group.name).join(', ') || 'No groups') : (userInfo?.groupName || 'Loading groups...')}
                 </p>
               </div>
               <div>
@@ -549,69 +420,25 @@ export default function UserSettingsPage() {
                 </div>
               )}
             </div>
-          </div>
-        </motion.div>
+        </ProfilePictureSettings>
+        <PersonalDisplayPanel />
+            <AvatarPickerModal isOpen={avatarPickerOpen} onClose={() => setAvatarPickerOpen(false)} name={userInfo?.username || 'User'} currentAvatarUrl={userInfo?.avatarUrl} currentColorIndex={userInfo?.colorIndex}
+              onUpload={file => userAuth.uploadAvatar(userId!, authKey!, file)}
+              onSave={async data => { await userAuth.updateProfile(userId!, authKey!, data); await refreshUserInfo(); }} />
 
-        {/* Theme Selection */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="rounded-xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
-          <div
-            className="px-6 py-4 flex items-center gap-3"
-            style={{ borderBottom: '1px solid var(--color-surface-border)' }}
-          >
-            <div 
-              className="w-9 h-9 rounded-lg flex items-center justify-center"
-              style={{ background: 'var(--color-secondary-muted)' }}
-            >
-              <PaintBrushIcon className="w-5 h-5" style={{ color: 'var(--color-secondary)' }} />
-            </div>
-            <div>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                Appearance
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Choose your preferred color scheme
-              </p>
-            </div>
-          </div>
+        </div>
+        <div hidden={activeSection !== 'sync'}><PersonalSyncPanel /></div>
+        <div hidden={activeSection !== 'history'}><PersonalHistoryPanel onExport={handleExportMyData} exporting={isExportingMyData} /></div>
+        <div hidden={activeSection !== 'about'}><PersonalHelpPanel /></div>
+        <div hidden={activeSection !== 'themes'} className="space-y-6">
+        <ThemesPanel embedded showLayout={false} />
 
-          <div className="p-6">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {themeIds.map((id) => (
-                <ThemeCard
-                  key={id}
-                  themeId={id}
-                  meta={themeMeta[id]}
-                  isSelected={themeId === id}
-                  onSelect={() => setTheme(id)}
-                />
-              ))}
-            </div>
-          </div>
-        </motion.div>
-
+        </div>
+        <div hidden={activeSection !== 'general'} className="space-y-6">
         {/* Privacy Settings */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="rounded-xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
-            style={{ borderBottom: '1px solid var(--color-surface-border)' }}
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -620,31 +447,20 @@ export default function UserSettingsPage() {
               <ShieldCheckIcon className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 Privacy
-              </h2>
+              </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 Control who can see your activity
               </p>
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             {/* Activity Visibility Toggle */}
-            <div 
-              className="flex items-center justify-between p-4 rounded-lg"
-              style={{ background: 'var(--color-surface-elevated)' }}
-            >
-              <div className="flex-1">
-                <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                  Activity Visibility
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  {isPublic
+            <SettingRow label="Activity Visibility" description={<>{isPublic
                     ? 'Your watch activity is visible to group members'
-                    : 'Your watch activity is hidden from group members'}
-                </p>
-              </div>
+                    : 'Your watch activity is hidden from group members'}</>}>
 
               {activityVisibilityLoaded && (
                 <div className="flex items-center gap-3">
@@ -654,31 +470,20 @@ export default function UserSettingsPage() {
                     {isPublic ? 'Public' : 'Private'}
                   </span>
                   <ToggleSwitch
-                    checked={isPublic}
+                    label="Activity Visibility" enabled={isPublic}
                     onChange={handleToggleVisibility}
                     disabled={updating}
                   />
                 </div>
               )}
-            </div>
+            </SettingRow>
 
             {/* Public Stats Share Link - a genuinely public, unauthenticated
                 page anyone with the link can view, unlike Activity
                 Visibility above (household members only). */}
-            <div
-              className="flex items-center justify-between p-4 rounded-lg mt-3"
-              style={{ background: 'var(--color-surface-elevated)' }}
-            >
-              <div className="flex-1">
-                <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                  Public Stats Page
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  {publicStatsEnabled
+            <SettingRow label="Public Stats Page" description={<>{publicStatsEnabled
                     ? 'Anyone with this link can view your watch stats - no login required'
-                    : 'Get a shareable link to your watch stats, viewable by anyone without logging in'}
-                </p>
-                {publicStatsEnabled && publicStatsUrl && (
+                    : 'Get a shareable link to your watch stats, viewable by anyone without logging in'}{publicStatsEnabled && publicStatsUrl && (
                   <div className="flex items-center gap-2 mt-2">
                     <code
                       className="text-xs px-2 py-1 rounded truncate max-w-[220px] sm:max-w-xs"
@@ -694,57 +499,32 @@ export default function UserSettingsPage() {
                       Copy
                     </button>
                   </div>
-                )}
-              </div>
+                )}</>}>
 
               {publicStatsLoaded && (
                 <ToggleSwitch
-                  checked={publicStatsEnabled}
+                  label="Public Stats Page" enabled={publicStatsEnabled}
                   onChange={handleTogglePublicStats}
                   disabled={savingPublicStats}
                 />
               )}
-            </div>
+            </SettingRow>
 
             {/* Data export */}
-            <div
-              className="flex items-center justify-between p-4 rounded-lg mt-3"
-              style={{ background: 'var(--color-surface-elevated)' }}
-            >
-              <div className="flex-1">
-                <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                  Your Data
-                </h3>
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  Download your watch history and the household watchlist as a JSON file
-                </p>
-              </div>
-              <button
-                onClick={handleExportMyData}
-                disabled={isExportingMyData}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-opacity disabled:opacity-50"
-                style={{ background: 'var(--color-primary)', color: 'var(--color-bg)' }}
-              >
+            <SettingRow label="Your Data" description={<>Download your watch history and the household watchlist as a JSON file</>}>
+              <Button variant="secondary" size="sm" onClick={handleExportMyData} disabled={isExportingMyData}>
                 {isExportingMyData ? 'Exporting...' : 'Download'}
-              </button>
-            </div>
+              </Button>
+            </SettingRow>
           </div>
-        </motion.div>
+        </Card>
 
+        </div>
+        <div hidden={activeSection !== 'notifications'} className="space-y-6">
         {/* Discord Webhook */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="rounded-xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
-            style={{ borderBottom: '1px solid var(--color-surface-border)' }}
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -753,16 +533,16 @@ export default function UserSettingsPage() {
               <GlobeAltIcon className="w-5 h-5" style={{ color: '#5865F2' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 Notifications
-              </h2>
+              </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 Shared content, plus your own watch activity
               </p>
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             {/* This device: their sign-in stopping, and a daily limit or
                 bedtime about to pause them. Off until they turn it on. */}
             <PersonPushRow userId={userId} authKey={authKey} />
@@ -771,18 +551,7 @@ export default function UserSettingsPage() {
                 notification settings; opting out here only affects pings
                 about MY OWN watch activity, nobody else's. */}
             {notifyOnWatchLoaded && (
-              <div
-                className="flex items-center justify-between p-4 rounded-lg mb-4"
-                style={{ background: 'var(--color-surface-elevated)' }}
-              >
-                <div className="flex-1">
-                  <h3 className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
-                    Watch notifications
-                  </h3>
-                  <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                    Notify (Discord + push) when I start or finish watching something
-                  </p>
-                </div>
+              <SettingRow label="Watch notifications" description={<>Notify (Discord + push) when I start or finish watching something</>}>
                 <div className="flex items-center gap-3">
                   <span
                     className={`text-sm font-medium ${notifyOnWatch ? 'text-success' : 'text-muted'}`}
@@ -790,12 +559,12 @@ export default function UserSettingsPage() {
                     {notifyOnWatch ? 'On' : 'Off'}
                   </span>
                   <ToggleSwitch
-                    checked={notifyOnWatch}
+                    label="Watch notifications" enabled={notifyOnWatch}
                     onChange={handleToggleNotifyOnWatch}
                     disabled={isSavingNotifyOnWatch}
                   />
                 </div>
-              </div>
+              </SettingRow>
             )}
 
             <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>
@@ -812,53 +581,35 @@ export default function UserSettingsPage() {
                   }
                 }}
                 placeholder="https://discord.com/api/webhooks/..."
-                className="flex-1 px-3 py-2 text-sm rounded-lg"
+                className="input-base min-w-0 flex-1 px-3 py-2 text-sm"
                 style={{
                   background: 'var(--color-surface-elevated)',
                   border: '1px solid var(--color-surface-border)',
                   color: 'var(--color-text)',
                 }}
               />
-              <button
-                onClick={handleTestWebhook}
-                disabled={isTestingWebhook || !discordWebhookUrl.trim()}
-                className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                style={{
-                  background: 'var(--color-surface-elevated)',
-                  border: '1px solid var(--color-surface-border)',
-                  color: 'var(--color-text-muted)',
-                  opacity: (!discordWebhookUrl.trim() || isTestingWebhook) ? 0.5 : 1,
-                }}
-                title="Send test message"
-              >
+              <Button variant="secondary" size="sm" onClick={handleTestWebhook} disabled={isTestingWebhook || !discordWebhookUrl.trim()}>
                 {isTestingWebhook ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
                   <BeakerIcon className="w-4 h-4" />
                 )}
                 <span className="text-sm">Test</span>
-              </button>
+              </Button>
             </div>
             <p className="text-xs mt-2" style={{ color: 'var(--color-text-subtle)' }}>
-              Always used for share notifications. Set this and your watch notifications route here too, instead of the shared family channel — leave it blank to keep using that.
+              Always used for share notifications. Set this and your watch notifications route here too, instead of the shared family channel. Leave it blank to keep using that.
             </p>
           </div>
-        </motion.div>
+        </Card>
 
+        <PersonalDevicesPanel />
+        </div>
+        <div hidden={activeSection !== 'integrations'} className="space-y-6">
         {/* API Key */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="rounded-xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
-            style={{ borderBottom: '1px solid var(--color-surface-border)' }}
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -867,16 +618,16 @@ export default function UserSettingsPage() {
               <KeyIcon className="w-5 h-5" style={{ color: 'var(--color-warning)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 API Access
-              </h2>
+              </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 Access your metrics via external API
               </p>
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text)' }}>
               Your API Key
             </label>
@@ -892,7 +643,7 @@ export default function UserSettingsPage() {
                   className="flex-1 text-sm font-mono truncate"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {maskedApiKey}
+                  {preferences.hideSensitive ? '••••••••••••••••' : maskedApiKey}
                 </code>
                 <button
                   onClick={() => setApiKeyVisible(!apiKeyVisible)}
@@ -916,21 +667,10 @@ export default function UserSettingsPage() {
                   <ClipboardDocumentIcon className="w-4 h-4" />
                 </button>
               </div>
-              <button
-                onClick={handleGenerateApiKey}
-                disabled={isGeneratingKey}
-                className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                style={{
-                  background: 'var(--color-surface-elevated)',
-                  border: '1px solid var(--color-surface-border)',
-                  color: 'var(--color-text-muted)',
-                  opacity: isGeneratingKey ? 0.5 : 1,
-                }}
-                title={currentApiKey ? 'Rotate API key' : 'Generate API key'}
-              >
+              <Button variant="secondary" size="sm" onClick={handleGenerateApiKey} disabled={isGeneratingKey}>
                 <ArrowPathIcon className={`w-4 h-4 ${isGeneratingKey ? 'animate-spin' : ''}`} />
                 <span className="text-sm">{currentApiKey ? 'Rotate' : 'Generate'}</span>
-              </button>
+              </Button>
             </div>
             <p className="text-xs mt-2" style={{ color: 'var(--color-text-subtle)' }}>
               Use this key in the Authorization header:{' '}
@@ -951,7 +691,7 @@ export default function UserSettingsPage() {
             </p>
 
             <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-surface-border)' }}>
-              <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>
+              <p className="text-sm font-medium text-sm mb-1" style={{ color: 'var(--color-text)' }}>
                 Scrobble from other apps
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
@@ -961,22 +701,14 @@ export default function UserSettingsPage() {
               </p>
             </div>
           </div>
-        </motion.div>
+        </Card>
 
+        </div>
+        <div hidden={activeSection !== 'security'} className="space-y-6">
         {/* Account Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="rounded-xl overflow-hidden"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-surface-border)',
-          }}
-        >
+        <Card padding="lg">
           <div
-            className="px-6 py-4 flex items-center gap-3"
-            style={{ borderBottom: '1px solid var(--color-surface-border)' }}
+            className="flex items-center gap-3 mb-5"
           >
             <div 
               className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -985,16 +717,16 @@ export default function UserSettingsPage() {
               <Cog6ToothIcon className="w-5 h-5" style={{ color: 'var(--color-error)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text)' }}>
+              <h3 className="text-base font-semibold font-display text-default" style={{ color: 'var(--color-text)' }}>
                 Account
-              </h2>
+              </h3>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 Manage your account
               </p>
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="space-y-4">
             <div
               className="flex items-center justify-between p-4 rounded-lg"
               style={{ background: 'var(--color-error-muted)' }}
@@ -1005,20 +737,13 @@ export default function UserSettingsPage() {
                   Permanently deletes your own watch history, watchlist, and account - not the shared addons/groups. No undo.
                 </p>
               </div>
-              <button
-                onClick={() => setIsDeleteModalOpen(true)}
-                className="shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-                style={{
-                  background: 'var(--color-error)',
-                  color: 'white',
-                }}
-              >
-                Delete Account
-              </button>
+              <Button variant="danger" size="sm" onClick={() => setIsDeleteModalOpen(true)}>Delete Account</Button>
             </div>
           </div>
-        </motion.div>
+        </Card>
 
+        </div>
+        <div hidden={activeSection !== 'general'} className="space-y-6">
         {/* Info */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -1027,11 +752,14 @@ export default function UserSettingsPage() {
           className="p-4 rounded-xl"
           style={{ background: 'var(--color-primary-muted)' }}
         >
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
             <strong style={{ color: 'var(--color-text)' }}>Note:</strong> Profile information is synced from your {providerLabel} account.
             To change your username or email, update them in the {providerLabel} app.
           </p>
         </motion.div>
+        </div>
+          </div>
+        </div>
       </div>
 
       <ConfirmModal

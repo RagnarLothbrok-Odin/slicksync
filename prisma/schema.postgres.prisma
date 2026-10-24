@@ -106,6 +106,7 @@ model User {
   // share link, distinct from activityVisibility above.
   publicStatsEnabled Boolean   @default(false)
   publicStatsSlug    String?   @unique
+  portalPreferences String? // Personal display preferences, independent of household sync settings
   lastSyncedAt       DateTime? // When user addons were last successfully synced
   syncStatus         String? // "idle", "syncing", "success", "error"
   syncErrorMessage   String? // Last sync error message if any
@@ -1031,6 +1032,8 @@ model PersonPushSubscription {
   @@unique([userId, endpoint])
   @@index([accountId, userId])
   @@map("person_push_subscriptions")
+  label String? // Name chosen by the owner for this notification device
+
 }
 
 // An addon SlickSync doesn't manage, reached through a person's stream gate
@@ -1438,4 +1441,21 @@ model WatchSyncMove {
 
   @@index([userId, at])
   @@map("watch_sync_moves")
+}
+
+// Personal Discover choices must never mutate the household watchlist or reactions.
+model PersonalTitleState {
+  id String @id @default(cuid())
+  accountId String
+  userId String
+  itemId String
+  itemType String
+  name String
+  poster String?
+  saved Boolean @default(false)
+  reaction String?
+  createdAt DateTime @default(now())
+  @@unique([userId, itemId])
+  @@index([accountId, userId, saved])
+  @@map("personal_title_state")
 }

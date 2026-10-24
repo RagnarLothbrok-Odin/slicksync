@@ -12,7 +12,7 @@ import { ProfilesCard } from '@/components/user/ProfilesCard';
 import { LimitsButton } from '@/components/user/LimitsButton';
 import { CatchUpButton } from '@/components/user/CatchUpButton';
 import { HouseholdsCard } from '@/components/jellyfin/HouseholdCard';
-import { NebulaPageHeading, NebulaCompactStatCard, NEBULA_GLASS_CLASS, nebulaGlassStyle, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
+import { NebulaPageHeading, NebulaCompactStatCard, NebulaGlassStripe } from '@/components/layout/NebulaTopbar';
 import { useLayoutMode } from '@/lib/layout-mode';
 import { toast } from '@/components/ui/Toast';
 import { api, User, Group, MetricsData, type LimitsSummary } from '@/lib/api';
@@ -553,7 +553,7 @@ export default function UsersPage() {
           on the page background - so this is a real structural addition,
           not a recolor. UserCard itself is completely unchanged either way. */}
       <div className={layoutMode === 'nebula' ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'min(120rem, 92vw)' } : undefined}>
+      <div className={layoutMode === 'nebula' ? 'mx-auto' : ''} style={layoutMode === 'nebula' ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
       {layoutMode === 'nebula' && (
         <NebulaPageHeading
           title="Users"
@@ -564,7 +564,7 @@ export default function UsersPage() {
       {layoutMode === 'nebula' && (
         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-5">
           <NebulaCompactStatCard label="Total Users" value={isLoading ? '...' : users.length} icon={<UsersIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={0} />
-          <NebulaCompactStatCard label="Active" value={isLoading ? '...' : activeCount} icon={<CheckIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={1} />
+          <NebulaCompactStatCard label="Watching now" value={isLoading ? '...' : activeCount} icon={<CheckIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={1} />
           <NebulaCompactStatCard label="Expired" value={isLoading ? '...' : expiredCount} icon={<XMarkIcon className="w-4 h-4 md:w-6 md:h-6" />} colorIndex={0} />
         </div>
       )}
@@ -598,7 +598,7 @@ export default function UsersPage() {
           </div>
         );
       })}
-      <div className={layoutMode === 'nebula' ? `${NEBULA_GLASS_CLASS} p-5` : ''} style={layoutMode === 'nebula' ? nebulaGlassStyle : undefined}>
+      <div className="interface-management-content">
       {layoutMode === 'nebula' && <NebulaGlassStripe />}
         {/* Filters and controls */}
         <PageToolbar
@@ -971,6 +971,7 @@ export default function UsersPage() {
       {/* Floating Add Button - Mobile Only */}
       <button
         onClick={() => setIsCreateModalOpen(true)}
+        aria-label="Add user"
         className="lg:hidden fixed bottom-4 right-4 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-lg bg-surface border border-default nav-item-hover-pill"
         style={{ boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
       >
@@ -1261,6 +1262,7 @@ function UserCard({
           <div className="user-card-toggle">
             <ToggleSwitch
               checked={user.status === 'active'}
+              title={`Activate ${user.name}`}
               onChange={async () => {
                 try {
                   const newStatus = user.status === 'active' ? false : true;
