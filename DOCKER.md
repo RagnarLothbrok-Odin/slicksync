@@ -33,7 +33,7 @@ inherit the build's dependency tree.
 | `builder` | Generates the Prisma client and builds the frontend |
 | `production` | Copies the runtime tree from `prod-deps`, the built app and the generated Prisma client from `builder` |
 
-That split is why the published image does not carry Biome, nodemon or the
+That split is why the published image does not carry Biome, concurrently or the
 rest of the build tooling. Note that `prisma` itself is a runtime dependency,
 not a build one: the start script applies the schema on every boot, so an
 image without it would reach for the network at startup.

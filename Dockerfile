@@ -14,7 +14,7 @@ COPY prisma ./prisma/
 RUN bun install --frozen-lockfile
 
 # Runtime dependencies only. The image used to ship whatever the build needed,
-# so every release carried eslint, nodemon, concurrently and their transitive
+# so every release carried linters, concurrently and their transitive
 # tree to every self-hoster - none of which runs in the container. Note that
 # prisma itself is a real runtime dependency here, because scripts/start.sh
 # applies the schema on every boot, so it lives under dependencies rather than
