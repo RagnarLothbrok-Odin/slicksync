@@ -81,3 +81,11 @@ test('person card: what they do, born, and a short bio without Wikipedia asides'
     'Linda Edna Cardellini is an American actress. She played Velma in Scooby-Doo. She was in Mad Men.',
   )
 })
+
+
+test('search genre excludes unrelated titles and missing metadata', () => {
+  assert.ok(f.matchesGenre({ genres: ['Drama', 'Crime'] }, 'crime'))
+  assert.ok(!f.matchesGenre({ genres: ['Comedy'] }, 'Crime'))
+  assert.ok(!f.matchesGenre({}, 'Crime'))
+  assert.ok(f.matchesGenre({}, undefined))
+})

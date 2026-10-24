@@ -56,6 +56,13 @@ function ratingOf(item) {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+/** Search does not apply a catalog genre extra, so match its metadata here. */
+function matchesGenre(item, genre) {
+  if (!genre) return true
+  return Array.isArray(item?.genres) && item.genres.some((value) =>
+    typeof value === 'string' && value.toLowerCase() === String(genre).toLowerCase())
+}
+
 /** Whether one item passes every filter that is on. */
 function matchesFacets(item, facets) {
   if (!facets) return true
@@ -137,5 +144,5 @@ function interleave(a, b) {
 
 module.exports = {
   DECADES, LENGTHS, FILTERED_TARGET, FILTERED_MAX_PAGES, BOTH_SPLIT,
-  parseFacets, matchesFacets, minutesOf, yearOf, ratingOf, takeFresh, filteredPage, bothPage, interleave,
+  parseFacets, matchesFacets, matchesGenre, minutesOf, yearOf, ratingOf, takeFresh, filteredPage, bothPage, interleave,
 }
