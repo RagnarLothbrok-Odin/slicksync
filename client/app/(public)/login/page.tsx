@@ -2,11 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   ArrowTopRightOnSquareIcon,
-  ClipboardIcon,
-  CheckIcon,
   ArrowPathIcon,
   UserIcon,
   ShieldCheckIcon,
@@ -18,6 +16,8 @@ import { copyToClipboard } from '@/lib/clipboard';
 import { SlickSyncLogo } from '@/components/ui/SlickSyncLogo';
 import { PasswordToggleButton } from '@/components/ui/Input';
 import { api } from '@/lib/api';
+import { FilterTabs } from '@/components/ui/FilterTabs';
+import { VerificationCode } from '@/components/ui/VerificationCode';
 import { useUserAuth, UserAuthProvider } from '@/lib/hooks/useUserAuth';
 import { useIsTV } from '@/lib/hooks/useIsTV';
 import JellyfinSignIn, { type JellyfinCredentials, type JellyfinSignInApi } from '@/components/jellyfin/JellyfinSignIn';
@@ -74,6 +74,7 @@ function startAdminSession(token?: string) {
 
 function LoginContent() {
   const searchParams = useSearchParams();
+  const reduceMotion = useReducedMotion();
   const router = useRouter();
   const { login: userLogin, loginNuvio, loginJellyfin, isAuthenticated } = useUserAuth();
   const isTV = useIsTV();
@@ -690,11 +691,11 @@ function LoginContent() {
 
   // Time color based on urgency
   const getTimeColor = () => {
-    if (!oauthExpiresAt) return 'var(--color-text-subtle)';
+    if (!oauthExpiresAt) return 'var(--color-text-muted)';
     const diff = oauthExpiresAt - Date.now();
     if (diff < 60000) return 'var(--color-error)';
     if (diff < 120000) return 'var(--color-warning)';
-    return 'var(--color-text-subtle)';
+    return 'var(--color-text-muted)';
   };
 
   // Switch mode
@@ -726,53 +727,23 @@ function LoginContent() {
       style={{ background: 'var(--color-bg)' }}
     >
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={reduceMotion ? false : { opacity: 0 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full relative"
-        style={{ maxWidth: '448px' }}
+        style={{ maxWidth: '480px' }}
       >
-        {/* Logo */}
-        <div className="mb-8">
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.1 }}
-            className="w-12 h-12 mb-5 rounded-2xl flex items-center justify-center"
-            style={{ background: 'var(--color-primary)' }}
-          >
-            <SlickSyncLogo className="w-7 h-7" />
-          </motion.div>
-          <h1
-            className="text-3xl font-bold font-display mb-2"
-            style={{ color: 'var(--color-text)' }}
-          >
-            Welcome to SlickSync
-          </h1>
-          <p style={{ color: 'var(--color-text-muted)' }}>
-            Your library. Your people. All in sync.
-          </p>
+        <div className="login-intro mb-7 text-center">
+          <div className="inline-flex items-center gap-2.5 mb-7">
+            <span className="flex w-10 h-10 items-center justify-center rounded-xl bg-primary"><SlickSyncLogo className="w-6 h-6 text-white" /></span>
+            <span className="text-base font-semibold text-default">SlickSync</span>
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight text-default mb-2">Welcome back.</h1>
+          <p className="text-sm text-muted">Your media, together. Sign in to continue.</p>
         </div>
-
-        {/* Mode Toggle */}
-        <div
-          className="p-1 rounded-xl mb-6 flex"
-          style={{ background: 'var(--color-surface)' }}
-        >
-          <button
-            onClick={() => switchMode('user')}
-            className={`flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${mode === 'user' ? 'seg-on' : 'seg-off'}`}
-          >
-            <UserIcon className="w-4 h-4" />
-            User
-          </button>
-          <button
-            onClick={() => switchMode('admin')}
-            className={`flex-1 py-2.5 px-4 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${mode === 'admin' ? 'seg-on' : 'seg-off'}`}
-          >
-            <ShieldCheckIcon className="w-4 h-4" />
-            Admin
-          </button>
-        </div>
+        <FilterTabs fill className="w-full mb-5" activeKey={mode} onChange={key => { if (key === 'user' || key === 'admin') switchMode(key); }} options={[
+          { key: 'user', label: 'Personal', icon: <UserIcon className="w-4 h-4" /> },
+          { key: 'admin', label: 'Admin', icon: <ShieldCheckIcon className="w-4 h-4" /> },
+        ]} />
 
         {/* Login Card */}
         <motion.div
@@ -783,7 +754,7 @@ function LoginContent() {
           }}
         >
           <div className="p-6">
-            <AnimatePresence initial={false}>
+            <AnimatePresence initial={false} mode="wait">
               {mode === 'admin' ? (
                 /* Admin Login Form */
                 <motion.div
@@ -795,53 +766,15 @@ function LoginContent() {
                 >
                   {/* Admin Login Type Selector (Public Mode only) */}
                   {INSTANCE_TYPE === 'public' && (
-                    <div className="flex gap-2 p-1 rounded-lg bg-bg-subtle mb-4">
-                      <button
-                        onClick={() => setAdminLoginType('credentials')}
-                        className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${adminLoginType === 'credentials'
-                          ? 'bg-surface shadow-sm text-default'
-                          : 'text-muted hover:text-default'
-                          }`}
-                      >
-                        UUID / Pass
-                      </button>
-                      <button
-                        onClick={() => {
-                          setAdminLoginType('stremio');
-                          if (!oauthLink) generateOAuthLink();
-                        }}
-                        className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${adminLoginType === 'stremio'
-                          ? 'bg-surface shadow-sm text-default'
-                          : 'text-muted hover:text-default'
-                          }`}
-                      >
-                        Stremio Login
-                      </button>
-                      <button
-                        onClick={() => {
-                          setAdminLoginType('nuvio');
-                          if (!nuvioCode) handleStartNuvioOAuth();
-                        }}
-                        className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${adminLoginType === 'nuvio'
-                          ? 'bg-surface shadow-sm text-default'
-                          : 'text-muted hover:text-default'
-                          }`}
-                      >
-                        Nuvio Login
-                      </button>
-                      <button
-                        onClick={() => {
-                          setAdminLoginType('jellyfin');
-                          setAdminError(null);
-                        }}
-                        className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${adminLoginType === 'jellyfin'
-                          ? 'bg-surface shadow-sm text-default'
-                          : 'text-muted hover:text-default'
-                          }`}
-                      >
-                        Jellyfin | AIOStreams
-                      </button>
-                    </div>
+                    <FilterTabs fill className="login-provider-tabs w-full mb-5" activeKey={adminLoginType} onChange={key => {
+                      if (key === 'credentials' || key === 'stremio' || key === 'nuvio' || key === 'jellyfin') setAdminLoginType(key);
+                      if (key === 'stremio' && !oauthLink) generateOAuthLink();
+                      if (key === 'nuvio' && !nuvioCode) handleStartNuvioOAuth();
+                      if (key === 'jellyfin') setAdminError(null);
+                    }} options={[
+                      { key: 'credentials', label: 'Account' }, { key: 'stremio', label: 'Stremio' },
+                      { key: 'nuvio', label: 'Nuvio' }, { key: 'jellyfin', label: 'Jellyfin' },
+                    ]} />
                   )}
 
                   {adminLoginType === 'jellyfin' ? (
@@ -894,7 +827,7 @@ function LoginContent() {
                         className="w-full py-3.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                         style={{
                           background: 'var(--color-primary)',
-                          color: 'white',
+                          color: 'var(--login-action-text)',
                           opacity: twoFactorVerifying || twoFactorCode.trim().length < 6 ? 0.5 : 1,
                         }}
                       >
@@ -990,7 +923,7 @@ function LoginContent() {
                         className="w-full py-3.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                         style={{
                           background: 'var(--color-primary)',
-                          color: 'white',
+                          color: 'var(--login-action-text)',
                           opacity: adminLoading || !adminUsername || !adminPassword ? 0.5 : 1,
                         }}
                       >
@@ -1029,7 +962,7 @@ function LoginContent() {
                         <>
                           <div className="flex items-center gap-3">
                             <div className="flex-1 h-px" style={{ background: 'var(--color-surface-border)' }} />
-                            <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--color-text-subtle)' }}>
+                            <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
                               or
                             </span>
                             <div className="flex-1 h-px" style={{ background: 'var(--color-surface-border)' }} />
@@ -1077,7 +1010,7 @@ function LoginContent() {
                         className="w-full py-3.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                         style={{
                           background: 'var(--color-primary)',
-                          color: 'white',
+                          color: 'var(--login-action-text)',
                           opacity: !oauthLink || isExpired || isAuthenticating ? 0.5 : 1,
                         }}
                       >
@@ -1113,7 +1046,7 @@ function LoginContent() {
                               height={160}
                             />
                           </div>
-                          <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                             Scan with your phone to continue
                           </p>
                         </div>
@@ -1121,27 +1054,10 @@ function LoginContent() {
 
                       {/* Manual code UI reused */}
                       <div className="text-center space-y-3 pt-2">
-                        <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-subtle)' }}>
+                        <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
                           Verification Code
                         </p>
-                        <button
-                          onClick={copyCode}
-                          disabled={!oauthCode}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all"
-                          style={{
-                            background: 'var(--color-bg)',
-                            border: '1px solid var(--color-surface-border)',
-                          }}
-                        >
-                          <span className="font-mono text-lg tracking-widest" style={{ color: 'var(--color-text)' }}>
-                            {oauthCode || '----'}
-                          </span>
-                          {copied ? (
-                            <CheckIcon className="w-4 h-4 text-success" />
-                          ) : (
-                            <ClipboardIcon className="w-4 h-4 text-muted" />
-                          )}
-                        </button>
+                        <VerificationCode code={oauthCode} copied={copied} onCopy={copyCode} />
                       </div>
 
                       {adminError && (
@@ -1159,12 +1075,12 @@ function LoginContent() {
                                 key={i}
                                 className="w-1.5 h-1.5 rounded-full"
                                 style={{ background: 'var(--color-success)' }}
-                                animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                                animate={reduceMotion ? { opacity: 1 } : { scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
                                 transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                               />
                             ))}
                           </div>
-                          <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                             Waiting for authorization...
                           </span>
                         </div>
@@ -1177,7 +1093,7 @@ function LoginContent() {
                       <p className="text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
                         Sign in to the <strong>admin dashboard</strong> with Nuvio, as an alternative to a UUID and password.
                       </p>
-                      <p className="text-xs text-center mb-4" style={{ color: 'var(--color-text-subtle)' }}>
+                      <p className="text-xs text-center mb-4" style={{ color: 'var(--color-text-muted)' }}>
                         Looking to connect a user's Nuvio library instead? Do that from Users, not here.
                       </p>
 
@@ -1187,7 +1103,7 @@ function LoginContent() {
                         className="w-full py-3.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                         style={{
                           background: 'var(--color-primary)',
-                          color: 'white',
+                          color: 'var(--login-action-text)',
                           opacity: !nuvioWebUrl || nuvioTimeLeft === 'Expired' || isNuvioAuthenticating ? 0.5 : 1,
                         }}
                       >
@@ -1222,36 +1138,19 @@ function LoginContent() {
                               height={160}
                             />
                           </div>
-                          <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                             Scan with your phone to continue
                           </p>
                         </div>
                       )}
 
                       <div className="text-center space-y-3 pt-2">
-                        <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-subtle)' }}>
+                        <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
                           Verification Code
                         </p>
-                        <button
-                          onClick={copyNuvioCode}
-                          disabled={!nuvioCode}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all"
-                          style={{
-                            background: 'var(--color-bg)',
-                            border: '1px solid var(--color-surface-border)',
-                          }}
-                        >
-                          <span className="font-mono text-lg tracking-widest" style={{ color: 'var(--color-text)' }}>
-                            {nuvioCode || '----'}
-                          </span>
-                          {nuvioCopied ? (
-                            <CheckIcon className="w-4 h-4 text-success" />
-                          ) : (
-                            <ClipboardIcon className="w-4 h-4 text-muted" />
-                          )}
-                        </button>
+                        <VerificationCode code={nuvioCode} copied={nuvioCopied} onCopy={copyNuvioCode} />
                         {nuvioTimeLeft && (
-                          <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                             {nuvioTimeLeft === 'Expired' ? 'Expired' : `Expires in ${nuvioTimeLeft}`}
                           </p>
                         )}
@@ -1282,12 +1181,12 @@ function LoginContent() {
                                 key={i}
                                 className="w-1.5 h-1.5 rounded-full"
                                 style={{ background: 'var(--color-success)' }}
-                                animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                                animate={reduceMotion ? { opacity: 1 } : { scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
                                 transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                               />
                             ))}
                           </div>
-                          <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                             Waiting for authorization...
                           </span>
                         </div>
@@ -1305,40 +1204,16 @@ function LoginContent() {
                   className="space-y-4"
                 >
                   {/* Provider switcher */}
-                  <div className="flex gap-2 p-1 rounded-lg bg-bg-subtle mb-4">
-                    <button
-                      onClick={() => {
-                        setUserLoginType('stremio');
-                        if (!oauthLink) generateOAuthLink();
-                      }}
-                      className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${userLoginType === 'stremio'
-                        ? 'bg-surface shadow-sm text-default'
-                        : 'text-muted hover:text-default'
-                        }`}
-                    >
-                      Stremio Login
-                    </button>
-                    <button
-                      onClick={() => {
-                        setUserLoginType('nuvio');
-                        if (!nuvioCode) handleStartNuvioOAuth();
-                      }}
-                      className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${userLoginType === 'nuvio'
-                        ? 'bg-surface shadow-sm text-default'
-                        : 'text-muted hover:text-default'
-                        }`}
-                    >
-                      Nuvio Login
-                    </button>
-                    <button
-                      onClick={() => setUserLoginType('jellyfin')}
-                      className={`flex-1 py-1.5 px-3 rounded-md text-xs font-medium transition-all ${userLoginType === 'jellyfin'
-                        ? 'bg-surface shadow-sm text-default'
-                        : 'text-muted hover:text-default'
-                        }`}
-                    >
-                      Jellyfin | AIOStreams
-                    </button>
+                  <div className="space-y-2 mb-5">
+                    <p className="text-xs font-medium text-muted">Choose your service</p>
+                    <FilterTabs fill className="login-provider-tabs w-full" activeKey={userLoginType} onChange={key => {
+                      if (key === 'stremio' || key === 'nuvio' || key === 'jellyfin') setUserLoginType(key);
+                      if (key === 'stremio' && !oauthLink) generateOAuthLink();
+                      if (key === 'nuvio' && !nuvioCode) handleStartNuvioOAuth();
+                    }} options={[
+                      { key: 'stremio', label: 'Stremio' }, { key: 'nuvio', label: 'Nuvio' },
+                      { key: 'jellyfin', label: 'Jellyfin' },
+                    ]} />
                   </div>
 
                   {userLoginType === 'jellyfin' ? (
@@ -1367,7 +1242,7 @@ function LoginContent() {
                     className="w-full py-3.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                     style={{
                       background: 'var(--color-primary)',
-                      color: 'white',
+                      color: 'var(--login-action-text)',
                       opacity: !oauthLink || isExpired || isAuthenticating ? 0.5 : 1,
                     }}
                   >
@@ -1402,7 +1277,7 @@ function LoginContent() {
                           height={160}
                         />
                       </div>
-                      <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                         Scan with your phone to continue
                       </p>
                     </div>
@@ -1411,7 +1286,7 @@ function LoginContent() {
                   {/* Divider */}
                   <div className="flex items-center gap-3">
                     <div className="flex-1 h-px" style={{ background: 'var(--color-surface-border)' }} />
-                    <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--color-text-subtle)' }}>
+                    <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
                       or
                     </span>
                     <div className="flex-1 h-px" style={{ background: 'var(--color-surface-border)' }} />
@@ -1432,27 +1307,7 @@ function LoginContent() {
                       </a>
                     </p>
 
-                    <button
-                      onClick={copyCode}
-                      disabled={!oauthCode}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all"
-                      style={{
-                        background: 'var(--color-bg)',
-                        border: '1px solid var(--color-surface-border)',
-                      }}
-                    >
-                      <span
-                        className="font-mono text-lg tracking-widest"
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        {oauthCode || '----'}
-                      </span>
-                      {copied ? (
-                        <CheckIcon className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
-                      ) : (
-                        <ClipboardIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
-                      )}
-                    </button>
+                    <VerificationCode code={oauthCode} copied={copied} onCopy={copyCode} />
                   </div>
 
                   {/* Timer and refresh */}
@@ -1494,10 +1349,7 @@ function LoginContent() {
                             key={i}
                             className="w-1.5 h-1.5 rounded-full"
                             style={{ background: 'var(--color-success)' }}
-                            animate={{
-                              scale: [1, 1.3, 1],
-                              opacity: [0.4, 1, 0.4],
-                            }}
+                            animate={reduceMotion ? { opacity: 1 } : { scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
                             transition={{
                               duration: 1,
                               repeat: Infinity,
@@ -1506,7 +1358,7 @@ function LoginContent() {
                           />
                         ))}
                       </div>
-                      <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                      <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                         Waiting for authorization...
                       </span>
                     </div>
@@ -1520,8 +1372,8 @@ function LoginContent() {
                   >
                     Sign in with <strong>your own</strong> Nuvio account to watch here and share it with your group.
                   </p>
-                  <p className="text-xs text-center mb-4" style={{ color: 'var(--color-text-subtle)' }}>
-                    This is for your personal viewing, not for admin dashboard access.
+                  <p className="text-xs text-center mb-4" style={{ color: 'var(--color-text-muted)' }}>
+                    Your library and watch history will be ready after you approve access.
                   </p>
 
                   <button
@@ -1530,7 +1382,7 @@ function LoginContent() {
                     className="w-full py-3.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                     style={{
                       background: 'var(--color-primary)',
-                      color: 'white',
+                      color: 'var(--login-action-text)',
                       opacity: !nuvioWebUrl || nuvioTimeLeft === 'Expired' || isNuvioAuthenticating ? 0.5 : 1,
                     }}
                   >
@@ -1565,36 +1417,19 @@ function LoginContent() {
                           height={160}
                         />
                       </div>
-                      <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                         Scan with your phone to continue
                       </p>
                     </div>
                   )}
 
                   <div className="text-center space-y-3 pt-2">
-                    <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-subtle)' }}>
+                    <p className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
                       Verification Code
                     </p>
-                    <button
-                      onClick={copyNuvioCode}
-                      disabled={!nuvioCode}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all"
-                      style={{
-                        background: 'var(--color-bg)',
-                        border: '1px solid var(--color-surface-border)',
-                      }}
-                    >
-                      <span className="font-mono text-lg tracking-widest" style={{ color: 'var(--color-text)' }}>
-                        {nuvioCode || '----'}
-                      </span>
-                      {nuvioCopied ? (
-                        <CheckIcon className="w-4 h-4 text-success" />
-                      ) : (
-                        <ClipboardIcon className="w-4 h-4 text-muted" />
-                      )}
-                    </button>
+                    <VerificationCode code={nuvioCode} copied={nuvioCopied} onCopy={copyNuvioCode} />
                     {nuvioTimeLeft && (
-                      <p className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                         {nuvioTimeLeft === 'Expired' ? 'Expired' : `Expires in ${nuvioTimeLeft}`}
                       </p>
                     )}
@@ -1625,12 +1460,12 @@ function LoginContent() {
                             key={i}
                             className="w-1.5 h-1.5 rounded-full"
                             style={{ background: 'var(--color-success)' }}
-                            animate={{ scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
+                            animate={reduceMotion ? { opacity: 1 } : { scale: [1, 1.3, 1], opacity: [0.4, 1, 0.4] }}
                             transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                           />
                         ))}
                       </div>
-                      <span className="text-xs" style={{ color: 'var(--color-text-subtle)' }}>
+                      <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                         Waiting for authorization...
                       </span>
                     </div>
@@ -1644,7 +1479,7 @@ function LoginContent() {
         </motion.div>
 
         {/* Footer */}
-        <p className="text-center mt-6 text-sm" style={{ color: 'var(--color-text-subtle)' }}>
+        <p className="text-center mt-6 text-sm" style={{ color: 'var(--color-text-muted)' }}>
           {mode === 'user'
             ? 'Sign in to access your library and share with your group.'
             : 'Admin access for managing users, groups, and addons.'}
