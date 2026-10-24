@@ -118,8 +118,8 @@ async function restoreKit(prisma, accountId, passphrase, kit, req, { encrypt }) 
     let bundle;
     try {
         bundle = JSON.parse(aesGcmDecrypt(key, kit.payload));
-    } catch {
-        throw new Error("Wrong passphrase, or the file is corrupted");
+    } catch (cause) {
+        throw new Error("Wrong passphrase, or the file is corrupted", { cause });
     }
 
     // Import config via the same battle-tested handler restore-from-backup uses.

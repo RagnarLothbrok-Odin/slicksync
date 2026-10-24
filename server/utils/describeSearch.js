@@ -186,11 +186,13 @@ async function searchByDescription(prisma, accountId, decrypt, description, tmdb
         if (aborted) {
             console.warn(`[DescribeSearch] ${creds.model} did not answer within ${waited}s`);
             throw new Error(
-                `The AI model (${creds.model}) did not answer within ${waited}s. It is normally far faster, so try again - if it keeps happening, a "flash"/"mini" tier model in Settings -> Integrations -> AI Services is more reliable.`
+                `The AI model (${creds.model}) did not answer within ${waited}s. It is normally far faster, so try again - if it keeps happening, a "flash"/"mini" tier model in Settings -> Integrations -> AI Services is more reliable.`,
+                { cause: e }
             );
         }
         throw new Error(
-            `The AI provider could not be reached after ${waited}s: ${e?.message || "unknown error"}`
+            `The AI provider could not be reached after ${waited}s: ${e?.message || "unknown error"}`,
+            { cause: e }
         );
     }
 

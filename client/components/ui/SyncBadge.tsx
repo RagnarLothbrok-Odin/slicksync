@@ -399,14 +399,17 @@ export function SyncBadge({
     }
 
     // Only make unsynced clickable, not error
-    if (onSync && finalStatus === "unsynced") {
+    if (onSync && (userId || groupId) && finalStatus === "unsynced") {
         return (
             <button
                 className="relative z-10 cursor-pointer border-0 shadow-none ring-0 focus:outline-none"
                 onClick={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    onSync(userId || groupId!);
+                    const id = userId || groupId;
+                    if (id) {
+                        onSync(id);
+                    }
                 }}
                 type="button"
             >

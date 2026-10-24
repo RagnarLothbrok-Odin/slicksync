@@ -170,8 +170,8 @@ function fieldsToJson(fields: AddonConfigField[]): Record<string, unknown> {
         } else {
             try {
                 out[f.key] = JSON.parse(f.value);
-            } catch {
-                throw new Error(`"${f.key}" must stay valid JSON`);
+            } catch (cause) {
+                throw new Error(`"${f.key}" must stay valid JSON`, { cause });
             }
         }
     }

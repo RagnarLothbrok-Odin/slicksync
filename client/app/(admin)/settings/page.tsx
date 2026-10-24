@@ -532,7 +532,7 @@ export default function SettingsPage() {
     // (reading it during render would disagree with the server render).
     const [activeTab, setActiveTab] = useState<SettingsTab>("general");
     const [settingsQuery, setSettingsQuery] = useState("");
-    const currentSection = SETTINGS_TABS.find((tab) => tab.key === activeTab)!;
+    const currentSection = SETTINGS_TABS.find((tab) => tab.key === activeTab) ?? SETTINGS_TABS[0];
     const settingsMatches = settingsQuery.trim()
         ? SETTINGS_INDEX.filter((entry) =>
               `${entry.label} ${entry.section} ${entry.keywords}`
@@ -4205,7 +4205,10 @@ export default function SettingsPage() {
                                                     </div>
                                                     <Button
                                                         onClick={() => {
-                                                            copyToClipboard(accountInfo.uuid!);
+                                                            if (!accountInfo.uuid) {
+                                                                return;
+                                                            }
+                                                            copyToClipboard(accountInfo.uuid);
                                                             setUuidCopied(true);
                                                             toast.success(
                                                                 "Account ID copied to clipboard"

@@ -168,7 +168,7 @@ self.addEventListener("fetch", (event) => {
                         cache.put(req, res.clone());
                     }
                     return res;
-                } catch {
+                } catch (cause) {
                     const hit = await cache.match(req);
                     if (hit) {
                         return hit;
@@ -179,7 +179,7 @@ self.addEventListener("fetch", (event) => {
                     if (any) {
                         return any;
                     }
-                    throw new Error("offline with empty cache");
+                    throw new Error("offline with empty cache", { cause });
                 }
             })()
         );

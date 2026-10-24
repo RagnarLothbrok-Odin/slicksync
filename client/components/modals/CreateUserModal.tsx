@@ -337,6 +337,10 @@ export function CreateUserModal({
 
     const handleSubmit = async () => {
         if (isReconnect) {
+            if (!userId) {
+                toast.error("Choose a user before reconnecting");
+                return;
+            }
             // Reconnect mode - manual entry
             if (!(email && password)) {
                 toast.error("Email and password are required");
@@ -344,7 +348,7 @@ export function CreateUserModal({
             }
             setIsSubmitting(true);
             try {
-                await api.connectUserStremio(userId!, {
+                await api.connectUserStremio(userId, {
                     email: email.trim(),
                     password,
                 });

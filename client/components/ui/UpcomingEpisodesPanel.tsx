@@ -100,10 +100,12 @@ function groupByDay(
         const air = new Date(it.airDate);
         const ts = new Date(air.getFullYear(), air.getMonth(), air.getDate()).getTime();
         const key = String(ts);
-        if (!groups.has(key)) {
-            groups.set(key, { items: [], key, ts });
+        const group = groups.get(key);
+        if (group) {
+            group.items.push(it);
+        } else {
+            groups.set(key, { items: [it], key, ts });
         }
-        groups.get(key)!.items.push(it);
     }
     return [...groups.values()].sort((a, b) => a.ts - b.ts);
 }

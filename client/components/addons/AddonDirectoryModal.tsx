@@ -405,7 +405,7 @@ export function AddonDirectoryModal({ isOpen, onClose, onAdded }: AddonDirectory
                                             }
                                             onClick={() =>
                                                 window.open(
-                                                    a.configureUrl!,
+                                                    a.configureUrl ?? undefined,
                                                     "_blank",
                                                     "noopener,noreferrer"
                                                 )

@@ -246,8 +246,9 @@ const paletteCache = new Map<ThemeName, ColorConfig[]>();
 
 const buildPalette = (theme?: ThemeName | string | null): ColorConfig[] => {
     const normalized = normalizeTheme(theme);
-    if (paletteCache.has(normalized)) {
-        return paletteCache.get(normalized)!;
+    const cached = paletteCache.get(normalized);
+    if (cached) {
+        return cached;
     }
 
     const baseHex = SURFACE_HEX[normalized] || SURFACE_HEX.light;

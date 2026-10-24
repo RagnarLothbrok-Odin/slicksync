@@ -245,7 +245,9 @@ export function AioHealthButton({ userId, name }: { userId: string; name: string
                                                     Apps using it
                                                 </p>
                                                 <p className="text-subtle text-xs">
-                                                    {state.apps!.map((x) => x.name).join(" · ")}
+                                                    {(state.apps ?? [])
+                                                        .map((x) => x.name)
+                                                        .join(" · ")}
                                                 </p>
                                             </div>
                                         )}
@@ -262,7 +264,7 @@ export function AioHealthButton({ userId, name }: { userId: string; name: string
                                                 </p>
                                                 {(state.recent?.length ?? 0) > 0 && (
                                                     <div className="flex flex-wrap gap-1.5">
-                                                        {state.recent!.map((t) => (
+                                                        {(state.recent ?? []).map((t) => (
                                                             <button
                                                                 className="rounded-lg border border-default px-2.5 py-1 text-subtle text-xs hover:bg-surface-hover hover:text-default disabled:opacity-50"
                                                                 disabled={testing}

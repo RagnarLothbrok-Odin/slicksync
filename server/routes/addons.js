@@ -213,7 +213,8 @@ async function reloadAddon(
         } catch (e) {
             console.error("❌ Failed to fetch manifest:", e.message);
             throw new Error(
-                `Failed to fetch addon manifest: ${addressProblem(e, policy) || e.message}`
+                `Failed to fetch addon manifest: ${addressProblem(e, policy) || e.message}`,
+                { cause: e }
             );
         }
     }

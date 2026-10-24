@@ -514,10 +514,12 @@ function buildGridWatchers(activities: ActivityItem[]): ActivityItem[] {
     const groups = new Map<string, ActivityItem[]>();
     for (const a of activities) {
         const key = contentKey(a);
-        if (!groups.has(key)) {
-            groups.set(key, []);
+        const bucket = groups.get(key);
+        if (bucket) {
+            bucket.push(a);
+        } else {
+            groups.set(key, [a]);
         }
-        groups.get(key)!.push(a);
     }
 
     const result: ActivityItem[] = [];
@@ -2323,10 +2325,12 @@ function ActivityPageContent() {
                 }
             }
             groupUsers.forEach((userId: string) => {
-                if (!map.has(userId)) {
-                    map.set(userId, []);
+                const bucket = map.get(userId);
+                if (bucket) {
+                    bucket.push(group.id);
+                } else {
+                    map.set(userId, [group.id]);
                 }
-                map.get(userId)!.push(group.id);
             });
         });
         return map;
@@ -2468,10 +2472,12 @@ function ActivityPageContent() {
 
         for (const activity of visibleActivities) {
             const dateKey = getDateKey(activity.timestamp);
-            if (!groups.has(dateKey)) {
-                groups.set(dateKey, []);
+            const bucket = groups.get(dateKey);
+            if (bucket) {
+                bucket.push(activity);
+            } else {
+                groups.set(dateKey, [activity]);
             }
-            groups.get(dateKey)!.push(activity);
         }
 
         // Convert to sorted array (most recent first)

@@ -1017,7 +1017,11 @@ export function HouseholdCard({
                             <div className="flex flex-wrap gap-3">
                                 <Button
                                     disabled={busy}
-                                    onClick={() => copyAddress(addressInfo.url!)}
+                                    onClick={() => {
+                                        if (addressInfo.url) {
+                                            copyAddress(addressInfo.url);
+                                        }
+                                    }}
                                     type="button"
                                     variant="secondary"
                                 >

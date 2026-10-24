@@ -552,8 +552,8 @@ module.exports = ({
         let who;
         try {
             who = await getPublicUser(authKey, req, user.id);
-        } catch {
-            throw new Error("Invalid auth key");
+        } catch (cause) {
+            throw new Error("Invalid auth key", { cause });
         }
         if (!who || who.id !== user.id) {
             throw new Error("Invalid auth key");

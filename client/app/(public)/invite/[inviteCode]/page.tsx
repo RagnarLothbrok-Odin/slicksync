@@ -330,7 +330,7 @@ export default function InviteRequestPage() {
                     setUsernameConfirmed(false);
                 }
                 if (error.code === "EMAIL_EXISTS" || error.code === "EMAIL_AND_USERNAME_EXIST") {
-                    throw new Error("This server user is already registered");
+                    throw new Error("This server user is already registered", { cause: error });
                 }
             }
             throw error;

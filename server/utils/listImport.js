@@ -215,12 +215,15 @@ async function importFromSlickSync(url) {
         );
     } catch (e) {
         if (/^(blocked host|unsupported protocol|invalid url)$/.test(e?.message || "")) {
-            throw new Error("That address cannot be used from this server - check the share link");
+            throw new Error("That address cannot be used from this server - check the share link", {
+                cause: e,
+            });
         }
         throw new Error(
             e?.name === "AbortError"
                 ? "That instance took too long to respond"
-                : "Could not reach that instance - check the URL and that it is publicly reachable"
+                : "Could not reach that instance - check the URL and that it is publicly reachable",
+            { cause: e }
         );
     } finally {
         clearTimeout(timeoutId);
@@ -240,8 +243,8 @@ async function importFromSlickSync(url) {
     let body;
     try {
         body = await res.json();
-    } catch {
-        throw new Error("That URL did not return a SlickSync catalog");
+    } catch (cause) {
+        throw new Error("That URL did not return a SlickSync catalog", { cause });
     }
     if (!(body && Array.isArray(body.items))) {
         throw new Error("That URL did not return a SlickSync catalog");

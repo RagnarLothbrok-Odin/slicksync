@@ -1000,8 +1000,8 @@ const ACTIONS = {
             let parsed;
             try {
                 parsed = new URL(url);
-            } catch {
-                throw new Error("Invalid webhook URL");
+            } catch (cause) {
+                throw new Error("Invalid webhook URL", { cause });
             }
             if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
                 throw new Error("Webhook URL must be http or https");
@@ -1055,7 +1055,9 @@ const ACTIONS = {
                 } catch (e) {
                     const refused = WEBHOOK_REFUSALS[e?.message];
                     if (refused) {
-                        throw new Error(typeof refused === "function" ? refused(policy) : refused);
+                        throw new Error(typeof refused === "function" ? refused(policy) : refused, {
+                            cause: e,
+                        });
                     }
                     throw e;
                 }

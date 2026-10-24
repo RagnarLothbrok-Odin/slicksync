@@ -1088,9 +1088,9 @@ async function getStremioUserInfo(authKey, username, email) {
         const msg = (e && (e.message || e.error || "")) || "";
         const code = e?.code || 0;
         if (code === 1 || /session does not exist/i.test(String(msg))) {
-            throw new Error("Invalid or expired Stremio auth key");
+            throw new Error("Invalid or expired Stremio auth key", { cause: e });
         }
-        throw new Error("Could not validate auth key");
+        throw new Error("Could not validate auth key", { cause: e });
     }
 
     const normalizedEmail = (verifiedUser?.email || email || "").toLowerCase();

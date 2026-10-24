@@ -580,7 +580,11 @@ export function OnboardingWizard() {
                                     {current.href && (
                                         <button
                                             className="flex-1 rounded-lg px-4 py-2.5 text-center font-medium text-sm transition-opacity hover:opacity-90"
-                                            onClick={() => goTo(current.href!)}
+                                            onClick={() => {
+                                                if (current.href) {
+                                                    goTo(current.href);
+                                                }
+                                            }}
                                             style={{
                                                 background: "var(--color-surface-hover)",
                                                 border: "1px solid var(--color-surface-border)",

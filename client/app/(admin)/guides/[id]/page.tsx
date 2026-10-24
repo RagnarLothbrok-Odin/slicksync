@@ -142,7 +142,11 @@ export default function GuideTopicPage() {
                                     ) : entry.href ? (
                                         <div className="mt-5">
                                             <Button
-                                                onClick={() => router.push(entry.href!)}
+                                                onClick={() => {
+                                                    if (entry.href) {
+                                                        router.push(entry.href);
+                                                    }
+                                                }}
                                                 rightIcon={
                                                     <ArrowTopRightOnSquareIcon className="h-4 w-4" />
                                                 }

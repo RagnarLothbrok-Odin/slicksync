@@ -120,7 +120,8 @@ export default function UserSettingsPage() {
             setActiveSection(section as (typeof PERSONAL_SECTIONS)[number]["key"]);
         }
     }, []);
-    const currentSection = PERSONAL_SECTIONS.find((section) => section.key === activeSection)!;
+    const currentSection =
+        PERSONAL_SECTIONS.find((section) => section.key === activeSection) ?? PERSONAL_SECTIONS[0];
     const matches = PERSONAL_SECTIONS.filter((section) =>
         `${section.label} ${section.blurb} ${section.keywords}`
             .toLowerCase()
@@ -620,10 +621,20 @@ export default function UserSettingsPage() {
                                 name={userInfo?.username || "User"}
                                 onClose={() => setAvatarPickerOpen(false)}
                                 onSave={async (data) => {
-                                    await userAuth.updateProfile(userId!, authKey!, data);
+                                    if (!(userId && authKey)) {
+                                        throw new Error("Sign in before updating your profile");
+                                    }
+                                    await userAuth.updateProfile(userId, authKey, data);
                                     await refreshUserInfo();
                                 }}
-                                onUpload={(file) => userAuth.uploadAvatar(userId!, authKey!, file)}
+                                onUpload={(file) => {
+                                    if (!(userId && authKey)) {
+                                        return Promise.reject(
+                                            new Error("Sign in before uploading an avatar")
+                                        );
+                                    }
+                                    return userAuth.uploadAvatar(userId, authKey, file);
+                                }}
                             />
                         </div>
                         <div hidden={activeSection !== "sync"}>

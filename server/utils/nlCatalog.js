@@ -155,7 +155,8 @@ async function postChat(creds, payload, signal) {
             )
         ) {
             throw new Error(
-                "The AI Services address cannot be used from this server - check it under Settings -> External API Keys"
+                "The AI Services address cannot be used from this server - check it under Settings -> External API Keys",
+                { cause: err }
             );
         }
         throw err;

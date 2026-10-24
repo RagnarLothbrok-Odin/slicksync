@@ -1459,7 +1459,7 @@ export default function ListDetailPage() {
                             ) : (
                                 <div
                                     className="h-full w-full"
-                                    style={coverColorStyle(list.coverColorIndex!)}
+                                    style={coverColorStyle(list.coverColorIndex ?? 0)}
                                 />
                             )}
                         </div>

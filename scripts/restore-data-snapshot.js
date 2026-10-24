@@ -65,8 +65,8 @@ function decrypt(buf, passphrase) {
     decipher.setAuthTag(tag);
     try {
         return Buffer.concat([decipher.update(ct), decipher.final()]);
-    } catch {
-        throw new Error("Wrong passphrase for this snapshot (or the file is damaged)");
+    } catch (cause) {
+        throw new Error("Wrong passphrase for this snapshot (or the file is damaged)", { cause });
     }
 }
 

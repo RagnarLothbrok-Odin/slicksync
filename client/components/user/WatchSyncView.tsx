@@ -1563,19 +1563,19 @@ export function WatchSyncView({
                                                             [
                                                                 [
                                                                     "all",
-                                                                    `All ${totals!.found.toLocaleString()}`,
+                                                                    `All ${(totals?.found ?? 0).toLocaleString()}`,
                                                                 ],
                                                                 [
                                                                     "copy",
-                                                                    `Will copy ${totals!.copy.toLocaleString()}`,
+                                                                    `Will copy ${(totals?.copy ?? 0).toLocaleString()}`,
                                                                 ],
                                                                 [
                                                                     "further",
-                                                                    `Kept ${totals!.further.toLocaleString()}`,
+                                                                    `Kept ${(totals?.further ?? 0).toLocaleString()}`,
                                                                 ],
                                                                 [
                                                                     "match",
-                                                                    `Need a match ${totals!.match.toLocaleString()}`,
+                                                                    `Need a match ${(totals?.match ?? 0).toLocaleString()}`,
                                                                 ],
                                                             ] as const
                                                         ).map(([k, label]) => (

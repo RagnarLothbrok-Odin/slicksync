@@ -523,10 +523,13 @@ export default function DashboardPage() {
                 .filter((s) => !s.isActive && s.endTime) // Only completed
                 .filter((s) => !liveUserItemKeys.has(`${s.user.id}-${s.item.id}`)) // Don't duplicate if already in live
                 .forEach((s) => {
+                    if (!s.endTime) {
+                        return;
+                    }
                     items.push({
                         isLive: false,
                         item: s.item,
-                        timestamp: new Date(s.endTime!).getTime(),
+                        timestamp: new Date(s.endTime).getTime(),
                         user: s.user,
                         watchedAt: s.endTime,
                     });

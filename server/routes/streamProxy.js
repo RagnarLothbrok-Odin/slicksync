@@ -74,7 +74,7 @@ function decryptStreamUrl(encryptedPayload, serverKey) {
 
         return plaintext.toString("utf8");
     } catch (error) {
-        throw new Error(`Failed to decrypt stream URL: ${error.message}`);
+        throw new Error(`Failed to decrypt stream URL: ${error.message}`, { cause: error });
     }
 }
 

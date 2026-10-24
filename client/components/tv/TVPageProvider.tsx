@@ -41,9 +41,9 @@ function useTVViewport(active: boolean) {
         if (!active || typeof document === "undefined") {
             return;
         }
-        let meta = document.querySelector('meta[name="viewport"]');
-        if (!meta) {
-            meta = document.createElement("meta");
+        const existing = document.querySelector('meta[name="viewport"]');
+        const meta = existing ?? document.createElement("meta");
+        if (!existing) {
             meta.setAttribute("name", "viewport");
             document.head.appendChild(meta);
         }
@@ -51,7 +51,7 @@ function useTVViewport(active: boolean) {
         meta.setAttribute("content", "width=1920, initial-scale=1");
         return () => {
             if (previous !== null) {
-                meta!.setAttribute("content", previous);
+                meta.setAttribute("content", previous);
             }
         };
     }, [active]);

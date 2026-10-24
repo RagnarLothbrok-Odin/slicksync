@@ -1926,14 +1926,14 @@ export default function MetricsPage() {
                                             <div className="mb-4 break-inside-avoid-column">
                                                 <HealthCheckCard
                                                     icon={<ServerIcon className="h-5 w-5" />}
-                                                    ok={healthData.servers!.every(
+                                                    ok={(healthData.servers ?? []).every(
                                                         (s) => s.status === "up"
                                                     )}
-                                                    summary={`${healthData.servers!.length} server${healthData.servers!.length === 1 ? "" : "s"} people sign in to`}
+                                                    summary={`${(healthData.servers ?? []).length} server${(healthData.servers ?? []).length === 1 ? "" : "s"} people sign in to`}
                                                     title="Servers"
                                                 >
                                                     <div className="space-y-2">
-                                                        {healthData.servers!.map((s) => (
+                                                        {(healthData.servers ?? []).map((s) => (
                                                             <div
                                                                 className="flex items-start justify-between gap-3 text-xs"
                                                                 key={s.key}

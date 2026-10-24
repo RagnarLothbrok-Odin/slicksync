@@ -192,10 +192,12 @@ export default function InvitationsPage() {
         for (const req of requests) {
             const invId = String(req.invitationId || req.invitation?.id || "");
             if (invId) {
-                if (!requestsByInvitation.has(invId)) {
-                    requestsByInvitation.set(invId, []);
+                const bucket = requestsByInvitation.get(invId);
+                if (bucket) {
+                    bucket.push(req);
+                } else {
+                    requestsByInvitation.set(invId, [req]);
                 }
-                requestsByInvitation.get(invId)!.push(req);
             }
         }
 
@@ -1521,7 +1523,9 @@ function RequestCard({ request, onUpdate }: { request: RequestDisplay; onUpdate?
                         </div>
                         <div className="border-default border-l pl-3 text-center">
                             <p className="mb-1 text-muted text-xs">Expires</p>
-                            <OAuthCountdown expiresAt={request.oauthExpiresAt!} />
+                            {request.oauthExpiresAt && (
+                                <OAuthCountdown expiresAt={request.oauthExpiresAt} />
+                            )}
                         </div>
                         <div className="flex flex-col gap-1">
                             <button

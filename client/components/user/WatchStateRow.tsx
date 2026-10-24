@@ -200,7 +200,7 @@ export function WatchStateRow({ userId }: { userId: string }) {
                         )}
                         {enabled && (view?.issues?.length ?? 0) > 0 && (
                             <ul className="mt-2 space-y-1">
-                                {view!.issues!.map((k) => (
+                                {(view.issues ?? []).map((k) => (
                                     <li className="text-warning text-xs" key={k}>
                                         {ISSUE_TEXT[k] || k}
                                     </li>
@@ -215,7 +215,8 @@ export function WatchStateRow({ userId }: { userId: string }) {
                                 <button
                                     className="mt-1 break-all text-left text-muted text-xs underline underline-offset-2 hover:text-default"
                                     onClick={async () => {
-                                        (await copyToClipboard(view.manifestUrl!))
+                                        view.manifestUrl &&
+                                        (await copyToClipboard(view.manifestUrl))
                                             ? toast.success("Link copied")
                                             : toast.error(
                                                   "Copy failed - select and copy the link text directly"

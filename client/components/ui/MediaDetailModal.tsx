@@ -1834,22 +1834,24 @@ export function MediaDetailModal({
                                                         Watch order
                                                     </p>
                                                     <ol className="space-y-0.5">
-                                                        {animeOrder!.mainLine.map((entry, i) => (
-                                                            <li
-                                                                className="text-muted text-xs"
-                                                                key={entry.anilistId}
-                                                            >
-                                                                <span className="text-default">
-                                                                    {i + 1}. {entry.name}
-                                                                </span>
-                                                                {entry.episodes
-                                                                    ? ` · ${entry.episodes} eps`
-                                                                    : ""}
-                                                                {entry.year
-                                                                    ? ` · ${entry.year}`
-                                                                    : ""}
-                                                            </li>
-                                                        ))}
+                                                        {(animeOrder?.mainLine ?? []).map(
+                                                            (entry, i) => (
+                                                                <li
+                                                                    className="text-muted text-xs"
+                                                                    key={entry.anilistId}
+                                                                >
+                                                                    <span className="text-default">
+                                                                        {i + 1}. {entry.name}
+                                                                    </span>
+                                                                    {entry.episodes
+                                                                        ? ` · ${entry.episodes} eps`
+                                                                        : ""}
+                                                                    {entry.year
+                                                                        ? ` · ${entry.year}`
+                                                                        : ""}
+                                                                </li>
+                                                            )
+                                                        )}
                                                     </ol>
                                                 </div>
                                             )}
@@ -1866,7 +1868,7 @@ export function MediaDetailModal({
                                             {details.watchProviders.providers.map((p) => (
                                                 <a
                                                     className="flex items-center gap-1.5 rounded-full border py-1 pr-2.5 pl-1 transition-colors hover:border-primary"
-                                                    href={details.watchProviders!.link || undefined}
+                                                    href={details.watchProviders?.link || undefined}
                                                     key={p.name}
                                                     rel="noopener noreferrer"
                                                     style={{
@@ -1920,6 +1922,10 @@ export function MediaDetailModal({
                                         // unlabelled bell in a row of icons is indistinguishable from
                                         // a notifications toggle, and the feature may as well not
                                         // exist if nobody can tell what it does.
+                                        const imdbId = details.imdb_id;
+                                        if (!imdbId) {
+                                            return null;
+                                        }
                                         const iconBtn = (opts: {
                                             onClick: () => void;
                                             busy?: boolean;
@@ -2005,10 +2011,7 @@ export function MediaDetailModal({
                                         const stremioBtn = (
                                             <a
                                                 className="flex w-full items-center justify-center gap-1.5 rounded-lg px-4 py-2 font-medium text-sm transition-colors sm:w-auto"
-                                                href={buildStremioAppUrl(
-                                                    details.imdb_id,
-                                                    effectiveType
-                                                )}
+                                                href={buildStremioAppUrl(imdbId, effectiveType)}
                                                 style={{
                                                     background: "rgba(167, 139, 250, 0.15)",
                                                     border: "1px solid rgba(167, 139, 250, 0.25)",
@@ -2027,10 +2030,7 @@ export function MediaDetailModal({
                                         const nuvioBtn = (
                                             <a
                                                 className="flex w-full items-center justify-center gap-1.5 rounded-lg px-4 py-2 font-medium text-sm transition-colors sm:w-auto"
-                                                href={buildNuvioAppUrl(
-                                                    details.imdb_id,
-                                                    effectiveType
-                                                )}
+                                                href={buildNuvioAppUrl(imdbId, effectiveType)}
                                                 style={{
                                                     // Blue/orange Nuvio identity split by a `/` diagonal
                                                     // (see Badge.tsx's 'nuvio' variant for the same treatment).
@@ -2057,7 +2057,7 @@ export function MediaDetailModal({
                                                 ...srv,
                                                 url: buildAioStreamsAppUrl(
                                                     srv.address,
-                                                    details.imdb_id!,
+                                                    imdbId,
                                                     aioType
                                                 ),
                                             }))
@@ -2190,7 +2190,7 @@ export function MediaDetailModal({
                                                         onEnterPress={() => {
                                                             window.location.href =
                                                                 buildStremioAppUrl(
-                                                                    details.imdb_id!,
+                                                                    imdbId,
                                                                     effectiveType
                                                                 );
                                                         }}
@@ -2200,7 +2200,7 @@ export function MediaDetailModal({
                                                     <TVFocusable
                                                         onEnterPress={() => {
                                                             window.location.href = buildNuvioAppUrl(
-                                                                details.imdb_id!,
+                                                                imdbId,
                                                                 effectiveType
                                                             );
                                                         }}
@@ -2233,7 +2233,7 @@ export function MediaDetailModal({
                         in the app this device picked (components/ui/OpenWithButton). */}
                                                 {householdActions && (
                                                     <OpenWithButton
-                                                        imdbId={details.imdb_id!}
+                                                        imdbId={imdbId}
                                                         type={aioType}
                                                     />
                                                 )}

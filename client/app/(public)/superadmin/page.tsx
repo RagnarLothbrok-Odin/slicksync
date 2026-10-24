@@ -757,7 +757,7 @@ export default function SuperAdminPage() {
                                     disabled={savingMaintenanceSetting}
                                     onChange={() =>
                                         updateMaintenanceSetting({
-                                            vacuumEnabled: !maintenance!.settings!.vacuumEnabled,
+                                            vacuumEnabled: !maintenance.settings?.vacuumEnabled,
                                         })
                                     }
                                 />

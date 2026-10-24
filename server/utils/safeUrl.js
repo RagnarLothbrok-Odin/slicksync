@@ -112,8 +112,8 @@ async function assertSafeUrl(raw, { allowPrivate = false } = {}) {
     let url;
     try {
         url = new URL(raw);
-    } catch {
-        throw new Error("invalid url");
+    } catch (cause) {
+        throw new Error("invalid url", { cause });
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") {
         throw new Error("unsupported protocol");
@@ -138,8 +138,8 @@ async function assertSafeUrl(raw, { allowPrivate = false } = {}) {
     let addresses;
     try {
         addresses = await dns.lookup(host, { all: true });
-    } catch {
-        throw new Error("unresolvable host");
+    } catch (cause) {
+        throw new Error("unresolvable host", { cause });
     }
     if (!addresses.length) {
         throw new Error("unresolvable host");

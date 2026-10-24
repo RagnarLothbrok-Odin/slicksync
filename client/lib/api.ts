@@ -502,10 +502,14 @@ class ApiClient {
             }
 
             // Otherwise, wrap it
-            const wrappedError = new ApiError(fetchError instanceof Error ? fetchError.message : "Request failed");
+            const wrappedError = new ApiError(
+                fetchError instanceof Error ? fetchError.message : "Request failed"
+            );
             wrappedError.originalError = fetchError;
             wrappedError.response = {
-                data: { message: fetchError instanceof Error ? fetchError.message : "Unknown error" },
+                data: {
+                    message: fetchError instanceof Error ? fetchError.message : "Unknown error",
+                },
                 status: 0,
             };
             throw wrappedError;
@@ -542,7 +546,10 @@ class ApiClient {
     }
 
     async stremioLogin(authKey: string) {
-        const data = await this.fetch<{ token: string; account: { id: string; uuid: string; email: string | null } }>("/auth/stremio-login", {
+        const data = await this.fetch<{
+            token: string;
+            account: { id: string; uuid: string; email: string | null };
+        }>("/auth/stremio-login", {
             body: JSON.stringify({ authKey }),
             method: "POST",
         });
@@ -574,7 +581,10 @@ class ApiClient {
     }
 
     async nuvioLogin(params: { code: string; deviceNonce: string; anonToken: string }) {
-        const data = await this.fetch<{ token: string; account: { id: string; uuid: string; email: string | null } }>("/auth/nuvio-login", {
+        const data = await this.fetch<{
+            token: string;
+            account: { id: string; uuid: string; email: string | null };
+        }>("/auth/nuvio-login", {
             body: JSON.stringify(params),
             method: "POST",
         });

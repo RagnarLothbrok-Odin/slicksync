@@ -684,10 +684,12 @@ export default function UserActivityPage() {
 
         for (const session of filteredSessions) {
             const dateKey = getDateKey(new Date(session.startTime));
-            if (!groups.has(dateKey)) {
-                groups.set(dateKey, []);
+            const bucket = groups.get(dateKey);
+            if (bucket) {
+                bucket.push(session);
+            } else {
+                groups.set(dateKey, [session]);
             }
-            groups.get(dateKey)!.push(session);
         }
 
         const today = new Date();

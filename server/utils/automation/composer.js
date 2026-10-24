@@ -171,8 +171,8 @@ async function composeRule(prisma, accountId, text, decrypt, callModel = null) {
     let parsed;
     try {
         parsed = JSON.parse(cleaned);
-    } catch {
-        throw new Error("The model did not return valid JSON - try rephrasing");
+    } catch (cause) {
+        throw new Error("The model did not return valid JSON - try rephrasing", { cause });
     }
     return sanitizeDraft(parsed);
 }

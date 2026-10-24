@@ -14,8 +14,8 @@ function previewHistory(text, existingIds = []) {
         let backup;
         try {
             backup = JSON.parse(text);
-        } catch {
-            throw new Error("That file is not valid JSON");
+        } catch (cause) {
+            throw new Error("That file is not valid JSON", { cause });
         }
         if (Array.isArray(backup?.movieHistory)) {
             parsed = {

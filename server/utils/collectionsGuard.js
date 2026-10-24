@@ -322,8 +322,8 @@ async function restoreLayoutSnapshot(prisma, accountId, userId, profileId, provi
     let data;
     try {
         data = JSON.parse(newestGood.dataJson);
-    } catch {
-        throw new Error("Stored layout snapshot is unreadable");
+    } catch (cause) {
+        throw new Error("Stored layout snapshot is unreadable", { cause });
     }
     for (const [platform, blob] of Object.entries(data || {})) {
         await provider.pushHomeCatalogSettings(profileId, platform, blob);
@@ -457,8 +457,8 @@ async function restoreSnapshot(prisma, accountId, userId, profileId, provider) {
     let collections;
     try {
         collections = JSON.parse(newestGood.dataJson);
-    } catch {
-        throw new Error("Stored snapshot is unreadable");
+    } catch (cause) {
+        throw new Error("Stored snapshot is unreadable", { cause });
     }
     await provider.setCollections(profileId, collections);
     // The restore is our own write - baseline it, which also retires the alarm.

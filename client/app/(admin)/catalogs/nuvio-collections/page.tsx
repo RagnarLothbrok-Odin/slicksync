@@ -1620,6 +1620,9 @@ export default function NuvioCollectionsPage() {
     const [homeRowsArmed, setHomeRowsArmed] = useState<number | null>(null);
     const [homeRowsBusy, setHomeRowsBusy] = useState(false);
     const copyHomeRows = async (targetProfileIndex: number) => {
+        if (selectedProfileIndex === null) {
+            return;
+        }
         if (homeRowsArmed !== targetProfileIndex) {
             setHomeRowsArmed(targetProfileIndex);
             setTimeout(
@@ -1633,7 +1636,7 @@ export default function NuvioCollectionsPage() {
         try {
             const r = await api.copyHomeLayout(
                 selectedUserId,
-                selectedProfileIndex!,
+                selectedProfileIndex,
                 targetProfileIndex
             );
             const targetName =

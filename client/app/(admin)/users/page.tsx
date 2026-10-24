@@ -399,10 +399,12 @@ export default function UsersPage() {
                 continue;
             }
             const key = (u.email || u.id).toLowerCase();
-            if (!byLogin.has(key)) {
-                byLogin.set(key, []);
+            const bucket = byLogin.get(key);
+            if (bucket) {
+                bucket.push(u);
+            } else {
+                byLogin.set(key, [u]);
             }
-            byLogin.get(key)!.push(u);
         }
         return [...byLogin.values()].map((people) => {
             const anchor = [...people].sort(
@@ -691,7 +693,10 @@ export default function UsersPage() {
                     {users
                         .filter((u) => u.guardExternal)
                         .map((u) => {
-                            const ext = u.guardExternal!;
+                            const ext = u.guardExternal;
+                            if (!ext) {
+                                return null;
+                            }
                             const name = u.username || "User";
                             const bits: string[] = [];
                             if (ext.added.length) {

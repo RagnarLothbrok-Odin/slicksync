@@ -28,13 +28,15 @@ import {
 const cache = new Map<string, Promise<OpenTargets>>();
 function loadTargets(id: string, type: "movie" | "series") {
     const key = `${type}:${id}`;
-    if (!cache.has(key)) {
-        cache.set(
-            key,
-            api.getOpenTargets(id, type).catch(() => ({ devices: [], servers: [], tmdbId: null }))
-        );
+    const cached = cache.get(key);
+    if (cached) {
+        return cached;
     }
-    return cache.get(key)!;
+    const pending = api
+        .getOpenTargets(id, type)
+        .catch(() => ({ devices: [], servers: [], tmdbId: null }));
+    cache.set(key, pending);
+    return pending;
 }
 
 const STYLE = {

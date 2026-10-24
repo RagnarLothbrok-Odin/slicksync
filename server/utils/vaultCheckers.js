@@ -320,8 +320,8 @@ async function vettedTcpAddresses(host) {
     let addresses;
     try {
         addresses = await dns.lookup(name, { all: true });
-    } catch {
-        throw new Error("unresolvable host");
+    } catch (cause) {
+        throw new Error("unresolvable host", { cause });
     }
     if (!addresses.length) {
         throw new Error("unresolvable host");
@@ -526,7 +526,8 @@ async function fetchAiModels(base, apiKey, signal) {
             )
         ) {
             throw new Error(
-                "The AI Services address cannot be used from this server - check it under Settings -> External API Keys"
+                "The AI Services address cannot be used from this server - check it under Settings -> External API Keys",
+                { cause: err }
             );
         }
         throw err;
