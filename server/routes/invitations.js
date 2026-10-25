@@ -1248,10 +1248,12 @@ module.exports.createPublicRouter = ({
             const { resolveServerConfigForAccount } = require("../providers/supabase");
             const serverConfig = await resolveServerConfigForAccount(prisma, invitation.accountId);
             const status = await pollNuvioTvLogin(code, deviceNonce, anonToken, serverConfig);
-            if (status?.status !== "authorized") {
-                return res.json({ status: status?.status || "pending" });
+            if (!status?.status || status.status === "pending") {
+                return res.json({ status: "pending" });
             }
 
+            // Nuvio's completion status is opaque, just as in normal login.
+            // The token exchange, not a particular status label, proves approval.
             // Approved on the device. The exchange happens here rather than in the
             // browser so the refresh token never leaves the server; the request
             // route picks it back up by the same code.

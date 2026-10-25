@@ -31,6 +31,11 @@ function fakePrisma() {
                 invitations.find((i) => i.inviteCode === where.inviteCode) || null,
         },
         inviteRequest: {
+            create: async ({ data }) => {
+                const request = { id: "new-request", ...data };
+                requests.push(request);
+                return request;
+            },
             findFirst: async ({ where }) =>
                 requests.find(
                     (r) =>
@@ -48,6 +53,7 @@ function fakePrisma() {
             },
         },
         requests,
+        user: { findFirst: async () => null },
     };
 }
 
@@ -178,3 +184,62 @@ test("a household install that has a login still refuses a signed-out caller", a
     assert.equal((await post("/invite/CODE1/generate-oauth", accepted)).status, 401);
     assert.equal((await post("/invite/generate-oauth")).status, 401);
 });
+
+// Exercise the real Nuvio adapter through the invitation route. Only the
+// upstream HTTP responses are replaced, so status mapping and token exchange
+// remain part of the test.
+for (const providerStatus of ["pending", "approved", "authorized", "expired"]) {
+    test(`Nuvio invitation handles ${providerStatus} through the exchange contract`, async (t) => {
+        const { post, prisma } = await serve(t, publicInstance);
+        let exchanges = 0;
+        const payload = Buffer.from(
+            JSON.stringify({ email: "viewer@example.com", sub: "viewer" })
+        ).toString("base64url");
+        global.fetch = async (url) => {
+            if (String(url).endsWith("/rest/v1/rpc/poll_tv_login_session")) {
+                return Response.json([{ status: providerStatus }]);
+            }
+            if (String(url).endsWith("/functions/v1/tv-logins-exchange")) {
+                exchanges++;
+                if (providerStatus === "expired") {
+                    return new Response("Expired", { status: 401 });
+                }
+                return Response.json({
+                    access_token: `header.${payload}.signature`,
+                    refresh_token: "test-refresh-token",
+                });
+            }
+            throw new Error("Unexpected upstream request");
+        };
+        const result = await post("/invite/CODE1/nuvio/poll", {
+            anonToken: "test-anonymous-token",
+            code: "test-code",
+            deviceNonce: "test-nonce",
+        });
+        if (providerStatus === "pending") {
+            assert.deepEqual(result, { body: { status: "pending" }, status: 200 });
+            assert.equal(exchanges, 0);
+        } else if (providerStatus === "expired") {
+            assert.equal(result.status, 500);
+            assert.equal(exchanges, 1);
+            assert.ok(result.body.error);
+        } else {
+            assert.deepEqual(result, {
+                body: { email: "viewer@example.com", status: "authorized" },
+                status: 200,
+            });
+            assert.equal(exchanges, 1);
+            const submitted = await post("/invite/CODE1/request", {
+                nuvioCode: "test-code",
+                username: "viewer",
+            });
+            assert.equal(submitted.status, 200);
+            assert.equal(submitted.body.status, "pending");
+            assert.equal(submitted.body.providerType, "nuvio");
+            assert.equal(submitted.body.email, "viewer@example.com");
+            assert.equal(submitted.body.nuvioRefreshToken, undefined);
+            assert.equal(prisma.requests.at(-1).nuvioRefreshToken, "test-refresh-token");
+        }
+        assert.ok(!JSON.stringify(result.body).includes("test-refresh-token"));
+    });
+}
