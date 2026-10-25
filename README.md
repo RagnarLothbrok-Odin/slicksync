@@ -81,8 +81,8 @@ Captured from the running app. Other names are replaced with demo names and emai
       <a href="docs/screenshots/discover.jpg"><img src="docs/screenshots/discover.jpg" width="100%" alt="Discover search, filters and movie posters with ratings"></a>
     </td>
     <td align="center" width="50%">
-      <strong>Personal Library</strong><br>
-      <a href="docs/screenshots/library.jpg"><img src="docs/screenshots/library.jpg" width="100%" alt="Personal library with title search, grid and list views, and saved movies and shows"></a>
+      <strong>User Addons</strong><br>
+      <a href="docs/screenshots/user-addons.jpg"><img src="docs/screenshots/user-addons.jpg" width="100%" alt="Ragnar’s admin profile showing group addons"></a>
     </td>
   </tr>
 </table>
