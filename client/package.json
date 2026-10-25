@@ -1,6 +1,6 @@
 {
   "name": "@slicksync/client",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "SlickSync web interface for household media, profiles, and settings.",
   "homepage": "https://github.com/RagnarLothbrok-Odin/slicksync#readme",
   "bugs": {
