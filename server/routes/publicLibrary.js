@@ -3477,120 +3477,43 @@ module.exports = ({
             }
             bingeWatches.sort((a, b) => b.episodeCount - a.episodeCount);
 
-            // Now playing - query watchSession for real-time active sessions
-            const activeSessions = await prisma.watchSession.findMany({
-                orderBy: { startTime: "desc" },
-                where: {
-                    accountId: user.accountId || DEFAULT_ACCOUNT_ID,
-                    isActive: true,
-                    userId,
-                },
-            });
-
-            // A Jellyfin login's live signal is its server's sessions list (added
-            // below); its library-read sessions linger after a viewing stops.
-            // A session whose last checkpoint sits at the end of the runtime is a
-            // watch that ended, not one that is playing - the same rule the admin
-            // Activity page uses (metricsBuilder.js).
-            const { hasReachedEnd } = require("../utils/sessionTracker");
-            const nowPlaying = (user.providerType === "jellyfin" ? [] : activeSessions)
-                .filter((s) => !hasReachedEnd(s.lastPosition, s.totalDuration))
-                .map((s) => ({
-                    item: {
-                        episode: s.episode,
-                        id: s.itemId,
-                        name: s.itemName,
-                        poster: s.poster,
-                        season: s.season,
-                        type: s.itemType,
-                    },
-                    lastPosition: s.lastPosition ?? null,
-                    startTime: s.startTime,
-                    totalDuration: s.totalDuration ?? null,
-                    videoId: s.videoId,
-                }));
-
-            // Playing in AIOStreams' own apps - see utils/watchState.js liveViewings() -
-            // or on a Jellyfin server they sign in to (utils/jellyfinLive.js).
+            // Use the same household attribution and evidence priority as the
+            // dashboards. Only this authenticated person's safe fields leave here.
+            let nowPlaying = [];
             try {
-                const { liveViewings } = require("../utils/watchState");
-                const jellyfinViewings = require("../utils/jellyfinLive").liveViewings([userId]);
-                for (const v of [
-                    ...(await liveViewings(prisma, user.accountId || DEFAULT_ACCOUNT_ID, [userId])),
-                    ...jellyfinViewings,
-                ]) {
-                    if (nowPlaying.some((np) => np.item.id === v.itemId)) {
-                        continue;
-                    }
-                    nowPlaying.push({
-                        item: {
-                            episode: v.episode,
-                            id: v.itemId,
-                            name: v.itemName || v.itemId,
-                            poster: v.poster,
-                            season: v.season,
-                            type: v.itemType,
-                        },
-                        startTime: v.startedAt,
-                        videoId: v.videoId,
-                    });
-                }
-            } catch (error) {
-                console.warn("[PublicLibrary] Failed to read AIOStreams viewings:", error.message);
-            }
-
-            // Merge in an AIOStreams proxy-detected active stream for this user
-            // (faster/more accurate start/stop detection than the WatchSession
-            // pipeline above). Wrapped/unwrapped around the shared helper since
-            // this route's nowPlaying entries have no `user` field (already
-            // scoped to one user) unlike metricsBuilder.js's account-wide list.
-            try {
-                const { mergeProxyNowPlaying } = require("../utils/proxyNowPlaying");
-                const wrapped = nowPlaying.map((np) => ({ user: { id: userId }, ...np }));
-                // Attributed among the whole household, then narrowed to this person.
-                // Given only this one person to choose from, a stream that belongs to
-                // someone else in the household (matched by their own AIOStreams
-                // login) had nobody else to go to and showed up here as theirs.
-                const household = await prisma.user.findMany({
-                    select: {
-                        avatarUrl: true,
-                        colorIndex: true,
-                        email: true,
-                        id: true,
-                        useGravatar: true,
-                        username: true,
-                    },
-                    where: { accountId: user.accountId || DEFAULT_ACCOUNT_ID, isActive: true },
-                });
-                const merged = await mergeProxyNowPlaying(
+                const playbackRows = await require("../utils/metricsBuilder").liveNowPlaying(
                     prisma,
-                    user.accountId || DEFAULT_ACCOUNT_ID,
-                    household.length ? household : [user],
-                    wrapped
+                    user.accountId || DEFAULT_ACCOUNT_ID
                 );
-                nowPlaying.length = 0;
-                nowPlaying.push(
-                    ...merged
-                        .filter((m) => m.user?.id === userId)
-                        .map((m) => ({
-                            item: m.item,
-                            // What the admin page gets too: where playback is, and whether
-                            // this is a live proxy stream and its timer still running.
-                            lastPosition: m.lastPosition ?? null,
-                            startTime: m.startTime,
-                            totalDuration: m.totalDuration ?? null,
-                            videoId: m.videoId,
-                            ...(m.source
-                                ? {
-                                      elapsedFrozen: m.elapsedFrozen,
-                                      elapsedSeconds: m.elapsedSeconds,
-                                      source: m.source,
-                                  }
-                                : {}),
-                        }))
-                );
+                nowPlaying = playbackRows
+                    .filter((row) => row.user?.id === userId)
+                    .map((row) => ({
+                        elapsedFrozen: row.elapsedFrozen === true,
+                        elapsedSeconds: row.elapsedSeconds ?? null,
+                        item: {
+                            episode: row.item.episode,
+                            id: row.item.id,
+                            name: row.item.name,
+                            poster: row.item.poster || null,
+                            season: row.item.season,
+                            type: row.item.type,
+                        },
+                        lastPosition: row.lastPosition ?? null,
+                        playback: row.playback
+                            ? {
+                                  evidence: row.playback.evidence,
+                                  observedAt: row.playback.observedAt,
+                                  position: row.playback.position,
+                                  state: row.playback.state,
+                              }
+                            : null,
+                        startTime: row.watchedAt,
+                        totalDuration: row.totalDuration ?? null,
+                        videoId: row.videoId,
+                    }));
             } catch (error) {
-                console.warn("[PublicLibrary] Failed to merge proxy now playing:", error.message);
+                // Playback refresh failures must not hide the person's history.
+                console.warn("[PublicLibrary] Failed to read playback activity:", error.message);
             }
 
             res.json({

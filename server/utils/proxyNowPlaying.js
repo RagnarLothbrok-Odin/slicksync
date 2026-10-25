@@ -1,27 +1,9 @@
-// Merges AIOStreams proxy-detected active streams (ProxyStreamSession) into
-// a WatchSession-derived nowPlaying list. The proxy signal is authoritative
-// for whether something is actually playing right now and exactly when it
-// started/stopped (confirmed accurate to one ~30s poll cycle - see
-// proxyStreamMonitor.js), which the WatchSession/library-poll pipeline is
-// not always reliable at (see MovieWatchHistory / ProxyStreamSession schema
-// comments for background on that).
-//
-// When a user has both an active proxy stream and a matching (same-title)
-// WatchSession-derived entry, the proxy entry wins for liveness/timing but
-// borrows the richer item metadata (poster, season, episode, real title)
-// from the WatchSession entry when available, since ProxyStreamSession only
-// has a filename-derived display name. Coverage is per-title, not per-user:
-// a WatchSession entry for a DIFFERENT title than any of that user's active
-// proxy rows (e.g. a usenet stream, which never routes through AIOStreams'
-// proxy at all, watched while a stale/unrelated debrid proxy row is still
-// active for the same user) is kept as-is, so nothing already working is
-// lost.
-//
-// `users` must be objects with at least { id, username }. `watchSessionNowPlaying`
-// entries must have a `user.id` field - callers with a differently-shaped
-// list (e.g. the per-user publicLibrary.js route, which has no `user` field
-// at all since it's already scoped to one user) should wrap/unwrap around
-// this call - see publicLibrary.js for that pattern.
+// Merge proxy connections with playback reports and library checkpoints.
+// A proxy can confirm a connection, but buffering prevents it from proving
+// the player's position or pause state. It supersedes matching history
+// checkpoints while preserving direct player and transition-event reports.
+// Metadata is borrowed only from a matching title. Unrelated titles survive.
+// Inputs include user.id so attribution stays scoped to the household.
 // How far back a closed proxy connection still counts as "the proxy knows
 // this stream ended". Must comfortably exceed the native tracker's
 // actively-watching freshness window (~18 min as of 2026-07-20, widened from

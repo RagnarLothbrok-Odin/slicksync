@@ -21,6 +21,13 @@ test("personal live playback authenticates before loading and returns only the s
                     type: "series",
                 },
                 lastPosition: 120,
+                playback: {
+                    evidence: "player",
+                    observedAt: "2026-10-25T12:00:00Z",
+                    position: "reported",
+                    providerToken: "secret",
+                    state: "paused",
+                },
                 streamUrl: "secret",
                 totalDuration: 600,
                 user: { email: "private@example.test", id: "mine" },
@@ -64,6 +71,12 @@ test("personal live playback authenticates before loading and returns only the s
         assert.equal(body.items[0].item.name, "My series");
         assert.equal(body.items[0].startTime, "2026-10-25T12:00:00Z");
         assert.equal(body.items[0].lastPosition, 120);
+        assert.deepEqual(body.items[0].playback, {
+            evidence: "player",
+            observedAt: "2026-10-25T12:00:00Z",
+            position: "reported",
+            state: "paused",
+        });
         assert.equal(body.items[0].totalDuration, 600);
         assert.equal(body.items[0].user, undefined);
         assert.ok(!JSON.stringify(body).includes("secret"));

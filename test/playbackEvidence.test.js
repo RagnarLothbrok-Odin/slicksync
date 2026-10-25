@@ -92,8 +92,50 @@ test("active and recently closed proxy connections cannot displace direct pause 
                 findMany: async ({ where }) => (where.isActive === active ? [proxy] : []),
             },
         };
-        const rows = await mergeProxyNowPlaying(prisma, "evidence-account", [user], [report]);
+        const rows = await mergeProxyNowPlaying(prisma, "evidence-account", [user], [report], {
+            isConfirming: () => true,
+        });
         assert.equal(rows.length, 1);
         assert.equal(rows[0], report);
     }
+});
+
+test("transition events replace native checkpoints but keep another episode separate", async () => {
+    const prisma = database();
+    const startedAt = new Date(Date.now() - 10_000);
+    prisma.watchStateCursor.findMany = async () => [
+        {
+            createdAt: startedAt,
+            durationMs: 600_000,
+            itemId: "tt123",
+            itemName: "Example",
+            itemType: "series",
+            startAt: startedAt,
+            startPositionMs: 100_000,
+            userId: user.id,
+            videoId: "tt123:1:2",
+        },
+    ];
+    let rows = await buildNowPlaying(prisma, "evidence-account", [user]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].playback.evidence, "event");
+    assert.equal(rows[0].playback.position, "estimated");
+    assert.equal(rows[0].playback.state, "playing");
+    assert.ok(rows[0].lastPosition >= 110_000);
+    prisma.watchStateCursor.findMany = async () => [
+        {
+            createdAt: startedAt,
+            durationMs: 600_000,
+            itemId: "tt123",
+            itemName: "Example",
+            itemType: "series",
+            startAt: startedAt,
+            startPositionMs: 100_000,
+            userId: user.id,
+            videoId: "tt123:1:3",
+        },
+    ];
+    rows = await buildNowPlaying(prisma, "evidence-account", [user]);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(new Set(rows.map((row) => row.videoId)), new Set(["tt123:1:2", "tt123:1:3"]));
 });
