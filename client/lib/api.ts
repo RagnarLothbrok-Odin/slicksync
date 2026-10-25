@@ -1,6 +1,7 @@
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import type { ErrorPayload } from "@/lib/errors";
 import type { StremioCatalog, StremioManifest } from "@/lib/stremio-manifest";
+import type { PlaybackEvidence } from "./playback";
 // API client for connecting to SlickSync backend
 // Use relative path if NEXT_PUBLIC_API_URL is not set (Next.js will proxy via rewrites)
 // Otherwise use the explicit URL (useful for production or different ports)
@@ -6802,7 +6803,8 @@ export interface MetricsData {
         videoId?: string | null; // videoId for series items (used for session matching)
         watchedAt: string;
         watchedAtTimestamp?: number; // Stable session startTime in ms (used for duration calculation)
-        source?: string; // 'aiostreams-proxy' for proxy-detected live entries; absent for native
+        playback?: PlaybackEvidence | null;
+        source?: string; // The provider signal used for this entry.
         // Playback position (ms), for the "resume here" quick-launch - native
         // only, a direct snapshot (see server/utils/metricsBuilder.js's comment).
         // Absent/null when unknown, e.g. a title the native pipeline hasn't

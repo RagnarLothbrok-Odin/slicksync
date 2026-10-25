@@ -4,6 +4,7 @@ import { FilmIcon, PlayIcon, TvIcon } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Badge, UserAvatar } from "@/components/ui";
+import { type PlaybackEvidence, playbackPresentation } from "@/lib/playback";
 
 interface NowPlayingItem {
     device?: { name: string | null; client: string | null } | null;
@@ -29,6 +30,7 @@ interface NowPlayingItem {
     // card shows, so the two read the same.
     lastPosition?: number | null;
     nuvioAppUrl?: string | null;
+    playback?: PlaybackEvidence | null;
     source?: string;
     stremioAppUrl?: string | null;
     totalDuration?: number | null;
@@ -78,9 +80,8 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
         return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
     };
 
-    // How long this has been playing, worked out the way the Activity page
-    // does: a stream the proxy is still confirming counts up from when it
-    // started; once it stops confirming, the server's last figure stands.
+    // Connection age describes the proxy session, not time spent watching.
+    // Native checkpoints have no reliable live elapsed time.
     const watchingFor = (item: NowPlayingItem): string | null => {
         const startMs =
             typeof item.watchedAtTimestamp === "number" ? item.watchedAtTimestamp : null;
@@ -90,9 +91,6 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
                     ? Math.max(0, Math.floor((now - startMs) / 1000))
                     : item.elapsedSeconds;
             return formatElapsed(Math.max(live, 0));
-        }
-        if (startMs && now) {
-            return formatElapsed(Math.max(0, Math.floor((now - startMs) / 1000)));
         }
         return null;
     };
@@ -186,23 +184,20 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
                                 </span>
                             )}
                         </div>
+                        <p className="mt-0.5 text-muted text-xs">
+                            {playbackPresentation(item.playback).status}
+                        </p>
                         {watchingFor(item) && (
                             <p className="mt-0.5 text-subtle text-xs">
-                                Watching for {watchingFor(item)}
+                                Connection open for {watchingFor(item)}
                             </p>
                         )}
                         {typeof item.lastPosition === "number" &&
                             typeof item.totalDuration === "number" &&
-                            item.totalDuration > 0 &&
-                            (item.stremioAppUrl || item.nuvioAppUrl) && (
+                            item.totalDuration > 0 && (
                                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                                     <span className="text-subtle text-xs">
-                                        {/* The position is the provider's last checkpoint, written
-                      at pause or stop - while the proxy shows the stream
-                      live it is where playback last stood, not a pause. */}
-                                        {item.source === "aiostreams-proxy"
-                                            ? "Last known position"
-                                            : "Paused at"}{" "}
+                                        {playbackPresentation(item.playback).positionLabel}{" "}
                                         {formatClock(item.lastPosition / 1000)} of{" "}
                                         {formatClock(item.totalDuration / 1000)} (
                                         {Math.round((item.lastPosition / item.totalDuration) * 100)}
@@ -243,7 +238,10 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
 
                     {/* Live indicator and Time Ago */}
                     <div className="flex-shrink-0 self-center">
-                        <div className="h-2 w-2 animate-pulse rounded-full bg-secondary" />
+                        <div
+                            aria-hidden="true"
+                            className={`h-2 w-2 rounded-full ${playbackPresentation(item.playback).playing ? "bg-success" : "bg-muted"}`}
+                        />
                     </div>
                 </motion.div>
             ))}

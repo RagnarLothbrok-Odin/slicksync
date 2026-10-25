@@ -71,6 +71,7 @@ import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { usePersonalFeatures } from "@/lib/hooks/usePersonalFeatures";
 import { useLayoutMode } from "@/lib/layout-mode";
+import { playbackPresentation } from "@/lib/playback";
 import { posterSrcSet, posterUrl } from "@/lib/posterUrl";
 import { useTheme } from "@/lib/theme";
 import { useDefaultViewMode } from "@/lib/viewMode";
@@ -1611,14 +1612,16 @@ function NowPlayingHeader({ count }: { count: number }) {
                 <div className="flex items-center justify-center rounded-full bg-primary/10 p-2">
                     <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary" />
                 </div>
-                <h2 className="font-display font-semibold text-default text-lg">Now Playing</h2>
+                <h2 className="font-display font-semibold text-default text-lg">
+                    Playback Activity
+                </h2>
                 <Badge size="sm" variant="primary">
-                    {count} {count === 1 ? "user" : "users"}
+                    {count} {count === 1 ? "session" : "sessions"}
                 </Badge>
             </div>
             <div className="flex items-center gap-2 text-muted text-xs">
                 <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-                <span>Live</span>
+                <span>Auto-updating</span>
             </div>
         </div>
     );
@@ -1631,8 +1634,6 @@ function NowPlayingHeader({ count }: { count: number }) {
 // two copies drifting apart on the next bug fix.
 function NowPlayingItemBody({
     np,
-    metricsData,
-    nowTick,
 }: {
     np: NonNullable<MetricsData["nowPlaying"]>[number];
     metricsData: MetricsData;
@@ -1696,177 +1697,9 @@ function NowPlayingItemBody({
                         on {[np.device.name, np.device.client].filter(Boolean).join(" · ")}
                     </p>
                 )}
-                {/* Live duration for now playing: now - session start.
-            Only shown when we have a proper WatchSession (so it doesn't reset on each sync). */}
-                {(() => {
-                    let session: NonNullable<typeof metricsData.watchSessions>[0] | undefined;
-                    let startMs: number | null = null;
-                    const isProxySourced = np.source === "aiostreams-proxy";
-
-                    // Proxy-sourced entries carry their own real connection-start
-                    // timestamp (np.watchedAtTimestamp) and must never borrow a native
-                    // WatchSession's startTime for it - sessionTracker.js can close and
-                    // reopen a WatchSession after a native polling gap even while the
-                    // proxy connection has stayed open the whole time, which reset this
-                    // display to "Watching for 1s" mid-stream (confirmed live 2026-08-19)
-                    // despite the proxy itself never having dropped. The session-match
-                    // below is still used for its own durationSeconds fallback on
-                    // non-proxy (native-only, e.g. usenet) entries, which have no proxy
-                    // signal to fall back on.
-                    if (isProxySourced && np.watchedAtTimestamp) {
-                        const watchedAtMs =
-                            typeof np.watchedAtTimestamp === "number"
-                                ? np.watchedAtTimestamp
-                                : new Date(np.watchedAt).getTime();
-                        if (!Number.isNaN(watchedAtMs)) {
-                            startMs = watchedAtMs;
-                        }
-                    }
-
-                    // Find matching active session from watchSessions
-                    // Match by: userId + itemId + videoId (for series) or userId + itemId (for movies)
-                    if (
-                        !isProxySourced &&
-                        metricsData?.watchSessions &&
-                        metricsData.watchSessions.length > 0
-                    ) {
-                        const matchingSessions = metricsData.watchSessions.filter((s) => {
-                            // Must be active and match user + item
-                            if (
-                                !s.isActive ||
-                                s.user.id !== np.user.id ||
-                                s.item.id !== np.item.id
-                            ) {
-                                return false;
-                            }
-
-                            // For series: match by videoId if available (most reliable)
-                            if (np.item.type === "series") {
-                                const npVideoId = np.videoId || null;
-                                const sVideoId = s.videoId || null;
-
-                                // If both have videoId, they must match
-                                if (npVideoId && sVideoId) {
-                                    return npVideoId === sVideoId;
-                                }
-
-                                // If only one has videoId, don't match (prevents wrong episode)
-                                if ((npVideoId && !sVideoId) || (!npVideoId && sVideoId)) {
-                                    return false;
-                                }
-
-                                // If neither has videoId, fall back to season/episode matching
-                                const npSeason = np.item.season ?? null;
-                                const npEpisode = np.item.episode ?? null;
-                                const sSeason = s.item.season ?? null;
-                                const sEpisode = s.item.episode ?? null;
-
-                                // Both must have season/episode and they must match
-                                if (
-                                    npSeason !== null &&
-                                    npEpisode !== null &&
-                                    sSeason !== null &&
-                                    sEpisode !== null
-                                ) {
-                                    return npSeason === sSeason && npEpisode === sEpisode;
-                                }
-
-                                // If Now Playing has season/episode but session doesn't, don't match
-                                if (
-                                    (npSeason !== null || npEpisode !== null) &&
-                                    sSeason === null &&
-                                    sEpisode === null
-                                ) {
-                                    return false;
-                                }
-
-                                // If both missing season/episode, match by item ID only (fallback)
-                            }
-
-                            // For movies: match by item ID only (no videoId)
-                            return true;
-                        });
-
-                        // If multiple matches, use the one with EARLIEST startTime (oldest session)
-                        // This prevents resets when new sessions are created
-                        if (matchingSessions.length > 0) {
-                            session = matchingSessions.reduce((oldest, current) => {
-                                const oldestTime = new Date(oldest.startTime).getTime();
-                                const currentTime = new Date(current.startTime).getTime();
-                                return currentTime < oldestTime ? current : oldest;
-                            });
-
-                            startMs = new Date(session.startTime).getTime();
-                            if (Number.isNaN(startMs)) {
-                                startMs = null;
-                            }
-                        }
-                    }
-
-                    // Fallback for native entries with no matched session: use
-                    // watchedAtTimestamp, but only if recent (within 5 minutes) - those
-                    // watchedAt values can be stale (last checkpoint, not "now"), and
-                    // the cap prevents showing an inflated/resetting duration before a
-                    // real session row exists. Proxy-sourced entries already had their
-                    // startMs set above and never reach this branch.
-                    if (!startMs && np.watchedAtTimestamp) {
-                        const watchedAtMs =
-                            typeof np.watchedAtTimestamp === "number"
-                                ? np.watchedAtTimestamp
-                                : new Date(np.watchedAt).getTime();
-                        const ageMs = nowTick - watchedAtMs;
-                        if (ageMs >= 0 && ageMs <= 300_000) {
-                            startMs = watchedAtMs;
-                        }
-                    }
-
-                    // Prefer the backend's durationSeconds when a matched session exists -
-                    // that value now reflects real watched-content progress (position
-                    // delta since the session started), refreshed once per poll cycle.
-                    // A pure client-side "now - startTime" tick looked "live" but climbed
-                    // every second regardless of whether the provider's position had
-                    // actually advanced at all, which overstated progress whenever the
-                    // provider went a while between checkpoints (common - see the
-                    // freshness-window notes in sessionTracker.js). A proxy-only entry
-                    // (no matched native session) uses the backend's elapsedSeconds
-                    // instead of ticking off nowTick directly - that value is frozen
-                    // once proxy traffic goes quiet, rather than climbing forever off
-                    // raw wall-clock even after the stream was actually exited
-                    // (confirmed real case: a proxy connection AIOStreams still listed
-                    // as open kept "Watching for" climbing well past 45+ minutes after
-                    // the user had already stopped watching - see proxyNowPlaying.js).
-                    // A proxy-only entry ticks live off nowTick (like the native
-                    // fallback below) as long as the backend hasn't marked it frozen -
-                    // elapsedFrozen is exactly the signal for "the proxy is still
-                    // reconfirming this connection right now" (see proxyNowPlaying.js),
-                    // so it's safe to keep counting between polls instead of sitting on
-                    // a stale number until the next 30s fetch lands. Once frozen, fall
-                    // back to the backend's own (correctly stopped) value - never tick
-                    // past what it can no longer vouch for.
-                    const elapsedSeconds =
-                        session && typeof session.durationSeconds === "number"
-                            ? Math.max(0, session.durationSeconds)
-                            : np.source === "aiostreams-proxy" &&
-                                typeof np.elapsedSeconds === "number"
-                              ? !np.elapsedFrozen && startMs && !Number.isNaN(startMs)
-                                  ? Math.max(0, Math.floor((nowTick - startMs) / 1000))
-                                  : np.elapsedSeconds
-                              : startMs && !Number.isNaN(startMs)
-                                ? Math.max(0, Math.floor((nowTick - startMs) / 1000))
-                                : null;
-
-                    // Only show duration if we have something to show (from session or recent fallback)
-                    if (elapsedSeconds === null) {
-                        return null;
-                    }
-
-                    return (
-                        <p className="mt-0.5 text-subtle text-xs">
-                            Watching for{" "}
-                            {elapsedSeconds > 0 ? formatDuration(elapsedSeconds) : "<1m"}
-                        </p>
-                    );
-                })()}
+                <p className="mt-0.5 text-muted text-xs">
+                    {playbackPresentation(np.playback).status}
+                </p>
                 {/* "Resume here" - jumps to the right title/episode on whatever
             device you tap this from, with the exact position shown so you
             know where to seek to. Neither Stremio's nor Nuvio's deep-link
@@ -1878,22 +1711,10 @@ function NowPlayingItemBody({
             connection/byte-range activity. */}
                 {typeof np.lastPosition === "number" &&
                     typeof np.totalDuration === "number" &&
-                    np.totalDuration > 0 &&
-                    (np.stremioAppUrl || np.nuvioAppUrl) && (
+                    np.totalDuration > 0 && (
                         <div className="mt-1.5 flex flex-wrap items-center gap-2">
                             <span className="text-subtle text-xs">
-                                {/* This position comes from native's last checkpoint (see
-                  proxyNowPlaying.js), which only writes at pause/stop. For a
-                  proxy-confirmed-live entry the proxy itself is proof
-                  playback is still going, so calling this stale number
-                  "Paused at" is actively wrong - confirmed real case: a fast
-                  debrid stream kept climbing toward 15min while this stayed
-                  frozen at a ~3min checkpoint, mislabeled as paused the
-                  whole time. Only call it "Paused" when there's no live
-                  proxy signal contradicting it. */}
-                                {np.source === "aiostreams-proxy"
-                                    ? "Last known position"
-                                    : "Paused at"}{" "}
+                                {playbackPresentation(np.playback).positionLabel}{" "}
                                 {formatClock(np.lastPosition / 1000)} of{" "}
                                 {formatClock(np.totalDuration / 1000)} (
                                 {Math.round((np.lastPosition / np.totalDuration) * 100)}%)
@@ -2194,7 +2015,7 @@ function ActivityPageContent() {
         return seconds;
     }, [activityData, todayStart]);
 
-    // Calculate live watch time today (base watch time + elapsed active sessions)
+    // Report accumulated watch time without adding unconfirmed wall-clock playback.
     const liveWatchTimeTodayHours = useMemo(() => {
         if (!metricsData) {
             return 0;
@@ -2214,33 +2035,6 @@ function ActivityPageContent() {
             }
         }
 
-        // Add elapsed time from all active "Now Playing" sessions
-        if (metricsData.nowPlaying && metricsData.nowPlaying.length > 0) {
-            metricsData.nowPlaying.forEach((np) => {
-                let startMs: number | null = null;
-
-                // Find session to get accurate start time
-                if (metricsData.watchSessions) {
-                    const session = metricsData.watchSessions.find(
-                        (s) => s.isActive && s.user.id === np.user.id && s.item.id === np.item.id
-                    );
-                    if (session) {
-                        startMs = new Date(session.startTime).getTime();
-                    }
-                }
-
-                // Fallback to watchedAtTimestamp
-                if (!startMs && np.watchedAtTimestamp) {
-                    startMs = np.watchedAtTimestamp;
-                }
-
-                if (startMs) {
-                    const elapsed = Math.max(0, (nowTick - startMs) / 1000);
-                    totalSeconds += elapsed;
-                }
-            });
-        }
-
         // Floor against today's individual watch entries (same durationSeconds
         // shown on the "Today" poster cards below). WatchActivity needs two
         // overallTimeWatched observations to produce a delta (see docs/runtime-behavior.md), so
@@ -2256,7 +2050,7 @@ function ActivityPageContent() {
         // not be recomputed on every tick. Scanning the whole feed once a second
         // to arrive at a number that cannot have changed was the expensive half
         // of this memo.
-    }, [metricsData, nowTick, todayStart, historySecondsToday]);
+    }, [metricsData, todayStart, historySecondsToday]);
 
     // Infinite scroll: load more when sentinel is visible
     const loadMore = useCallback(() => {
@@ -2528,7 +2322,8 @@ function ActivityPageContent() {
     // Activity stats derived from real metrics data
     const currentlyWatchingCount =
         metricsData?.nowPlaying && Array.isArray(metricsData.nowPlaying)
-            ? metricsData.nowPlaying.length
+            ? metricsData.nowPlaying.filter((np) => playbackPresentation(np.playback).playing)
+                  .length
             : 0;
 
     const completedTodayCount = activityData.filter(
@@ -2557,7 +2352,11 @@ function ActivityPageContent() {
     // nowPlaying entry, e.g. the same title under both their Stremio and Nuvio
     // profiles).
     const activeUsersCount = metricsData?.nowPlaying
-        ? new Set(metricsData.nowPlaying.map((np) => np.user.id)).size
+        ? new Set(
+              metricsData.nowPlaying
+                  .filter((np) => playbackPresentation(np.playback).playing)
+                  .map((np) => np.user.id)
+          ).size
         : 0;
 
     // Group task history by time periods (TODO: fetch from API)

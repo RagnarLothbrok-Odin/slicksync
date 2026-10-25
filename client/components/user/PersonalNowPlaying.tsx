@@ -3,6 +3,7 @@
 import { ArrowPathIcon, ChevronRightIcon, FilmIcon, PlayIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useState } from "react";
 import { useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
+import { playbackPresentation } from "@/lib/playback";
 import { type NowPlayingItem, personalRequest } from "@/lib/user-api";
 import { PersonalMediaDetailModal } from "./PersonalMediaDetailModal";
 
@@ -10,6 +11,7 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
     const [failedArtwork, setFailedArtwork] = useState(false);
     const title =
         item.item.name && item.item.name !== item.item.id ? item.item.name : "Your current title";
+    const presentation = playbackPresentation(item.playback);
     const duration = item.totalDuration;
     const position = item.lastPosition;
     const knownProgress =
@@ -48,9 +50,14 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
                 )}
             </span>
             <span className="min-w-0 flex-1">
-                <span className="mb-2 inline-flex items-center gap-1.5 text-success text-xs">
-                    <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
-                    {item.elapsedFrozen ? "Playback detected" : "Playing now"}
+                <span
+                    className={`mb-2 inline-flex items-center gap-1.5 text-xs ${presentation.playing ? "text-success" : "text-muted"}`}
+                >
+                    <span
+                        aria-hidden="true"
+                        className={`h-1.5 w-1.5 rounded-full ${presentation.playing ? "bg-success" : "bg-current"}`}
+                    />
+                    {presentation.status}
                 </span>
                 <span className="line-clamp-2 font-semibold text-default text-lg leading-snug tracking-tight sm:text-xl">
                     {title}
@@ -58,7 +65,7 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
                 <span className="mt-1 block text-muted text-sm">{episode}</span>
                 {progress !== null && (
                     <span
-                        aria-label="Playback progress"
+                        aria-label={presentation.positionLabel}
                         aria-valuemax={100}
                         aria-valuemin={0}
                         aria-valuenow={Math.round(progress)}
@@ -72,7 +79,8 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
                             />
                         </span>
                         <span className="mt-1.5 block text-subtle text-xs">
-                            {remaining === 0 ? "Finishing up" : `${remaining} min left`}
+                            {presentation.positionLabel} · {Math.round(progress)}%
+                            {remaining !== null && ` · ${remaining} min remaining at update`}
                         </span>
                     </span>
                 )}
@@ -149,9 +157,9 @@ export function PersonalNowPlaying() {
                     className="font-semibold text-default text-lg tracking-tight"
                     id="personal-now-playing-heading"
                 >
-                    Currently Watching
+                    Playback Activity
                 </h2>
-                <span className="text-subtle text-xs">Live activity</span>
+                <span className="text-subtle text-xs">Auto-updating</span>
             </div>
             {current?.items.length ? (
                 <div className="grid gap-3 lg:grid-cols-2">
@@ -170,7 +178,7 @@ export function PersonalNowPlaying() {
                         {current
                             ? current.error
                                 ? "Live activity is unavailable."
-                                : "Nothing playing right now."
+                                : "No playback activity detected."
                             : "Checking your playback..."}
                     </p>
                     {current?.error && (

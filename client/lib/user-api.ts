@@ -1,4 +1,5 @@
 import type { JellyfinSignInApi } from "@/components/jellyfin/JellyfinSignIn";
+import type { PlaybackEvidence } from "./playback";
 import type { StremioManifest } from "./stremio-manifest";
 
 /**
@@ -694,6 +695,7 @@ export interface NowPlayingItem {
     };
     /** Native playback checkpoints and runtime are milliseconds. */
     lastPosition?: number | null;
+    playback?: PlaybackEvidence | null;
     startTime: string;
     totalDuration?: number | null;
     videoId?: string;
