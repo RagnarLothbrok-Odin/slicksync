@@ -1,7 +1,7 @@
 # Docker
 
 How the image is built and what runs inside it. For installing and updating,
-follow the [README](./README.md#-installation) — this describes the machinery
+follow the [README](./README.md#-installation); this describes the machinery
 behind it.
 
 ## One image, two processes
@@ -18,7 +18,9 @@ container
 Both ports are declared, but only `3000` is worth publishing. Put a reverse
 proxy in front of it for TLS; SlickSync does not terminate TLS itself.
 
-Override with `FRONTEND_PORT` and `BACKEND_PORT` if either collides.
+Keep internal ports at 3000 and 4000: the frontend proxy and image healthcheck use
+these defaults. To avoid a host port collision, change the host mapping to
+`"3001:3000"` in Compose.
 
 ## Build stages
 
@@ -71,22 +73,39 @@ generated encryption key, Vault backups, avatars and the poster cache.
 
 It has to outlive the container. `docker compose pull && docker compose up -d`
 replaces the container, and without the volume it takes the encryption key
-with it — which would leave every stored provider credential unreadable.
+with it; which would leave every stored provider credential unreadable.
 
 ## Looking inside
 
 ```bash
 docker compose -f docker-compose.private.yml logs -f
-docker exec -it slicksync sh
-docker exec slicksync sh -c 'echo $APP_VERSION'
+docker compose -f docker-compose.private.yml exec slicksync sh
+docker compose -f docker-compose.private.yml exec slicksync sh -c 'echo $APP_VERSION'
 ```
 
-The image declares a healthcheck against the frontend, so `docker ps` reports
+The image declares a healthcheck against both the frontend and backend, including
+a backend database check, so `docker ps` reports
 health without you polling anything.
 
 ## Environment
 
 Everything configurable is documented in `.env.example`, which is the
-authoritative list. Only `JWT_SECRET` is always required; in public mode
-`ENCRYPTION_KEY` and `POSTGRES_PASSWORD` are as well. On a private instance an
+authoritative list. The supplied Compose file requires `JWT_SECRET`. Public deployments need their
+own PostgreSQL connection configuration; no public Compose bundle is maintained. On a private instance an
 encryption key generates itself on first boot and is kept in the data volume.
+
+## Startup and updates
+
+The frontend runs from `client/.next/standalone/client/server.js`, with its static
+assets copied alongside it during the image build. The startup script launches
+both processes and forwards shutdown signals.
+
+Back up the data volume before updating. Private startup currently applies
+`prisma db push --accept-data-loss --skip-generate` and continues even if that
+command fails. It is schema synchronization, not a versioned migration or a
+rollback mechanism. Review schema changes before deploying a new image.
+
+The `private` filename and image tag identify the single-household application
+mode, not repository or GHCR package visibility. Keep the explicit Compose filename
+in commands. This fork publishes only the moving `:private` tag, so record the
+image digest if you need a reproducible rollback.

@@ -5,8 +5,11 @@
 > `/api/docs` - no login required to view it, only to call an endpoint for
 > real.
 
+This reference covers the external integration API. Internal admin and user-panel
+routes under `/api` are separate application interfaces.
+
 ## Base URL
-All API endpoints are prefixed with `/api/ext` (e.g., `/api/ext/account`, `/api/ext/addons/reload`).
+The supported external API endpoints are prefixed with `/api/ext` (e.g., `/api/ext/account`, `/api/ext/addons/reload`).
 
 ## Authentication
 
@@ -30,20 +33,36 @@ Get account statistics.
 **Response:**
 ```json
 {
-  "lastRunAt": "1337-01-01T00:00:00Z",
-  "usersCount": 10,
-  "groupsCount": 5,
-  "addonsCount": 20
+  "lastRunAt": "2026-10-25T00:00:00Z",
+  "totalUsers": 10,
+  "totalGroups": 5,
+  "totalAddons": 20,
+  "pendingInvites": 0
 }
 ```
 
+The response also includes account identity fields: `id`, `uuid`, `email`,
+`linkedProvider`, `avatarUrl`, and `displayName`. Optional profile values may be null.
+
+#### `GET /api/ext/continue-watching`
+
+Read the authenticated account's household Continue Watching rows, newest activity first.
+`limit` defaults to 5 and is clamped to 1 through 20.
+
+Returns `{ "items": [...] }`. Each item includes `show`, `showId`, `contentType`,
+`user`, `provider`, `poster`, `season`, `episode`, `episodeTitle`, `lastWatchedAt`,
+`progressPercent`, `resume`, `appUrl`, and `webUrl`. Artwork, episode details,
+progress and links can be null. `resume` distinguishes an episode in progress
+from the next episode. Treat provider app links as deep links and use `webUrl`
+for a browser fallback.
+
 #### `GET /api/ext/metrics.json`
-Get the full dashboard metrics for this account — same data the Metrics page renders. Served from an in-memory cache refreshed every 5 minutes when available; built on demand otherwise.
+Get the full dashboard metrics for this account; same data the Metrics page renders. Served from an in-memory cache refreshed every 5 minutes when available; built on demand otherwise.
 
 **Authentication:** Required (API key)
 
 **Query Parameters:**
-- `period` (optional): `7d` | `30d` | `90d` | `all` — defaults to `30d`
+- `period` (optional): `7d` | `30d` | `90d` | `all`; defaults to `30d`
 
 **Response:** Same shape the admin Metrics page consumes.
 
@@ -99,13 +118,13 @@ Reload addons by addon ID, then sync all groups containing those addons. Applies
 **Response:**
 ```json
 {
-  "message": "Addons reloaded and groups synced",
+  "message": "Reload and sync completed",
   "reloaded": 2,
-  "syncedGroups": 3
+  "groupsSynced": 3,
+  "totalUsersSynced": 6,
+  "diffs": []
 }
 ```
-
-<!-- Image temporarily unavailable - was in deleted client folder -->
 
 #### `POST /api/ext/groups/sync`
 Sync all groups.
@@ -119,8 +138,11 @@ Sync all groups.
 **Response:**
 ```json
 {
-  "message": "All groups synced",
-  "syncedCount": 5
+  "message": "Sync triggered",
+  "ok": 5,
+  "fail": 0,
+  "totalFailed": 0,
+  "totalSynced": 10
 }
 ```
 
@@ -128,7 +150,8 @@ Sync all groups.
 
 ## Error Responses
 
-All endpoints may return error responses in the following format:
+Errors generally include `message`; the metrics endpoint uses `error` instead.
+Some responses include additional detail:
 
 ```json
 {
@@ -149,7 +172,7 @@ All endpoints may return error responses in the following format:
 ## Notes
 
 - All timestamps are in ISO 8601 format
-- All IDs are UUIDs
+- Treat IDs as opaque strings
 - URLs are normalized and validated
 - Manifest URLs are encrypted in the database
 - Sync operations respect account-level sync settings (mode: normal/advanced, safe/unsafe)
