@@ -1,13 +1,22 @@
-const { createDefaultAvatar } = require('../utils/defaultAvatar')
-const express = require('express')
-const { publicMessage } = require('../utils/publicError');
-const crypto = require('crypto')
-const { postDiscord } = require('../utils/notify')
-const { notifyPushForType } = require('../utils/pushNotifications')
-const { validateStremioAuthKey } = require('../utils/stremio')
-const { startNuvioTvLogin, pollNuvioTvLogin, exchangeNuvioTvLogin } = require('../providers/nuvioAuth')
-const { formatCodeBlock, formatRelativeTime, parseSyncConfig, getAppVersion } = require('../utils/webhookHelpers')
-const { getUserAvatarUrl } = require('../utils/avatarUtils')
+const { createDefaultAvatar } = require("../utils/defaultAvatar");
+const express = require("express");
+const { publicMessage } = require("../utils/publicError");
+const crypto = require("node:crypto");
+const { postDiscord } = require("../utils/notify");
+const { notifyPushForType } = require("../utils/pushNotifications");
+const { validateStremioAuthKey } = require("../utils/stremio");
+const {
+    startNuvioTvLogin,
+    pollNuvioTvLogin,
+    exchangeNuvioTvLogin,
+} = require("../providers/nuvioAuth");
+const {
+    formatCodeBlock,
+    formatRelativeTime,
+    parseSyncConfig,
+    getAppVersion,
+} = require("../utils/webhookHelpers");
+const { getUserAvatarUrl } = require("../utils/avatarUtils");
 
 // An invite code opens a door for anyone who holds it, so it has to be out of
 // reach of guessing: 17 characters, each drawn evenly from 30 (about 83 bits)
@@ -16,1901 +25,2404 @@ const { getUserAvatarUrl } = require('../utils/avatarUtils')
 // a screenshot (0/O, 1/I/L) and U, and stay uppercase like every code made
 // before. Those older codes are shorter; they are only ever matched as
 // stored, so they keep working.
-const INVITE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'
-const INVITE_CODE_LENGTH = 17
+const INVITE_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+const INVITE_CODE_LENGTH = 17;
 function generateInviteCode() {
-  let code = ''
-  for (let i = 0; i < INVITE_CODE_LENGTH; i++) code += INVITE_CODE_ALPHABET[crypto.randomInt(INVITE_CODE_ALPHABET.length)]
-  return code
+    let code = "";
+    for (let i = 0; i < INVITE_CODE_LENGTH; i++) {
+        code += INVITE_CODE_ALPHABET[crypto.randomInt(INVITE_CODE_ALPHABET.length)];
+    }
+    return code;
 }
 
 // An invitation names its group rather than pointing at it. If that group has
 // since been deleted the person still joins, just in no group - so say so,
 // rather than leave them there unnoticed.
 async function tellGroupMissing(prisma, accountId, { username, userId, groupName, inviteCode }) {
-  const who = username || 'Someone'
-  const title = `${who} joined without a group`
-  const body = `Invitation ${inviteCode} puts people in "${groupName}", which no longer exists. Add ${who} to a group, and pick a new group for the invitation.`
-  try {
-    const { createNotification } = require('../utils/notificationStore')
-    await createNotification(prisma, accountId, { type: 'invite', title, body, url: userId ? `/users/${userId}` : '/invitations', dedupeKey: `invite-group-missing:${userId || inviteCode}` })
-    const { isPushEnabled, sendPushToAccount } = require('../utils/pushNotifications')
-    if (isPushEnabled()) await sendPushToAccount(prisma, accountId, { title, body, icon: '/android-chrome-192x192.png', url: userId ? `/users/${userId}` : '/invitations' })
-  } catch (e) {
-    console.warn('[invitations] could not tell about a missing group:', e?.message)
-  }
+    const who = username || "Someone";
+    const title = `${who} joined without a group`;
+    const body = `Invitation ${inviteCode} puts people in "${groupName}", which no longer exists. Add ${who} to a group, and pick a new group for the invitation.`;
+    try {
+        const { createNotification } = require("../utils/notificationStore");
+        await createNotification(prisma, accountId, {
+            body,
+            dedupeKey: `invite-group-missing:${userId || inviteCode}`,
+            title,
+            type: "invite",
+            url: userId ? `/users/${userId}` : "/invitations",
+        });
+        const { isPushEnabled, sendPushToAccount } = require("../utils/pushNotifications");
+        if (isPushEnabled()) {
+            await sendPushToAccount(prisma, accountId, {
+                body,
+                icon: "/android-chrome-192x192.png",
+                title,
+                url: userId ? `/users/${userId}` : "/invitations",
+            });
+        }
+    } catch (e) {
+        console.warn("[invitations] could not tell about a missing group:", e?.message);
+    }
 }
 
-module.exports = ({ prisma, getAccountId, INSTANCE_TYPE, encrypt, decrypt, assignUserToGroup }) => {
-  const router = express.Router()
+module.exports = ({
+    prisma,
+    getAccountId,
+    INSTANCE_TYPE: _INSTANCE_TYPE,
+    encrypt: _encrypt,
+    decrypt,
+    assignUserToGroup: _assignUserToGroup,
+}) => {
+    const router = express.Router();
 
-  router.get('/', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      // fetch all invites with their requests, newest first
-      const invitations = await prisma.invitation.findMany({
-        where: { accountId },
-        include: {
-          requests: {
-            orderBy: { createdAt: 'desc' }
-          }
-        },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      // Which Jellyfin server each one makes accounts on (utils/jellyfinInviteAccounts.js).
-      let makes = {}
-      try {
-        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-        const cfg = typeof acc?.sync === 'string' ? JSON.parse(acc.sync) : (acc?.sync || {})
-        makes = cfg.jellyfinInvites || {}
-      } catch {}
-      res.json(invitations.map((inv) => ({ ...inv, jellyfinServerKey: makes[inv.id] || null })))
-    } catch (error) {
-      console.error('Error fetching invitations:', error)
-      res.status(500).json({ error: 'Failed to fetch invitations' })
-    }
-  })
-
-  // What the notification bell needs, every 30 seconds: requests waiting for
-  // an answer, and the last month's accepted ones - not every invitation with
-  // every request it ever had (sign-in tokens included).
-  router.get('/bell', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-      const rows = await prisma.inviteRequest.findMany({
-        where: { accountId, OR: [{ status: 'pending' }, { status: 'accepted', createdAt: { gte: since } }] },
-        select: {
-          id: true, username: true, email: true, status: true, createdAt: true, respondedAt: true,
-          invitation: { select: { name: true, inviteCode: true, groupName: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 200,
-      })
-      const shape = ({ invitation, ...r }) => ({ ...r, invitationName: invitation?.name || invitation?.inviteCode || 'Invitation', groupName: invitation?.groupName || 'a group' })
-      res.json({
-        pending: rows.filter((r) => r.status === 'pending').map(shape),
-        accepted: rows.filter((r) => r.status === 'accepted').map(shape),
-      })
-    } catch (error) {
-      console.error('Error fetching invite requests for the bell:', error)
-      res.status(500).json({ error: 'Failed to fetch invite requests' })
-    }
-  })
-
-  router.post('/', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { name, maxUses, expiresAt, groupName, syncOnJoin, membershipDurationDays } = req.body
-
-      // make sure code is unique
-      let inviteCode
-      let attempts = 0
-      do {
-        inviteCode = generateInviteCode()
-        const exists = await prisma.invitation.findUnique({ where: { inviteCode } })
-        if (!exists) break
-        attempts++
-        if (attempts > 10) return res.status(500).json({ error: 'Failed to generate unique invite code' })
-      } while (true)
-
-      // Normalize numeric fields
-      // When left empty, treat as 0 = unlimited
-      const parsedMaxUses =
-        maxUses === null ||
-          maxUses === undefined ||
-          maxUses === '' ||
-          Number.isNaN(Number(maxUses))
-          ? 0
-          : Number(maxUses)
-
-      const parsedMembershipDuration =
-        membershipDurationDays === null || membershipDurationDays === undefined || Number.isNaN(Number(membershipDurationDays))
-          ? null
-          : Number(membershipDurationDays)
-
-      const invitation = await prisma.invitation.create({
-        data: {
-          accountId,
-          name: name || null,
-          inviteCode,
-          groupName: groupName || null,
-          // When maxUses is 0, the invite is unlimited
-          maxUses: parsedMaxUses,
-          currentUses: 0,
-          expiresAt: expiresAt ? new Date(expiresAt) : null,
-          membershipDurationDays: parsedMembershipDuration,
-          isActive: true,
-          syncOnJoin: syncOnJoin === true
-        }
-      })
-
-      // discord webhook
-      try {
-        const account = await prisma.appAccount.findUnique({
-          where: { id: accountId },
-          select: { sync: true }
-        })
-        const syncCfg = parseSyncConfig(account?.sync)
-        const webhookUrl = syncCfg?.webhookUrl
-        if (syncCfg?.notifyOnInvite === true && webhookUrl) {
-          // build the invite link
-          const originHeader = (req.headers?.origin || '').trim()
-          const hostHeader = req.get('host')
-          const protocolHost = hostHeader ? `${req.protocol}://${hostHeader}` : ''
-          const baseUrl = (originHeader || protocolHost || '').replace(/\/$/, '')
-          const inviteLink = baseUrl ? `${baseUrl}/invite/${invitation.inviteCode}` : `/invite/${invitation.inviteCode}`
-
-          const relativeExpiry = formatRelativeTime(invitation.expiresAt)
-          let descriptionText
-          if (relativeExpiry) {
-            descriptionText = `An invitation has been created${invitation.groupName ? ` for **${invitation.groupName}**` : ''} and expires ${relativeExpiry}.`
-          } else {
-            descriptionText = `An invitation has been created${invitation.groupName ? ` for **${invitation.groupName}**` : ''} with no expiration.`
-          }
-
-          const embed = {
-            title: 'New Invitation Created',
-            description: descriptionText,
-            color: 0x3b82f6,
-            fields: [
-              { name: 'Invite Code', value: formatCodeBlock(invitation.inviteCode), inline: true },
-              { name: 'Group', value: formatCodeBlock(invitation.groupName || 'No group'), inline: true },
-              {
-                name: 'Uses',
-                value: formatCodeBlock(
-                  invitation.maxUses && invitation.maxUses > 0
-                    ? invitation.maxUses.toString()
-                    : 'Unlimited'
-                ),
-                inline: true
-              },
-              { name: 'Invite Link', value: formatCodeBlock(inviteLink), inline: false }
-            ],
-            timestamp: (invitation.createdAt || new Date()).toISOString()
-          }
-
-          const appVersion = getAppVersion()
-          if (appVersion) {
-            embed.footer = { text: `SlickSync v${appVersion}` }
-          }
-
-          // For invitation creation, we don't have a user yet, so use default avatar
-          await postDiscord(webhookUrl, null, {
-            embeds: [embed],
-            avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-          })
-        }
-        // Push mirror (self-gates on notifyOnInvite; independent of webhook).
-        await notifyPushForType(prisma, accountId, 'notifyOnInvite', {
-          title: 'New invitation created',
-          body: `Code ${invitation.inviteCode}${invitation.groupName ? ` · ${invitation.groupName}` : ''}`,
-          icon: '/android-chrome-192x192.png',
-          url: '/invitations',
-        })
-      } catch (webhookError) {
-        console.error('Failed to send invitation webhook:', webhookError)
-      }
-
-      const jellyfinServerKey = typeof req.body?.jellyfinServerKey === 'string' && req.body.jellyfinServerKey ? req.body.jellyfinServerKey : null
-      if (jellyfinServerKey) await require('../utils/jellyfinInviteAccounts').setInvitationServer(prisma, accountId, invitation.id, jellyfinServerKey)
-      res.json({ ...invitation, jellyfinServerKey })
-    } catch (error) {
-      console.error('Error creating invitation:', error)
-      res.status(500).json({ error: 'Failed to create invitation' })
-    }
-  })
-
-  router.patch('/:id/toggle-status', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { id } = req.params
-      const { isActive } = req.body
-
-      const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      const updated = await prisma.invitation.update({
-        where: { id },
-        data: { isActive: isActive },
-        include: {
-          requests: {
-            orderBy: { createdAt: 'desc' }
-          }
-        }
-      })
-
-      res.json(updated)
-    } catch (error) {
-      console.error('Error toggling invitation status:', error)
-      res.status(500).json({ error: 'Failed to toggle invitation status' })
-    }
-  })
-
-  router.patch('/:id', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { id } = req.params
-      const { name, groupName, syncOnJoin, expiresAt, membershipDurationDays, maxUses, createdAt } = req.body
-
-      const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      const updateData = {}
-      if (name !== undefined) updateData.name = name || null
-      if (groupName !== undefined) updateData.groupName = groupName || null
-      if (syncOnJoin !== undefined) updateData.syncOnJoin = syncOnJoin === true
-      if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null
-      if (membershipDurationDays !== undefined) {
-        updateData.membershipDurationDays =
-          membershipDurationDays === null || Number.isNaN(Number(membershipDurationDays))
-            ? null
-            : Number(membershipDurationDays)
-      }
-      if (maxUses !== undefined) {
-        // Treat empty/null as 0 = unlimited
-        updateData.maxUses =
-          maxUses === null || maxUses === '' || Number.isNaN(Number(maxUses))
-            ? 0
-            : Number(maxUses)
-      }
-      if (createdAt !== undefined) updateData.createdAt = createdAt ? new Date(createdAt) : invitation.createdAt
-
-      const updated = await prisma.invitation.update({
-        where: { id },
-        data: updateData,
-        include: {
-          requests: {
-            orderBy: { createdAt: 'desc' }
-          }
-        }
-      })
-
-      const inviteAccounts = require('../utils/jellyfinInviteAccounts')
-      if (req.body?.jellyfinServerKey !== undefined) {
-        await inviteAccounts.setInvitationServer(prisma, accountId, id, req.body.jellyfinServerKey || null)
-      }
-      res.json({ ...updated, jellyfinServerKey: await inviteAccounts.invitationServer(prisma, accountId, id) })
-    } catch (error) {
-      console.error('Error updating invitation:', error)
-      res.status(500).json({ error: 'Failed to update invitation' })
-    }
-  })
-
-  router.delete('/:id', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { id } = req.params
-      const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      await prisma.invitation.delete({
-        where: { id }
-      })
-
-      res.json({ message: 'Invitation deleted successfully' })
-    } catch (error) {
-      console.error('Error deleting invitation:', error)
-      res.status(500).json({ error: 'Failed to delete invitation' })
-    }
-  })
-
-  router.get('/:id/requests', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { id } = req.params
-      const invitation = await prisma.invitation.findFirst({ where: { id, accountId } })
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      const requests = await prisma.inviteRequest.findMany({
-        where: { invitationId: id },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      res.json(requests)
-    } catch (error) {
-      console.error('Error fetching requests:', error)
-      res.status(500).json({ error: 'Failed to fetch requests' })
-    }
-  })
-
-  router.get('/:id', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { id } = req.params
-
-      const invitation = await prisma.invitation.findFirst({
-        where: { id, accountId },
-        include: {
-          requests: {
-            orderBy: { createdAt: 'desc' }
-          }
-        }
-      })
-
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      res.json(invitation)
-    } catch (error) {
-      console.error('Error fetching invitation:', error)
-      res.status(500).json({ error: 'Failed to fetch invitation' })
-    }
-  })
-
-  router.post('/requests/:requestId/accept', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { requestId } = req.params
-      const { groupName } = req.body
-
-      const request = await prisma.inviteRequest.findUnique({
-        where: { id: requestId },
-        include: { invitation: true }
-      })
-
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
-
-      // validate the invite is still usable
-      if (!request.invitation.isActive) {
-        return res.status(400).json({ error: 'Invitation is not active' })
-      }
-      if (request.invitation.expiresAt && new Date(request.invitation.expiresAt) < new Date()) {
-        return res.status(400).json({ error: 'Invitation has expired' })
-      }
-      if (
-        request.invitation.maxUses != null &&
-        request.invitation.maxUses > 0 &&
-        request.invitation.currentUses >= request.invitation.maxUses
-      ) {
-        return res.status(400).json({ error: 'Invitation has reached maximum uses' })
-      }
-
-      // prefer groupName from body, then from request, then from invite, else null
-      const finalGroupName = groupName || request.groupName || request.invitation.groupName || null
-
-      // NEW FLOW: If request has stremioAuthKey, auto-create user on accept
-      // A request arrives with whichever credential its provider uses: a
-      // Stremio auth key, or a Nuvio refresh token. Either one means the
-      // person already proved who they are, so the user can be made now.
-      const isNuvioRequest = request.providerType === 'nuvio' && !!request.nuvioRefreshToken
-      const isJellyfinRequest = request.providerType === 'jellyfin' && !!request.jellyfinToken
-      if (request.stremioAuthKey || isNuvioRequest || isJellyfinRequest) {
-        // Ensure email uniqueness across all accounts
-        const { ensureEmailUniqueness } = require('../utils/helpers/database')
-        await ensureEmailUniqueness(prisma, request.email, request.invitation.accountId)
-
-        // Check if user already exists in this account. Scoped by providerType so the
-        // same email can exist as both a Stremio and a Nuvio user (see the identical fix
-        // in stremio.js) - without this, accepting a Stremio invite for someone whose
-        // email already has a Nuvio account incorrectly rejects them as "already registered".
-        const existingUser = await prisma.user.findFirst({
-          where: {
-            accountId: request.invitation.accountId,
-            email: request.email,
-            providerType: isJellyfinRequest ? 'jellyfin' : isNuvioRequest ? 'nuvio' : 'stremio'
-          }
-        })
-
-        if (existingUser) {
-          await prisma.inviteRequest.update({
-            where: { id: request.id },
-            data: { status: 'rejected' }
-          })
-          return res.status(409).json({ error: 'User is already registered to SlickSync' })
-        }
-
-        // Compute expiration
-        let computedExpiresAt = null
-        const now = new Date()
-        const durationRaw = request.invitation.membershipDurationDays
-        if (durationRaw != null && !Number.isNaN(durationRaw)) {
-          const days = Number(durationRaw)
-          const debugMode =
-            process.env.DEBUG === 'true' ||
-            process.env.DEBUG === '1' ||
-            process.env.NEXT_PUBLIC_DEBUG === 'true' ||
-            process.env.NEXT_PUBLIC_DEBUG === '1'
-
-          if (debugMode && days === -1) {
-            computedExpiresAt = new Date(now.getTime() + 60 * 1000)
-          } else if (days > 0) {
-            computedExpiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
-          }
-        }
-
-        // Create the user
-        const newUser = await prisma.user.create({
-          data: {
-            avatarUrl: createDefaultAvatar(),
-            accountId: request.invitation.accountId,
-            email: request.email,
-            username: request.username,
-            providerType: isJellyfinRequest ? 'jellyfin' : isNuvioRequest ? 'nuvio' : 'stremio',
-            stremioAuthKey: isNuvioRequest || isJellyfinRequest ? null : request.stremioAuthKey,
-            nuvioRefreshToken: isNuvioRequest ? request.nuvioRefreshToken : null,
-            nuvioUserId: isNuvioRequest ? request.nuvioUserId : null,
-            ...(isJellyfinRequest ? {
-              jellyfinServerUrl: request.jellyfinServerUrl,
-              jellyfinServerId: request.jellyfinServerId,
-              jellyfinServerKind: request.jellyfinServerKind,
-              jellyfinUserId: request.jellyfinUserId,
-              jellyfinUserName: request.jellyfinUserName,
-              jellyfinToken: request.jellyfinToken,
-            } : {}),
-            isActive: true,
-            expiresAt: computedExpiresAt,
-            inviteCode: request.invitation.inviteCode
-          }
-        })
-
-        // A Jellyfin account this invitation made was kept switched off
-        // until now (utils/jellyfinInviteAccounts.js).
-        if (isJellyfinRequest) {
-          try {
-            await require('../utils/jellyfinInviteAccounts').onAccepted(prisma, decrypt, request.invitation.accountId, newUser)
-          } catch (e) {
-            console.warn('Could not switch on the Jellyfin account made for this invite:', e?.message)
-          }
-        }
-
+    router.get("/", async (req, res) => {
         try {
-          const { emitAutomationEvent } = require('../utils/automation/engine')
-          await emitAutomationEvent(prisma, request.invitation.accountId, 'invite.accepted', {
-            username: newUser.username,
-            userId: newUser.id,
-            email: newUser.email,
-            inviteCode: request.invitation.inviteCode,
-            providerType: newUser.providerType,
-          })
-          // Also fires the broader user.created (see registry.js's comment on
-          // why both exist) - a rule watching for "any new user" shouldn't
-          // have to separately listen for invite.accepted too.
-          await emitAutomationEvent(prisma, request.invitation.accountId, 'user.created', {
-            username: newUser.username, userId: newUser.id, email: newUser.email, providerType: newUser.providerType,
-          })
-        } catch { /* emit never throws; guarding the require itself */ }
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-        // Assign to group
-        if (finalGroupName) {
-          try {
-            const group = await prisma.group.findFirst({
-              where: {
-                accountId: request.invitation.accountId,
-                name: finalGroupName
-              }
-            })
-            if (group) {
-              // One queued, transactional change (see assignUserToGroup): two
-              // people accepted at the same moment each used to read the old
-              // member list and the second write erased the first person.
-              await require('../utils/helpers/database').assignUserToGroup(prisma, newUser.id, group.id, { appAccountId: request.invitation.accountId })
+            // fetch all invites with their requests, newest first
+            const invitations = await prisma.invitation.findMany({
+                include: {
+                    requests: {
+                        orderBy: { createdAt: "desc" },
+                    },
+                },
+                orderBy: { createdAt: "desc" },
+                where: { accountId },
+            });
 
-              // Sync user addons if syncOnJoin is enabled
-              if (request.invitation.syncOnJoin) {
-                try {
-                  const { syncUserAddons } = require('./users')
-                  const reqLike = { appAccountId: request.invitation.accountId, headers: {} }
-                  const syncResult = await syncUserAddons(prisma, newUser.id, [], false, reqLike, decrypt, () => request.invitation.accountId, true)
-                  if (syncResult?.success) {
-                    console.log('✅ User synced on join')
-                  } else {
-                    console.warn('⚠️ Sync on join failed:', syncResult?.error)
-                  }
-                } catch (syncError) {
-                  console.error('❌ Error syncing user on join:', syncError)
+            // Which Jellyfin server each one makes accounts on (utils/jellyfinInviteAccounts.js).
+            let makes = {};
+            try {
+                const acc = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                const cfg = typeof acc?.sync === "string" ? JSON.parse(acc.sync) : acc?.sync || {};
+                makes = cfg.jellyfinInvites || {};
+            } catch {
+                // Malformed optional data leaves the existing fallback in place.
+            }
+            res.json(
+                invitations.map((inv) => ({ ...inv, jellyfinServerKey: makes[inv.id] || null }))
+            );
+        } catch (error) {
+            console.error("Error fetching invitations:", error);
+            res.status(500).json({ error: "Failed to fetch invitations" });
+        }
+    });
+
+    // What the notification bell needs, every 30 seconds: requests waiting for
+    // an answer, and the last month's accepted ones - not every invitation with
+    // every request it ever had (sign-in tokens included).
+    router.get("/bell", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            const rows = await prisma.inviteRequest.findMany({
+                orderBy: { createdAt: "desc" },
+                select: {
+                    createdAt: true,
+                    email: true,
+                    id: true,
+                    invitation: { select: { groupName: true, inviteCode: true, name: true } },
+                    respondedAt: true,
+                    status: true,
+                    username: true,
+                },
+                take: 200,
+                where: {
+                    accountId,
+                    OR: [{ status: "pending" }, { createdAt: { gte: since }, status: "accepted" }],
+                },
+            });
+            const shape = ({ invitation, ...r }) => ({
+                ...r,
+                groupName: invitation?.groupName || "a group",
+                invitationName: invitation?.name || invitation?.inviteCode || "Invitation",
+            });
+            res.json({
+                accepted: rows.filter((r) => r.status === "accepted").map(shape),
+                pending: rows.filter((r) => r.status === "pending").map(shape),
+            });
+        } catch (error) {
+            console.error("Error fetching invite requests for the bell:", error);
+            res.status(500).json({ error: "Failed to fetch invite requests" });
+        }
+    });
+
+    router.post("/", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { name, maxUses, expiresAt, groupName, syncOnJoin, membershipDurationDays } =
+                req.body;
+
+            // make sure code is unique
+            let inviteCode;
+            let attempts = 0;
+            do {
+                inviteCode = generateInviteCode();
+                const exists = await prisma.invitation.findUnique({ where: { inviteCode } });
+                if (!exists) {
+                    break;
                 }
-              }
-            } else {
-              await tellGroupMissing(prisma, request.invitation.accountId, { username: newUser.username, userId: newUser.id, groupName: finalGroupName, inviteCode: request.invitation.inviteCode })
+                attempts++;
+                if (attempts > 10) {
+                    return res.status(500).json({ error: "Failed to generate unique invite code" });
+                }
+            } while (attempts <= 10);
+
+            // Normalize numeric fields
+            // When left empty, treat as 0 = unlimited
+            const parsedMaxUses =
+                maxUses === null ||
+                maxUses === undefined ||
+                maxUses === "" ||
+                Number.isNaN(Number(maxUses))
+                    ? 0
+                    : Number(maxUses);
+
+            const parsedMembershipDuration =
+                membershipDurationDays === null ||
+                membershipDurationDays === undefined ||
+                Number.isNaN(Number(membershipDurationDays))
+                    ? null
+                    : Number(membershipDurationDays);
+
+            const invitation = await prisma.invitation.create({
+                data: {
+                    accountId,
+                    currentUses: 0,
+                    expiresAt: expiresAt ? new Date(expiresAt) : null,
+                    groupName: groupName || null,
+                    inviteCode,
+                    isActive: true,
+                    // When maxUses is 0, the invite is unlimited
+                    maxUses: parsedMaxUses,
+                    membershipDurationDays: parsedMembershipDuration,
+                    name: name || null,
+                    syncOnJoin: syncOnJoin === true,
+                },
+            });
+
+            // discord webhook
+            try {
+                const account = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                const syncCfg = parseSyncConfig(account?.sync);
+                const webhookUrl = syncCfg?.webhookUrl;
+                if (syncCfg?.notifyOnInvite === true && webhookUrl) {
+                    // build the invite link
+                    const originHeader = (req.headers?.origin || "").trim();
+                    const hostHeader = req.get("host");
+                    const protocolHost = hostHeader ? `${req.protocol}://${hostHeader}` : "";
+                    const baseUrl = (originHeader || protocolHost || "").replace(/\/$/, "");
+                    const inviteLink = baseUrl
+                        ? `${baseUrl}/invite/${invitation.inviteCode}`
+                        : `/invite/${invitation.inviteCode}`;
+
+                    const relativeExpiry = formatRelativeTime(invitation.expiresAt);
+                    let descriptionText;
+                    if (relativeExpiry) {
+                        descriptionText = `An invitation has been created${invitation.groupName ? ` for **${invitation.groupName}**` : ""} and expires ${relativeExpiry}.`;
+                    } else {
+                        descriptionText = `An invitation has been created${invitation.groupName ? ` for **${invitation.groupName}**` : ""} with no expiration.`;
+                    }
+
+                    const embed = {
+                        color: 0x3b_82_f6,
+                        description: descriptionText,
+                        fields: [
+                            {
+                                inline: true,
+                                name: "Invite Code",
+                                value: formatCodeBlock(invitation.inviteCode),
+                            },
+                            {
+                                inline: true,
+                                name: "Group",
+                                value: formatCodeBlock(invitation.groupName || "No group"),
+                            },
+                            {
+                                inline: true,
+                                name: "Uses",
+                                value: formatCodeBlock(
+                                    invitation.maxUses && invitation.maxUses > 0
+                                        ? invitation.maxUses.toString()
+                                        : "Unlimited"
+                                ),
+                            },
+                            {
+                                inline: false,
+                                name: "Invite Link",
+                                value: formatCodeBlock(inviteLink),
+                            },
+                        ],
+                        timestamp: (invitation.createdAt || new Date()).toISOString(),
+                        title: "New Invitation Created",
+                    };
+
+                    const appVersion = getAppVersion();
+                    if (appVersion) {
+                        embed.footer = { text: `SlickSync v${appVersion}` };
+                    }
+
+                    // For invitation creation, we don't have a user yet, so use default avatar
+                    await postDiscord(webhookUrl, null, {
+                        avatar_url:
+                            "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+                        embeds: [embed],
+                    });
+                }
+                // Push mirror (self-gates on notifyOnInvite; independent of webhook).
+                await notifyPushForType(prisma, accountId, "notifyOnInvite", {
+                    body: `Code ${invitation.inviteCode}${invitation.groupName ? ` · ${invitation.groupName}` : ""}`,
+                    icon: "/android-chrome-192x192.png",
+                    title: "New invitation created",
+                    url: "/invitations",
+                });
+            } catch (webhookError) {
+                console.error("Failed to send invitation webhook:", webhookError);
             }
-          } catch (error) {
-            console.error('Error assigning user to group:', error)
-          }
+
+            const jellyfinServerKey =
+                typeof req.body?.jellyfinServerKey === "string" && req.body.jellyfinServerKey
+                    ? req.body.jellyfinServerKey
+                    : null;
+            if (jellyfinServerKey) {
+                await require("../utils/jellyfinInviteAccounts").setInvitationServer(
+                    prisma,
+                    accountId,
+                    invitation.id,
+                    jellyfinServerKey
+                );
+            }
+            res.json({ ...invitation, jellyfinServerKey });
+        } catch (error) {
+            console.error("Error creating invitation:", error);
+            res.status(500).json({ error: "Failed to create invitation" });
         }
+    });
 
-        // Bump use count
-        const updatedInvitation = await prisma.invitation.update({
-          where: { id: request.invitation.id },
-          data: { currentUses: { increment: 1 } }
-        })
-
-        // Mark request as completed
-        const updatedRequest = await prisma.inviteRequest.update({
-          where: { id: requestId },
-          data: {
-            status: 'completed',
-            groupName: finalGroupName,
-            respondedAt: new Date(),
-            respondedBy: accountId
-          }
-        })
-
-        // Send webhook
+    router.patch("/:id/toggle-status", async (req, res) => {
         try {
-          const account = await prisma.appAccount.findUnique({
-            where: { id: request.invitation.accountId },
-            select: { sync: true }
-          })
-          const syncCfg = parseSyncConfig(account?.sync)
-          const webhookUrl = syncCfg?.webhookUrl
-          if (syncCfg?.notifyOnInvite === true && webhookUrl) {
-            const hasLimit = updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0
-            const usesLeft = hasLimit
-              ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
-              : null
-            const usesLeftText = hasLimit && usesLeft !== null
-              ? `${usesLeft} / ${updatedInvitation.maxUses}`
-              : 'Unlimited'
-
-            const titleGroup = finalGroupName ? ` ${finalGroupName}` : ''
-            const title = `User ${newUser.username} Accepted${titleGroup} via Invite`
-
-            const embed = {
-              title: title,
-              description: `Admin accepted invite request. User has been automatically created.`,
-              color: 0x22c55e,
-              fields: [
-                { name: 'Username', value: formatCodeBlock(newUser.username), inline: true },
-                { name: 'Email', value: formatCodeBlock(newUser.email), inline: true },
-                { name: 'Group', value: formatCodeBlock(finalGroupName || 'No group'), inline: true },
-                { name: 'Invite Code', value: formatCodeBlock(request.invitation.inviteCode), inline: true },
-                { name: 'Uses Left', value: formatCodeBlock(usesLeftText), inline: true }
-              ],
-              timestamp: new Date().toISOString()
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
             }
 
-            const appVersion = getAppVersion()
-            if (appVersion) {
-              embed.footer = { text: `SlickSync v${appVersion}` }
+            const { id } = req.params;
+            const { isActive } = req.body;
+
+            const invitation = await prisma.invitation.findFirst({ where: { accountId, id } });
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
             }
 
-            await postDiscord(webhookUrl, null, {
-              embeds: [embed],
-              avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-            })
-          }
-          // Push mirror (self-gates on notifyOnInvite; independent of webhook).
-          await notifyPushForType(prisma, request.invitation.accountId, 'notifyOnInvite', {
-            title: `${newUser.username} joined`,
-            body: `Accepted invite${finalGroupName ? ` · ${finalGroupName}` : ''}`,
-            icon: '/android-chrome-192x192.png',
-            url: '/invitations',
-          })
-        } catch (webhookError) {
-          console.error('Failed to send user accepted webhook:', webhookError)
+            const updated = await prisma.invitation.update({
+                data: { isActive },
+                include: {
+                    requests: {
+                        orderBy: { createdAt: "desc" },
+                    },
+                },
+                where: { id },
+            });
+
+            res.json(updated);
+        } catch (error) {
+            console.error("Error toggling invitation status:", error);
+            res.status(500).json({ error: "Failed to toggle invitation status" });
         }
+    });
 
-        return res.json(updatedRequest)
-      }
+    router.patch("/:id", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-      // LEGACY FLOW: No stremioAuthKey — just mark as accepted (user will do OAuth separately)
-      const updatedRequest = await prisma.inviteRequest.update({
-        where: { id: requestId },
-        data: {
-          status: 'accepted',
-          groupName: finalGroupName,
-          respondedAt: new Date(),
-          respondedBy: accountId
+            const { id } = req.params;
+            const {
+                name,
+                groupName,
+                syncOnJoin,
+                expiresAt,
+                membershipDurationDays,
+                maxUses,
+                createdAt,
+            } = req.body;
+
+            const invitation = await prisma.invitation.findFirst({ where: { accountId, id } });
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+
+            const updateData = {};
+            if (name !== undefined) {
+                updateData.name = name || null;
+            }
+            if (groupName !== undefined) {
+                updateData.groupName = groupName || null;
+            }
+            if (syncOnJoin !== undefined) {
+                updateData.syncOnJoin = syncOnJoin === true;
+            }
+            if (expiresAt !== undefined) {
+                updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
+            }
+            if (membershipDurationDays !== undefined) {
+                updateData.membershipDurationDays =
+                    membershipDurationDays === null || Number.isNaN(Number(membershipDurationDays))
+                        ? null
+                        : Number(membershipDurationDays);
+            }
+            if (maxUses !== undefined) {
+                // Treat empty/null as 0 = unlimited
+                updateData.maxUses =
+                    maxUses === null || maxUses === "" || Number.isNaN(Number(maxUses))
+                        ? 0
+                        : Number(maxUses);
+            }
+            if (createdAt !== undefined) {
+                updateData.createdAt = createdAt ? new Date(createdAt) : invitation.createdAt;
+            }
+
+            const updated = await prisma.invitation.update({
+                data: updateData,
+                include: {
+                    requests: {
+                        orderBy: { createdAt: "desc" },
+                    },
+                },
+                where: { id },
+            });
+
+            const inviteAccounts = require("../utils/jellyfinInviteAccounts");
+            if (req.body?.jellyfinServerKey !== undefined) {
+                await inviteAccounts.setInvitationServer(
+                    prisma,
+                    accountId,
+                    id,
+                    req.body.jellyfinServerKey || null
+                );
+            }
+            res.json({
+                ...updated,
+                jellyfinServerKey: await inviteAccounts.invitationServer(prisma, accountId, id),
+            });
+        } catch (error) {
+            console.error("Error updating invitation:", error);
+            res.status(500).json({ error: "Failed to update invitation" });
         }
-      })
+    });
 
-      res.json(updatedRequest)
-    } catch (error) {
-      console.error('Error accepting request:', error)
-      res.status(500).json({ error: 'Failed to accept request' })
-    }
-  })
+    router.delete("/:id", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-  router.post('/requests/:requestId/reject', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+            const { id } = req.params;
+            const invitation = await prisma.invitation.findFirst({ where: { accountId, id } });
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
 
-      const { requestId } = req.params
-      const request = await prisma.inviteRequest.findUnique({
-        where: { id: requestId },
-        include: { invitation: true }
-      })
+            await prisma.invitation.delete({
+                where: { id },
+            });
 
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
-
-      const updatedRequest = await prisma.inviteRequest.update({
-        where: { id: requestId },
-        data: {
-          status: 'rejected',
-          respondedAt: new Date(),
-          respondedBy: accountId
+            res.json({ message: "Invitation deleted successfully" });
+        } catch (error) {
+            console.error("Error deleting invitation:", error);
+            res.status(500).json({ error: "Failed to delete invitation" });
         }
-      })
+    });
 
-      res.json(updatedRequest)
-    } catch (error) {
-      console.error('Error rejecting request:', error)
-      res.status(500).json({ error: 'Failed to reject request' })
-    }
-  })
+    router.get("/:id/requests", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-  // undo rejection - basically just accept it
-  router.post('/requests/:requestId/undo-rejection', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+            const { id } = req.params;
+            const invitation = await prisma.invitation.findFirst({ where: { accountId, id } });
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
 
-      const { requestId } = req.params
-      const { groupName } = req.body
+            const requests = await prisma.inviteRequest.findMany({
+                orderBy: { createdAt: "desc" },
+                where: { invitationId: id },
+            });
 
-      const request = await prisma.inviteRequest.findUnique({
-        where: { id: requestId },
-        include: { invitation: true }
-      })
-
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
-      if (request.status !== 'rejected') return res.status(400).json({ error: 'Request is not rejected' })
-
-      // make sure invite is still valid
-      if (!request.invitation.isActive) return res.status(400).json({ error: 'Invitation is not active' })
-      if (request.invitation.expiresAt && new Date(request.invitation.expiresAt) < new Date()) {
-        return res.status(400).json({ error: 'Invitation has expired' })
-      }
-      if (
-        request.invitation.maxUses != null &&
-        request.invitation.maxUses > 0 &&
-        request.invitation.currentUses >= request.invitation.maxUses
-      ) {
-        return res.status(400).json({ error: 'Invitation has reached maximum uses' })
-      }
-
-      const finalGroupName = groupName || request.invitation.groupName || null
-
-      const updatedRequest = await prisma.inviteRequest.update({
-        where: { id: requestId },
-        data: {
-          status: 'accepted',
-          groupName: finalGroupName,
-          respondedAt: new Date(),
-          respondedBy: accountId
+            res.json(requests);
+        } catch (error) {
+            console.error("Error fetching requests:", error);
+            res.status(500).json({ error: "Failed to fetch requests" });
         }
-      })
+    });
 
-      res.json(updatedRequest)
-    } catch (error) {
-      console.error('Error undoing rejection:', error)
-      res.status(500).json({ error: 'Failed to undo rejection' })
-    }
-  })
+    router.get("/:id", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-  // clear oauth link so user can generate a new one
-  router.post('/requests/:requestId/clear-oauth', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+            const { id } = req.params;
 
-      const { requestId } = req.params
-      const request = await prisma.inviteRequest.findUnique({
-        where: { id: requestId },
-        include: { invitation: true }
-      })
+            const invitation = await prisma.invitation.findFirst({
+                include: {
+                    requests: {
+                        orderBy: { createdAt: "desc" },
+                    },
+                },
+                where: { accountId, id },
+            });
 
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
-      // Allow clearing OAuth for accepted requests (or expired ones that were accepted)
-      if (request.status !== 'accepted' && request.status !== 'completed') {
-        return res.status(400).json({ error: 'Request must be accepted to clear OAuth link' })
-      }
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
 
-      const updatedRequest = await prisma.inviteRequest.update({
-        where: { id: requestId },
-        data: {
-          oauthCode: null,
-          oauthLink: null,
-          oauthExpiresAt: null,
-          status: 'accepted' // Reset to accepted so user can generate new OAuth link
+            res.json(invitation);
+        } catch (error) {
+            console.error("Error fetching invitation:", error);
+            res.status(500).json({ error: "Failed to fetch invitation" });
         }
-      })
+    });
 
-      res.json(updatedRequest)
-    } catch (error) {
-      console.error('Error clearing OAuth link:', error)
-      res.status(500).json({ error: 'Failed to clear OAuth link' })
-    }
-  })
+    router.post("/requests/:requestId/accept", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-  // delete an invitation request
-  router.delete('/requests/:requestId', async (req, res) => {
-    try {
-      const accountId = getAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+            const { requestId } = req.params;
+            const { groupName } = req.body;
 
-      const { requestId } = req.params
-      const request = await prisma.inviteRequest.findUnique({
-        where: { id: requestId },
-        include: { invitation: true }
-      })
+            const request = await prisma.inviteRequest.findUnique({
+                include: { invitation: true },
+                where: { id: requestId },
+            });
 
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-      if (request.invitation.accountId !== accountId) return res.status(403).json({ error: 'Forbidden' })
+            if (!request) {
+                return res.status(404).json({ error: "Request not found" });
+            }
+            if (request.invitation.accountId !== accountId) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
 
-      // Only allow deletion for rejected or accepted requests (not completed or pending)
-      if (request.status === 'completed') {
-        return res.status(400).json({ error: 'Cannot delete completed requests' })
-      }
-      if (request.status === 'pending') {
-        return res.status(400).json({ error: 'Cannot delete pending requests. Reject them instead.' })
-      }
-      // A Jellyfin account the invitation made for a request that was never
-      // accepted goes with the request.
-      try {
-        await require('../utils/jellyfinInviteAccounts').onRequestDropped(prisma, decrypt, accountId, request)
-      } catch (e) {
-        console.warn('Could not remove the Jellyfin account made for this request:', e?.message)
-      }
+            // validate the invite is still usable
+            if (!request.invitation.isActive) {
+                return res.status(400).json({ error: "Invitation is not active" });
+            }
+            if (
+                request.invitation.expiresAt &&
+                new Date(request.invitation.expiresAt) < new Date()
+            ) {
+                return res.status(400).json({ error: "Invitation has expired" });
+            }
+            if (
+                request.invitation.maxUses != null &&
+                request.invitation.maxUses > 0 &&
+                request.invitation.currentUses >= request.invitation.maxUses
+            ) {
+                return res.status(400).json({ error: "Invitation has reached maximum uses" });
+            }
 
-      // Delete the request
-      await prisma.inviteRequest.delete({
-        where: { id: requestId }
-      })
+            // prefer groupName from body, then from request, then from invite, else null
+            const finalGroupName =
+                groupName || request.groupName || request.invitation.groupName || null;
 
-      res.json({ message: 'Request deleted successfully' })
-    } catch (error) {
-      console.error('Error deleting request:', error)
-      res.status(500).json({ error: 'Failed to delete request' })
-    }
-  })
+            // NEW FLOW: If request has stremioAuthKey, auto-create user on accept
+            // A request arrives with whichever credential its provider uses: a
+            // Stremio auth key, or a Nuvio refresh token. Either one means the
+            // person already proved who they are, so the user can be made now.
+            const isNuvioRequest = request.providerType === "nuvio" && !!request.nuvioRefreshToken;
+            const isJellyfinRequest =
+                request.providerType === "jellyfin" && !!request.jellyfinToken;
+            if (request.stremioAuthKey || isNuvioRequest || isJellyfinRequest) {
+                // Ensure email uniqueness across all accounts
+                const { ensureEmailUniqueness } = require("../utils/helpers/database");
+                await ensureEmailUniqueness(prisma, request.email, request.invitation.accountId);
 
-  return router
-}
+                // Check if user already exists in this account. Scoped by providerType so the
+                // same email can exist as both a Stremio and a Nuvio user (see the identical fix
+                // in stremio.js) - without this, accepting a Stremio invite for someone whose
+                // email already has a Nuvio account incorrectly rejects them as "already registered".
+                const existingUser = await prisma.user.findFirst({
+                    where: {
+                        accountId: request.invitation.accountId,
+                        email: request.email,
+                        providerType: isJellyfinRequest
+                            ? "jellyfin"
+                            : isNuvioRequest
+                              ? "nuvio"
+                              : "stremio",
+                    },
+                });
+
+                if (existingUser) {
+                    await prisma.inviteRequest.update({
+                        data: { status: "rejected" },
+                        where: { id: request.id },
+                    });
+                    return res
+                        .status(409)
+                        .json({ error: "User is already registered to SlickSync" });
+                }
+
+                // Compute expiration
+                let computedExpiresAt = null;
+                const now = new Date();
+                const durationRaw = request.invitation.membershipDurationDays;
+                if (durationRaw != null && !Number.isNaN(durationRaw)) {
+                    const days = Number(durationRaw);
+                    const debugMode =
+                        process.env.DEBUG === "true" ||
+                        process.env.DEBUG === "1" ||
+                        process.env.NEXT_PUBLIC_DEBUG === "true" ||
+                        process.env.NEXT_PUBLIC_DEBUG === "1";
+
+                    if (debugMode && days === -1) {
+                        computedExpiresAt = new Date(now.getTime() + 60 * 1000);
+                    } else if (days > 0) {
+                        computedExpiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+                    }
+                }
+
+                // Create the user
+                const newUser = await prisma.user.create({
+                    data: {
+                        accountId: request.invitation.accountId,
+                        avatarUrl: createDefaultAvatar(),
+                        email: request.email,
+                        nuvioRefreshToken: isNuvioRequest ? request.nuvioRefreshToken : null,
+                        nuvioUserId: isNuvioRequest ? request.nuvioUserId : null,
+                        providerType: isJellyfinRequest
+                            ? "jellyfin"
+                            : isNuvioRequest
+                              ? "nuvio"
+                              : "stremio",
+                        stremioAuthKey:
+                            isNuvioRequest || isJellyfinRequest ? null : request.stremioAuthKey,
+                        username: request.username,
+                        ...(isJellyfinRequest
+                            ? {
+                                  jellyfinServerId: request.jellyfinServerId,
+                                  jellyfinServerKind: request.jellyfinServerKind,
+                                  jellyfinServerUrl: request.jellyfinServerUrl,
+                                  jellyfinToken: request.jellyfinToken,
+                                  jellyfinUserId: request.jellyfinUserId,
+                                  jellyfinUserName: request.jellyfinUserName,
+                              }
+                            : {}),
+                        expiresAt: computedExpiresAt,
+                        inviteCode: request.invitation.inviteCode,
+                        isActive: true,
+                    },
+                });
+
+                // A Jellyfin account this invitation made was kept switched off
+                // until now (utils/jellyfinInviteAccounts.js).
+                if (isJellyfinRequest) {
+                    try {
+                        await require("../utils/jellyfinInviteAccounts").onAccepted(
+                            prisma,
+                            decrypt,
+                            request.invitation.accountId,
+                            newUser
+                        );
+                    } catch (e) {
+                        console.warn(
+                            "Could not switch on the Jellyfin account made for this invite:",
+                            e?.message
+                        );
+                    }
+                }
+
+                try {
+                    const { emitAutomationEvent } = require("../utils/automation/engine");
+                    await emitAutomationEvent(
+                        prisma,
+                        request.invitation.accountId,
+                        "invite.accepted",
+                        {
+                            email: newUser.email,
+                            inviteCode: request.invitation.inviteCode,
+                            providerType: newUser.providerType,
+                            userId: newUser.id,
+                            username: newUser.username,
+                        }
+                    );
+                    // Also fires the broader user.created (see registry.js's comment on
+                    // why both exist) - a rule watching for "any new user" shouldn't
+                    // have to separately listen for invite.accepted too.
+                    await emitAutomationEvent(
+                        prisma,
+                        request.invitation.accountId,
+                        "user.created",
+                        {
+                            email: newUser.email,
+                            providerType: newUser.providerType,
+                            userId: newUser.id,
+                            username: newUser.username,
+                        }
+                    );
+                } catch {
+                    /* emit never throws; guarding the require itself */
+                }
+
+                // Assign to group
+                if (finalGroupName) {
+                    try {
+                        const group = await prisma.group.findFirst({
+                            where: {
+                                accountId: request.invitation.accountId,
+                                name: finalGroupName,
+                            },
+                        });
+                        if (group) {
+                            // One queued, transactional change (see assignUserToGroup): two
+                            // people accepted at the same moment each used to read the old
+                            // member list and the second write erased the first person.
+                            await require("../utils/helpers/database").assignUserToGroup(
+                                prisma,
+                                newUser.id,
+                                group.id,
+                                { appAccountId: request.invitation.accountId }
+                            );
+
+                            // Sync user addons if syncOnJoin is enabled
+                            if (request.invitation.syncOnJoin) {
+                                try {
+                                    const { syncUserAddons } = require("./users");
+                                    const reqLike = {
+                                        appAccountId: request.invitation.accountId,
+                                        headers: {},
+                                    };
+                                    const syncResult = await syncUserAddons(
+                                        prisma,
+                                        newUser.id,
+                                        [],
+                                        false,
+                                        reqLike,
+                                        decrypt,
+                                        () => request.invitation.accountId,
+                                        true
+                                    );
+                                    if (syncResult?.success) {
+                                        console.log("✅ User synced on join");
+                                    } else {
+                                        console.warn("⚠️ Sync on join failed:", syncResult?.error);
+                                    }
+                                } catch (syncError) {
+                                    console.error("❌ Error syncing user on join:", syncError);
+                                }
+                            }
+                        } else {
+                            await tellGroupMissing(prisma, request.invitation.accountId, {
+                                groupName: finalGroupName,
+                                inviteCode: request.invitation.inviteCode,
+                                userId: newUser.id,
+                                username: newUser.username,
+                            });
+                        }
+                    } catch (error) {
+                        console.error("Error assigning user to group:", error);
+                    }
+                }
+
+                // Bump use count
+                const updatedInvitation = await prisma.invitation.update({
+                    data: { currentUses: { increment: 1 } },
+                    where: { id: request.invitation.id },
+                });
+
+                // Mark request as completed
+                const updatedRequest = await prisma.inviteRequest.update({
+                    data: {
+                        groupName: finalGroupName,
+                        respondedAt: new Date(),
+                        respondedBy: accountId,
+                        status: "completed",
+                    },
+                    where: { id: requestId },
+                });
+
+                // Send webhook
+                try {
+                    const account = await prisma.appAccount.findUnique({
+                        select: { sync: true },
+                        where: { id: request.invitation.accountId },
+                    });
+                    const syncCfg = parseSyncConfig(account?.sync);
+                    const webhookUrl = syncCfg?.webhookUrl;
+                    if (syncCfg?.notifyOnInvite === true && webhookUrl) {
+                        const hasLimit =
+                            updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0;
+                        const usesLeft = hasLimit
+                            ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
+                            : null;
+                        const usesLeftText =
+                            hasLimit && usesLeft !== null
+                                ? `${usesLeft} / ${updatedInvitation.maxUses}`
+                                : "Unlimited";
+
+                        const titleGroup = finalGroupName ? ` ${finalGroupName}` : "";
+                        const title = `User ${newUser.username} Accepted${titleGroup} via Invite`;
+
+                        const embed = {
+                            color: 0x22_c5_5e,
+                            description:
+                                "Admin accepted invite request. User has been automatically created.",
+                            fields: [
+                                {
+                                    inline: true,
+                                    name: "Username",
+                                    value: formatCodeBlock(newUser.username),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Email",
+                                    value: formatCodeBlock(newUser.email),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Group",
+                                    value: formatCodeBlock(finalGroupName || "No group"),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Invite Code",
+                                    value: formatCodeBlock(request.invitation.inviteCode),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Uses Left",
+                                    value: formatCodeBlock(usesLeftText),
+                                },
+                            ],
+                            timestamp: new Date().toISOString(),
+                            title,
+                        };
+
+                        const appVersion = getAppVersion();
+                        if (appVersion) {
+                            embed.footer = { text: `SlickSync v${appVersion}` };
+                        }
+
+                        await postDiscord(webhookUrl, null, {
+                            avatar_url:
+                                "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+                            embeds: [embed],
+                        });
+                    }
+                    // Push mirror (self-gates on notifyOnInvite; independent of webhook).
+                    await notifyPushForType(
+                        prisma,
+                        request.invitation.accountId,
+                        "notifyOnInvite",
+                        {
+                            body: `Accepted invite${finalGroupName ? ` · ${finalGroupName}` : ""}`,
+                            icon: "/android-chrome-192x192.png",
+                            title: `${newUser.username} joined`,
+                            url: "/invitations",
+                        }
+                    );
+                } catch (webhookError) {
+                    console.error("Failed to send user accepted webhook:", webhookError);
+                }
+
+                return res.json(updatedRequest);
+            }
+
+            // LEGACY FLOW: No stremioAuthKey — just mark as accepted (user will do OAuth separately)
+            const updatedRequest = await prisma.inviteRequest.update({
+                data: {
+                    groupName: finalGroupName,
+                    respondedAt: new Date(),
+                    respondedBy: accountId,
+                    status: "accepted",
+                },
+                where: { id: requestId },
+            });
+
+            res.json(updatedRequest);
+        } catch (error) {
+            console.error("Error accepting request:", error);
+            res.status(500).json({ error: "Failed to accept request" });
+        }
+    });
+
+    router.post("/requests/:requestId/reject", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { requestId } = req.params;
+            const request = await prisma.inviteRequest.findUnique({
+                include: { invitation: true },
+                where: { id: requestId },
+            });
+
+            if (!request) {
+                return res.status(404).json({ error: "Request not found" });
+            }
+            if (request.invitation.accountId !== accountId) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
+
+            const updatedRequest = await prisma.inviteRequest.update({
+                data: {
+                    respondedAt: new Date(),
+                    respondedBy: accountId,
+                    status: "rejected",
+                },
+                where: { id: requestId },
+            });
+
+            res.json(updatedRequest);
+        } catch (error) {
+            console.error("Error rejecting request:", error);
+            res.status(500).json({ error: "Failed to reject request" });
+        }
+    });
+
+    // undo rejection - basically just accept it
+    router.post("/requests/:requestId/undo-rejection", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { requestId } = req.params;
+            const { groupName } = req.body;
+
+            const request = await prisma.inviteRequest.findUnique({
+                include: { invitation: true },
+                where: { id: requestId },
+            });
+
+            if (!request) {
+                return res.status(404).json({ error: "Request not found" });
+            }
+            if (request.invitation.accountId !== accountId) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
+            if (request.status !== "rejected") {
+                return res.status(400).json({ error: "Request is not rejected" });
+            }
+
+            // make sure invite is still valid
+            if (!request.invitation.isActive) {
+                return res.status(400).json({ error: "Invitation is not active" });
+            }
+            if (
+                request.invitation.expiresAt &&
+                new Date(request.invitation.expiresAt) < new Date()
+            ) {
+                return res.status(400).json({ error: "Invitation has expired" });
+            }
+            if (
+                request.invitation.maxUses != null &&
+                request.invitation.maxUses > 0 &&
+                request.invitation.currentUses >= request.invitation.maxUses
+            ) {
+                return res.status(400).json({ error: "Invitation has reached maximum uses" });
+            }
+
+            const finalGroupName = groupName || request.invitation.groupName || null;
+
+            const updatedRequest = await prisma.inviteRequest.update({
+                data: {
+                    groupName: finalGroupName,
+                    respondedAt: new Date(),
+                    respondedBy: accountId,
+                    status: "accepted",
+                },
+                where: { id: requestId },
+            });
+
+            res.json(updatedRequest);
+        } catch (error) {
+            console.error("Error undoing rejection:", error);
+            res.status(500).json({ error: "Failed to undo rejection" });
+        }
+    });
+
+    // clear oauth link so user can generate a new one
+    router.post("/requests/:requestId/clear-oauth", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { requestId } = req.params;
+            const request = await prisma.inviteRequest.findUnique({
+                include: { invitation: true },
+                where: { id: requestId },
+            });
+
+            if (!request) {
+                return res.status(404).json({ error: "Request not found" });
+            }
+            if (request.invitation.accountId !== accountId) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
+            // Allow clearing OAuth for accepted requests (or expired ones that were accepted)
+            if (request.status !== "accepted" && request.status !== "completed") {
+                return res
+                    .status(400)
+                    .json({ error: "Request must be accepted to clear OAuth link" });
+            }
+
+            const updatedRequest = await prisma.inviteRequest.update({
+                data: {
+                    oauthCode: null,
+                    oauthExpiresAt: null,
+                    oauthLink: null,
+                    status: "accepted", // Reset to accepted so user can generate new OAuth link
+                },
+                where: { id: requestId },
+            });
+
+            res.json(updatedRequest);
+        } catch (error) {
+            console.error("Error clearing OAuth link:", error);
+            res.status(500).json({ error: "Failed to clear OAuth link" });
+        }
+    });
+
+    // delete an invitation request
+    router.delete("/requests/:requestId", async (req, res) => {
+        try {
+            const accountId = getAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { requestId } = req.params;
+            const request = await prisma.inviteRequest.findUnique({
+                include: { invitation: true },
+                where: { id: requestId },
+            });
+
+            if (!request) {
+                return res.status(404).json({ error: "Request not found" });
+            }
+            if (request.invitation.accountId !== accountId) {
+                return res.status(403).json({ error: "Forbidden" });
+            }
+
+            // Only allow deletion for rejected or accepted requests (not completed or pending)
+            if (request.status === "completed") {
+                return res.status(400).json({ error: "Cannot delete completed requests" });
+            }
+            if (request.status === "pending") {
+                return res
+                    .status(400)
+                    .json({ error: "Cannot delete pending requests. Reject them instead." });
+            }
+            // A Jellyfin account the invitation made for a request that was never
+            // accepted goes with the request.
+            try {
+                await require("../utils/jellyfinInviteAccounts").onRequestDropped(
+                    prisma,
+                    decrypt,
+                    accountId,
+                    request
+                );
+            } catch (e) {
+                console.warn(
+                    "Could not remove the Jellyfin account made for this request:",
+                    e?.message
+                );
+            }
+
+            // Delete the request
+            await prisma.inviteRequest.delete({
+                where: { id: requestId },
+            });
+
+            res.json({ message: "Request deleted successfully" });
+        } catch (error) {
+            console.error("Error deleting request:", error);
+            res.status(500).json({ error: "Failed to delete request" });
+        }
+    });
+
+    return router;
+};
 
 // Helper function to get Stremio user info from authKey
 async function getStremioUserInfo(authKey, username, email) {
-  const { validateStremioAuthKey } = require('../utils/stremio')
+    const { validateStremioAuthKey: validateStremioAuthKeyLocal } = require("../utils/stremio");
 
-  let verifiedUser = null
-  try {
-    const validation = await validateStremioAuthKey(authKey)
-    verifiedUser = validation && validation.user ? validation.user : null
-  } catch (e) {
-    const msg = (e && (e.message || e.error || '')) || ''
-    const code = (e && e.code) || 0
-    if (code === 1 || /session does not exist/i.test(String(msg))) {
-      throw new Error('Invalid or expired Stremio auth key')
+    let verifiedUser = null;
+    try {
+        const validation = await validateStremioAuthKeyLocal(authKey);
+        verifiedUser = validation?.user ? validation.user : null;
+    } catch (e) {
+        const msg = (e && (e.message || e.error || "")) || "";
+        const code = e?.code || 0;
+        if (code === 1 || /session does not exist/i.test(String(msg))) {
+            throw new Error("Invalid or expired Stremio auth key", { cause: e });
+        }
+        throw new Error("Could not validate auth key", { cause: e });
     }
-    throw new Error('Could not validate auth key')
-  }
 
-  const normalizedEmail = (verifiedUser?.email || email || '').toLowerCase()
-  const requestedUsername = typeof username === 'string' ? username.trim() : ''
-  const emailPart = normalizedEmail ? normalizedEmail.split('@')[0] : ''
-  let baseUsername = (requestedUsername || verifiedUser?.username || emailPart || `user_${Math.random().toString(36).slice(2, 8)}`).trim()
-  if (!baseUsername) {
-    baseUsername = `user_${Math.random().toString(36).slice(2, 8)}`
-  }
-  const finalUsername = baseUsername
+    const normalizedEmail = (verifiedUser?.email || email || "").toLowerCase();
+    const requestedUsername = typeof username === "string" ? username.trim() : "";
+    const emailPart = normalizedEmail ? normalizedEmail.split("@")[0] : "";
+    let baseUsername = (
+        requestedUsername ||
+        verifiedUser?.username ||
+        emailPart ||
+        `user_${Math.random().toString(36).slice(2, 8)}`
+    ).trim();
+    if (!baseUsername) {
+        baseUsername = `user_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    const finalUsername = baseUsername;
 
-  return {
-    username: finalUsername,
-    email: normalizedEmail
-  }
+    return {
+        email: normalizedEmail,
+        username: finalUsername,
+    };
 }
 
-module.exports.generateInviteCode = generateInviteCode
-module.exports.INVITE_CODE_ALPHABET = INVITE_CODE_ALPHABET
-module.exports.INVITE_CODE_LENGTH = INVITE_CODE_LENGTH
+module.exports.generateInviteCode = generateInviteCode;
+module.exports.INVITE_CODE_ALPHABET = INVITE_CODE_ALPHABET;
+module.exports.INVITE_CODE_LENGTH = INVITE_CODE_LENGTH;
 
 // Public invite routes (no auth required)
 // These routes are mounted at /invite/:inviteCode/*
-module.exports.createPublicRouter =({ prisma, encrypt, assignUserToGroup, decrypt, INSTANCE_TYPE, PRIVATE_AUTH_ENABLED, DEFAULT_ACCOUNT_ID }) => {
-  const publicRouter = express.Router()
+module.exports.createPublicRouter = ({
+    prisma,
+    encrypt,
+    assignUserToGroup: _assignUserToGroup,
+    decrypt,
+    INSTANCE_TYPE,
+    PRIVATE_AUTH_ENABLED,
+    DEFAULT_ACCOUNT_ID,
+}) => {
+    const publicRouter = express.Router();
 
-  // The household signed in on this request, or null. The whole /invite tree
-  // is open to strangers, but the gate still sets req.appAccountId when a
-  // valid session cookie comes along, so the few routes here that are for a
-  // household's admin can tell who is calling. A household install with no
-  // login has exactly one household, and it is always the caller.
-  const config = require('../utils/config')
-  const instanceType = INSTANCE_TYPE ?? config.INSTANCE_TYPE
-  const loginRequired = instanceType === 'public' || !!(PRIVATE_AUTH_ENABLED ?? config.PRIVATE_AUTH_ENABLED)
-  const callerAccountId = (req) => (loginRequired ? req.appAccountId || null : (DEFAULT_ACCOUNT_ID ?? config.DEFAULT_ACCOUNT_ID))
+    // The household signed in on this request, or null. The whole /invite tree
+    // is open to strangers, but the gate still sets req.appAccountId when a
+    // valid session cookie comes along, so the few routes here that are for a
+    // household's admin can tell who is calling. A household install with no
+    // login has exactly one household, and it is always the caller.
+    const config = require("../utils/config");
+    const instanceType = INSTANCE_TYPE ?? config.INSTANCE_TYPE;
+    const loginRequired =
+        instanceType === "public" || !!(PRIVATE_AUTH_ENABLED ?? config.PRIVATE_AUTH_ENABLED);
+    const callerAccountId = (req) =>
+        loginRequired
+            ? req.appAccountId || null
+            : (DEFAULT_ACCOUNT_ID ?? config.DEFAULT_ACCOUNT_ID);
 
-  // --- Nuvio device login, for someone joining by invite ---
-  //
-  // Signing in with Nuvio is a device-code exchange that has to run through
-  // this server, and the equivalent admin routes sit behind account scoping
-  // that an invitee cannot pass - they have no account yet. These do the same
-  // work, gated on a live invitation instead of a session.
-  //
-  // Capped per address for the same reason the admin route is: every start
-  // creates an anonymous session upstream.
-  const inviteNuvioSessions = new Map()
-  const INVITE_NUVIO_SESSION_CAP = 5
-  // Exchanged tokens wait here between the poll that earned them and the
-  // request that consumes them, keyed by the device code. They never reach
-  // the browser, and they expire on their own so an abandoned sign-in does
-  // not leave a usable credential sitting in memory.
-  const pendingInviteNuvioTokens = new Map()
-  const PENDING_TOKEN_TTL_MS = 10 * 60 * 1000
+    // --- Nuvio device login, for someone joining by invite ---
+    //
+    // Signing in with Nuvio is a device-code exchange that has to run through
+    // this server, and the equivalent admin routes sit behind account scoping
+    // that an invitee cannot pass - they have no account yet. These do the same
+    // work, gated on a live invitation instead of a session.
+    //
+    // Capped per address for the same reason the admin route is: every start
+    // creates an anonymous session upstream.
+    const inviteNuvioSessions = new Map();
+    const INVITE_NUVIO_SESSION_CAP = 5;
+    // Exchanged tokens wait here between the poll that earned them and the
+    // request that consumes them, keyed by the device code. They never reach
+    // the browser, and they expire on their own so an abandoned sign-in does
+    // not leave a usable credential sitting in memory.
+    const pendingInviteNuvioTokens = new Map();
+    const PENDING_TOKEN_TTL_MS = 10 * 60 * 1000;
 
-  function takePendingNuvioToken(code) {
-    const entry = pendingInviteNuvioTokens.get(code)
-    if (!entry) return null
-    pendingInviteNuvioTokens.delete(code)
-    if (Date.now() - entry.at > PENDING_TOKEN_TTL_MS) return null
-    return entry
-  }
-
-  async function liveInvitation(inviteCode) {
-    const invitation = await prisma.invitation.findUnique({ where: { inviteCode } })
-    if (!invitation) return { error: 404, message: 'Invitation not found' }
-    if (!invitation.isActive) return { error: 400, message: 'Invitation is not active' }
-    if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
-      return { error: 400, message: 'Invitation has expired' }
-    }
-    if (invitation.maxUses != null && invitation.maxUses > 0 && invitation.currentUses >= invitation.maxUses) {
-      return { error: 400, message: 'Invitation has reached maximum uses' }
-    }
-    return { invitation }
-  }
-
-  publicRouter.post('/:inviteCode/nuvio/start', async (req, res) => {
-    try {
-      const { invitation, error, message } = await liveInvitation(req.params.inviteCode)
-      if (error) return res.status(error).json({ error: message })
-
-      const ip = req.ip
-      if ((inviteNuvioSessions.get(ip) || 0) >= INVITE_NUVIO_SESSION_CAP) {
-        return res.status(429).json({ error: 'Too many sign-in attempts. Finish the one in progress, or wait a moment.' })
-      }
-      inviteNuvioSessions.set(ip, (inviteNuvioSessions.get(ip) || 0) + 1)
-      const timer = setTimeout(() => {
-        const n = (inviteNuvioSessions.get(ip) || 1) - 1
-        if (n > 0) inviteNuvioSessions.set(ip, n); else inviteNuvioSessions.delete(ip)
-      }, PENDING_TOKEN_TTL_MS)
-      if (typeof timer.unref === 'function') timer.unref()
-
-      const { resolveServerConfigForAccount } = require('../providers/supabase')
-      const serverConfig = await resolveServerConfigForAccount(prisma, invitation.accountId)
-      const session = await startNuvioTvLogin(serverConfig)
-      res.json(session)
-    } catch (error) {
-      console.error('Invite Nuvio start error:', error?.message)
-      res.status(500).json({ error: 'Could not start the Nuvio sign-in' })
-    }
-  })
-
-  publicRouter.post('/:inviteCode/nuvio/poll', async (req, res) => {
-    try {
-      const { invitation, error, message } = await liveInvitation(req.params.inviteCode)
-      if (error) return res.status(error).json({ error: message })
-
-      const { code, deviceNonce, anonToken } = req.body || {}
-      if (!code || !deviceNonce || !anonToken) {
-        return res.status(400).json({ error: 'code, deviceNonce and anonToken are required' })
-      }
-
-      const { resolveServerConfigForAccount } = require('../providers/supabase')
-      const serverConfig = await resolveServerConfigForAccount(prisma, invitation.accountId)
-      const status = await pollNuvioTvLogin(code, deviceNonce, anonToken, serverConfig)
-      if (status?.status !== 'authorized') return res.json({ status: status?.status || 'pending' })
-
-      // Approved on the device. The exchange happens here rather than in the
-      // browser so the refresh token never leaves the server; the request
-      // route picks it back up by the same code.
-      const tokens = await exchangeNuvioTvLogin(code, deviceNonce, anonToken, serverConfig)
-      const refreshToken = tokens?.refresh_token || tokens?.refreshToken
-      const email = tokens?.user?.email || tokens?.email || null
-      if (!refreshToken || !email) {
-        return res.status(502).json({ error: 'Nuvio approved the sign-in but returned nothing usable' })
-      }
-      pendingInviteNuvioTokens.set(code, {
-        refreshToken,
-        providerUserId: tokens?.user?.id || tokens?.providerUserId || null,
-        email: String(email).trim().toLowerCase(),
-        at: Date.now()
-      })
-      res.json({ status: 'authorized', email })
-    } catch (error) {
-      console.error('Invite Nuvio poll error:', error?.message)
-      res.status(500).json({ error: 'Could not check the Nuvio sign-in' })
-    }
-  })
-
-  // --- Jellyfin-compatible server sign-in, for someone joining by invite ---
-  //
-  // Same steps the admin's Add User uses (utils/jellyfinConnect.js), gated on
-  // a live invitation instead of a session. The sign-in itself happens in the
-  // request route below, so the server's token never reaches the browser.
-  const inviteJellyfinRouter = express.Router({ mergeParams: true })
-  inviteJellyfinRouter.use(async (req, res, next) => {
-    try {
-      const { error, message } = await liveInvitation(req.params.inviteCode)
-      if (error) return res.status(error).json({ error: message })
-      next()
-    } catch (e) {
-      res.status(500).json({ error: 'Could not check the invitation' })
-    }
-  })
-  require('../utils/jellyfinConnect').mountSignInSteps(inviteJellyfinRouter)
-  publicRouter.use('/:inviteCode/jellyfin', inviteJellyfinRouter)
-
-  // Generate OAuth link for account deletion (public endpoint, no invite code needed)
-  // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
-  publicRouter.post('/generate-oauth', async (req, res) => {
-    try {
-      // Only a signed-in admin: it spends a call to Stremio's link service
-      // and has no business being open to anonymous traffic.
-      if (!callerAccountId(req)) return res.status(401).json({ error: 'Unauthorized' })
-
-      // Always generate fresh oauth link
-      let oauthCode = null
-      let oauthLink = null
-      let oauthExpiresAt = null
-
-      try {
-        const host = req.headers.host || req.headers.origin || 'slicksync.local'
-
-        const stremioResponse = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
-          headers: {
-            'X-Requested-With': host,
-          },
-        })
-
-        if (stremioResponse.ok) {
-          const stremioData = await stremioResponse.json()
-          const result = stremioData?.result
-          if (result?.success && result?.code && result?.link) {
-            oauthCode = result.code
-            oauthLink = result.link
-            // 5 min expiry - convert to ISO string for JSON serialization
-            oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString()
-          } else {
-            return res.status(500).json({
-              error: 'Failed to generate OAuth link - Stremio API returned invalid response',
-              details: stremioData?.error?.message || 'Missing code or link in response'
-            })
-          }
-        } else {
-          const errorText = await stremioResponse.text()
-          return res.status(500).json({
-            error: 'Failed to generate OAuth link from Stremio',
-            details: `HTTP ${stremioResponse.status}: ${errorText}`
-          })
+    function takePendingNuvioToken(code) {
+        const entry = pendingInviteNuvioTokens.get(code);
+        if (!entry) {
+            return null;
         }
-      } catch (error) {
-        return res.status(500).json({
-          error: 'Failed to generate OAuth link',
-          details: publicMessage(error, 'Unknown error')
-        })
-      }
-
-      res.setHeader('Content-Type', 'application/json')
-      res.json({
-        oauthLink,
-        oauthCode,
-        oauthExpiresAt
-      })
-    } catch (error) {
-      console.error('Error in generate-oauth:', error)
-      res.setHeader('Content-Type', 'application/json')
-      res.status(500).json({ error: 'Failed to generate OAuth link' })
+        pendingInviteNuvioTokens.delete(code);
+        if (Date.now() - entry.at > PENDING_TOKEN_TTL_MS) {
+            return null;
+        }
+        return entry;
     }
-  })
 
-  // Delete user via OAuth (public endpoint for opt-out)
-  // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
-  // Using /delete-user to avoid conflict with /invite/delete page route
-  publicRouter.post('/delete-user', async (req, res) => {
-    try {
-      const { authKey } = req.body
-
-      if (!authKey) {
-        res.setHeader('Content-Type', 'application/json')
-        return res.status(400).json({ error: 'authKey is required' })
-      }
-
-      // Validate authKey and get email
-      const { validateStremioAuthKey } = require('../utils/stremio')
-      let stremioEmail = null
-      try {
-        const validation = await validateStremioAuthKey(authKey)
-        if (validation && validation.user && validation.user.email) {
-          stremioEmail = validation.user.email.toLowerCase().trim()
+    async function liveInvitation(inviteCode) {
+        const invitation = await prisma.invitation.findUnique({ where: { inviteCode } });
+        if (!invitation) {
+            return { error: 404, message: "Invitation not found" };
         }
-      } catch (e) {
-        const msg = (e && (e.message || e.error || '')) || ''
-        const code = (e && e.code) || 0
-        res.setHeader('Content-Type', 'application/json')
-        if (code === 1 || /session does not exist/i.test(String(msg))) {
-          return res.status(401).json({ error: 'Invalid or expired Stremio auth key' })
+        if (!invitation.isActive) {
+            return { error: 400, message: "Invitation is not active" };
         }
-        return res.status(400).json({ error: 'Could not validate auth key' })
-      }
-
-      if (!stremioEmail) {
-        res.setHeader('Content-Type', 'application/json')
-        return res.status(400).json({ error: 'Could not retrieve email from Stremio account' })
-      }
-
-      // Every Stremio person with this email - the opt-out is for the Stremio
-      // account the key just proved. A Nuvio or Jellyfin person who happens to
-      // share the email is someone else's sign-in and stays.
-      const users = await prisma.user.findMany({
-        where: {
-          email: stremioEmail,
-          providerType: 'stremio'
+        if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
+            return { error: 400, message: "Invitation has expired" };
         }
-      })
-
-      // Nothing is touched on their Stremio account unless there is someone
-      // here to opt out - a person SlickSync never held keeps their addons.
-      if (users.length === 0) {
-        res.setHeader('Content-Type', 'application/json')
-        return res.status(404).json({ error: 'No user found with this email address' })
-      }
-
-      // For each user, cascade-delete their own data (watch history, group
-      // membership, etc.) - not just the bare User row. This used to only
-      // remove group membership and delete(User), silently orphaning every
-      // userId-scoped table (WatchSnapshot, EpisodeWatchHistory,
-      // MovieWatchHistory, WatchSession, ...) forever, despite this page
-      // telling people "all associated data will be permanently deleted."
-      const { deleteUserCascade } = require('../utils/accountDeletion')
-      for (const user of users) {
-        await deleteUserCascade(prisma, user.id)
-        console.log(`✅ Deleted user via opt-out: ${user.id}`)
-      }
-
-      // Clear Stremio addons using the OAuth-provided authKey (a session that
-      // stays valid after the rows above are gone). This comes last: if the
-      // deletion fails part-way the person's addons are still there, and
-      // running the opt-out again finishes both. Clearing is best-effort -
-      // the person is already out of SlickSync whether or not Stremio answers,
-      // and a second run would find nobody here, so the answer says whether it
-      // worked.
-      let addonsCleared = false
-      try {
-        const { StremioAPIClient } = require('stremio-api-client')
-        // The authKey from OAuth is already plain text, no decryption needed
-        console.log('🔄 Attempting to clear Stremio addons for an opted-out user')
-        const apiClient = new StremioAPIClient({ endpoint: 'https://api.strem.io', authKey: authKey })
-
-        // Clear all addons
-        const { clearAddons } = require('../utils/addonHelpers')
-        await clearAddons(apiClient)
-
-        // Verify addons were cleared
-        const verifyResult = await apiClient.request('addonCollectionGet', {})
-        const remainingAddons = verifyResult?.addons || []
-        if (Array.isArray(remainingAddons) && remainingAddons.length === 0) {
-          addonsCleared = true
-          console.log('✅ Cleared Stremio addons for an opted-out user')
-        } else {
-          console.warn(`⚠️  Addons may not have been fully cleared. Remaining: ${remainingAddons.length}`)
+        if (
+            invitation.maxUses != null &&
+            invitation.maxUses > 0 &&
+            invitation.currentUses >= invitation.maxUses
+        ) {
+            return { error: 400, message: "Invitation has reached maximum uses" };
         }
-      } catch (e) {
-        console.error('❌ Failed to clear Stremio addons during user deletion:', {
-          message: publicMessage(e, 'Something went wrong'),
-          stack: e.stack,
-          error: e,
-          authKeyLength: authKey ? authKey.length : 0
-        })
-      }
-
-      // Whether the Stremio side was cleared goes back too: asking again finds
-      // nobody left here and touches nothing, so the page has to tell the
-      // person when they are the one who needs to remove the addons.
-      res.setHeader('Content-Type', 'application/json')
-      res.json({
-        message: 'User deleted successfully',
-        success: true,
-        addonsCleared
-      })
-    } catch (error) {
-      console.error('Error deleting user:', error)
-      res.setHeader('Content-Type', 'application/json')
-      res.status(500).json({ error: 'Failed to delete user' })
+        return { invitation };
     }
-  })
 
-  publicRouter.get('/:inviteCode/check', async (req, res) => {
-    try {
-      const { inviteCode } = req.params
-      const invitation = await prisma.invitation.findUnique({
-        where: { inviteCode }
-      })
-
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      // An invitation that makes Jellyfin accounts says which server.
-      let jellyfinNewAccount = null
-      try { jellyfinNewAccount = await require('../utils/jellyfinInviteAccounts').publicOffer(prisma, invitation) } catch {}
-      res.json({
-        isActive: invitation.isActive,
-        expiresAt: invitation.expiresAt,
-        currentUses: invitation.currentUses,
-        maxUses: invitation.maxUses,
-        jellyfinNewAccount,
-      })
-    } catch (error) {
-      console.error('Error checking invitation:', error)
-      res.status(500).json({ error: 'Failed to check invitation' })
-    }
-  })
-
-  publicRouter.post('/:inviteCode/request', async (req, res) => {
-    try {
-      const { inviteCode } = req.params
-      const { username, authKey, email: legacyEmail, nuvioCode, jellyfin, jellyfinNew } = req.body
-
-      // Four ways in: a Stremio auth key, a Nuvio device-login code that the
-      // poll above already exchanged, a sign-in to a Jellyfin-compatible
-      // server, or the older email-only request that waits for the admin to
-      // sort out the account.
-      const hasAuthKey = authKey && typeof authKey === 'string' && authKey.trim()
-      const hasNuvio = nuvioCode && typeof nuvioCode === 'string' && nuvioCode.trim()
-      const hasJellyfin = jellyfin && typeof jellyfin === 'object' && typeof jellyfin.serverUrl === 'string' && jellyfin.serverUrl.trim()
-      // A new account the invitation makes on its Jellyfin server.
-      const wantsNewJellyfin = jellyfinNew && typeof jellyfinNew === 'object' && typeof jellyfinNew.password === 'string'
-
-      if (!username) {
-        return res.status(400).json({ error: 'Username is required' })
-      }
-
-      if (!hasAuthKey && !hasNuvio && !hasJellyfin && !wantsNewJellyfin && !legacyEmail) {
-        return res.status(400).json({ error: 'Sign in with Stremio, Nuvio or your server, or provide an email' })
-      }
-
-      const invitation = await prisma.invitation.findUnique({
-        where: { inviteCode }
-      })
-
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-      if (!invitation.isActive) return res.status(400).json({ error: 'Invitation is not active' })
-      if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
-        return res.status(400).json({ error: 'Invitation has expired' })
-      }
-      if (
-        invitation.maxUses != null &&
-        invitation.maxUses > 0 &&
-        invitation.currentUses >= invitation.maxUses
-      ) {
-        return res.status(400).json({ error: 'Invitation has reached maximum uses' })
-      }
-
-      let email = legacyEmail ? legacyEmail.trim().toLowerCase() : null
-      let encryptedAuthKey = null
-      let providerType = 'stremio'
-      let encryptedNuvioToken = null
-      let nuvioUserId = null
-      let jellyfinData = null
-
-      // A Jellyfin-compatible server: sign in here and keep the token - or,
-      // for an invitation that makes accounts, make one and sign in as it.
-      if (hasJellyfin || wantsNewJellyfin) {
-        const { signInFromBody, jellyfinFields } = require('../utils/jellyfinConnect')
-        const { identityEmail } = require('../providers/jellyfinAuth')
-        let signedIn
+    publicRouter.post("/:inviteCode/nuvio/start", async (req, res) => {
         try {
-          signedIn = wantsNewJellyfin
-            ? await require('../utils/jellyfinInviteAccounts').createForRequest(prisma, decrypt, invitation, { username, password: jellyfinNew.password })
-            : await signInFromBody(jellyfin)
-        } catch (err) {
-          const status = err?.status === 401 ? 401 : 400
-          return res.status(status).json({ error: publicMessage(err, 'Could not sign in to the server'), ...(err?.pinNeeded ? { pinNeeded: true } : {}) })
-        }
-        await require('../utils/jellyfinConnect').rememberSignIn(prisma, encrypt, signedIn.probe, signedIn.login)
-        const { providerType: _jfType, ...fields } = jellyfinFields(signedIn.probe, signedIn.login, encrypt, { appAccountId: invitation.accountId })
-        jellyfinData = fields
-        providerType = 'jellyfin'
-        email = identityEmail(signedIn.probe.serverUrl, signedIn.login.userId)
-      }
-
-      // Nuvio: the token was exchanged during the poll and held server-side,
-      // so all the browser sends back is the code it was issued.
-      if (hasNuvio) {
-        const pending = takePendingNuvioToken(nuvioCode.trim())
-        if (!pending) {
-          return res.status(400).json({ error: 'That Nuvio sign-in has expired - start it again' })
-        }
-        providerType = 'nuvio'
-        email = pending.email
-        nuvioUserId = pending.providerUserId
-        encryptedNuvioToken = encrypt(pending.refreshToken, { appAccountId: invitation.accountId })
-      }
-
-      // New flow: validate authKey via Stremio to get email
-      if (hasAuthKey) {
-        let stremioInfo
-        try {
-          stremioInfo = await validateStremioAuthKey(authKey.trim())
-        } catch (err) {
-          const code = err?.code
-          if (code === 1) {
-            return res.status(401).json({ error: 'Invalid or expired Stremio session' })
-          }
-          return res.status(400).json({ error: publicMessage(err, 'Failed to validate Stremio auth key') })
-        }
-
-        email = String(stremioInfo?.user?.email || '').trim().toLowerCase()
-        if (!email) {
-          return res.status(400).json({ error: 'Could not retrieve email from Stremio account' })
-        }
-
-        // Encrypt the auth key for storage
-        encryptedAuthKey = encrypt(authKey.trim(), { appAccountId: invitation.accountId })
-      }
-
-      if (!email) {
-        return res.status(400).json({ error: 'Email is required' })
-      }
-
-      // check if user already exists (by email or username)
-      const existingUserByEmail = await prisma.user.findFirst({
-        where: {
-          accountId: invitation.accountId,
-          email
-        }
-      })
-
-      const existingUserByUsername = await prisma.user.findFirst({
-        where: {
-          accountId: invitation.accountId,
-          username: username.trim()
-        }
-      })
-
-      if (existingUserByEmail && existingUserByUsername) {
-        return res.status(409).json({ error: 'EMAIL_AND_USERNAME_EXIST', message: 'Both email and username are already registered' })
-      }
-      if (existingUserByEmail) {
-        return res.status(409).json({ error: 'EMAIL_EXISTS', message: 'This email is already registered' })
-      }
-      if (existingUserByUsername) {
-        return res.status(409).json({ error: 'USERNAME_EXISTS', message: 'This username is already taken' })
-      }
-
-      // check for duplicate requests (any status)
-      const existingRequest = await prisma.inviteRequest.findFirst({
-        where: {
-          invitationId: invitation.id,
-          email,
-          username: username.trim()
-        },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      if (existingRequest) {
-        return res.status(409).json({
-          error: 'A request already exists for this email and username',
-          status: existingRequest.status
-        })
-      }
-
-      const request = await prisma.inviteRequest.create({
-        data: {
-          invitationId: invitation.id,
-          accountId: invitation.accountId,
-          email,
-          username: username.trim(),
-          status: 'pending',
-          providerType,
-          stremioAuthKey: encryptedAuthKey,
-          nuvioRefreshToken: encryptedNuvioToken,
-          nuvioUserId,
-          ...(jellyfinData || {})
-        }
-      })
-
-      // The stored sign-in stays on the server.
-      const { jellyfinToken: _token, stremioAuthKey: _key, nuvioRefreshToken: _refresh, ...safeRequest } = request
-      res.json(safeRequest)
-    } catch (error) {
-      console.error('Error submitting invite request:', error)
-      res.status(500).json({ error: 'Failed to submit request' })
-    }
-  })
-
-  publicRouter.get('/:inviteCode/status', async (req, res) => {
-    try {
-      const { inviteCode } = req.params
-      const { email, username } = req.query
-
-      if (!email || !username) {
-        return res.status(400).json({ error: 'Email and username are required' })
-      }
-
-      const invitation = await prisma.invitation.findUnique({
-        where: { inviteCode }
-      })
-
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-
-      // get most recent request
-      const request = await prisma.inviteRequest.findFirst({
-        where: {
-          invitationId: invitation.id,
-          email: email.trim().toLowerCase(),
-          username: username.trim()
-        },
-        include: {
-          invitation: true
-        },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      if (!request) return res.status(404).json({ error: 'Request not found' })
-
-      // allow checking completed requests even if invite is disabled
-      if (!invitation.isActive && request.status !== 'completed') {
-        return res.status(400).json({ error: 'Invitation is not active' })
-      }
-
-      // Where the request stands, and nothing to sign in with. This is
-      // answered to anyone who knows the invite code plus an email and a
-      // username, and a Stremio link code is a bearer secret: whoever holds it
-      // gets the account's auth key once it is approved. The invite page never
-      // shows it from here (it makes its own), and the admin reads a request's
-      // link through the signed-in invitations API.
-      res.json({
-        status: request.status,
-        groupName: request.groupName || request.invitation.groupName || null,
-        createdAt: request.createdAt
-      })
-    } catch (error) {
-      console.error('Error checking request status:', error)
-      res.status(500).json({ error: 'Failed to check request status' })
-    }
-  })
-
-  publicRouter.post('/:inviteCode/generate-oauth', async (req, res) => {
-    try {
-      // An invite code plus a request's email and username must not be enough
-      // to replace the stored link code: only a signed-in admin of the
-      // household that owns the invitation may.
-      const accountId = callerAccountId(req)
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-
-      const { inviteCode } = req.params
-      const { email, username } = req.body
-
-      if (!email || !username) {
-        return res.status(400).json({ error: 'Email and username are required' })
-      }
-
-      const invitation = await prisma.invitation.findUnique({
-        where: { inviteCode }
-      })
-
-      // Another household's invitation answers exactly like one that does
-      // not exist, so a code cannot be probed from a different account.
-      if (!invitation || invitation.accountId !== accountId) return res.status(404).json({ error: 'Invitation not found' })
-      if (!invitation.isActive) return res.status(400).json({ error: 'Invitation is not active' })
-
-      const request = await prisma.inviteRequest.findFirst({
-        where: {
-          invitationId: invitation.id,
-          email: email.trim().toLowerCase(),
-          username: username.trim(),
-          status: 'accepted'
-        },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      if (!request) return res.status(404).json({ error: 'No accepted request found' })
-
-      // always generate fresh oauth link
-      let oauthCode = null
-      let oauthLink = null
-      let oauthExpiresAt = null
-
-      try {
-        const host = req.headers.host || req.headers.origin || 'slicksync.local'
-
-        const stremioResponse = await fetch('https://link.stremio.com/api/v2/create?type=Create', {
-          headers: {
-            'X-Requested-With': host,
-          },
-        })
-
-        if (stremioResponse.ok) {
-          const stremioData = await stremioResponse.json()
-          const result = stremioData?.result
-          if (result?.success && result?.code && result?.link) {
-            oauthCode = result.code
-            oauthLink = result.link
-            // 5 min expiry
-            oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000)
-          } else {
-            return res.status(500).json({
-              error: 'Failed to generate OAuth link - Stremio API returned invalid response',
-              details: stremioData?.error?.message || 'Missing code or link in response'
-            })
-          }
-        } else {
-          const errorText = await stremioResponse.text()
-          return res.status(500).json({
-            error: 'Failed to generate OAuth link from Stremio',
-            details: `HTTP ${stremioResponse.status}: ${errorText}`
-          })
-        }
-      } catch (error) {
-        return res.status(500).json({
-          error: 'Failed to generate OAuth link',
-          details: publicMessage(error, 'Unknown error')
-        })
-      }
-
-      await prisma.inviteRequest.update({
-        where: { id: request.id },
-        data: {
-          oauthCode,
-          oauthLink,
-          oauthExpiresAt
-        }
-      })
-
-      res.json({
-        oauthCode,
-        oauthLink,
-        oauthExpiresAt
-      })
-    } catch (error) {
-      console.error('Error generating OAuth link:', error)
-      res.status(500).json({ error: 'Failed to generate OAuth link' })
-    }
-  })
-
-  publicRouter.post('/:inviteCode/complete', async (req, res) => {
-    try {
-      const { inviteCode } = req.params
-      const { email, username, authKey, groupName } = req.body
-
-      if (!email || !username || !authKey) {
-        return res.status(400).json({ error: 'Email, username, and authKey are required' })
-      }
-
-      const invitation = await prisma.invitation.findUnique({
-        where: { inviteCode }
-      })
-
-      if (!invitation) return res.status(404).json({ error: 'Invitation not found' })
-      if (!invitation.isActive) return res.status(400).json({ error: 'Invitation is not active' })
-
-      // find the accepted request - try exact match first
-      let request = await prisma.inviteRequest.findFirst({
-        where: {
-          invitationId: invitation.id,
-          email: email.trim().toLowerCase(),
-          username: username.trim(),
-          status: 'accepted'
-        },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      // if not found, do a more lenient search (handles edge cases)
-      if (!request) {
-        const allRequests = await prisma.inviteRequest.findMany({
-          where: {
-            invitationId: invitation.id,
-            status: 'accepted'
-          },
-          orderBy: { createdAt: 'desc' }
-        })
-
-        request = allRequests.find(r =>
-          r.email.toLowerCase() === email.trim().toLowerCase() &&
-          r.username.trim() === username.trim()
-        ) || null
-      }
-
-      if (!request) {
-        // maybe it's already completed? check that too
-        let completedRequest = await prisma.inviteRequest.findFirst({
-          where: {
-            invitationId: invitation.id,
-            email: email.trim().toLowerCase(),
-            username: username.trim(),
-            status: 'completed'
-          },
-          orderBy: { createdAt: 'desc' }
-        })
-
-        if (!completedRequest) {
-          const allCompletedRequests = await prisma.inviteRequest.findMany({
-            where: {
-              invitationId: invitation.id,
-              status: 'completed'
-            },
-            orderBy: { createdAt: 'desc' }
-          })
-
-          completedRequest = allCompletedRequests.find(r =>
-            r.email.toLowerCase() === email.trim().toLowerCase() &&
-            r.username.trim() === username.trim()
-          ) || null
-        }
-
-        if (completedRequest) {
-          // already done, just return success
-          return res.json({
-            status: 'completed',
-            message: 'User already created'
-          })
-        }
-
-        return res.status(404).json({ error: 'No accepted request found' })
-      }
-
-      // The group is the one the admin chose (on the request, else the
-      // invite's). Never the caller's - this route is public, and a group
-      // named in the body used to win, letting someone pick their own group.
-      void groupName
-      const finalGroupName = request.groupName || invitation.groupName || null
-
-      // validate the stremio auth key and get email - this is required
-      let stremioEmail = null
-      try {
-        const validation = await validateStremioAuthKey(authKey)
-        if (validation && validation.user && validation.user.email) {
-          stremioEmail = validation.user.email.toLowerCase().trim()
-        }
-      } catch (error) {
-        console.error('Failed to validate Stremio auth key:', error)
-        return res.status(400).json({
-          error: 'INVALID_AUTH_KEY',
-          message: 'Could not validate Stremio authentication. Please try again.'
-        })
-      }
-
-      if (!stremioEmail) {
-        return res.status(400).json({
-          error: 'EMAIL_NOT_AVAILABLE',
-          message: 'Could not retrieve email from Stremio account. Please try again.'
-        })
-      }
-
-      // emails must match exactly
-      const requestEmail = request.email.toLowerCase().trim()
-      if (stremioEmail !== requestEmail) {
-        // Send Discord webhook for email mismatch if configured
-        try {
-          const account = await prisma.appAccount.findUnique({
-            where: { id: invitation.accountId },
-            select: { sync: true }
-          })
-
-          const syncCfg = parseSyncConfig(account?.sync)
-          const webhookUrl = syncCfg?.webhookUrl
-          if (syncCfg?.notifyOnInvite === true && webhookUrl) {
-            const embed = {
-              title: `User ${request.username} used different emails`,
-              description: `The user has used different emails for the Stremio account and its request.`,
-              color: 0xef4444, // Red color for error
-              fields: [
-                { name: 'Username', value: formatCodeBlock(request.username), inline: true },
-                { name: 'Invite Code', value: formatCodeBlock(invitation.inviteCode), inline: true },
-                { name: 'Group', value: formatCodeBlock(request.groupName || invitation.groupName || 'No group'), inline: true },
-                { name: 'Request Email', value: formatCodeBlock(request.email), inline: true },
-                { name: 'Stremio Email', value: formatCodeBlock(stremioEmail), inline: true }
-              ],
-              timestamp: new Date().toISOString()
+            const { invitation, error, message } = await liveInvitation(req.params.inviteCode);
+            if (error) {
+                return res.status(error).json({ error: message });
             }
 
-            const appVersion = getAppVersion()
-            if (appVersion) {
-              embed.footer = { text: `SlickSync v${appVersion}` }
+            const ip = req.ip;
+            if ((inviteNuvioSessions.get(ip) || 0) >= INVITE_NUVIO_SESSION_CAP) {
+                return res.status(429).json({
+                    error: "Too many sign-in attempts. Finish the one in progress, or wait a moment.",
+                });
             }
-
-            // The requester's own details are what this notice is about, and
-            // they are what is in scope here. It used to read from a `user`
-            // that is never defined on this path, so every email-mismatch
-            // notice threw instead of being sent.
-            const avatarUrl = await getUserAvatarUrl(request.username, request.email, 0)
-
-            await postDiscord(webhookUrl, null, {
-              embeds: [embed],
-              avatar_url: avatarUrl || 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-            })
-          }
-          // Push mirror (self-gates on notifyOnInvite; independent of webhook).
-          await notifyPushForType(prisma, invitation.accountId, 'notifyOnInvite', {
-            title: `${request.username} used different emails`,
-            body: `Request ${request.email} · Stremio ${stremioEmail}`,
-            icon: '/android-chrome-192x192.png',
-            url: '/invitations',
-          })
-        } catch (webhookError) {
-          console.error('Failed to send email mismatch webhook:', webhookError)
-        }
-
-        return res.status(400).json({
-          error: 'EMAIL_MISMATCH',
-          message: 'The Stremio account email does not match the email used in your request'
-        })
-      }
-
-      // Ensure email uniqueness across all accounts
-      // If user exists in another account, delete it first
-      const { ensureEmailUniqueness } = require('../utils/helpers/database')
-      await ensureEmailUniqueness(prisma, email, invitation.accountId)
-
-      // Check if user already exists in this account (after cleanup). Scoped by
-      // providerType so the same email can exist as both a Stremio and a Nuvio user
-      // (see the identical fix in stremio.js) - without this, accepting a Stremio
-      // invite for someone whose email already has a Nuvio account incorrectly
-      // rejects them as "already registered".
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          accountId: invitation.accountId,
-          email: email.trim().toLowerCase(),
-          providerType: 'stremio'
-        }
-      })
-
-      if (existingUser) {
-        // mark request as rejected since user already exists in this account
-        await prisma.inviteRequest.update({
-          where: { id: request.id },
-          data: { status: 'rejected' }
-        })
-        return res.status(409).json({ error: 'User is already registered to SlickSync' })
-      }
-
-      // encrypt and create the user
-      const encryptedAuthKey = encrypt(authKey, { appAccountId: invitation.accountId })
-
-      let computedExpiresAt = null
-      const now = new Date()
-      const durationRaw = invitation.membershipDurationDays
-      if (durationRaw != null && !Number.isNaN(durationRaw)) {
-        const days = Number(durationRaw)
-        const debugMode =
-          process.env.DEBUG === 'true' ||
-          process.env.DEBUG === '1' ||
-          process.env.NEXT_PUBLIC_DEBUG === 'true' ||
-          process.env.NEXT_PUBLIC_DEBUG === '1'
-
-        if (debugMode && days === -1) {
-          // Special-case debug: 1 minute membership
-          computedExpiresAt = new Date(now.getTime() + 60 * 1000)
-        } else if (days > 0) {
-          computedExpiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
-        }
-      }
-
-      const newUser = await prisma.user.create({
-        data: {
-          avatarUrl: createDefaultAvatar(),
-          accountId: invitation.accountId,
-          email: email.trim().toLowerCase(),
-          username: username.trim(),
-          stremioAuthKey: encryptedAuthKey,
-          isActive: true,
-          expiresAt: computedExpiresAt,
-          inviteCode: invitation.inviteCode
-        }
-      })
-
-      try {
-        const { emitAutomationEvent } = require('../utils/automation/engine')
-        await emitAutomationEvent(prisma, invitation.accountId, 'invite.accepted', {
-          username: newUser.username,
-          userId: newUser.id,
-          email: newUser.email,
-          inviteCode: invitation.inviteCode,
-          providerType: newUser.providerType,
-        })
-        await emitAutomationEvent(prisma, invitation.accountId, 'user.created', {
-          username: newUser.username, userId: newUser.id, email: newUser.email, providerType: newUser.providerType,
-        })
-      } catch { /* emit never throws; guarding the require itself */ }
-
-      // assign to group if we have one
-      if (finalGroupName) {
-        try {
-          const group = await prisma.group.findFirst({
-            where: {
-              accountId: invitation.accountId,
-              name: finalGroupName
-            }
-          })
-          if (group) {
-            // One queued, transactional change - see the same call above.
-            await require('../utils/helpers/database').assignUserToGroup(prisma, newUser.id, group.id, { appAccountId: invitation.accountId })
-
-            // Sync user addons if syncOnJoin is enabled
-            if (invitation.syncOnJoin) {
-              try {
-                const { syncUserAddons } = require('./users')
-                const reqLike = { appAccountId: invitation.accountId, headers: {} }
-                const syncResult = await syncUserAddons(prisma, newUser.id, [], false, reqLike, decrypt, () => invitation.accountId, true)
-                if (syncResult?.success) {
-                  console.log('✅ User synced on join')
+            inviteNuvioSessions.set(ip, (inviteNuvioSessions.get(ip) || 0) + 1);
+            const timer = setTimeout(() => {
+                const n = (inviteNuvioSessions.get(ip) || 1) - 1;
+                if (n > 0) {
+                    inviteNuvioSessions.set(ip, n);
                 } else {
-                  console.warn('⚠️ Sync on join failed:', syncResult?.error)
+                    inviteNuvioSessions.delete(ip);
                 }
-              } catch (syncError) {
-                console.error('❌ Error syncing user on join:', syncError)
-                // Don't fail the whole thing if sync fails
-              }
+            }, PENDING_TOKEN_TTL_MS);
+            if (typeof timer.unref === "function") {
+                timer.unref();
             }
-          } else {
-            await tellGroupMissing(prisma, invitation.accountId, { username: newUser.username, userId: newUser.id, groupName: finalGroupName, inviteCode: invitation.inviteCode })
-          }
+
+            const { resolveServerConfigForAccount } = require("../providers/supabase");
+            const serverConfig = await resolveServerConfigForAccount(prisma, invitation.accountId);
+            const session = await startNuvioTvLogin(serverConfig);
+            res.json(session);
         } catch (error) {
-          console.error('Error assigning user to group:', error)
-          // don't fail the whole thing if group assignment fails
+            console.error("Invite Nuvio start error:", error?.message);
+            res.status(500).json({ error: "Could not start the Nuvio sign-in" });
         }
-      }
+    });
 
-      // bump the use count
-      const updatedInvitation = await prisma.invitation.update({
-        where: { id: invitation.id },
-        data: { currentUses: invitation.currentUses + 1 }
-      })
+    publicRouter.post("/:inviteCode/nuvio/poll", async (req, res) => {
+        try {
+            const { invitation, error, message } = await liveInvitation(req.params.inviteCode);
+            if (error) {
+                return res.status(error).json({ error: message });
+            }
 
-      // mark request as completed
-      await prisma.inviteRequest.update({
-        where: { id: request.id },
-        data: { status: 'completed' }
-      })
+            const { code, deviceNonce, anonToken } = req.body || {};
+            if (!(code && deviceNonce && anonToken)) {
+                return res
+                    .status(400)
+                    .json({ error: "code, deviceNonce and anonToken are required" });
+            }
 
-      // send webhook if configured
-      try {
-        const account = await prisma.appAccount.findUnique({
-          where: { id: invitation.accountId },
-          select: { sync: true }
-        })
+            const { resolveServerConfigForAccount } = require("../providers/supabase");
+            const serverConfig = await resolveServerConfigForAccount(prisma, invitation.accountId);
+            const status = await pollNuvioTvLogin(code, deviceNonce, anonToken, serverConfig);
+            if (!status?.status || status.status === "pending") {
+                return res.json({ status: "pending" });
+            }
 
-        const syncCfg = parseSyncConfig(account?.sync)
-        const webhookUrl = syncCfg?.webhookUrl
-        if (syncCfg?.notifyOnInvite === true && webhookUrl) {
-          // uses left after incrementing
-          const hasLimit = updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0
-          const usesLeft = hasLimit
-            ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
-            : null
-          const usesLeftText = hasLimit && usesLeft !== null
-            ? `${usesLeft} / ${updatedInvitation.maxUses}`
-            : 'Unlimited'
-
-          const titleGroup = finalGroupName ? ` ${finalGroupName}` : ''
-          const title = `User ${newUser.username} Joined${titleGroup} via Invite`
-
-          const embed = {
-            title: title,
-            description: `User has successfully joined SlickSync using invite.`,
-            color: 0x22c55e, // Green color for success
-            fields: [
-              { name: 'Username', value: formatCodeBlock(newUser.username), inline: true },
-              { name: 'Email', value: formatCodeBlock(newUser.email), inline: true },
-              { name: 'Group', value: formatCodeBlock(finalGroupName || 'No group'), inline: true },
-              { name: 'Invite Code', value: formatCodeBlock(invitation.inviteCode), inline: true },
-              { name: 'Uses Left', value: formatCodeBlock(usesLeftText), inline: true }
-            ],
-            timestamp: new Date().toISOString()
-          }
-
-          const appVersion = getAppVersion()
-          if (appVersion) {
-            embed.footer = { text: `SlickSync v${appVersion}` }
-          }
-
-          await postDiscord(webhookUrl, null, {
-            embeds: [embed],
-            avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-          })
+            // Nuvio's completion status is opaque, just as in normal login.
+            // The token exchange, not a particular status label, proves approval.
+            // Approved on the device. The exchange happens here rather than in the
+            // browser so the refresh token never leaves the server; the request
+            // route picks it back up by the same code.
+            const tokens = await exchangeNuvioTvLogin(code, deviceNonce, anonToken, serverConfig);
+            const refreshToken = tokens?.refresh_token || tokens?.refreshToken;
+            const email = tokens?.user?.email || tokens?.email || null;
+            if (!(refreshToken && email)) {
+                return res
+                    .status(502)
+                    .json({ error: "Nuvio approved the sign-in but returned nothing usable" });
+            }
+            pendingInviteNuvioTokens.set(code, {
+                at: Date.now(),
+                email: String(email).trim().toLowerCase(),
+                providerUserId: tokens?.user?.id || tokens?.providerUserId || null,
+                refreshToken,
+            });
+            res.json({ email, status: "authorized" });
+        } catch (error) {
+            console.error("Invite Nuvio poll error:", error?.message);
+            res.status(500).json({ error: "Could not check the Nuvio sign-in" });
         }
-        // Push mirror (self-gates on notifyOnInvite; independent of webhook).
-        await notifyPushForType(prisma, invitation.accountId, 'notifyOnInvite', {
-          title: `${newUser.username} joined`,
-          body: `Via invite${finalGroupName ? ` · ${finalGroupName}` : ''}`,
-          icon: '/android-chrome-192x192.png',
-          url: '/users',
-        })
-      } catch (webhookError) {
-        console.error('Failed to send user joined webhook:', webhookError)
-      }
+    });
 
-      res.json({
-        message: 'User created successfully',
-        status: 'completed',
-        user: {
-          id: newUser.id,
-          username: newUser.username,
-          email: newUser.email
+    // --- Jellyfin-compatible server sign-in, for someone joining by invite ---
+    //
+    // Same steps the admin's Add User uses (utils/jellyfinConnect.js), gated on
+    // a live invitation instead of a session. The sign-in itself happens in the
+    // request route below, so the server's token never reaches the browser.
+    const inviteJellyfinRouter = express.Router({ mergeParams: true });
+    inviteJellyfinRouter.use(async (req, res, next) => {
+        try {
+            const { error, message } = await liveInvitation(req.params.inviteCode);
+            if (error) {
+                return res.status(error).json({ error: message });
+            }
+            next();
+        } catch {
+            res.status(500).json({ error: "Could not check the invitation" });
         }
-      })
-    } catch (error) {
-      console.error('Error completing invite:', error)
-      res.status(500).json({ error: 'Failed to complete invite' })
-    }
-  })
+    });
+    require("../utils/jellyfinConnect").mountSignInSteps(inviteJellyfinRouter);
+    publicRouter.use("/:inviteCode/jellyfin", inviteJellyfinRouter);
 
-  // Get Stremio user info from authKey (public endpoint for invite flow)
-  publicRouter.post('/:inviteCode/user-info', async (req, res) => {
-    try {
-      const { inviteCode } = req.params
-      const { authKey, username, email } = req.body
+    // Generate OAuth link for account deletion (public endpoint, no invite code needed)
+    // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
+    publicRouter.post("/generate-oauth", async (req, res) => {
+        try {
+            // Only a signed-in admin: it spends a call to Stremio's link service
+            // and has no business being open to anonymous traffic.
+            if (!callerAccountId(req)) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-      if (!authKey) {
-        return res.status(400).json({ error: 'authKey is required' })
-      }
+            // Always generate fresh oauth link
+            let oauthCode = null;
+            let oauthLink = null;
+            let oauthExpiresAt = null;
 
-      // Verify the invite exists and is active
-      const invitation = await prisma.invitation.findUnique({
-        where: { inviteCode }
-      })
+            try {
+                const host = req.headers.host || req.headers.origin || "slicksync.local";
 
-      if (!invitation) {
-        return res.status(404).json({ error: 'Invitation not found' })
-      }
+                const stremioResponse = await fetch(
+                    "https://link.stremio.com/api/v2/create?type=Create",
+                    {
+                        headers: {
+                            "X-Requested-With": host,
+                        },
+                    }
+                );
 
-      if (!invitation.isActive) {
-        return res.status(403).json({ error: 'Invitation is disabled' })
-      }
+                if (stremioResponse.ok) {
+                    const stremioData = await stremioResponse.json();
+                    const result = stremioData?.result;
+                    if (result?.success && result?.code && result?.link) {
+                        oauthCode = result.code;
+                        oauthLink = result.link;
+                        // 5 min expiry - convert to ISO string for JSON serialization
+                        oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+                    } else {
+                        return res.status(500).json({
+                            details:
+                                stremioData?.error?.message || "Missing code or link in response",
+                            error: "Failed to generate OAuth link - Stremio API returned invalid response",
+                        });
+                    }
+                } else {
+                    const errorText = await stremioResponse.text();
+                    return res.status(500).json({
+                        details: `HTTP ${stremioResponse.status}: ${errorText}`,
+                        error: "Failed to generate OAuth link from Stremio",
+                    });
+                }
+            } catch (error) {
+                return res.status(500).json({
+                    details: publicMessage(error, "Unknown error"),
+                    error: "Failed to generate OAuth link",
+                });
+            }
 
-      // Get user info from authKey
-      const userInfo = await getStremioUserInfo(authKey, username, email)
+            res.setHeader("Content-Type", "application/json");
+            res.json({
+                oauthCode,
+                oauthExpiresAt,
+                oauthLink,
+            });
+        } catch (error) {
+            console.error("Error in generate-oauth:", error);
+            res.setHeader("Content-Type", "application/json");
+            res.status(500).json({ error: "Failed to generate OAuth link" });
+        }
+    });
 
-      return res.json({
-        message: 'Stremio account verified',
-        user: userInfo
-      })
-    } catch (error) {
-      if (error.message === 'Invalid or expired Stremio auth key') {
-        return res.status(401).json({ error: publicMessage(error, 'Something went wrong') })
-      }
-      if (error.message === 'Could not validate auth key') {
-        return res.status(400).json({ error: publicMessage(error, 'Something went wrong') })
-      }
-      console.error('Error verifying auth key:', error)
-      res.status(500).json({ error: 'Failed to verify auth key' })
-    }
-  })
+    // Delete user via OAuth (public endpoint for opt-out)
+    // MUST be defined BEFORE /:inviteCode routes to avoid route conflicts
+    // Using /delete-user to avoid conflict with /invite/delete page route
+    publicRouter.post("/delete-user", async (req, res) => {
+        try {
+            const { authKey } = req.body;
 
-  return publicRouter
-}
+            if (!authKey) {
+                res.setHeader("Content-Type", "application/json");
+                return res.status(400).json({ error: "authKey is required" });
+            }
+
+            // Validate authKey and get email
+            const {
+                validateStremioAuthKey: validateStremioAuthKeyLocal,
+            } = require("../utils/stremio");
+            let stremioEmail = null;
+            try {
+                const validation = await validateStremioAuthKeyLocal(authKey);
+                if (validation?.user?.email) {
+                    stremioEmail = validation.user.email.toLowerCase().trim();
+                }
+            } catch (e) {
+                const msg = (e && (e.message || e.error || "")) || "";
+                const code = e?.code || 0;
+                res.setHeader("Content-Type", "application/json");
+                if (code === 1 || /session does not exist/i.test(String(msg))) {
+                    return res.status(401).json({ error: "Invalid or expired Stremio auth key" });
+                }
+                return res.status(400).json({ error: "Could not validate auth key" });
+            }
+
+            if (!stremioEmail) {
+                res.setHeader("Content-Type", "application/json");
+                return res
+                    .status(400)
+                    .json({ error: "Could not retrieve email from Stremio account" });
+            }
+
+            // Every Stremio person with this email - the opt-out is for the Stremio
+            // account the key just proved. A Nuvio or Jellyfin person who happens to
+            // share the email is someone else's sign-in and stays.
+            const users = await prisma.user.findMany({
+                where: {
+                    email: stremioEmail,
+                    providerType: "stremio",
+                },
+            });
+
+            // Nothing is touched on their Stremio account unless there is someone
+            // here to opt out - a person SlickSync never held keeps their addons.
+            if (users.length === 0) {
+                res.setHeader("Content-Type", "application/json");
+                return res.status(404).json({ error: "No user found with this email address" });
+            }
+
+            // For each user, cascade-delete their own data (watch history, group
+            // membership, etc.) - not just the bare User row. This used to only
+            // remove group membership and delete(User), silently orphaning every
+            // userId-scoped table (WatchSnapshot, EpisodeWatchHistory,
+            // MovieWatchHistory, WatchSession, ...) forever, despite this page
+            // telling people "all associated data will be permanently deleted."
+            const { deleteUserCascade } = require("../utils/accountDeletion");
+            for (const user of users) {
+                await deleteUserCascade(prisma, user.id);
+                console.log(`✅ Deleted user via opt-out: ${user.id}`);
+            }
+
+            // Clear Stremio addons using the OAuth-provided authKey (a session that
+            // stays valid after the rows above are gone). This comes last: if the
+            // deletion fails part-way the person's addons are still there, and
+            // running the opt-out again finishes both. Clearing is best-effort -
+            // the person is already out of SlickSync whether or not Stremio answers,
+            // and a second run would find nobody here, so the answer says whether it
+            // worked.
+            let addonsCleared = false;
+            try {
+                const { StremioAPIClient } = require("stremio-api-client");
+                // The authKey from OAuth is already plain text, no decryption needed
+                console.log("🔄 Attempting to clear Stremio addons for an opted-out user");
+                const apiClient = new StremioAPIClient({
+                    authKey,
+                    endpoint: "https://api.strem.io",
+                });
+
+                // Clear all addons
+                const { clearAddons } = require("../utils/addonHelpers");
+                await clearAddons(apiClient);
+
+                // Verify addons were cleared
+                const verifyResult = await apiClient.request("addonCollectionGet", {});
+                const remainingAddons = verifyResult?.addons || [];
+                if (Array.isArray(remainingAddons) && remainingAddons.length === 0) {
+                    addonsCleared = true;
+                    console.log("✅ Cleared Stremio addons for an opted-out user");
+                } else {
+                    console.warn(
+                        `⚠️  Addons may not have been fully cleared. Remaining: ${remainingAddons.length}`
+                    );
+                }
+            } catch (e) {
+                console.error("❌ Failed to clear Stremio addons during user deletion:", {
+                    authKeyLength: authKey ? authKey.length : 0,
+                    error: e,
+                    message: publicMessage(e, "Something went wrong"),
+                    stack: e.stack,
+                });
+            }
+
+            // Whether the Stremio side was cleared goes back too: asking again finds
+            // nobody left here and touches nothing, so the page has to tell the
+            // person when they are the one who needs to remove the addons.
+            res.setHeader("Content-Type", "application/json");
+            res.json({
+                addonsCleared,
+                message: "User deleted successfully",
+                success: true,
+            });
+        } catch (error) {
+            console.error("Error deleting user:", error);
+            res.setHeader("Content-Type", "application/json");
+            res.status(500).json({ error: "Failed to delete user" });
+        }
+    });
+
+    publicRouter.get("/:inviteCode/check", async (req, res) => {
+        try {
+            const { inviteCode } = req.params;
+            const invitation = await prisma.invitation.findUnique({
+                where: { inviteCode },
+            });
+
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+
+            // An invitation that makes Jellyfin accounts says which server.
+            let jellyfinNewAccount = null;
+            try {
+                jellyfinNewAccount = await require("../utils/jellyfinInviteAccounts").publicOffer(
+                    prisma,
+                    invitation
+                );
+            } catch {
+                // Unavailable optional records leave the current result in place.
+            }
+            res.json({
+                currentUses: invitation.currentUses,
+                expiresAt: invitation.expiresAt,
+                isActive: invitation.isActive,
+                jellyfinNewAccount,
+                maxUses: invitation.maxUses,
+            });
+        } catch (error) {
+            console.error("Error checking invitation:", error);
+            res.status(500).json({ error: "Failed to check invitation" });
+        }
+    });
+
+    publicRouter.post("/:inviteCode/request", async (req, res) => {
+        try {
+            const { inviteCode } = req.params;
+            const {
+                username,
+                authKey,
+                email: legacyEmail,
+                nuvioCode,
+                jellyfin,
+                jellyfinNew,
+            } = req.body;
+
+            // Four ways in: a Stremio auth key, a Nuvio device-login code that the
+            // poll above already exchanged, a sign-in to a Jellyfin-compatible
+            // server, or the older email-only request that waits for the admin to
+            // sort out the account.
+            const hasAuthKey = authKey && typeof authKey === "string" && authKey.trim();
+            const hasNuvio = nuvioCode && typeof nuvioCode === "string" && nuvioCode.trim();
+            const hasJellyfin =
+                jellyfin &&
+                typeof jellyfin === "object" &&
+                typeof jellyfin.serverUrl === "string" &&
+                jellyfin.serverUrl.trim();
+            // A new account the invitation makes on its Jellyfin server.
+            const wantsNewJellyfin =
+                jellyfinNew &&
+                typeof jellyfinNew === "object" &&
+                typeof jellyfinNew.password === "string";
+
+            if (!username) {
+                return res.status(400).json({ error: "Username is required" });
+            }
+
+            if (!(hasAuthKey || hasNuvio || hasJellyfin || wantsNewJellyfin || legacyEmail)) {
+                return res.status(400).json({
+                    error: "Sign in with Stremio, Nuvio or your server, or provide an email",
+                });
+            }
+
+            const invitation = await prisma.invitation.findUnique({
+                where: { inviteCode },
+            });
+
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+            if (!invitation.isActive) {
+                return res.status(400).json({ error: "Invitation is not active" });
+            }
+            if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
+                return res.status(400).json({ error: "Invitation has expired" });
+            }
+            if (
+                invitation.maxUses != null &&
+                invitation.maxUses > 0 &&
+                invitation.currentUses >= invitation.maxUses
+            ) {
+                return res.status(400).json({ error: "Invitation has reached maximum uses" });
+            }
+
+            let email = legacyEmail ? legacyEmail.trim().toLowerCase() : null;
+            let encryptedAuthKey = null;
+            let providerType = "stremio";
+            let encryptedNuvioToken = null;
+            let nuvioUserId = null;
+            let jellyfinData = null;
+
+            // A Jellyfin-compatible server: sign in here and keep the token - or,
+            // for an invitation that makes accounts, make one and sign in as it.
+            if (hasJellyfin || wantsNewJellyfin) {
+                const { signInFromBody, jellyfinFields } = require("../utils/jellyfinConnect");
+                const { identityEmail } = require("../providers/jellyfinAuth");
+                let signedIn;
+                try {
+                    signedIn = wantsNewJellyfin
+                        ? await require("../utils/jellyfinInviteAccounts").createForRequest(
+                              prisma,
+                              decrypt,
+                              invitation,
+                              { password: jellyfinNew.password, username }
+                          )
+                        : await signInFromBody(jellyfin);
+                } catch (err) {
+                    const status = err?.status === 401 ? 401 : 400;
+                    return res.status(status).json({
+                        error: publicMessage(err, "Could not sign in to the server"),
+                        ...(err?.pinNeeded ? { pinNeeded: true } : {}),
+                    });
+                }
+                await require("../utils/jellyfinConnect").rememberSignIn(
+                    prisma,
+                    encrypt,
+                    signedIn.probe,
+                    signedIn.login
+                );
+                const { providerType: _jfType, ...fields } = jellyfinFields(
+                    signedIn.probe,
+                    signedIn.login,
+                    encrypt,
+                    { appAccountId: invitation.accountId }
+                );
+                jellyfinData = fields;
+                providerType = "jellyfin";
+                email = identityEmail(signedIn.probe.serverUrl, signedIn.login.userId);
+            }
+
+            // Nuvio: the token was exchanged during the poll and held server-side,
+            // so all the browser sends back is the code it was issued.
+            if (hasNuvio) {
+                const pending = takePendingNuvioToken(nuvioCode.trim());
+                if (!pending) {
+                    return res
+                        .status(400)
+                        .json({ error: "That Nuvio sign-in has expired - start it again" });
+                }
+                providerType = "nuvio";
+                email = pending.email;
+                nuvioUserId = pending.providerUserId;
+                encryptedNuvioToken = encrypt(pending.refreshToken, {
+                    appAccountId: invitation.accountId,
+                });
+            }
+
+            // New flow: validate authKey via Stremio to get email
+            if (hasAuthKey) {
+                let stremioInfo;
+                try {
+                    stremioInfo = await validateStremioAuthKey(authKey.trim());
+                } catch (err) {
+                    const code = err?.code;
+                    if (code === 1) {
+                        return res
+                            .status(401)
+                            .json({ error: "Invalid or expired Stremio session" });
+                    }
+                    return res
+                        .status(400)
+                        .json({ error: publicMessage(err, "Failed to validate Stremio auth key") });
+                }
+
+                email = String(stremioInfo?.user?.email || "")
+                    .trim()
+                    .toLowerCase();
+                if (!email) {
+                    return res
+                        .status(400)
+                        .json({ error: "Could not retrieve email from Stremio account" });
+                }
+
+                // Encrypt the auth key for storage
+                encryptedAuthKey = encrypt(authKey.trim(), { appAccountId: invitation.accountId });
+            }
+
+            if (!email) {
+                return res.status(400).json({ error: "Email is required" });
+            }
+
+            // check if user already exists (by email or username)
+            const existingUserByEmail = await prisma.user.findFirst({
+                where: {
+                    accountId: invitation.accountId,
+                    email,
+                },
+            });
+
+            const existingUserByUsername = await prisma.user.findFirst({
+                where: {
+                    accountId: invitation.accountId,
+                    username: username.trim(),
+                },
+            });
+
+            if (existingUserByEmail && existingUserByUsername) {
+                return res.status(409).json({
+                    error: "EMAIL_AND_USERNAME_EXIST",
+                    message: "Both email and username are already registered",
+                });
+            }
+            if (existingUserByEmail) {
+                return res
+                    .status(409)
+                    .json({ error: "EMAIL_EXISTS", message: "This email is already registered" });
+            }
+            if (existingUserByUsername) {
+                return res
+                    .status(409)
+                    .json({ error: "USERNAME_EXISTS", message: "This username is already taken" });
+            }
+
+            // check for duplicate requests (any status)
+            const existingRequest = await prisma.inviteRequest.findFirst({
+                orderBy: { createdAt: "desc" },
+                where: {
+                    email,
+                    invitationId: invitation.id,
+                    username: username.trim(),
+                },
+            });
+
+            if (existingRequest) {
+                return res.status(409).json({
+                    error: "A request already exists for this email and username",
+                    status: existingRequest.status,
+                });
+            }
+
+            const request = await prisma.inviteRequest.create({
+                data: {
+                    accountId: invitation.accountId,
+                    email,
+                    invitationId: invitation.id,
+                    nuvioRefreshToken: encryptedNuvioToken,
+                    nuvioUserId,
+                    providerType,
+                    status: "pending",
+                    stremioAuthKey: encryptedAuthKey,
+                    username: username.trim(),
+                    ...(jellyfinData || {}),
+                },
+            });
+
+            // The stored sign-in stays on the server.
+            const {
+                jellyfinToken: _token,
+                stremioAuthKey: _key,
+                nuvioRefreshToken: _refresh,
+                ...safeRequest
+            } = request;
+            res.json(safeRequest);
+        } catch (error) {
+            console.error("Error submitting invite request:", error);
+            res.status(500).json({ error: "Failed to submit request" });
+        }
+    });
+
+    publicRouter.get("/:inviteCode/status", async (req, res) => {
+        try {
+            const { inviteCode } = req.params;
+            const { email, username } = req.query;
+
+            if (!(email && username)) {
+                return res.status(400).json({ error: "Email and username are required" });
+            }
+
+            const invitation = await prisma.invitation.findUnique({
+                where: { inviteCode },
+            });
+
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+
+            // get most recent request
+            const request = await prisma.inviteRequest.findFirst({
+                include: {
+                    invitation: true,
+                },
+                orderBy: { createdAt: "desc" },
+                where: {
+                    email: email.trim().toLowerCase(),
+                    invitationId: invitation.id,
+                    username: username.trim(),
+                },
+            });
+
+            if (!request) {
+                return res.status(404).json({ error: "Request not found" });
+            }
+
+            // allow checking completed requests even if invite is disabled
+            if (!invitation.isActive && request.status !== "completed") {
+                return res.status(400).json({ error: "Invitation is not active" });
+            }
+
+            // Where the request stands, and nothing to sign in with. This is
+            // answered to anyone who knows the invite code plus an email and a
+            // username, and a Stremio link code is a bearer secret: whoever holds it
+            // gets the account's auth key once it is approved. The invite page never
+            // shows it from here (it makes its own), and the admin reads a request's
+            // link through the signed-in invitations API.
+            res.json({
+                createdAt: request.createdAt,
+                groupName: request.groupName || request.invitation.groupName || null,
+                status: request.status,
+            });
+        } catch (error) {
+            console.error("Error checking request status:", error);
+            res.status(500).json({ error: "Failed to check request status" });
+        }
+    });
+
+    publicRouter.post("/:inviteCode/generate-oauth", async (req, res) => {
+        try {
+            // An invite code plus a request's email and username must not be enough
+            // to replace the stored link code: only a signed-in admin of the
+            // household that owns the invitation may.
+            const accountId = callerAccountId(req);
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            const { inviteCode } = req.params;
+            const { email, username } = req.body;
+
+            if (!(email && username)) {
+                return res.status(400).json({ error: "Email and username are required" });
+            }
+
+            const invitation = await prisma.invitation.findUnique({
+                where: { inviteCode },
+            });
+
+            // Another household's invitation answers exactly like one that does
+            // not exist, so a code cannot be probed from a different account.
+            if (!invitation || invitation.accountId !== accountId) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+            if (!invitation.isActive) {
+                return res.status(400).json({ error: "Invitation is not active" });
+            }
+
+            const request = await prisma.inviteRequest.findFirst({
+                orderBy: { createdAt: "desc" },
+                where: {
+                    email: email.trim().toLowerCase(),
+                    invitationId: invitation.id,
+                    status: "accepted",
+                    username: username.trim(),
+                },
+            });
+
+            if (!request) {
+                return res.status(404).json({ error: "No accepted request found" });
+            }
+
+            // always generate fresh oauth link
+            let oauthCode = null;
+            let oauthLink = null;
+            let oauthExpiresAt = null;
+
+            try {
+                const host = req.headers.host || req.headers.origin || "slicksync.local";
+
+                const stremioResponse = await fetch(
+                    "https://link.stremio.com/api/v2/create?type=Create",
+                    {
+                        headers: {
+                            "X-Requested-With": host,
+                        },
+                    }
+                );
+
+                if (stremioResponse.ok) {
+                    const stremioData = await stremioResponse.json();
+                    const result = stremioData?.result;
+                    if (result?.success && result?.code && result?.link) {
+                        oauthCode = result.code;
+                        oauthLink = result.link;
+                        // 5 min expiry
+                        oauthExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
+                    } else {
+                        return res.status(500).json({
+                            details:
+                                stremioData?.error?.message || "Missing code or link in response",
+                            error: "Failed to generate OAuth link - Stremio API returned invalid response",
+                        });
+                    }
+                } else {
+                    const errorText = await stremioResponse.text();
+                    return res.status(500).json({
+                        details: `HTTP ${stremioResponse.status}: ${errorText}`,
+                        error: "Failed to generate OAuth link from Stremio",
+                    });
+                }
+            } catch (error) {
+                return res.status(500).json({
+                    details: publicMessage(error, "Unknown error"),
+                    error: "Failed to generate OAuth link",
+                });
+            }
+
+            await prisma.inviteRequest.update({
+                data: {
+                    oauthCode,
+                    oauthExpiresAt,
+                    oauthLink,
+                },
+                where: { id: request.id },
+            });
+
+            res.json({
+                oauthCode,
+                oauthExpiresAt,
+                oauthLink,
+            });
+        } catch (error) {
+            console.error("Error generating OAuth link:", error);
+            res.status(500).json({ error: "Failed to generate OAuth link" });
+        }
+    });
+
+    publicRouter.post("/:inviteCode/complete", async (req, res) => {
+        try {
+            const { inviteCode } = req.params;
+            const { email, username, authKey, groupName } = req.body;
+
+            if (!(email && username && authKey)) {
+                return res.status(400).json({ error: "Email, username, and authKey are required" });
+            }
+
+            const invitation = await prisma.invitation.findUnique({
+                where: { inviteCode },
+            });
+
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+            if (!invitation.isActive) {
+                return res.status(400).json({ error: "Invitation is not active" });
+            }
+
+            // find the accepted request - try exact match first
+            let request = await prisma.inviteRequest.findFirst({
+                orderBy: { createdAt: "desc" },
+                where: {
+                    email: email.trim().toLowerCase(),
+                    invitationId: invitation.id,
+                    status: "accepted",
+                    username: username.trim(),
+                },
+            });
+
+            // if not found, do a more lenient search (handles edge cases)
+            if (!request) {
+                const allRequests = await prisma.inviteRequest.findMany({
+                    orderBy: { createdAt: "desc" },
+                    where: {
+                        invitationId: invitation.id,
+                        status: "accepted",
+                    },
+                });
+
+                request =
+                    allRequests.find(
+                        (r) =>
+                            r.email.toLowerCase() === email.trim().toLowerCase() &&
+                            r.username.trim() === username.trim()
+                    ) || null;
+            }
+
+            if (!request) {
+                // maybe it's already completed? check that too
+                let completedRequest = await prisma.inviteRequest.findFirst({
+                    orderBy: { createdAt: "desc" },
+                    where: {
+                        email: email.trim().toLowerCase(),
+                        invitationId: invitation.id,
+                        status: "completed",
+                        username: username.trim(),
+                    },
+                });
+
+                if (!completedRequest) {
+                    const allCompletedRequests = await prisma.inviteRequest.findMany({
+                        orderBy: { createdAt: "desc" },
+                        where: {
+                            invitationId: invitation.id,
+                            status: "completed",
+                        },
+                    });
+
+                    completedRequest =
+                        allCompletedRequests.find(
+                            (r) =>
+                                r.email.toLowerCase() === email.trim().toLowerCase() &&
+                                r.username.trim() === username.trim()
+                        ) || null;
+                }
+
+                if (completedRequest) {
+                    // already done, just return success
+                    return res.json({
+                        message: "User already created",
+                        status: "completed",
+                    });
+                }
+
+                return res.status(404).json({ error: "No accepted request found" });
+            }
+
+            // The group is the one the admin chose (on the request, else the
+            // invite's). Never the caller's - this route is public, and a group
+            // named in the body used to win, letting someone pick their own group.
+            void groupName;
+            const finalGroupName = request.groupName || invitation.groupName || null;
+
+            // validate the stremio auth key and get email - this is required
+            let stremioEmail = null;
+            try {
+                const validation = await validateStremioAuthKey(authKey);
+                if (validation?.user?.email) {
+                    stremioEmail = validation.user.email.toLowerCase().trim();
+                }
+            } catch (error) {
+                console.error("Failed to validate Stremio auth key:", error);
+                return res.status(400).json({
+                    error: "INVALID_AUTH_KEY",
+                    message: "Could not validate Stremio authentication. Please try again.",
+                });
+            }
+
+            if (!stremioEmail) {
+                return res.status(400).json({
+                    error: "EMAIL_NOT_AVAILABLE",
+                    message: "Could not retrieve email from Stremio account. Please try again.",
+                });
+            }
+
+            // emails must match exactly
+            const requestEmail = request.email.toLowerCase().trim();
+            if (stremioEmail !== requestEmail) {
+                // Send Discord webhook for email mismatch if configured
+                try {
+                    const account = await prisma.appAccount.findUnique({
+                        select: { sync: true },
+                        where: { id: invitation.accountId },
+                    });
+
+                    const syncCfg = parseSyncConfig(account?.sync);
+                    const webhookUrl = syncCfg?.webhookUrl;
+                    if (syncCfg?.notifyOnInvite === true && webhookUrl) {
+                        const embed = {
+                            color: 0xef_44_44, // Red color for error
+                            description:
+                                "The user has used different emails for the Stremio account and its request.",
+                            fields: [
+                                {
+                                    inline: true,
+                                    name: "Username",
+                                    value: formatCodeBlock(request.username),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Invite Code",
+                                    value: formatCodeBlock(invitation.inviteCode),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Group",
+                                    value: formatCodeBlock(
+                                        request.groupName || invitation.groupName || "No group"
+                                    ),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Request Email",
+                                    value: formatCodeBlock(request.email),
+                                },
+                                {
+                                    inline: true,
+                                    name: "Stremio Email",
+                                    value: formatCodeBlock(stremioEmail),
+                                },
+                            ],
+                            timestamp: new Date().toISOString(),
+                            title: `User ${request.username} used different emails`,
+                        };
+
+                        const appVersion = getAppVersion();
+                        if (appVersion) {
+                            embed.footer = { text: `SlickSync v${appVersion}` };
+                        }
+
+                        // The requester's own details are what this notice is about, and
+                        // they are what is in scope here. It used to read from a `user`
+                        // that is never defined on this path, so every email-mismatch
+                        // notice threw instead of being sent.
+                        const avatarUrl = await getUserAvatarUrl(
+                            request.username,
+                            request.email,
+                            0
+                        );
+
+                        await postDiscord(webhookUrl, null, {
+                            avatar_url:
+                                avatarUrl ||
+                                "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+                            embeds: [embed],
+                        });
+                    }
+                    // Push mirror (self-gates on notifyOnInvite; independent of webhook).
+                    await notifyPushForType(prisma, invitation.accountId, "notifyOnInvite", {
+                        body: `Request ${request.email} · Stremio ${stremioEmail}`,
+                        icon: "/android-chrome-192x192.png",
+                        title: `${request.username} used different emails`,
+                        url: "/invitations",
+                    });
+                } catch (webhookError) {
+                    console.error("Failed to send email mismatch webhook:", webhookError);
+                }
+
+                return res.status(400).json({
+                    error: "EMAIL_MISMATCH",
+                    message:
+                        "The Stremio account email does not match the email used in your request",
+                });
+            }
+
+            // Ensure email uniqueness across all accounts
+            // If user exists in another account, delete it first
+            const { ensureEmailUniqueness } = require("../utils/helpers/database");
+            await ensureEmailUniqueness(prisma, email, invitation.accountId);
+
+            // Check if user already exists in this account (after cleanup). Scoped by
+            // providerType so the same email can exist as both a Stremio and a Nuvio user
+            // (see the identical fix in stremio.js) - without this, accepting a Stremio
+            // invite for someone whose email already has a Nuvio account incorrectly
+            // rejects them as "already registered".
+            const existingUser = await prisma.user.findFirst({
+                where: {
+                    accountId: invitation.accountId,
+                    email: email.trim().toLowerCase(),
+                    providerType: "stremio",
+                },
+            });
+
+            if (existingUser) {
+                // mark request as rejected since user already exists in this account
+                await prisma.inviteRequest.update({
+                    data: { status: "rejected" },
+                    where: { id: request.id },
+                });
+                return res.status(409).json({ error: "User is already registered to SlickSync" });
+            }
+
+            // encrypt and create the user
+            const encryptedAuthKey = encrypt(authKey, { appAccountId: invitation.accountId });
+
+            let computedExpiresAt = null;
+            const now = new Date();
+            const durationRaw = invitation.membershipDurationDays;
+            if (durationRaw != null && !Number.isNaN(durationRaw)) {
+                const days = Number(durationRaw);
+                const debugMode =
+                    process.env.DEBUG === "true" ||
+                    process.env.DEBUG === "1" ||
+                    process.env.NEXT_PUBLIC_DEBUG === "true" ||
+                    process.env.NEXT_PUBLIC_DEBUG === "1";
+
+                if (debugMode && days === -1) {
+                    // Special-case debug: 1 minute membership
+                    computedExpiresAt = new Date(now.getTime() + 60 * 1000);
+                } else if (days > 0) {
+                    computedExpiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+                }
+            }
+
+            const newUser = await prisma.user.create({
+                data: {
+                    accountId: invitation.accountId,
+                    avatarUrl: createDefaultAvatar(),
+                    email: email.trim().toLowerCase(),
+                    expiresAt: computedExpiresAt,
+                    inviteCode: invitation.inviteCode,
+                    isActive: true,
+                    stremioAuthKey: encryptedAuthKey,
+                    username: username.trim(),
+                },
+            });
+
+            try {
+                const { emitAutomationEvent } = require("../utils/automation/engine");
+                await emitAutomationEvent(prisma, invitation.accountId, "invite.accepted", {
+                    email: newUser.email,
+                    inviteCode: invitation.inviteCode,
+                    providerType: newUser.providerType,
+                    userId: newUser.id,
+                    username: newUser.username,
+                });
+                await emitAutomationEvent(prisma, invitation.accountId, "user.created", {
+                    email: newUser.email,
+                    providerType: newUser.providerType,
+                    userId: newUser.id,
+                    username: newUser.username,
+                });
+            } catch {
+                /* emit never throws; guarding the require itself */
+            }
+
+            // assign to group if we have one
+            if (finalGroupName) {
+                try {
+                    const group = await prisma.group.findFirst({
+                        where: {
+                            accountId: invitation.accountId,
+                            name: finalGroupName,
+                        },
+                    });
+                    if (group) {
+                        // One queued, transactional change - see the same call above.
+                        await require("../utils/helpers/database").assignUserToGroup(
+                            prisma,
+                            newUser.id,
+                            group.id,
+                            { appAccountId: invitation.accountId }
+                        );
+
+                        // Sync user addons if syncOnJoin is enabled
+                        if (invitation.syncOnJoin) {
+                            try {
+                                const { syncUserAddons } = require("./users");
+                                const reqLike = { appAccountId: invitation.accountId, headers: {} };
+                                const syncResult = await syncUserAddons(
+                                    prisma,
+                                    newUser.id,
+                                    [],
+                                    false,
+                                    reqLike,
+                                    decrypt,
+                                    () => invitation.accountId,
+                                    true
+                                );
+                                if (syncResult?.success) {
+                                    console.log("✅ User synced on join");
+                                } else {
+                                    console.warn("⚠️ Sync on join failed:", syncResult?.error);
+                                }
+                            } catch (syncError) {
+                                console.error("❌ Error syncing user on join:", syncError);
+                                // Don't fail the whole thing if sync fails
+                            }
+                        }
+                    } else {
+                        await tellGroupMissing(prisma, invitation.accountId, {
+                            groupName: finalGroupName,
+                            inviteCode: invitation.inviteCode,
+                            userId: newUser.id,
+                            username: newUser.username,
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error assigning user to group:", error);
+                    // don't fail the whole thing if group assignment fails
+                }
+            }
+
+            // bump the use count
+            const updatedInvitation = await prisma.invitation.update({
+                data: { currentUses: invitation.currentUses + 1 },
+                where: { id: invitation.id },
+            });
+
+            // mark request as completed
+            await prisma.inviteRequest.update({
+                data: { status: "completed" },
+                where: { id: request.id },
+            });
+
+            // send webhook if configured
+            try {
+                const account = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: invitation.accountId },
+                });
+
+                const syncCfg = parseSyncConfig(account?.sync);
+                const webhookUrl = syncCfg?.webhookUrl;
+                if (syncCfg?.notifyOnInvite === true && webhookUrl) {
+                    // uses left after incrementing
+                    const hasLimit =
+                        updatedInvitation.maxUses != null && updatedInvitation.maxUses > 0;
+                    const usesLeft = hasLimit
+                        ? Math.max(0, updatedInvitation.maxUses - updatedInvitation.currentUses)
+                        : null;
+                    const usesLeftText =
+                        hasLimit && usesLeft !== null
+                            ? `${usesLeft} / ${updatedInvitation.maxUses}`
+                            : "Unlimited";
+
+                    const titleGroup = finalGroupName ? ` ${finalGroupName}` : "";
+                    const title = `User ${newUser.username} Joined${titleGroup} via Invite`;
+
+                    const embed = {
+                        color: 0x22_c5_5e, // Green color for success
+                        description: "User has successfully joined SlickSync using invite.",
+                        fields: [
+                            {
+                                inline: true,
+                                name: "Username",
+                                value: formatCodeBlock(newUser.username),
+                            },
+                            { inline: true, name: "Email", value: formatCodeBlock(newUser.email) },
+                            {
+                                inline: true,
+                                name: "Group",
+                                value: formatCodeBlock(finalGroupName || "No group"),
+                            },
+                            {
+                                inline: true,
+                                name: "Invite Code",
+                                value: formatCodeBlock(invitation.inviteCode),
+                            },
+                            {
+                                inline: true,
+                                name: "Uses Left",
+                                value: formatCodeBlock(usesLeftText),
+                            },
+                        ],
+                        timestamp: new Date().toISOString(),
+                        title,
+                    };
+
+                    const appVersion = getAppVersion();
+                    if (appVersion) {
+                        embed.footer = { text: `SlickSync v${appVersion}` };
+                    }
+
+                    await postDiscord(webhookUrl, null, {
+                        avatar_url:
+                            "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+                        embeds: [embed],
+                    });
+                }
+                // Push mirror (self-gates on notifyOnInvite; independent of webhook).
+                await notifyPushForType(prisma, invitation.accountId, "notifyOnInvite", {
+                    body: `Via invite${finalGroupName ? ` · ${finalGroupName}` : ""}`,
+                    icon: "/android-chrome-192x192.png",
+                    title: `${newUser.username} joined`,
+                    url: "/users",
+                });
+            } catch (webhookError) {
+                console.error("Failed to send user joined webhook:", webhookError);
+            }
+
+            res.json({
+                message: "User created successfully",
+                status: "completed",
+                user: {
+                    email: newUser.email,
+                    id: newUser.id,
+                    username: newUser.username,
+                },
+            });
+        } catch (error) {
+            console.error("Error completing invite:", error);
+            res.status(500).json({ error: "Failed to complete invite" });
+        }
+    });
+
+    // Get Stremio user info from authKey (public endpoint for invite flow)
+    publicRouter.post("/:inviteCode/user-info", async (req, res) => {
+        try {
+            const { inviteCode } = req.params;
+            const { authKey, username, email } = req.body;
+
+            if (!authKey) {
+                return res.status(400).json({ error: "authKey is required" });
+            }
+
+            // Verify the invite exists and is active
+            const invitation = await prisma.invitation.findUnique({
+                where: { inviteCode },
+            });
+
+            if (!invitation) {
+                return res.status(404).json({ error: "Invitation not found" });
+            }
+
+            if (!invitation.isActive) {
+                return res.status(403).json({ error: "Invitation is disabled" });
+            }
+
+            // Get user info from authKey
+            const userInfo = await getStremioUserInfo(authKey, username, email);
+
+            return res.json({
+                message: "Stremio account verified",
+                user: userInfo,
+            });
+        } catch (error) {
+            if (error.message === "Invalid or expired Stremio auth key") {
+                return res
+                    .status(401)
+                    .json({ error: publicMessage(error, "Something went wrong") });
+            }
+            if (error.message === "Could not validate auth key") {
+                return res
+                    .status(400)
+                    .json({ error: publicMessage(error, "Something went wrong") });
+            }
+            console.error("Error verifying auth key:", error);
+            res.status(500).json({ error: "Failed to verify auth key" });
+        }
+    });
+
+    return publicRouter;
+};
 
 // Export the helper for use in other routes
-module.exports.getStremioUserInfo = getStremioUserInfo
-
+module.exports.getStremioUserInfo = getStremioUserInfo;

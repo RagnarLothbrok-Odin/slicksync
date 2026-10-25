@@ -1,61 +1,63 @@
-'use client';
+"use client";
 
-import { motion, AnimatePresence } from 'framer-motion';
-import { Alert } from '@/lib/api';
-import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import { useState } from 'react';
+import { ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { AnimatePresence, motion } from "framer-motion";
+import { useState } from "react";
+import type { Alert } from "@/lib/api";
 
 interface AlertBannerProps {
-  alerts: {
-    critical: Alert[];
-    warnings: Alert[];
-    total: number;
-    hasCritical: boolean;
-  };
+    alerts: {
+        critical: Alert[];
+        warnings: Alert[];
+        total: number;
+        hasCritical: boolean;
+    };
 }
 
 export function AlertBanner({ alerts }: AlertBannerProps) {
-  const [dismissed, setDismissed] = useState(false);
+    const [dismissed, setDismissed] = useState(false);
 
-  if (dismissed || (!alerts.critical.length && !alerts.warnings.length)) {
-    return null;
-  }
+    if (dismissed || !(alerts.critical.length || alerts.warnings.length)) {
+        return null;
+    }
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="mb-6"
-    >
-      <AnimatePresence>
-        {alerts.critical.map((alert, idx) => (
-          <motion.div
-            key={`critical-${idx}`}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="flex items-center gap-4 p-4 mb-3 rounded-xl bg-error-muted border border-error/20"
-          >
-            <ExclamationTriangleIcon className="w-6 h-6 text-error flex-shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium text-error">{alert.message}</p>
-              {alert.users && alert.users.length > 0 && (
-                <p className="text-sm text-error/70 mt-1">
-                  Users: {alert.users.join(', ')}
-                  {alert.count > alert.users.length && ` +${alert.count - alert.users.length} more`}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => setDismissed(true)}
-              className="p-1 rounded-lg hover:bg-error/10 text-error"
-            >
-              <XMarkIcon className="w-5 h-5" />
-            </button>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-    </motion.div>
-  );
+    return (
+        <motion.div
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6"
+            exit={{ opacity: 0, y: -20 }}
+            initial={{ opacity: 0, y: -20 }}
+        >
+            <AnimatePresence>
+                {alerts.critical.map((alert, idx) => (
+                    <motion.div
+                        animate={{ height: "auto", opacity: 1 }}
+                        className="mb-3 flex items-center gap-4 rounded-xl border border-error/20 bg-error-muted p-4"
+                        exit={{ height: 0, opacity: 0 }}
+                        initial={{ height: 0, opacity: 0 }}
+                        key={`critical-${idx}`}
+                    >
+                        <ExclamationTriangleIcon className="h-6 w-6 flex-shrink-0 text-error" />
+                        <div className="flex-1">
+                            <p className="font-medium text-error">{alert.message}</p>
+                            {alert.users && alert.users.length > 0 && (
+                                <p className="mt-1 text-error/70 text-sm">
+                                    Users: {alert.users.join(", ")}
+                                    {alert.count > alert.users.length &&
+                                        ` +${alert.count - alert.users.length} more`}
+                                </p>
+                            )}
+                        </div>
+                        <button
+                            className="rounded-lg p-1 text-error hover:bg-error/10"
+                            onClick={() => setDismissed(true)}
+                            type="button"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    </motion.div>
+                ))}
+            </AnimatePresence>
+        </motion.div>
+    );
 }

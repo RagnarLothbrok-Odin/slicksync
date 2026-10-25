@@ -20,15 +20,15 @@
 // fires as before) - that's how addon-health/episode alerts avoid a duplicate
 // bell entry on top of their own dedicated tables.
 const BELL_TYPE_BY_TOGGLE = {
-  notifyOnActivity: 'activity',
-  notifyOnSync: 'sync',
-  notifyOnInvite: 'invite',
-  notifyOnVault: 'vault',
-  notifyOnNewDevice: 'device',
-  notifyOnBackup: 'task',
-  notifyOnProxyHealth: 'proxy',
-  notifyOnUpdateAvailable: 'update',
-}
+    notifyOnActivity: "activity",
+    notifyOnBackup: "task",
+    notifyOnInvite: "invite",
+    notifyOnNewDevice: "device",
+    notifyOnProxyHealth: "proxy",
+    notifyOnSync: "sync",
+    notifyOnUpdateAvailable: "update",
+    notifyOnVault: "vault",
+};
 
 /**
  * Create one persistent bell notification. Idempotent when a dedupeKey is
@@ -36,33 +36,43 @@ const BELL_TYPE_BY_TOGGLE = {
  * callers (e.g. the account-mismatch detector) MUST pass one; genuine
  * one-shot event callers can leave it null.
  */
-async function createNotification(prisma, accountId, { type, title, body, poster = null, url = null, data = null, dedupeKey = null }) {
-  if (!accountId || !type || !title) return null
-  // Nudge connected clients to refetch the bell right away instead of on
-  // their next 30s tick. Fire-and-forget - see utils/liveEvents.js.
-  try { require('./liveEvents').emitLive(accountId, 'notification') } catch {}
-  try {
-    if (dedupeKey) {
-      // upsert on the (accountId, dedupeKey) unique constraint so the same
-      // event can never create two rows, even across restarts / re-polls.
-      return await prisma.notification.upsert({
-        where: { accountId_dedupeKey: { accountId, dedupeKey } },
-        create: { accountId, type, title, body: body || '', poster, url, data, dedupeKey },
-        // Deliberately do NOT clear read/readAt on re-fire - if the operator
-        // already saw and read this exact event, a duplicate detection pass
-        // shouldn't resurrect it as unread. Refresh only the display fields.
-        update: { title, body: body || '', poster, url, data },
-      })
+async function createNotification(
+    prisma,
+    accountId,
+    { type, title, body, poster = null, url = null, data = null, dedupeKey = null }
+) {
+    if (!(accountId && type && title)) {
+        return null;
     }
-    return await prisma.notification.create({
-      data: { accountId, type, title, body: body || '', poster, url, data },
-    })
-  } catch (e) {
-    // Never let a bell-write failure disturb the push/Discord path it rides
-    // alongside - the notification still reaches the other two channels.
-    console.warn('[NotificationStore] createNotification failed:', e?.message)
-    return null
-  }
+    // Nudge connected clients to refetch the bell right away instead of on
+    // their next 30s tick. Fire-and-forget - see utils/liveEvents.js.
+    try {
+        require("./liveEvents").emitLive(accountId, "notification");
+    } catch {
+        // Live updates are advisory; the persisted operation has already completed.
+    }
+    try {
+        if (dedupeKey) {
+            // upsert on the (accountId, dedupeKey) unique constraint so the same
+            // event can never create two rows, even across restarts / re-polls.
+            return await prisma.notification.upsert({
+                create: { accountId, body: body || "", data, dedupeKey, poster, title, type, url },
+                // Deliberately do NOT clear read/readAt on re-fire - if the operator
+                // already saw and read this exact event, a duplicate detection pass
+                // shouldn't resurrect it as unread. Refresh only the display fields.
+                update: { body: body || "", data, poster, title, url },
+                where: { accountId_dedupeKey: { accountId, dedupeKey } },
+            });
+        }
+        return await prisma.notification.create({
+            data: { accountId, body: body || "", data, poster, title, type, url },
+        });
+    } catch (e) {
+        // Never let a bell-write failure disturb the push/Discord path it rides
+        // alongside - the notification still reaches the other two channels.
+        console.warn("[NotificationStore] createNotification failed:", e?.message);
+        return null;
+    }
 }
 
 /**
@@ -73,19 +83,21 @@ async function createNotification(prisma, accountId, { type, title, body, poster
  * without writing for toggles not in BELL_TYPE_BY_TOGGLE (see above).
  */
 async function persistBellNotification(prisma, accountId, typeKey, payload) {
-  const type = BELL_TYPE_BY_TOGGLE[typeKey]
-  if (!type) return null
-  // A generic '/android-chrome-192x192.png' icon is the push fallback, not a
-  // real poster - don't store it as one, or the bell would render the app
-  // icon as if it were content art.
-  const poster = payload.icon && !payload.icon.includes('android-chrome') ? payload.icon : null
-  return createNotification(prisma, accountId, {
-    type,
-    title: payload.title,
-    body: payload.body,
-    poster,
-    url: payload.url || null,
-  })
+    const type = BELL_TYPE_BY_TOGGLE[typeKey];
+    if (!type) {
+        return null;
+    }
+    // A generic '/android-chrome-192x192.png' icon is the push fallback, not a
+    // real poster - don't store it as one, or the bell would render the app
+    // icon as if it were content art.
+    const poster = payload.icon && !payload.icon.includes("android-chrome") ? payload.icon : null;
+    return createNotification(prisma, accountId, {
+        body: payload.body,
+        poster,
+        title: payload.title,
+        type,
+        url: payload.url || null,
+    });
 }
 
-module.exports = { createNotification, persistBellNotification, BELL_TYPE_BY_TOGGLE }
+module.exports = { BELL_TYPE_BY_TOGGLE, createNotification, persistBellNotification };

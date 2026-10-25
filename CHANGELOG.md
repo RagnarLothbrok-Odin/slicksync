@@ -1,26 +1,41 @@
 # Changelog
 
-SlickSync's changelog lives in [`client/public/changelog.json`](./client/public/changelog.json)
-and renders in the app under **Changelog** in the sidebar.
+The in-app version history lives in
+[`client/public/changelog.json`](./client/public/changelog.json). Existing entries
+include inherited upstream releases and do not all describe changes made by this
+independent fork. New entries should describe this fork's changes.
 
-This file previously carried the changelog inherited from upstream
-[Syncio](https://github.com/iamneur0/syncio). It stopped at `1.2.0`, and its
-compare links pointed at a repository that doesn't exist. It's kept as a
-pointer so it isn't mistaken for current.
+## Checks
 
-## Cutting a release
+[`checks.yml`](./.github/workflows/checks.yml) runs on pushes to `main`, pull
+requests, and manual dispatch. It installs the Bun workspace with the frozen
+lockfile, runs the tests, then runs lint and TypeScript checks. It does not build
+or publish an image. Branch protection must be configured separately to require it.
 
-Releases are cut by pushing a version tag — no release bot is involved:
+## Container publishing
 
-1. Add an entry to the top of `client/public/changelog.json`.
-2. Bump `version` in `package.json` to match.
-3. Tag and push:
+[`release.yml`](./.github/workflows/release.yml) runs when a stable GitHub Release
+is published. It validates that the `v<major>.<minor>.<patch>` tag matches the
+root package version, runs tests and lint once, then builds private and public
+modes natively for Linux amd64 and arm64.
 
-   ```bash
-   git tag v1.9.76
-   git push origin v1.9.76
-   ```
+After all four builds succeed, it publishes combined architecture manifests to
+`ghcr.io/ragnarlothbrok-odin/slicksync` with these tags:
 
-Pushing a `v*.*.*` tag triggers [`private-release.yml`](./.github/workflows/private-release.yml)
-and [`public-release.yml`](./.github/workflows/public-release.yml), which build
-and push the Docker images to `ghcr.io/slicknsliding/slicksync`.
+| Mode | Moving tag | Version tag example |
+|---|---|---|
+| Private / SQLite | `private` | `private-v1.102.0` |
+| Public / PostgreSQL | `public` | `public-v1.102.0` |
+
+Draft releases, prereleases and tag pushes alone do not publish images. There is
+no manual branch publishing, beta channel, automatic version bump, GitHub Release
+creation, or automatic deployment to a server. Image publishing runs after the
+GitHub Release is public, so wait for the workflow to finish before pulling.
+
+## Preparing a release
+
+Only publish when intentionally requested. Review changes since the latest
+release tag, update the in-app changelog and root package version, and commit
+those changes before tagging `v<version>`. Publish a stable GitHub Release
+for that tag to publish the images. Include release notes when preparing the
+GitHub Release. Update Bun's lockfile if package metadata changes require it.

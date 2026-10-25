@@ -1,7 +1,7 @@
-const https = require('https')
-const { getUserAvatarUrl } = require('./avatarUtils')
-const { fetchKitsuMetadata } = require('./kitsuUtils')
-const { fetchOmdbRatings } = require('./omdb')
+const https = require("node:https");
+const { getUserAvatarUrl } = require("./avatarUtils");
+const { fetchKitsuMetadata } = require("./kitsuUtils");
+const { fetchOmdbRatings } = require("./omdb");
 
 // A webhook or ntfy address is typed in by whoever set the notification up,
 // so before anything is sent it gets the same check as every other address
@@ -9,46 +9,53 @@ const { fetchOmdbRatings } = require('./omdb')
 // may post to a server on its own network, an instance serving strangers
 // may not be made to post into its own.
 async function mayContact(address) {
-  const { assertSafeUrl, instancePolicy } = require('./safeUrl')
-  await assertSafeUrl(address, instancePolicy())
+    const { assertSafeUrl, instancePolicy } = require("./safeUrl");
+    await assertSafeUrl(address, instancePolicy());
 }
 
 async function postDiscord(webhookUrl, content, options = {}) {
-  try {
-    if (!webhookUrl) return
-    const url = new URL(webhookUrl)
-    await mayContact(webhookUrl)
-    
-    // If embeds are provided, use embeds format, otherwise use content
-    let payload
-    if (options.embeds && Array.isArray(options.embeds)) {
-      payload = { embeds: options.embeds }
-    } else {
-      payload = { content }
+    try {
+        if (!webhookUrl) {
+            return;
+        }
+        const url = new URL(webhookUrl);
+        await mayContact(webhookUrl);
+
+        // If embeds are provided, use embeds format, otherwise use content
+        let payload;
+        if (options.embeds && Array.isArray(options.embeds)) {
+            payload = { embeds: options.embeds };
+        } else {
+            payload = { content };
+        }
+
+        // Legacy avatar_url support (for backward compatibility)
+        if (options.avatar_url) {
+            payload.avatar_url = options.avatar_url;
+        }
+
+        const body = JSON.stringify(payload);
+        const httpOptions = {
+            headers: {
+                "Content-Length": Buffer.byteLength(body),
+                "Content-Type": "application/json",
+            },
+            hostname: url.hostname,
+            method: "POST",
+            path: url.pathname + url.search,
+        };
+        await new Promise((resolve, reject) => {
+            const req = https.request(httpOptions, (res) => {
+                res.on("data", () => undefined);
+                res.on("end", resolve);
+            });
+            req.on("error", reject);
+            req.write(body);
+            req.end();
+        });
+    } catch {
+        // Optional remote data does not prevent the current operation from completing.
     }
-    
-    // Legacy avatar_url support (for backward compatibility)
-    if (options.avatar_url) {
-      payload.avatar_url = options.avatar_url
-    }
-    
-    const body = JSON.stringify(payload)
-    const httpOptions = {
-      method: 'POST',
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-    }
-    await new Promise((resolve, reject) => {
-      const req = https.request(httpOptions, (res) => {
-        res.on('data', () => {})
-        res.on('end', resolve)
-      })
-      req.on('error', reject)
-      req.write(body)
-      req.end()
-    })
-  } catch {}
 }
 
 // In-memory cache for fetchMetadata results, keyed by itemId+itemType+videoId.
@@ -59,27 +66,33 @@ async function postDiscord(webhookUrl, content, options = {}) {
 // Simple Map with a TTL, not a real LRU - this data is small and the process
 // restarts on every deploy anyway, so unbounded growth between deploys isn't
 // a real concern at this scale.
-const metadataCache = new Map()
-const METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const metadataCache = new Map();
+const METADATA_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 // Entries were only ever added. Each one holds a full metadata record -
 // cast, artwork, descriptions - so on an instance left running for weeks
 // this grew for the lifetime of the process, holding memory for titles
 // nobody had looked at since. Expired entries are dropped on write, and
 // the whole store is capped; oldest goes first once it is full.
-const METADATA_CACHE_MAX = 500
+const METADATA_CACHE_MAX = 500;
 function rememberMetadata(key, value) {
-  const now = Date.now()
-  metadataCache.set(key, { value, at: now })
-  if (metadataCache.size <= METADATA_CACHE_MAX) return
-  for (const [k, v] of metadataCache) {
-    if (now - v.at > METADATA_CACHE_TTL_MS) metadataCache.delete(k)
-  }
-  // Still over after dropping the stale ones: shed the oldest inserted.
-  while (metadataCache.size > METADATA_CACHE_MAX) {
-    const oldest = metadataCache.keys().next().value
-    if (oldest === undefined) break
-    metadataCache.delete(oldest)
-  }
+    const now = Date.now();
+    metadataCache.set(key, { at: now, value });
+    if (metadataCache.size <= METADATA_CACHE_MAX) {
+        return;
+    }
+    for (const [k, v] of metadataCache) {
+        if (now - v.at > METADATA_CACHE_TTL_MS) {
+            metadataCache.delete(k);
+        }
+    }
+    // Still over after dropping the stale ones: shed the oldest inserted.
+    while (metadataCache.size > METADATA_CACHE_MAX) {
+        const oldest = metadataCache.keys().next().value;
+        if (oldest === undefined) {
+            break;
+        }
+        metadataCache.delete(oldest);
+    }
 }
 
 // omdbOpts is forwarded to fetchOmdbRatings: the notification path passes
@@ -87,541 +100,633 @@ function rememberMetadata(key, value) {
 // near the daily cap, while the foreground media-details endpoint (which
 // also calls this) passes nothing and always fetches.
 async function fetchMetadata(itemId, itemType, videoId, omdbApiKey, omdbOpts) {
-  if (!itemId) return null
-
-  const cacheKey = `${itemId}|${itemType}|${videoId || ''}`
-  const cached = metadataCache.get(cacheKey)
-  if (cached && (Date.now() - cached.at) < METADATA_CACHE_TTL_MS) {
-    return cached.value
-  }
-
-  try {
-    // Extract base ID and episode info from video_id if available (format: "tt8080122:season:episode")
-    // Otherwise extract from itemId
-    let baseId = itemId
-    let season = undefined
-    let episode = undefined
-
-    // Check if video_id is a Kitsu ID (format: "kitsu:50008:4")
-    if (videoId && videoId.startsWith('kitsu:')) {
-      const videoIdParts = videoId.split(':')
-      if (videoIdParts.length >= 2) {
-        const kitsuId = videoIdParts[1] // e.g., "50008"
-        const episodePart = videoIdParts[videoIdParts.length - 1] // e.g., "4"
-        episode = parseInt(episodePart, 10)
-
-        console.log(`[ActivityMonitor] Processing Kitsu ID: ${videoId}, kitsuId=${kitsuId}, episode=${episode}`)
-
-        // Fetch metadata from Kitsu API
-        const kitsuData = await fetchKitsuMetadata(kitsuId)
-        if (kitsuData) {
-          // Default season to 1 when Kitsu returns null (common for anime without explicit season numbers)
-          season = kitsuData.season !== null ? kitsuData.season : 1
-          console.log(`[ActivityMonitor] Kitsu metadata: title="${kitsuData.titleEn}", baseTitle="${kitsuData.baseTitle}", season=${season} (original: ${kitsuData.season})`)
-          // Now we need to find the IMDb ID for the base title
-          // Try to use itemId if it's an IMDb ID, otherwise we'll need to search
-          if (itemId && itemId.startsWith('tt') && /^tt\d+$/.test(itemId)) {
-            baseId = itemId
-            console.log(`[ActivityMonitor] Using IMDb ID from itemId: ${baseId}`)
-          } else {
-            // If itemId is not an IMDb ID, we'll try to use it anyway
-            // The item should have an IMDb ID in its _id field
-            baseId = itemId
-            console.log(`[ActivityMonitor] Using itemId as baseId: ${baseId}`)
-          }
-        } else {
-          console.log(`[ActivityMonitor] Failed to fetch Kitsu metadata for kitsuId=${kitsuId}`)
-        }
-      }
-    }
-    // If video_id is provided and in the format "tt8080122:season:episode", use it
-    else if (videoId && videoId.includes(':')) {
-      const videoIdParts = videoId.split(':')
-      if (videoIdParts.length >= 3 && videoIdParts[0].startsWith('tt') && /^tt\d+$/.test(videoIdParts[0])) {
-        baseId = videoIdParts[0]
-        season = parseInt(videoIdParts[1], 10)
-        episode = parseInt(videoIdParts[2], 10)
-      }
+    if (!itemId) {
+        return null;
     }
 
-    // If we don't have season/episode from video_id, try to extract from itemId
-    if ((season === undefined || episode === undefined) && itemId.includes(':')) {
-      const parts = itemId.split(':')
-      // Check if first part is IMDB ID (starts with 'tt')
-      if (parts[0].startsWith('tt') && /^tt\d+$/.test(parts[0])) {
-        baseId = parts[0] // Use IMDB ID
-        // If itemId has format "tt8080122:season:episode", extract season/episode
-        if (parts.length >= 3) {
-          season = parseInt(parts[1], 10)
-          episode = parseInt(parts[2], 10)
-        }
-      } else {
-        // For tmdb: or tvdb: formats, use the number part
-        // But Cinemeta works best with IMDB IDs, so this might not work
-        baseId = parts[1] || parts[0]
-      }
+    const cacheKey = `${itemId}|${itemType}|${videoId || ""}`;
+    const cached = metadataCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < METADATA_CACHE_TTL_MS) {
+        return cached.value;
     }
-
-    // Only try Cinemeta if we have an IMDB ID (starts with 'tt')
-    if (!baseId.startsWith('tt') || !/^tt\d+$/.test(baseId)) {
-      return null // Cinemeta primarily works with IMDB IDs
-    }
-
-    // Try fetching from Cinemeta Live (works best with IMDB IDs)
-    // For movies: https://cinemeta-live.strem.io/meta/movie/{id}.json
-    // For series: https://cinemeta-live.strem.io/meta/series/{id}.json
-    const endpoint = itemType === 'movie'
-      ? `https://cinemeta-live.strem.io/meta/movie/${baseId}.json`
-      : `https://cinemeta-live.strem.io/meta/series/${baseId}.json`
-
-    // Use AbortController for timeout (Node.js fetch doesn't support timeout directly)
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
 
     try {
-      const response = await fetch(endpoint, {
-        headers: {
-          'User-Agent': 'SlickSync/1.0'
-        },
-        signal: controller.signal
-      })
+        // Extract base ID and episode info from video_id if available (format: "tt8080122:season:episode")
+        // Otherwise extract from itemId
+        let baseId = itemId;
+        let season;
+        let episode;
 
-      clearTimeout(timeoutId)
+        // Check if video_id is a Kitsu ID (format: "kitsu:50008:4")
+        if (videoId?.startsWith("kitsu:")) {
+            const videoIdParts = videoId.split(":");
+            if (videoIdParts.length >= 2) {
+                const kitsuId = videoIdParts[1]; // e.g., "50008"
+                const episodePart = videoIdParts.at(-1); // e.g., "4"
+                episode = Number.parseInt(episodePart, 10);
 
-      if (response.ok) {
-        const data = await response.json()
-        const meta = data?.meta
-        if (meta) {
-          // credits_cast entries are {character, name, profile_path, id} objects,
-          // not plain strings - meta.cast (the older/simpler field) is plain
-          // strings with no photo. Normalize both shapes to a consistent
-          // {name, character, photo} object per person. profile_path is a
-          // TMDb image path (e.g. "/mkdRcVIQl4WZhDf1vXKWTD7HZrZ.jpg") - TMDb's
-          // image CDN is public and needs no API key, unlike TMDb's own API.
-          const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w185'
-          const normalizedCast = (meta.credits_cast || meta.cast || [])
-            .map((c) => {
-              if (typeof c === 'string') return { name: c, character: null, photo: null, tmdbId: null }
-              if (c && typeof c === 'object' && c.name) {
-                return {
-                  name: c.name,
-                  character: c.character || null,
-                  photo: c.profile_path ? `${TMDB_IMAGE_BASE}${c.profile_path}` : null,
-                  // TMDb person id from Cinemeta's credits_cast - preserved so
-                  // the cast/crew deep-dive can fetch this person's filmography
-                  // (needs a TMDb key; see discover.js's /person route). Null
-                  // for the plain-string legacy `cast` shape, which has no id.
-                  tmdbId: (typeof c.id === 'number' || typeof c.id === 'string') ? c.id : null,
+                console.log(
+                    `[ActivityMonitor] Processing Kitsu ID: ${videoId}, kitsuId=${kitsuId}, episode=${episode}`
+                );
+
+                // Fetch metadata from Kitsu API
+                const kitsuData = await fetchKitsuMetadata(kitsuId);
+                if (kitsuData) {
+                    // Default season to 1 when Kitsu returns null (common for anime without explicit season numbers)
+                    season = kitsuData.season === null ? 1 : kitsuData.season;
+                    console.log(
+                        `[ActivityMonitor] Kitsu metadata: title="${kitsuData.titleEn}", baseTitle="${kitsuData.baseTitle}", season=${season} (original: ${kitsuData.season})`
+                    );
+                    // Now we need to find the IMDb ID for the base title
+                    // Try to use itemId if it's an IMDb ID, otherwise we'll need to search
+                    if (itemId?.startsWith("tt") && /^tt\d+$/.test(itemId)) {
+                        baseId = itemId;
+                        console.log(`[ActivityMonitor] Using IMDb ID from itemId: ${baseId}`);
+                    } else {
+                        // If itemId is not an IMDb ID, we'll try to use it anyway
+                        // The item should have an IMDb ID in its _id field
+                        baseId = itemId;
+                        console.log(`[ActivityMonitor] Using itemId as baseId: ${baseId}`);
+                    }
+                } else {
+                    console.log(
+                        `[ActivityMonitor] Failed to fetch Kitsu metadata for kitsuId=${kitsuId}`
+                    );
                 }
-              }
-              return null
-            })
-            .filter(Boolean)
-
-          const result = {
-            title: meta.name || meta.title || null,
-            poster: meta.poster || null,
-            description: meta.description || null,
-            cast: normalizedCast,
-            imdb_id: meta.imdb_id || null,
-            moviedb_id: meta.moviedb_id || null,
-            genres: meta.genres || [],
-            released: meta.released || null,
-            // Detail-view fields (media detail modal) - additive, existing callers
-            // (Discord notifications) only read the fields above and are unaffected.
-            background: meta.background || null,
-            imdbRating: meta.imdbRating || null,
-            runtime: meta.runtime || null,
-            releaseInfo: meta.releaseInfo || null,
-            director: meta.director || [],
-            country: meta.country || null,
-            awards: meta.awards || null,
-            // meta.trailers entries are {source, type} - source is a plain YouTube
-            // video ID (e.g. "cdx31ak4KbQ"), embeddable directly via YouTube's own
-            // public embed URL. Only expose entries actually typed as a trailer.
-            trailers: Array.isArray(meta.trailers)
-              ? meta.trailers.filter((t) => t?.source && t?.type === 'Trailer').map((t) => t.source)
-              : []
-          }
-
-          // For series, find the specific episode by video_id, season, and episode number
-          if (itemType === 'series' && meta.videos && Array.isArray(meta.videos)) {
-            // Full episode list (for "what's next after the last one watched"
-            // callers, e.g. Continue Watching) - season 0 is specials, excluded
-            // since they're not part of normal watch-order progression.
-            result.allEpisodes = meta.videos
-              .filter((v) => v.season !== 0 && v.season != null && v.episode != null)
-              .map((v) => ({
-                season: v.season,
-                episode: v.episode,
-                title: v.title || v.name || null,
-                released: v.released || null,
-                thumbnail: v.thumbnail || null
-              }))
-              .sort((a, b) => a.season - b.season || a.episode - b.episode)
-
-            let episodeData = null
-
-            // Ensure season and episode are numbers
-            // Default season to 1 if null/undefined (common for anime without explicit season numbers)
-            const seasonNum = season !== undefined && season !== null ? Number(season) : 1
-            const episodeNum = episode !== undefined && episode !== null ? Number(episode) : undefined
-
-            // First try to match by video_id if provided (it already has the format "tt22202452:1:1")
-            // Skip this for Kitsu IDs since they don't match Cinemeta's format
-            if (videoId && !videoId.startsWith('kitsu:')) {
-              episodeData = meta.videos.find(v => v.id === videoId)
-              if (episodeData) {
-                console.log(`[ActivityMonitor] Found episode by video_id: ${videoId}`)
-              }
             }
-
-            // If not found, try to match by constructing the episode ID format: "tt8080122:1:1"
-            if (!episodeData && seasonNum !== undefined && episodeNum !== undefined && !isNaN(seasonNum) && !isNaN(episodeNum) && baseId) {
-              const constructedId = `${baseId}:${seasonNum}:${episodeNum}`
-              episodeData = meta.videos.find(v => v.id === constructedId)
-              if (episodeData) {
-                console.log(`[ActivityMonitor] Found episode by constructed ID: ${constructedId}`)
-              }
+        }
+        // If video_id is provided and in the format "tt8080122:season:episode", use it
+        else if (videoId?.includes(":")) {
+            const videoIdParts = videoId.split(":");
+            if (
+                videoIdParts.length >= 3 &&
+                videoIdParts[0].startsWith("tt") &&
+                /^tt\d+$/.test(videoIdParts[0])
+            ) {
+                baseId = videoIdParts[0];
+                season = Number.parseInt(videoIdParts[1], 10);
+                episode = Number.parseInt(videoIdParts[2], 10);
             }
+        }
 
-            // If still not found, try to match by season and episode number directly
-            // Cinemeta uses 1-indexed seasons/episodes with both 'episode' and 'number' fields
-            if (!episodeData && seasonNum !== undefined && episodeNum !== undefined && !isNaN(seasonNum) && !isNaN(episodeNum)) {
-              episodeData = meta.videos.find(v => {
-                // Match by season and episode (exact numeric match)
-                if (v.season === seasonNum && v.episode === episodeNum) return true
-                // Match by season and number (some entries use 'number' instead of 'episode')
-                if (v.season === seasonNum && v.number === episodeNum) return true
-                return false
-              })
-              if (episodeData) {
-                console.log(`[ActivityMonitor] Found episode by season/episode: S${seasonNum}E${episodeNum}`)
-              }
-            }
-
-            if (episodeData) {
-              // Debug: Log what we found
-              console.log(`[ActivityMonitor] Episode found: id=${episodeData.id}, title="${episodeData.title}", hasTitle=${!!episodeData.title}, keys=${Object.keys(episodeData).join(',')}`)
-
-              result.episode = {
-                title: episodeData.title || episodeData.name || null,
-                released: episodeData.released || null,
-                overview: episodeData.overview || episodeData.description || null,
-                thumbnail: episodeData.thumbnail || null
-              }
-
-              // Debug: Log what we're setting
-              console.log(`[ActivityMonitor] Setting episode title to: "${result.episode.title}"`)
+        // If we don't have season/episode from video_id, try to extract from itemId
+        if ((season === undefined || episode === undefined) && itemId.includes(":")) {
+            const parts = itemId.split(":");
+            // Check if first part is IMDB ID (starts with 'tt')
+            if (parts[0].startsWith("tt") && /^tt\d+$/.test(parts[0])) {
+                baseId = parts[0]; // Use IMDB ID
+                // If itemId has format "tt8080122:season:episode", extract season/episode
+                if (parts.length >= 3) {
+                    season = Number.parseInt(parts[1], 10);
+                    episode = Number.parseInt(parts[2], 10);
+                }
             } else {
-              console.log(`[ActivityMonitor] Episode NOT found: Looking for video_id=${videoId || 'none'}, season=${season}, episode=${episode}, baseId=${baseId}`)
-              if (meta.videos && meta.videos.length > 0) {
-                console.log(`[ActivityMonitor] Available video IDs (first 5): ${meta.videos.slice(0, 5).map(v => v.id).join(', ')}`)
-              }
+                // For tmdb: or tvdb: formats, use the number part
+                // But Cinemeta works best with IMDB IDs, so this might not work
+                baseId = parts[1] || parts[0];
             }
-          }
-
-          // OMDb ratings (Rotten Tomatoes / Metacritic), keyed off the real
-          // IMDb ID Cinemeta just confirmed - additive, resolves to nulls
-          // (not an error) when OMDB_API_KEY is unset.
-          result.rottenTomatoes = null
-          result.metacritic = null
-          result.boxOffice = null
-          result.rated = null
-          if (result.imdb_id) {
-            const omdbRatings = await fetchOmdbRatings(result.imdb_id, omdbApiKey, omdbOpts)
-            if (omdbRatings) {
-              result.rottenTomatoes = omdbRatings.rottenTomatoes
-              result.metacritic = omdbRatings.metacritic
-              result.boxOffice = omdbRatings.boxOffice
-              result.rated = omdbRatings.rated
-            }
-          }
-
-          rememberMetadata(cacheKey, result)
-          return result
         }
-      }
-    } catch (fetchError) {
-      clearTimeout(timeoutId)
-      if (fetchError.name === 'AbortError') {
-        // Timeout - silently fail
-      } else {
-        throw fetchError
-      }
-    }
-  } catch (error) {
-    // Silently fail - metadata is optional
-  }
 
-  return null
+        // Only try Cinemeta if we have an IMDB ID (starts with 'tt')
+        if (!(baseId.startsWith("tt") && /^tt\d+$/.test(baseId))) {
+            return null; // Cinemeta primarily works with IMDB IDs
+        }
+
+        // Try fetching from Cinemeta Live (works best with IMDB IDs)
+        // For movies: https://cinemeta-live.strem.io/meta/movie/{id}.json
+        // For series: https://cinemeta-live.strem.io/meta/series/{id}.json
+        const endpoint =
+            itemType === "movie"
+                ? `https://cinemeta-live.strem.io/meta/movie/${baseId}.json`
+                : `https://cinemeta-live.strem.io/meta/series/${baseId}.json`;
+
+        // Use AbortController for timeout (Node.js fetch doesn't support timeout directly)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+        try {
+            const response = await fetch(endpoint, {
+                headers: {
+                    "User-Agent": "SlickSync/1.0",
+                },
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+                const data = await response.json();
+                const meta = data?.meta;
+                if (meta) {
+                    // credits_cast entries are {character, name, profile_path, id} objects,
+                    // not plain strings - meta.cast (the older/simpler field) is plain
+                    // strings with no photo. Normalize both shapes to a consistent
+                    // {name, character, photo} object per person. profile_path is a
+                    // TMDb image path (e.g. "/mkdRcVIQl4WZhDf1vXKWTD7HZrZ.jpg") - TMDb's
+                    // image CDN is public and needs no API key, unlike TMDb's own API.
+                    const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185";
+                    const normalizedCast = (meta.credits_cast || meta.cast || [])
+                        .map((c) => {
+                            if (typeof c === "string") {
+                                return { character: null, name: c, photo: null, tmdbId: null };
+                            }
+                            if (c && typeof c === "object" && c.name) {
+                                return {
+                                    character: c.character || null,
+                                    name: c.name,
+                                    photo: c.profile_path
+                                        ? `${TMDB_IMAGE_BASE}${c.profile_path}`
+                                        : null,
+                                    // TMDb person id from Cinemeta's credits_cast - preserved so
+                                    // the cast/crew deep-dive can fetch this person's filmography
+                                    // (needs a TMDb key; see discover.js's /person route). Null
+                                    // for the plain-string legacy `cast` shape, which has no id.
+                                    tmdbId:
+                                        typeof c.id === "number" || typeof c.id === "string"
+                                            ? c.id
+                                            : null,
+                                };
+                            }
+                            return null;
+                        })
+                        .filter(Boolean);
+
+                    const result = {
+                        awards: meta.awards || null,
+                        // Detail-view fields (media detail modal) - additive, existing callers
+                        // (Discord notifications) only read the fields above and are unaffected.
+                        background: meta.background || null,
+                        cast: normalizedCast,
+                        country: meta.country || null,
+                        description: meta.description || null,
+                        director: meta.director || [],
+                        genres: meta.genres || [],
+                        imdb_id: meta.imdb_id || null,
+                        imdbRating: meta.imdbRating || null,
+                        moviedb_id: meta.moviedb_id || null,
+                        poster: meta.poster || null,
+                        released: meta.released || null,
+                        releaseInfo: meta.releaseInfo || null,
+                        runtime: meta.runtime || null,
+                        title: meta.name || meta.title || null,
+                        // meta.trailers entries are {source, type} - source is a plain YouTube
+                        // video ID (e.g. "cdx31ak4KbQ"), embeddable directly via YouTube's own
+                        // public embed URL. Only expose entries actually typed as a trailer.
+                        trailers: Array.isArray(meta.trailers)
+                            ? meta.trailers
+                                  .filter((t) => t?.source && t?.type === "Trailer")
+                                  .map((t) => t.source)
+                            : [],
+                    };
+
+                    // For series, find the specific episode by video_id, season, and episode number
+                    if (itemType === "series" && meta.videos && Array.isArray(meta.videos)) {
+                        // Full episode list (for "what's next after the last one watched"
+                        // callers, e.g. Continue Watching) - season 0 is specials, excluded
+                        // since they're not part of normal watch-order progression.
+                        result.allEpisodes = meta.videos
+                            .filter((v) => v.season !== 0 && v.season != null && v.episode != null)
+                            .map((v) => ({
+                                episode: v.episode,
+                                released: v.released || null,
+                                season: v.season,
+                                thumbnail: v.thumbnail || null,
+                                title: v.title || v.name || null,
+                            }))
+                            .sort((a, b) => a.season - b.season || a.episode - b.episode);
+
+                        let episodeData = null;
+
+                        // Ensure season and episode are numbers
+                        // Default season to 1 if null/undefined (common for anime without explicit season numbers)
+                        const seasonNum =
+                            season !== undefined && season !== null ? Number(season) : 1;
+                        const episodeNum =
+                            episode !== undefined && episode !== null ? Number(episode) : undefined;
+
+                        // First try to match by video_id if provided (it already has the format "tt22202452:1:1")
+                        // Skip this for Kitsu IDs since they don't match Cinemeta's format
+                        if (videoId && !videoId.startsWith("kitsu:")) {
+                            episodeData = meta.videos.find((v) => v.id === videoId);
+                            if (episodeData) {
+                                console.log(
+                                    `[ActivityMonitor] Found episode by video_id: ${videoId}`
+                                );
+                            }
+                        }
+
+                        // If not found, try to match by constructing the episode ID format: "tt8080122:1:1"
+                        if (
+                            !episodeData &&
+                            seasonNum !== undefined &&
+                            episodeNum !== undefined &&
+                            !Number.isNaN(seasonNum) &&
+                            !Number.isNaN(episodeNum) &&
+                            baseId
+                        ) {
+                            const constructedId = `${baseId}:${seasonNum}:${episodeNum}`;
+                            episodeData = meta.videos.find((v) => v.id === constructedId);
+                            if (episodeData) {
+                                console.log(
+                                    `[ActivityMonitor] Found episode by constructed ID: ${constructedId}`
+                                );
+                            }
+                        }
+
+                        // If still not found, try to match by season and episode number directly
+                        // Cinemeta uses 1-indexed seasons/episodes with both 'episode' and 'number' fields
+                        if (
+                            !episodeData &&
+                            seasonNum !== undefined &&
+                            episodeNum !== undefined &&
+                            !Number.isNaN(seasonNum) &&
+                            !Number.isNaN(episodeNum)
+                        ) {
+                            episodeData = meta.videos.find((v) => {
+                                // Match by season and episode (exact numeric match)
+                                if (v.season === seasonNum && v.episode === episodeNum) {
+                                    return true;
+                                }
+                                // Match by season and number (some entries use 'number' instead of 'episode')
+                                if (v.season === seasonNum && v.number === episodeNum) {
+                                    return true;
+                                }
+                                return false;
+                            });
+                            if (episodeData) {
+                                console.log(
+                                    `[ActivityMonitor] Found episode by season/episode: S${seasonNum}E${episodeNum}`
+                                );
+                            }
+                        }
+
+                        if (episodeData) {
+                            // Debug: Log what we found
+                            console.log(
+                                `[ActivityMonitor] Episode found: id=${episodeData.id}, title="${episodeData.title}", hasTitle=${!!episodeData.title}, keys=${Object.keys(episodeData).join(",")}`
+                            );
+
+                            result.episode = {
+                                overview: episodeData.overview || episodeData.description || null,
+                                released: episodeData.released || null,
+                                thumbnail: episodeData.thumbnail || null,
+                                title: episodeData.title || episodeData.name || null,
+                            };
+
+                            // Debug: Log what we're setting
+                            console.log(
+                                `[ActivityMonitor] Setting episode title to: "${result.episode.title}"`
+                            );
+                        } else {
+                            console.log(
+                                `[ActivityMonitor] Episode NOT found: Looking for video_id=${videoId || "none"}, season=${season}, episode=${episode}, baseId=${baseId}`
+                            );
+                            if (meta.videos && meta.videos.length > 0) {
+                                console.log(
+                                    `[ActivityMonitor] Available video IDs (first 5): ${meta.videos
+                                        .slice(0, 5)
+                                        .map((v) => v.id)
+                                        .join(", ")}`
+                                );
+                            }
+                        }
+                    }
+
+                    // OMDb ratings (Rotten Tomatoes / Metacritic), keyed off the real
+                    // IMDb ID Cinemeta just confirmed - additive, resolves to nulls
+                    // (not an error) when OMDB_API_KEY is unset.
+                    result.rottenTomatoes = null;
+                    result.metacritic = null;
+                    result.boxOffice = null;
+                    result.rated = null;
+                    if (result.imdb_id) {
+                        const omdbRatings = await fetchOmdbRatings(
+                            result.imdb_id,
+                            omdbApiKey,
+                            omdbOpts
+                        );
+                        if (omdbRatings) {
+                            result.rottenTomatoes = omdbRatings.rottenTomatoes;
+                            result.metacritic = omdbRatings.metacritic;
+                            result.boxOffice = omdbRatings.boxOffice;
+                            result.rated = omdbRatings.rated;
+                        }
+                    }
+
+                    rememberMetadata(cacheKey, result);
+                    return result;
+                }
+            }
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === "AbortError") {
+                // Timeout - silently fail
+            } else {
+                throw fetchError;
+            }
+        }
+    } catch {
+        // Silently fail - metadata is optional
+    }
+
+    return null;
 }
 
-async function sendActivityNotification(webhookUrl, activities, prisma, accountId, decrypt) {
-  try {
-    const { resolveOmdbKeyForAccount } = require('./listImport')
-    const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountId)
-    // Decorating a notification is the definition of work nobody is waiting
-    // on, so it is the one OMDb consumer quota autopilot may stand down.
-    // (Content-rating checks deliberately are NOT - deferring those would
-    // let unrated titles past an enforced kid-safe list to save quota.)
-    const autopilotOpts = await require('./omdb').backgroundOmdbOpts(prisma, accountId)
-    // Send one embed per activity (one notification per item)
-    for (const activity of activities) {
-      const user = activity.user
-      const item = activity.item
-      const watchDate = new Date(activity.watchDate)
+async function sendActivityNotification(webhookUrl, activities, prisma, accountId, _decrypt) {
+    try {
+        const { resolveOmdbKeyForAccount } = require("./listImport");
+        const omdbApiKey = await resolveOmdbKeyForAccount(prisma, accountId);
+        // Decorating a notification is the definition of work nobody is waiting
+        // on, so it is the one OMDb consumer quota autopilot may stand down.
+        // (Content-rating checks deliberately are NOT - deferring those would
+        // let unrated titles past an enforced kid-safe list to save quota.)
+        const autopilotOpts = await require("./omdb").backgroundOmdbOpts(prisma, accountId);
+        // Send one embed per activity (one notification per item)
+        for (const activity of activities) {
+            const user = activity.user;
+            const item = activity.item;
+            const watchDate = new Date(activity.watchDate);
 
-      // Build title with show/movie name and SXXEXX for shows
-      let itemTitle = item.name || 'Unknown'
-      if (item.year) {
-        const yearStr = String(item.year).replace(/–\s*$/, '').replace(/-\s*$/, '')
-        itemTitle += ` (${yearStr})`
-      }
+            // Build title with show/movie name and SXXEXX for shows
+            let itemTitle = item.name || "Unknown";
+            if (item.year) {
+                const yearStr = String(item.year).replace(/–\s*$/, "").replace(/-\s*$/, "");
+                itemTitle += ` (${yearStr})`;
+            }
 
-      if (item.type === 'series' && item.season !== undefined && item.episode !== undefined) {
-        itemTitle += ` (S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')})`
-      }
+            if (item.type === "series" && item.season !== undefined && item.episode !== undefined) {
+                itemTitle += ` (S${String(item.season).padStart(2, "0")}E${String(item.episode).padStart(2, "0")})`;
+            }
 
-      // Fetch metadata from Cinemeta API (description, cast, episode info)
-      // Use video_id if available (it already contains season:episode), otherwise use _id with season/episode
-      const metadata = await fetchMetadata(item._id, item.type, item.video_id, omdbApiKey, autopilotOpts)
+            // Fetch metadata from Cinemeta API (description, cast, episode info)
+            // Use video_id if available (it already contains season:episode), otherwise use _id with season/episode
+            const metadata = await fetchMetadata(
+                item._id,
+                item.type,
+                item.video_id,
+                omdbApiKey,
+                autopilotOpts
+            );
 
-      const fields = []
+            const fields = [];
 
-      // Field 1: Overview - use episode overview for series, show description for movies
-      let overviewText = null
-      if (item.type === 'series' && metadata?.episode?.overview) {
-        overviewText = metadata.episode.overview
-      } else if (metadata?.description) {
-        overviewText = metadata.description
-      }
+            // Field 1: Overview - use episode overview for series, show description for movies
+            let overviewText = null;
+            if (item.type === "series" && metadata?.episode?.overview) {
+                overviewText = metadata.episode.overview;
+            } else if (metadata?.description) {
+                overviewText = metadata.description;
+            }
 
-      if (overviewText) {
-        fields.push({
-          name: 'Overview',
-          value: overviewText.length > 1024 ? overviewText.substring(0, 1021) + '...' : overviewText,
-          inline: false
-        })
-      }
+            if (overviewText) {
+                fields.push({
+                    inline: false,
+                    name: "Overview",
+                    value:
+                        overviewText.length > 1024
+                            ? `${overviewText.slice(0, 1021)}...`
+                            : overviewText,
+                });
+            }
 
-      // Field 2: Title (episode title for series) - inline
-      if (item.type === 'series' && metadata?.episode?.title) {
-        fields.push({
-          name: 'Title',
-          value: metadata.episode.title,
-          inline: true
-        })
-      }
+            // Field 2: Title (episode title for series) - inline
+            if (item.type === "series" && metadata?.episode?.title) {
+                fields.push({
+                    inline: true,
+                    name: "Title",
+                    value: metadata.episode.title,
+                });
+            }
 
-      // Field 3: Played (timestamp) - inline (same row as Title)
-      fields.push({
-        name: 'Played',
-        value: `<t:${Math.floor(watchDate.getTime() / 1000)}:R>`,
-        inline: true
-      })
+            // Field 3: Played (timestamp) - inline (same row as Title)
+            fields.push({
+                inline: true,
+                name: "Played",
+                value: `<t:${Math.floor(watchDate.getTime() / 1000)}:R>`,
+            });
 
-      // Field 4: Genres - inline
-      if (metadata?.genres && Array.isArray(metadata.genres) && metadata.genres.length > 0) {
-        fields.push({
-          name: 'Genres',
-          value: metadata.genres.join(' ∙ '),
-          inline: true
-        })
-      }
+            // Field 4: Genres - inline
+            if (metadata?.genres && Array.isArray(metadata.genres) && metadata.genres.length > 0) {
+                fields.push({
+                    inline: true,
+                    name: "Genres",
+                    value: metadata.genres.join(" ∙ "),
+                });
+            }
 
-      // Field 5: Links (combined TMDb and IMDb) - inline
-      const links = []
-      if (metadata?.moviedb_id) {
-        const tmdbUrl = item.type === 'movie'
-          ? `https://www.themoviedb.org/movie/${metadata.moviedb_id}`
-          : `https://www.themoviedb.org/tv/${metadata.moviedb_id}`
-        links.push(`[TMDb](${tmdbUrl})`)
-      }
-      if (metadata?.imdb_id) {
-        const imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`
-        links.push(`[IMDb](${imdbUrl})`)
-      }
+            // Field 5: Links (combined TMDb and IMDb) - inline
+            const links = [];
+            if (metadata?.moviedb_id) {
+                const tmdbUrl =
+                    item.type === "movie"
+                        ? `https://www.themoviedb.org/movie/${metadata.moviedb_id}`
+                        : `https://www.themoviedb.org/tv/${metadata.moviedb_id}`;
+                links.push(`[TMDb](${tmdbUrl})`);
+            }
+            if (metadata?.imdb_id) {
+                const imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+                links.push(`[IMDb](${imdbUrl})`);
+            }
 
-      if (links.length > 0) {
-        fields.push({
-          name: 'Links',
-          value: links.join(' ∙ '),
-          inline: true
-        })
-      }
+            if (links.length > 0) {
+                fields.push({
+                    inline: true,
+                    name: "Links",
+                    value: links.join(" ∙ "),
+                });
+            }
 
-      // Field 6: Released date - inline
-      // For series, use episode release date; for movies, use show/movie release date
-      let releasedDate = null
-      if (item.type === 'series' && metadata?.episode?.released) {
-        releasedDate = new Date(metadata.episode.released)
-      } else if (metadata?.released) {
-        releasedDate = new Date(metadata.released)
-      }
+            // Field 6: Released date - inline
+            // For series, use episode release date; for movies, use show/movie release date
+            let releasedDate = null;
+            if (item.type === "series" && metadata?.episode?.released) {
+                releasedDate = new Date(metadata.episode.released);
+            } else if (metadata?.released) {
+                releasedDate = new Date(metadata.released);
+            }
 
-      if (releasedDate && !isNaN(releasedDate.getTime())) {
-        fields.push({
-          name: 'Released',
-          value: `<t:${Math.floor(releasedDate.getTime() / 1000)}:D>`,
-          inline: true
-        })
-      }
+            if (releasedDate && !Number.isNaN(releasedDate.getTime())) {
+                fields.push({
+                    inline: true,
+                    name: "Released",
+                    value: `<t:${Math.floor(releasedDate.getTime() / 1000)}:D>`,
+                });
+            }
 
-      // Generate user avatar URL (tries Gravatar first, falls back to colored initial)
-      const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex)
+            // Generate user avatar URL (tries Gravatar first, falls back to colored initial)
+            const avatarUrl = await getUserAvatarUrl(user.username, user.email, user.colorIndex);
 
-      const embed = {
-        title: itemTitle, // Just the show/movie name with SXXEXX for shows
-        author: {
-          name: `${user.username} played`,
-          icon_url: avatarUrl || undefined
-        },
-        description: '', // Empty description, using Overview field instead
-        color: 0x00ff00, // Green
-        fields: fields,
-        timestamp: new Date().toISOString()
-      }
+            const embed = {
+                author: {
+                    icon_url: avatarUrl || undefined,
+                    name: `${user.username} played`,
+                },
+                color: 0x00_ff_00, // Green
+                description: "", // Empty description, using Overview field instead
+                fields,
+                timestamp: new Date().toISOString(),
+                title: itemTitle, // Just the show/movie name with SXXEXX for shows
+            };
 
-      // Add thumbnail (use poster, not episode thumbnail)
-      if (item.poster) {
-        embed.thumbnail = {
-          url: item.poster
+            // Add thumbnail (use poster, not episode thumbnail)
+            if (item.poster) {
+                embed.thumbnail = {
+                    url: item.poster,
+                };
+            }
+
+            // Add footer with SlickSync version
+            let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+            if (!appVersion) {
+                try {
+                    appVersion = require("../../package.json")?.version || "";
+                } catch {
+                    // The version label is optional when package metadata is unavailable.
+                }
+            }
+            if (appVersion) {
+                embed.footer = { text: `SlickSync v${appVersion}` };
+            }
+
+            await postDiscord(webhookUrl, null, {
+                avatar_url:
+                    "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+                embeds: [embed],
+            });
         }
-      }
-
-      // Add footer with SlickSync version
-      let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-      if (!appVersion) {
-        try { appVersion = require('../../package.json')?.version || '' } catch { }
-      }
-      if (appVersion) {
-        embed.footer = { text: `SlickSync v${appVersion}` }
-      }
-
-      await postDiscord(webhookUrl, null, {
-        embeds: [embed],
-        avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-      })
+    } catch {
+        // Silently fail
     }
-  } catch (error) {
-    // Silently fail
-  }
 }
 
-async function sendShareNotification(webhookUrl, sharerUsername, sharerEmail, sharerColorIndex, item) {
-  try {
-    // Build title with show/movie name
-    let itemTitle = item.itemName || 'Unknown'
+async function sendShareNotification(
+    webhookUrl,
+    sharerUsername,
+    sharerEmail,
+    sharerColorIndex,
+    item
+) {
+    try {
+        // Build title with show/movie name
+        const itemTitle = item.itemName || "Unknown";
 
-    // Extract base ID for metadata lookup
-    const itemId = item.itemId || ''
-    const baseId = itemId.split(':')[0]
+        // Extract base ID for metadata lookup
+        const itemId = item.itemId || "";
+        const baseId = itemId.split(":")[0];
 
-    // Fetch metadata from Cinemeta API
-    const metadata = await fetchMetadata(baseId, item.itemType, null)
+        // Fetch metadata from Cinemeta API
+        const metadata = await fetchMetadata(baseId, item.itemType, null);
 
-    const fields = []
+        const fields = [];
 
-    // Field 1: Overview/Description
-    if (metadata?.description) {
-      fields.push({
-        name: 'Overview',
-        value: metadata.description.length > 1024 ? metadata.description.substring(0, 1021) + '...' : metadata.description,
-        inline: false
-      })
-    }
+        // Field 1: Overview/Description
+        if (metadata?.description) {
+            fields.push({
+                inline: false,
+                name: "Overview",
+                value:
+                    metadata.description.length > 1024
+                        ? `${metadata.description.slice(0, 1021)}...`
+                        : metadata.description,
+            });
+        }
 
-    // Field 2: Shared timestamp - inline
-    fields.push({
-      name: 'Shared',
-      value: `<t:${Math.floor(Date.now() / 1000)}:R>`,
-      inline: true
-    })
-
-    // Field 3: Genres - inline
-    if (metadata?.genres && Array.isArray(metadata.genres) && metadata.genres.length > 0) {
-      fields.push({
-        name: 'Genres',
-        value: metadata.genres.join(' ∙ '),
-        inline: true
-      })
-    }
-
-    // Field 4: Links (combined TMDb and IMDb) - inline
-    const links = []
-    if (metadata?.moviedb_id) {
-      const tmdbUrl = item.itemType === 'movie'
-        ? `https://www.themoviedb.org/movie/${metadata.moviedb_id}`
-        : `https://www.themoviedb.org/tv/${metadata.moviedb_id}`
-      links.push(`[TMDb](${tmdbUrl})`)
-    }
-    if (metadata?.imdb_id) {
-      const imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`
-      links.push(`[IMDb](${imdbUrl})`)
-    }
-
-    if (links.length > 0) {
-      fields.push({
-        name: 'Links',
-        value: links.join(' ∙ '),
-        inline: true
-      })
-    }
-
-    // Field 5: Released date - inline
-    if (metadata?.released) {
-      const releasedDate = new Date(metadata.released)
-      if (!isNaN(releasedDate.getTime())) {
+        // Field 2: Shared timestamp - inline
         fields.push({
-          name: 'Released',
-          value: `<t:${Math.floor(releasedDate.getTime() / 1000)}:D>`,
-          inline: true
-        })
-      }
+            inline: true,
+            name: "Shared",
+            value: `<t:${Math.floor(Date.now() / 1000)}:R>`,
+        });
+
+        // Field 3: Genres - inline
+        if (metadata?.genres && Array.isArray(metadata.genres) && metadata.genres.length > 0) {
+            fields.push({
+                inline: true,
+                name: "Genres",
+                value: metadata.genres.join(" ∙ "),
+            });
+        }
+
+        // Field 4: Links (combined TMDb and IMDb) - inline
+        const links = [];
+        if (metadata?.moviedb_id) {
+            const tmdbUrl =
+                item.itemType === "movie"
+                    ? `https://www.themoviedb.org/movie/${metadata.moviedb_id}`
+                    : `https://www.themoviedb.org/tv/${metadata.moviedb_id}`;
+            links.push(`[TMDb](${tmdbUrl})`);
+        }
+        if (metadata?.imdb_id) {
+            const imdbUrl = `https://www.imdb.com/title/${metadata.imdb_id}`;
+            links.push(`[IMDb](${imdbUrl})`);
+        }
+
+        if (links.length > 0) {
+            fields.push({
+                inline: true,
+                name: "Links",
+                value: links.join(" ∙ "),
+            });
+        }
+
+        // Field 5: Released date - inline
+        if (metadata?.released) {
+            const releasedDate = new Date(metadata.released);
+            if (!Number.isNaN(releasedDate.getTime())) {
+                fields.push({
+                    inline: true,
+                    name: "Released",
+                    value: `<t:${Math.floor(releasedDate.getTime() / 1000)}:D>`,
+                });
+            }
+        }
+
+        // Generate sharer's avatar URL
+        const avatarUrl = await getUserAvatarUrl(sharerUsername, sharerEmail, sharerColorIndex);
+
+        const embed = {
+            author: {
+                icon_url: avatarUrl || undefined,
+                name: `${sharerUsername} shared`,
+            },
+            color: 0x58_65_f2, // Discord Blurple for shares (different from green for plays)
+            description: "",
+            fields,
+            timestamp: new Date().toISOString(),
+            title: itemTitle,
+        };
+
+        // Add thumbnail (poster)
+        if (item.poster) {
+            embed.thumbnail = {
+                url: item.poster,
+            };
+        }
+
+        // Add footer with SlickSync version
+        let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+        if (!appVersion) {
+            try {
+                appVersion = require("../../package.json")?.version || "";
+            } catch {
+                // The version label is optional when package metadata is unavailable.
+            }
+        }
+        if (appVersion) {
+            embed.footer = { text: `SlickSync v${appVersion}` };
+        }
+
+        await postDiscord(webhookUrl, null, {
+            avatar_url:
+                "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+            embeds: [embed],
+        });
+
+        return true;
+    } catch (error) {
+        console.error("[ShareNotification] Failed to send:", error.message);
+        return false;
     }
-
-    // Generate sharer's avatar URL
-    const avatarUrl = await getUserAvatarUrl(sharerUsername, sharerEmail, sharerColorIndex)
-
-    const embed = {
-      title: itemTitle,
-      author: {
-        name: `${sharerUsername} shared`,
-        icon_url: avatarUrl || undefined
-      },
-      description: '',
-      color: 0x5865F2, // Discord Blurple for shares (different from green for plays)
-      fields: fields,
-      timestamp: new Date().toISOString()
-    }
-
-    // Add thumbnail (poster)
-    if (item.poster) {
-      embed.thumbnail = {
-        url: item.poster
-      }
-    }
-
-    // Add footer with SlickSync version
-    let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-    if (!appVersion) {
-      try { appVersion = require('../../package.json')?.version || '' } catch { } 
-    }
-    if (appVersion) {
-      embed.footer = { text: `SlickSync v${appVersion}` }
-    }
-
-    await postDiscord(webhookUrl, null, {
-      embeds: [embed],
-      avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png'
-    })
-
-    return true
-  } catch (error) {
-    console.error('[ShareNotification] Failed to send:', error.message)
-    return false
-  }
 }
 
 /**
@@ -635,71 +740,105 @@ async function sendShareNotification(webhookUrl, sharerUsername, sharerEmail, sh
  * @param {string} [options.sourceLogo] - Optional source logo URL
  * @returns {Object} Discord embed object
  */
-function createSyncEmbed({ groupsCount, usersCount, syncMode, diffs = [], sourceLabel, sourceLogo, accountUuid }) {
-  const fields = []
-  
-  // Format diffs as one code block per addon (Resources / Catalogs)
-  if (Array.isArray(diffs) && diffs.length > 0) {
-    for (const item of diffs) {
-      const addonName = item?.name || item?.id
-      const d = item?.diffs || {}
-      const sections = []
-      const resLines = []
-      const catLines = []
-      
-      if (Array.isArray(d.addedResources)) d.addedResources.forEach(r => resLines.push(`+ ${r}`))
-      if (Array.isArray(d.removedResources)) d.removedResources.forEach(r => resLines.push(`- ${r}`))
-      if (Array.isArray(d.addedCatalogs)) d.addedCatalogs.forEach(label => catLines.push(`+ ${label}`))
-      if (Array.isArray(d.removedCatalogs)) d.removedCatalogs.forEach(label => catLines.push(`- ${label}`))
-      
-      if (resLines.length) {
-        sections.push('Resources:')
-        sections.push(...resLines)
-      }
-      if (catLines.length) {
-        if (resLines.length) sections.push('')
-        sections.push('Catalogs:')
-        sections.push(...catLines)
-      }
-      
-      if (sections.length) {
-        fields.push({ name: addonName, value: '```' + sections.join('\n') + '```', inline: false })
-      }
+function createSyncEmbed({
+    groupsCount,
+    usersCount,
+    syncMode: _syncMode,
+    diffs = [],
+    sourceLabel,
+    sourceLogo,
+    accountUuid,
+}) {
+    const fields = [];
+
+    // Format diffs as one code block per addon (Resources / Catalogs)
+    if (Array.isArray(diffs) && diffs.length > 0) {
+        for (const item of diffs) {
+            const addonName = item?.name || item?.id;
+            const d = item?.diffs || {};
+            const sections = [];
+            const resLines = [];
+            const catLines = [];
+
+            if (Array.isArray(d.addedResources)) {
+                d.addedResources.forEach((r) => {
+                    resLines.push(`+ ${r}`);
+                });
+            }
+            if (Array.isArray(d.removedResources)) {
+                d.removedResources.forEach((r) => {
+                    resLines.push(`- ${r}`);
+                });
+            }
+            if (Array.isArray(d.addedCatalogs)) {
+                d.addedCatalogs.forEach((label) => {
+                    catLines.push(`+ ${label}`);
+                });
+            }
+            if (Array.isArray(d.removedCatalogs)) {
+                d.removedCatalogs.forEach((label) => {
+                    catLines.push(`- ${label}`);
+                });
+            }
+
+            if (resLines.length) {
+                sections.push("Resources:");
+                sections.push(...resLines);
+            }
+            if (catLines.length) {
+                if (resLines.length) {
+                    sections.push("");
+                }
+                sections.push("Catalogs:");
+                sections.push(...catLines);
+            }
+
+            if (sections.length) {
+                fields.push({
+                    inline: false,
+                    name: addonName,
+                    value: `\`\`\`${sections.join("\n")}\`\`\``,
+                });
+            }
+        }
     }
-  }
 
-  const embed = {
-    title: `Sync Succeeded on ${groupsCount} Groups (${usersCount} Users)`,
-    color: 0x808080,
-    fields: fields,
-    timestamp: new Date().toISOString()
-  }
+    const embed = {
+        color: 0x80_80_80,
+        fields,
+        timestamp: new Date().toISOString(),
+        title: `Sync Succeeded on ${groupsCount} Groups (${usersCount} Users)`,
+    };
 
-  // Add author block if source/logo provided
-  if (sourceLabel && sourceLabel !== 'API') {
-    embed.author = {
-      name: sourceLabel
+    // Add author block if source/logo provided
+    if (sourceLabel && sourceLabel !== "API") {
+        embed.author = {
+            name: sourceLabel,
+        };
+        if (sourceLogo) {
+            embed.author.icon_url = sourceLogo;
+        }
     }
-    if (sourceLogo) {
-      embed.author.icon_url = sourceLogo
+    // Add account as a dedicated field (copy-friendly, no spoiler)
+    if (accountUuid) {
+        // Use code block for easy copy on all clients
+        fields.unshift({ inline: false, name: "Account", value: `\`\`\`${accountUuid}\`\`\`` });
     }
-  }
-  // Add account as a dedicated field (copy-friendly, no spoiler)
-  if (accountUuid) {
-    // Use code block for easy copy on all clients
-    fields.unshift({ name: 'Account', value: '```' + accountUuid + '```', inline: false })
-  }
 
-  // Footer: SlickSync version (use same source as UI; fall back to package.json)
-  let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || ''
-  if (!appVersion) {
-    try { appVersion = require('../../package.json')?.version || '' } catch {}
-  }
-  if (appVersion) {
-    embed.footer = { text: `SlickSync v${appVersion}` }
-  }
+    // Footer: SlickSync version (use same source as UI; fall back to package.json)
+    let appVersion = process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || "";
+    if (!appVersion) {
+        try {
+            appVersion = require("../../package.json")?.version || "";
+        } catch {
+            // The version label is optional when package metadata is unavailable.
+        }
+    }
+    if (appVersion) {
+        embed.footer = { text: `SlickSync v${appVersion}` };
+    }
 
-  return embed
+    return embed;
 }
 
 /**
@@ -708,13 +847,16 @@ function createSyncEmbed({ groupsCount, usersCount, syncMode, diffs = [], source
  * @param {Object} options - Same options as createSyncEmbed
  */
 async function sendSyncNotification(webhookUrl, options) {
-  if (!webhookUrl) return
-  
-  const embed = createSyncEmbed(options)
-  await postDiscord(webhookUrl, null, { 
-    embeds: [embed], 
-    avatar_url: 'https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png' 
-  })
+    if (!webhookUrl) {
+        return;
+    }
+
+    const embed = createSyncEmbed(options);
+    await postDiscord(webhookUrl, null, {
+        avatar_url:
+            "https://raw.githubusercontent.com/iamneur0/slicksync/refs/heads/main/client/public/logo-black.png",
+        embeds: [embed],
+    });
 }
 
 // Posts an actual file attachment (not just an embed image URL) to a
@@ -724,39 +866,57 @@ async function sendSyncNotification(webhookUrl, options) {
 // part alongside the file part; Node/Bun's global FormData + Blob make that
 // a native fetch call instead of hand-rolling multipart boundaries.
 async function postDiscordFile(webhookUrl, buffer, filename, content) {
-  try {
-    if (!webhookUrl || !buffer) return false
-    const form = new FormData()
-    if (content) form.append('payload_json', JSON.stringify({ content }))
-    form.append('files[0]', new Blob([buffer], { type: 'image/png' }), filename)
-    await mayContact(webhookUrl)
-    const res = await fetch(webhookUrl, { method: 'POST', body: form, redirect: 'error' })
-    return res.ok
-  } catch {
-    return false
-  }
+    try {
+        if (!(webhookUrl && buffer)) {
+            return false;
+        }
+        const form = new FormData();
+        if (content) {
+            form.append("payload_json", JSON.stringify({ content }));
+        }
+        form.append("files[0]", new Blob([buffer], { type: "image/png" }), filename);
+        await mayContact(webhookUrl);
+        const res = await fetch(webhookUrl, { body: form, method: "POST", redirect: "error" });
+        return res.ok;
+    } catch {
+        return false;
+    }
 }
 
-async function postNtfy(ntfyUrl, topic, { title, message, priority = 'default', tags = [] } = {}) {
-  try {
-    if (!ntfyUrl || !topic) return
-    const base = String(ntfyUrl).replace(/\/+$/, '')
-    const url = `${base}/${encodeURIComponent(topic)}`
-    const headers = { 'Content-Type': 'text/plain; charset=utf-8' }
-    if (title) headers['Title'] = title
-    if (priority) headers['Priority'] = priority
-    if (Array.isArray(tags) && tags.length) headers['Tags'] = tags.join(',')
-    await require('./safeUrl').safeFetch(url, { method: 'POST', headers, body: message || '' }, require('./safeUrl').instancePolicy())
-  } catch {}
+async function postNtfy(ntfyUrl, topic, { title, message, priority = "default", tags = [] } = {}) {
+    try {
+        if (!(ntfyUrl && topic)) {
+            return;
+        }
+        const base = String(ntfyUrl).replace(/\/+$/, "");
+        const url = `${base}/${encodeURIComponent(topic)}`;
+        const headers = { "Content-Type": "text/plain; charset=utf-8" };
+        if (title) {
+            headers.Title = title;
+        }
+        if (priority) {
+            headers.Priority = priority;
+        }
+        if (Array.isArray(tags) && tags.length) {
+            headers.Tags = tags.join(",");
+        }
+        await require("./safeUrl").safeFetch(
+            url,
+            { body: message || "", headers, method: "POST" },
+            require("./safeUrl").instancePolicy()
+        );
+    } catch {
+        // A failed notification delivery must not interrupt the operation being reported.
+    }
 }
 
 module.exports = {
-  postDiscord,
-  postDiscordFile,
-  postNtfy,
-  createSyncEmbed,
-  sendSyncNotification,
-  fetchMetadata,
-  sendActivityNotification,
-  sendShareNotification
-}
+    createSyncEmbed,
+    fetchMetadata,
+    postDiscord,
+    postDiscordFile,
+    postNtfy,
+    sendActivityNotification,
+    sendShareNotification,
+    sendSyncNotification,
+};

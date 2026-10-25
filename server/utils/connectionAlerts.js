@@ -25,26 +25,26 @@
  * out should not be something to discover and opt into first.
  */
 
-const SETTLE_MS = 15 * 60 * 1000
-const ICON = '/android-chrome-192x192.png'
+const SETTLE_MS = 15 * 60 * 1000;
+const ICON = "/android-chrome-192x192.png";
 
 function outageKey(userId, since) {
-  return `connection-${userId}-${new Date(since).getTime()}`
+    return `connection-${userId}-${new Date(since).getTime()}`;
 }
 
 // A server outage is keyed by the server and the start of the outage, like a
 // person's; recovery finds it by the server prefix since each person on the
 // server noticed the outage a poll apart.
 function serverOutagePrefix(serverKey) {
-  return `connection-server-${serverKey}-`
+    return `connection-server-${serverKey}-`;
 }
 
 function isConnectionIssue(message) {
-  return /^Connection issue:/i.test(message || '')
+    return /^Connection issue:/i.test(message || "");
 }
 
 function serverKeyOf(person) {
-  return require('./jellyfinServerCollections').serverKeyOf(person)
+    return require("./jellyfinServerCollections").serverKeyOf(person);
 }
 
 /**
@@ -55,14 +55,16 @@ function serverKeyOf(person) {
  * no answer at all, or a 5xx (a reverse proxy with nothing behind it).
  */
 async function serverAnswers(url) {
-  try {
-    const { jfRequest } = require('../providers/jellyfinAuth')
-    await jfRequest(url, '/System/Info/Public', { timeoutMs: 5000 })
-    return true
-  } catch (e) {
-    if (e?.unreachable) return false
-    return Number(e?.status) > 0 && Number(e.status) < 500
-  }
+    try {
+        const { jfRequest } = require("../providers/jellyfinAuth");
+        await jfRequest(url, "/System/Info/Public", { timeoutMs: 5000 });
+        return true;
+    } catch (e) {
+        if (e?.unreachable) {
+            return false;
+        }
+        return Number(e?.status) > 0 && Number(e.status) < 500;
+    }
 }
 
 /**
@@ -72,75 +74,133 @@ async function serverAnswers(url) {
  * by the failure recorded on the previous pass.
  */
 async function everyoneOnServerFailing(prisma, accountId, user) {
-  if (user.providerType !== 'jellyfin' || !user.jellyfinServerUrl) return null
-  const key = serverKeyOf(user)
-  if (!key) return null
-  const people = (await prisma.user.findMany({
-    where: { accountId, isActive: true, providerType: 'jellyfin', jellyfinToken: { not: null } },
-    select: { id: true, username: true, jellyfinServerUrl: true, jellyfinServerId: true, jellyfinServerKind: true, providerConnectionError: true, providerConnectionErrorAt: true },
-  })).filter((p) => serverKeyOf(p) === key)
-  if (!people.some((p) => p.id === user.id)) return null
-  if (!people.every((p) => isConnectionIssue(p.providerConnectionError) && p.providerConnectionErrorAt)) return null
-  return { key, people }
+    if (user.providerType !== "jellyfin" || !user.jellyfinServerUrl) {
+        return null;
+    }
+    const key = serverKeyOf(user);
+    if (!key) {
+        return null;
+    }
+    const people = (
+        await prisma.user.findMany({
+            select: {
+                id: true,
+                jellyfinServerId: true,
+                jellyfinServerKind: true,
+                jellyfinServerUrl: true,
+                providerConnectionError: true,
+                providerConnectionErrorAt: true,
+                username: true,
+            },
+            where: {
+                accountId,
+                isActive: true,
+                jellyfinToken: { not: null },
+                providerType: "jellyfin",
+            },
+        })
+    ).filter((p) => serverKeyOf(p) === key);
+    if (!people.some((p) => p.id === user.id)) {
+        return null;
+    }
+    if (
+        !people.every(
+            (p) => isConnectionIssue(p.providerConnectionError) && p.providerConnectionErrorAt
+        )
+    ) {
+        return null;
+    }
+    return { key, people };
 }
 
 function serverName(user) {
-  try {
-    const { displayServer } = require('../providers/jellyfinAuth')
-    return displayServer(user.jellyfinServerUrl) || user.jellyfinServerUrl
-  } catch {
-    return user.jellyfinServerUrl
-  }
+    try {
+        const { displayServer } = require("../providers/jellyfinAuth");
+        return displayServer(user.jellyfinServerUrl) || user.jellyfinServerUrl;
+    } catch {
+        return user.jellyfinServerUrl;
+    }
 }
 
 function names(people) {
-  const list = people.map((p) => p.username || 'Someone')
-  if (list.length <= 3) return list.join(', ').replace(/, ([^,]*)$/, ' and $1')
-  return `${list.slice(0, 2).join(', ')} and ${list.length - 2} others`
+    const list = people.map((p) => p.username || "Someone");
+    if (list.length <= 3) {
+        return list.join(", ").replace(/, ([^,]*)$/, " and $1");
+    }
+    return `${list.slice(0, 2).join(", ")} and ${list.length - 2} others`;
 }
 
 function providerLabel(user) {
-  if (user.providerType === 'nuvio') return 'Nuvio'
-  if (user.providerType === 'jellyfin') {
-    if (user.jellyfinServerKind === 'aiostreams') return 'AIOStreams'
-    if (user.jellyfinServerKind === 'aiometadata') return 'AIOMetadata'
-    return 'Jellyfin'
-  }
-  return 'Stremio'
+    if (user.providerType === "nuvio") {
+        return "Nuvio";
+    }
+    if (user.providerType === "jellyfin") {
+        if (user.jellyfinServerKind === "aiostreams") {
+            return "AIOStreams";
+        }
+        if (user.jellyfinServerKind === "aiometadata") {
+            return "AIOMetadata";
+        }
+        return "Jellyfin";
+    }
+    return "Stremio";
 }
 
 async function readConfig(prisma, accountId) {
-  const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-  let cfg = account?.sync
-  if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = {} } }
-  return cfg && typeof cfg === 'object' ? cfg : {}
+    const account = await prisma.appAccount.findUnique({
+        select: { sync: true },
+        where: { id: accountId },
+    });
+    let cfg = account?.sync;
+    if (typeof cfg === "string") {
+        try {
+            cfg = JSON.parse(cfg);
+        } catch {
+            cfg = {};
+        }
+    }
+    return cfg && typeof cfg === "object" ? cfg : {};
 }
 
 async function alreadySent(prisma, accountId, dedupeKey) {
-  const row = await prisma.notification.findUnique({
-    where: { accountId_dedupeKey: { accountId, dedupeKey } },
-    select: { id: true },
-  }).catch(() => null)
-  return !!row
+    const row = await prisma.notification
+        .findUnique({
+            select: { id: true },
+            where: { accountId_dedupeKey: { accountId, dedupeKey } },
+        })
+        .catch(() => null);
+    return !!row;
 }
 
 async function send(prisma, accountId, { title, body, dedupeKey }) {
-  const { createNotification } = require('./notificationStore')
-  await createNotification(prisma, accountId, { type: 'sync', title, body, url: '/users', dedupeKey })
+    const { createNotification } = require("./notificationStore");
+    await createNotification(prisma, accountId, {
+        body,
+        dedupeKey,
+        title,
+        type: "sync",
+        url: "/users",
+    });
 
-  // Digest on: it goes in the digest instead of an immediate push, the
-  // same as addon health. The bell row above is written either way.
-  try {
-    const { isDigestEnabled, queueDigestEntry } = require('./notificationDigest')
-    if (await isDigestEnabled(prisma, accountId)) {
-      await queueDigestEntry(prisma, accountId, 'connection', `${title} — ${body}`)
-      return
+    // Digest on: it goes in the digest instead of an immediate push, the
+    // same as addon health. The bell row above is written either way.
+    try {
+        const { isDigestEnabled, queueDigestEntry } = require("./notificationDigest");
+        if (await isDigestEnabled(prisma, accountId)) {
+            await queueDigestEntry(prisma, accountId, "connection", `${title} — ${body}`);
+            return;
+        }
+    } catch {
+        // Unavailable optional records leave the current result in place.
     }
-  } catch {}
-  try {
-    const { isPushEnabled, sendPushToAccount } = require('./pushNotifications')
-    if (isPushEnabled()) await sendPushToAccount(prisma, accountId, { title, body, icon: ICON, url: '/users' })
-  } catch {}
+    try {
+        const { isPushEnabled, sendPushToAccount } = require("./pushNotifications");
+        if (isPushEnabled()) {
+            await sendPushToAccount(prisma, accountId, { body, icon: ICON, title, url: "/users" });
+        }
+    } catch {
+        // Unavailable optional records leave the current result in place.
+    }
 }
 
 /**
@@ -150,122 +210,179 @@ async function send(prisma, accountId, { title, body, dedupeKey }) {
  * recorded, with its "Reconnect needed: " / "Connection issue: " prefix.
  * `probe` checks whether a server answers (tests pass their own).
  */
-async function onConnectionFailed(prisma, accountId, user, message, since, now = Date.now(), { probe = serverAnswers } = {}) {
-  try {
-    if (!accountId || !user?.id || !since || user.__recordAs) return false
-    const needsReconnect = /^Reconnect needed:/i.test(message || '')
-    const lastedLongEnough = !!user.providerConnectionError && now - new Date(since).getTime() >= SETTLE_MS
-    if (!needsReconnect && !lastedLongEnough) return false
-
-    const dedupeKey = outageKey(user.id, since)
-    if (await alreadySent(prisma, accountId, dedupeKey)) return false
-    const cfg = await readConfig(prisma, accountId)
-    if (cfg.notifyOnConnectionHealth === false) return false
-
-    // The whole server down: one alert for everyone on it.
-    if (!needsReconnect) {
-      const server = await everyoneOnServerFailing(prisma, accountId, user).catch(() => null)
-      if (server) {
-        const prefix = serverOutagePrefix(server.key)
-        if (await openServerOutage(prisma, accountId, prefix)) return false
-        if (!(await probe(user.jellyfinServerUrl))) {
-          const start = Math.min(...server.people.map((p) => new Date(p.providerConnectionErrorAt).getTime()))
-          const label = providerLabel(user)
-          await send(prisma, accountId, {
-            title: `Can't reach the ${label} server ${serverName(user)}`,
-            body: `It has been down for over ${Math.round(SETTLE_MS / 60000)} minutes. Watching isn't being tracked for ${names(server.people)} until it's back.`,
-            dedupeKey: `${prefix}${start}`,
-          })
-          return true
+async function onConnectionFailed(
+    prisma,
+    accountId,
+    user,
+    message,
+    since,
+    now = Date.now(),
+    { probe = serverAnswers } = {}
+) {
+    try {
+        if (!(accountId && user?.id && since) || user.__recordAs) {
+            return false;
         }
-        // It answers - so it isn't the server; each person is told as before.
-      }
-    }
-
-    const name = user.username || 'Someone'
-    const label = providerLabel(user)
-    const detail = String(message || '').replace(/^(Reconnect needed|Connection issue):\s*/i, '').slice(0, 200)
-    // The person too, on any device they turned notifications on for from
-    // their own page: signing in there is the fix, so the tap opens it.
-    if (needsReconnect) {
-      const app = user.providerType === 'nuvio' ? 'nuvio' : user.providerType === 'jellyfin' ? 'jellyfin' : 'stremio'
-      await require('./pushNotifications').sendPushToPerson(prisma, accountId, user.id, {
-        title: 'Sign in to SlickSync again',
-        body: `Your ${label} sign-in stopped working, so your watching isn't being tracked. Tap to sign in again.`,
-        icon: ICON,
-        url: `/login?app=${app}`,
-      }).catch(() => {})
-    }
-    await send(prisma, accountId, needsReconnect
-      ? {
-          title: `${name} needs to reconnect ${label}`,
-          body: `Their ${label} sign-in stopped working, so their watching isn't being tracked. Reconnect them from Users - or they can sign in on their own SlickSync page, which reconnects them too.`,
-          dedupeKey,
+        const needsReconnect = /^Reconnect needed:/i.test(message || "");
+        const lastedLongEnough =
+            !!user.providerConnectionError && now - new Date(since).getTime() >= SETTLE_MS;
+        if (!(needsReconnect || lastedLongEnough)) {
+            return false;
         }
-      : {
-          title: `Can't reach ${name}'s ${label}`,
-          body: `It has been failing for over ${Math.round(SETTLE_MS / 60000)} minutes${detail ? ` (${detail})` : ''}. Their watching isn't being tracked until it's back.`,
-          dedupeKey,
-        })
-    return true
-  } catch (e) {
-    console.warn('[ConnectionAlerts] failure alert failed:', e?.message)
-    return false
-  }
+
+        const dedupeKey = outageKey(user.id, since);
+        if (await alreadySent(prisma, accountId, dedupeKey)) {
+            return false;
+        }
+        const cfg = await readConfig(prisma, accountId);
+        if (cfg.notifyOnConnectionHealth === false) {
+            return false;
+        }
+
+        // The whole server down: one alert for everyone on it.
+        if (!needsReconnect) {
+            const server = await everyoneOnServerFailing(prisma, accountId, user).catch(() => null);
+            if (server) {
+                const prefix = serverOutagePrefix(server.key);
+                if (await openServerOutage(prisma, accountId, prefix)) {
+                    return false;
+                }
+                if (!(await probe(user.jellyfinServerUrl))) {
+                    const start = Math.min(
+                        ...server.people.map((p) => new Date(p.providerConnectionErrorAt).getTime())
+                    );
+                    const label = providerLabel(user);
+                    await send(prisma, accountId, {
+                        body: `It has been down for over ${Math.round(SETTLE_MS / 60_000)} minutes. Watching isn't being tracked for ${names(server.people)} until it's back.`,
+                        dedupeKey: `${prefix}${start}`,
+                        title: `Can't reach the ${label} server ${serverName(user)}`,
+                    });
+                    return true;
+                }
+                // It answers - so it isn't the server; each person is told as before.
+            }
+        }
+
+        const name = user.username || "Someone";
+        const label = providerLabel(user);
+        const detail = String(message || "")
+            .replace(/^(Reconnect needed|Connection issue):\s*/i, "")
+            .slice(0, 200);
+        // The person too, on any device they turned notifications on for from
+        // their own page: signing in there is the fix, so the tap opens it.
+        if (needsReconnect) {
+            const app =
+                user.providerType === "nuvio"
+                    ? "nuvio"
+                    : user.providerType === "jellyfin"
+                      ? "jellyfin"
+                      : "stremio";
+            await require("./pushNotifications")
+                .sendPushToPerson(prisma, accountId, user.id, {
+                    body: `Your ${label} sign-in stopped working, so your watching isn't being tracked. Tap to sign in again.`,
+                    icon: ICON,
+                    title: "Sign in to SlickSync again",
+                    url: `/login?app=${app}`,
+                })
+                .catch(() => undefined);
+        }
+        await send(
+            prisma,
+            accountId,
+            needsReconnect
+                ? {
+                      body: `Their ${label} sign-in stopped working, so their watching isn't being tracked. Reconnect them from Users - or they can sign in on their own SlickSync page, which reconnects them too.`,
+                      dedupeKey,
+                      title: `${name} needs to reconnect ${label}`,
+                  }
+                : {
+                      body: `It has been failing for over ${Math.round(SETTLE_MS / 60_000)} minutes${detail ? ` (${detail})` : ""}. Their watching isn't being tracked until it's back.`,
+                      dedupeKey,
+                      title: `Can't reach ${name}'s ${label}`,
+                  }
+        );
+        return true;
+    } catch (e) {
+        console.warn("[ConnectionAlerts] failure alert failed:", e?.message);
+        return false;
+    }
 }
 
 // The newest announced outage of this server that has no "back up" yet, or null.
 async function openServerOutage(prisma, accountId, prefix) {
-  const row = await prisma.notification.findFirst({
-    where: { accountId, dedupeKey: { startsWith: prefix } },
-    orderBy: { createdAt: 'desc' },
-    select: { dedupeKey: true },
-  }).catch(() => null)
-  if (!row || row.dedupeKey.endsWith('-ok')) return null
-  return row.dedupeKey
+    const row = await prisma.notification
+        .findFirst({
+            orderBy: { createdAt: "desc" },
+            select: { dedupeKey: true },
+            where: { accountId, dedupeKey: { startsWith: prefix } },
+        })
+        .catch(() => null);
+    if (!row || row.dedupeKey.endsWith("-ok")) {
+        return null;
+    }
+    return row.dedupeKey;
 }
 
 /** After a successful live fetch for a person who had a recorded failure. */
 async function onConnectionRecovered(prisma, accountId, user) {
-  try {
-    if (!accountId || !user?.id || !user.providerConnectionErrorAt || user.__recordAs) return false
+    try {
+        if (!(accountId && user?.id && user.providerConnectionErrorAt) || user.__recordAs) {
+            return false;
+        }
 
-    // The first person back on a server that was announced down says the
-    // server is back; everyone after them stays quiet.
-    if (user.providerType === 'jellyfin' && user.jellyfinServerUrl) {
-      const key = serverKeyOf(user)
-      const open = key ? await openServerOutage(prisma, accountId, serverOutagePrefix(key)) : null
-      if (open) {
-        const cfg = await readConfig(prisma, accountId)
-        if (cfg.notifyOnConnectionHealth === false) return false
+        // The first person back on a server that was announced down says the
+        // server is back; everyone after them stays quiet.
+        if (user.providerType === "jellyfin" && user.jellyfinServerUrl) {
+            const key = serverKeyOf(user);
+            const open = key
+                ? await openServerOutage(prisma, accountId, serverOutagePrefix(key))
+                : null;
+            if (open) {
+                const cfg = await readConfig(prisma, accountId);
+                if (cfg.notifyOnConnectionHealth === false) {
+                    return false;
+                }
+                await send(prisma, accountId, {
+                    body: "Watching is being tracked again for everyone on it.",
+                    dedupeKey: `${open}-ok`,
+                    title: `The ${providerLabel(user)} server ${serverName(user)} is back`,
+                });
+                return true;
+            }
+        }
+
+        const failedKey = outageKey(user.id, user.providerConnectionErrorAt);
+        // Nothing was announced (a blip, or alerts were off) - nothing to undo.
+        if (!(await alreadySent(prisma, accountId, failedKey))) {
+            return false;
+        }
+        const dedupeKey = `${failedKey}-ok`;
+        if (await alreadySent(prisma, accountId, dedupeKey)) {
+            return false;
+        }
+        const cfg = await readConfig(prisma, accountId);
+        if (cfg.notifyOnConnectionHealth === false) {
+            return false;
+        }
+
+        const name = user.username || "Someone";
         await send(prisma, accountId, {
-          title: `The ${providerLabel(user)} server ${serverName(user)} is back`,
-          body: 'Watching is being tracked again for everyone on it.',
-          dedupeKey: `${open}-ok`,
-        })
-        return true
-      }
+            body: "Their watching is being tracked again.",
+            dedupeKey,
+            title: `${name}'s ${providerLabel(user)} is connected again`,
+        });
+        return true;
+    } catch (e) {
+        console.warn("[ConnectionAlerts] recovery alert failed:", e?.message);
+        return false;
     }
-
-    const failedKey = outageKey(user.id, user.providerConnectionErrorAt)
-    // Nothing was announced (a blip, or alerts were off) - nothing to undo.
-    if (!(await alreadySent(prisma, accountId, failedKey))) return false
-    const dedupeKey = `${failedKey}-ok`
-    if (await alreadySent(prisma, accountId, dedupeKey)) return false
-    const cfg = await readConfig(prisma, accountId)
-    if (cfg.notifyOnConnectionHealth === false) return false
-
-    const name = user.username || 'Someone'
-    await send(prisma, accountId, {
-      title: `${name}'s ${providerLabel(user)} is connected again`,
-      body: 'Their watching is being tracked again.',
-      dedupeKey,
-    })
-    return true
-  } catch (e) {
-    console.warn('[ConnectionAlerts] recovery alert failed:', e?.message)
-    return false
-  }
 }
 
-module.exports = { onConnectionFailed, onConnectionRecovered, outageKey, serverOutagePrefix, serverAnswers, SETTLE_MS }
+module.exports = {
+    onConnectionFailed,
+    onConnectionRecovered,
+    outageKey,
+    SETTLE_MS,
+    serverAnswers,
+    serverOutagePrefix,
+};

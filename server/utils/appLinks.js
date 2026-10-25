@@ -18,20 +18,20 @@
  */
 
 function buildStremioLinks(imdbId, type, season, episode) {
-  let videoId = ''
-  if (type === 'movie') {
-    videoId = imdbId
-  } else if (season != null && episode != null) {
-    videoId = `${imdbId}:${season}:${episode}`
-  }
-  return {
-    appUrl: `stremio:///detail/${type}/${imdbId}/${videoId}`,
-    webUrl: `https://web.stremio.com/#/detail/${type}/${imdbId}/${videoId}`
-  }
+    let videoId = "";
+    if (type === "movie") {
+        videoId = imdbId;
+    } else if (season != null && episode != null) {
+        videoId = `${imdbId}:${season}:${episode}`;
+    }
+    return {
+        appUrl: `stremio:///detail/${type}/${imdbId}/${videoId}`,
+        webUrl: `https://web.stremio.com/#/detail/${type}/${imdbId}/${videoId}`,
+    };
 }
 
 function buildNuvioAppUrl(type, imdbId) {
-  return `nuvio://meta?type=${encodeURIComponent(type)}&id=${encodeURIComponent(imdbId)}`
+    return `nuvio://meta?type=${encodeURIComponent(type)}&id=${encodeURIComponent(imdbId)}`;
 }
 
-module.exports = { buildStremioLinks, buildNuvioAppUrl }
+module.exports = { buildNuvioAppUrl, buildStremioLinks };

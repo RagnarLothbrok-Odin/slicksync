@@ -21,121 +21,189 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync \
 //     node scripts/consolidate-encryption-keys.js [--apply] [--sync-keyfile]
 
-const { PrismaClient } = require('@prisma/client')
-const enc = require('../server/utils/encryption')
-const { KEY_FILE } = require('../server/utils/keyManager')
-const fs = require('fs')
+const { PrismaClient } = require("@prisma/client");
+const enc = require("../server/utils/encryption");
+const { KEY_FILE } = require("../server/utils/keyManager");
+const fs = require("node:fs");
 
-const APPLY = process.argv.includes('--apply')
-const SYNC_KEYFILE = process.argv.includes('--sync-keyfile')
-const prisma = new PrismaClient()
-const currentKey = enc.getServerKey()
+const APPLY = process.argv.includes("--apply");
+const SYNC_KEYFILE = process.argv.includes("--sync-keyfile");
+const prisma = new PrismaClient();
+const currentKey = enc.getServerKey();
 
 // Already readable with the current key alone? Then it's consolidated already.
 function isCurrent(text) {
-  try { enc.aesGcmDecrypt(currentKey, text); return true } catch { return false }
+    try {
+        enc.aesGcmDecrypt(currentKey, text);
+        return true;
+    } catch {
+        return false;
+    }
 }
 // Read via the full fallback chain (server key + ENCRYPTION_KEY_FALLBACKS).
 function decryptAny(text) {
-  try { return enc.decrypt(text) } catch { return null }
+    try {
+        return enc.decrypt(text);
+    } catch {
+        return null;
+    }
 }
 
-const stats = {}
+const stats = {};
 function bump(label, status) {
-  stats[label] = stats[label] || { empty: 0, already: 0, reencrypt: 0, undecryptable: 0 }
-  stats[label][status]++
+    stats[label] = stats[label] || { already: 0, empty: 0, reencrypt: 0, undecryptable: 0 };
+    stats[label][status]++;
 }
 
 // Returns the re-encrypted value to write, or null if no write is needed.
 // Records status against `label` for the summary.
 function planValue(label, text) {
-  if (text === null || text === undefined || text === '') { bump(label, 'empty'); return null }
-  if (isCurrent(text)) { bump(label, 'already'); return null }
-  const plain = decryptAny(text)
-  if (plain === null) { bump(label, 'undecryptable'); return null }
-  bump(label, 'reencrypt')
-  return enc.aesGcmEncrypt(currentKey, plain)
+    if (text === null || text === undefined || text === "") {
+        bump(label, "empty");
+        return null;
+    }
+    if (isCurrent(text)) {
+        bump(label, "already");
+        return null;
+    }
+    const plain = decryptAny(text);
+    if (plain === null) {
+        bump(label, "undecryptable");
+        return null;
+    }
+    bump(label, "reencrypt");
+    return enc.aesGcmEncrypt(currentKey, plain);
 }
 
 // Generic pass over a table's simple encrypted string columns.
 async function consolidateTable(modelName, delegate, idField, fields) {
-  const rows = await delegate.findMany()
-  for (const row of rows) {
-    const data = {}
-    for (const f of fields) {
-      const next = planValue(`${modelName}.${f}`, row[f])
-      if (next !== null) data[f] = next
+    const rows = await delegate.findMany();
+    for (const row of rows) {
+        const data = {};
+        for (const f of fields) {
+            const next = planValue(`${modelName}.${f}`, row[f]);
+            if (next !== null) {
+                data[f] = next;
+            }
+        }
+        if (Object.keys(data).length > 0 && APPLY) {
+            await delegate.update({ data, where: { [idField]: row[idField] } });
+        }
     }
-    if (Object.keys(data).length > 0 && APPLY) {
-      await delegate.update({ where: { [idField]: row[idField] }, data })
-    }
-  }
 }
 
 // AddonSnapshot.addonsJson is a JSON array whose entries each carry an encrypted
 // `manifestUrl`. Walk and re-encrypt those in place, re-serialize if changed.
 async function consolidateSnapshots() {
-  const rows = await prisma.addonSnapshot.findMany()
-  for (const row of rows) {
-    let arr
-    try { arr = JSON.parse(row.addonsJson) } catch { bump('AddonSnapshot.addonsJson', 'undecryptable'); continue }
-    if (!Array.isArray(arr)) { bump('AddonSnapshot.addonsJson', 'empty'); continue }
-    let changed = false
-    for (const a of arr) {
-      if (a && typeof a.manifestUrl === 'string' && a.manifestUrl) {
-        const next = planValue('AddonSnapshot.addon.manifestUrl', a.manifestUrl)
-        if (next !== null) { a.manifestUrl = next; changed = true }
-      }
+    const rows = await prisma.addonSnapshot.findMany();
+    for (const row of rows) {
+        let arr;
+        try {
+            arr = JSON.parse(row.addonsJson);
+        } catch {
+            bump("AddonSnapshot.addonsJson", "undecryptable");
+            continue;
+        }
+        if (!Array.isArray(arr)) {
+            bump("AddonSnapshot.addonsJson", "empty");
+            continue;
+        }
+        let changed = false;
+        for (const a of arr) {
+            if (a && typeof a.manifestUrl === "string" && a.manifestUrl) {
+                const next = planValue("AddonSnapshot.addon.manifestUrl", a.manifestUrl);
+                if (next !== null) {
+                    a.manifestUrl = next;
+                    changed = true;
+                }
+            }
+        }
+        if (changed && APPLY) {
+            await prisma.addonSnapshot.update({
+                data: { addonsJson: JSON.stringify(arr) },
+                where: { id: row.id },
+            });
+        }
     }
-    if (changed && APPLY) {
-      await prisma.addonSnapshot.update({ where: { id: row.id }, data: { addonsJson: JSON.stringify(arr) } })
-    }
-  }
 }
 
 async function run() {
-  console.log(`\n=== Encryption key consolidation (${APPLY ? 'APPLY' : 'DRY-RUN'}) ===`)
-  console.log(`Fallback keys available: ${(require('../server/utils/config').ENCRYPTION_KEY_FALLBACKS || []).length}\n`)
+    console.log(`\n=== Encryption key consolidation (${APPLY ? "APPLY" : "DRY-RUN"}) ===`);
+    console.log(
+        `Fallback keys available: ${(require("../server/utils/config").ENCRYPTION_KEY_FALLBACKS || []).length}\n`
+    );
 
-  await consolidateTable('User', prisma.user, 'id', ['stremioAuthKey', 'nuvioRefreshToken', 'jellyfinToken', 'aioConfigPassword', 'simklAccessToken'])
-  await consolidateTable('UserProviderCredential', prisma.userProviderCredential, 'id', ['stremioAuthKey', 'nuvioRefreshToken', 'jellyfinToken'])
-  // A household profile's own sign-in (AIOStreams / AIOMetadata users).
-  await consolidateTable('JellyfinProfile', prisma.jellyfinProfile, 'id', ['token'])
-  // A pending invite request carries the sign-in until it is accepted.
-  await consolidateTable('InviteRequest', prisma.inviteRequest, 'id', ['stremioAuthKey', 'nuvioRefreshToken', 'jellyfinToken'])
-  await consolidateTable('Addon', prisma.addon, 'id', ['manifestUrl', 'manifest', 'originalManifest'])
-  await consolidateTable('VaultEntry', prisma.vaultEntry, 'id', ['encryptedSecret'])
-  // Kept versions of AIOStreams configurations - they hold debrid keys.
-  await consolidateTable('AioConfigSnapshot', prisma.aioConfigSnapshot, 'id', ['config'])
-  await consolidateSnapshots()
+    await consolidateTable("User", prisma.user, "id", [
+        "stremioAuthKey",
+        "nuvioRefreshToken",
+        "jellyfinToken",
+        "aioConfigPassword",
+        "simklAccessToken",
+    ]);
+    await consolidateTable("UserProviderCredential", prisma.userProviderCredential, "id", [
+        "stremioAuthKey",
+        "nuvioRefreshToken",
+        "jellyfinToken",
+    ]);
+    // A household profile's own sign-in (AIOStreams / AIOMetadata users).
+    await consolidateTable("JellyfinProfile", prisma.jellyfinProfile, "id", ["token"]);
+    // A pending invite request carries the sign-in until it is accepted.
+    await consolidateTable("InviteRequest", prisma.inviteRequest, "id", [
+        "stremioAuthKey",
+        "nuvioRefreshToken",
+        "jellyfinToken",
+    ]);
+    await consolidateTable("Addon", prisma.addon, "id", [
+        "manifestUrl",
+        "manifest",
+        "originalManifest",
+    ]);
+    await consolidateTable("VaultEntry", prisma.vaultEntry, "id", ["encryptedSecret"]);
+    // Kept versions of AIOStreams configurations - they hold debrid keys.
+    await consolidateTable("AioConfigSnapshot", prisma.aioConfigSnapshot, "id", ["config"]);
+    await consolidateSnapshots();
 
-  console.log('Field                                   already  rewrite  UNREADABLE  empty')
-  console.log('---------------------------------------------------------------------------')
-  let totalRewrite = 0, totalUnreadable = 0
-  for (const [label, s] of Object.entries(stats).sort()) {
-    totalRewrite += s.reencrypt
-    totalUnreadable += s.undecryptable
-    const flag = s.undecryptable > 0 ? '  <-- REVIEW' : ''
-    console.log(`${label.padEnd(38)}  ${String(s.already).padStart(6)}  ${String(s.reencrypt).padStart(6)}  ${String(s.undecryptable).padStart(9)}  ${String(s.empty).padStart(5)}${flag}`)
-  }
-  console.log('---------------------------------------------------------------------------')
-  console.log(`\n${APPLY ? 'Re-encrypted' : 'Would re-encrypt'}: ${totalRewrite} value(s). Undecryptable: ${totalUnreadable}.`)
-  if (totalUnreadable > 0) {
-    console.log('!! Undecryptable values were LEFT UNCHANGED - no known key reads them. Investigate before dropping fallbacks.')
-  }
-
-  if (SYNC_KEYFILE) {
-    if (!APPLY) {
-      console.log('\n--sync-keyfile ignored without --apply.')
-    } else if (totalUnreadable > 0) {
-      console.log('\n--sync-keyfile SKIPPED: undecryptable values remain; not touching the key file until data is fully consolidated.')
-    } else {
-      fs.writeFileSync(KEY_FILE, currentKey.toString('base64'), { mode: 0o600 })
-      console.log(`\nSynced ${KEY_FILE} to the current key - persisted key now matches env; the boot "ENCRYPTION_KEY differs" warning will stop.`)
+    console.log("Field                                   already  rewrite  UNREADABLE  empty");
+    console.log("---------------------------------------------------------------------------");
+    let totalRewrite = 0,
+        totalUnreadable = 0;
+    for (const [label, s] of Object.entries(stats).sort()) {
+        totalRewrite += s.reencrypt;
+        totalUnreadable += s.undecryptable;
+        const flag = s.undecryptable > 0 ? "  <-- REVIEW" : "";
+        console.log(
+            `${label.padEnd(38)}  ${String(s.already).padStart(6)}  ${String(s.reencrypt).padStart(6)}  ${String(s.undecryptable).padStart(9)}  ${String(s.empty).padStart(5)}${flag}`
+        );
     }
-  }
+    console.log("---------------------------------------------------------------------------");
+    console.log(
+        `\n${APPLY ? "Re-encrypted" : "Would re-encrypt"}: ${totalRewrite} value(s). Undecryptable: ${totalUnreadable}.`
+    );
+    if (totalUnreadable > 0) {
+        console.log(
+            "!! Undecryptable values were LEFT UNCHANGED - no known key reads them. Investigate before dropping fallbacks."
+        );
+    }
 
-  await prisma.$disconnect()
+    if (SYNC_KEYFILE) {
+        if (!APPLY) {
+            console.log("\n--sync-keyfile ignored without --apply.");
+        } else if (totalUnreadable > 0) {
+            console.log(
+                "\n--sync-keyfile SKIPPED: undecryptable values remain; not touching the key file until data is fully consolidated."
+            );
+        } else {
+            fs.writeFileSync(KEY_FILE, currentKey.toString("base64"), { mode: 0o600 });
+            console.log(
+                `\nSynced ${KEY_FILE} to the current key - persisted key now matches env; the boot "ENCRYPTION_KEY differs" warning will stop.`
+            );
+        }
+    }
+
+    await prisma.$disconnect();
 }
 
-run().catch((e) => { console.error('ERROR', e); process.exit(1) })
+run().catch((e) => {
+    console.error("ERROR", e);
+    process.exit(1);
+});

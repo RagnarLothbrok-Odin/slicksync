@@ -16,13 +16,13 @@
 // as encryption.js's accountDekStore) that authGate's jwt.verify() will
 // simply fail to parse - it can never be replayed as a session token, by
 // construction rather than by convention.
-const crypto = require('crypto')
-const bcrypt = require('bcryptjs')
-const { authenticator } = require('otplib')
-const QRCode = require('qrcode')
+const crypto = require("node:crypto");
+const bcrypt = require("bcryptjs");
+const { authenticator } = require("otplib");
+const QRCode = require("qrcode");
 
-const pendingStore = new Map() // pendingToken -> { accountId, expiresAt }
-const PENDING_TTL_MS = 5 * 60 * 1000 // 5m - just long enough to type a 6-digit code
+const pendingStore = new Map(); // pendingToken -> { accountId, expiresAt }
+const PENDING_TTL_MS = 5 * 60 * 1000; // 5m - just long enough to type a 6-digit code
 
 // Same account-derived-key AES-GCM pattern settings.js's account-api-key
 // routes already use for AppAccount.apiKeyHash (accountKey = sha256(accountId
@@ -33,42 +33,47 @@ const PENDING_TTL_MS = 5 * 60 * 1000 // 5m - just long enough to type a 6-digit 
 // contexts (req.appAccountId during Settings management, the already-
 // resolved account.id during login).
 function accountKeyFor(accountId) {
-  const { getServerKey } = require('./encryption')
-  return crypto.createHash('sha256').update(Buffer.concat([Buffer.from(accountId || ''), getServerKey()])).digest()
+    const { getServerKey } = require("./encryption");
+    return crypto
+        .createHash("sha256")
+        .update(Buffer.concat([Buffer.from(accountId || ""), getServerKey()]))
+        .digest();
 }
 
 function encryptSecret(accountId, plaintext) {
-  const { aesGcmEncrypt } = require('./encryption')
-  return aesGcmEncrypt(accountKeyFor(accountId), plaintext)
+    const { aesGcmEncrypt } = require("./encryption");
+    return aesGcmEncrypt(accountKeyFor(accountId), plaintext);
 }
 
 function decryptSecret(accountId, encrypted) {
-  const { aesGcmDecrypt } = require('./encryption')
-  return aesGcmDecrypt(accountKeyFor(accountId), encrypted)
+    const { aesGcmDecrypt } = require("./encryption");
+    return aesGcmDecrypt(accountKeyFor(accountId), encrypted);
 }
 
 function generateSecret() {
-  return authenticator.generateSecret()
+    return authenticator.generateSecret();
 }
 
 function otpauthUrl(secret, accountLabel) {
-  return authenticator.keyuri(accountLabel || 'account', 'SlickSync', secret)
+    return authenticator.keyuri(accountLabel || "account", "SlickSync", secret);
 }
 
 async function qrCodeDataUrl(otpauthUrlStr) {
-  return QRCode.toDataURL(otpauthUrlStr)
+    return QRCode.toDataURL(otpauthUrlStr);
 }
 
 // otplib defaults to a 1-step (30s) window either side of "now", enough for
 // modest clock drift between server and phone without materially widening
 // the guessable window.
 function verifyTotp(secret, token) {
-  if (!secret || !token) return false
-  try {
-    return authenticator.check(String(token).replace(/\s+/g, ''), secret)
-  } catch {
-    return false
-  }
+    if (!(secret && token)) {
+        return false;
+    }
+    try {
+        return authenticator.check(String(token).replace(/\s+/g, ""), secret);
+    } catch {
+        return false;
+    }
 }
 
 // Backup codes: returned to the caller ONCE in plaintext (caller must show
@@ -78,57 +83,65 @@ function verifyTotp(secret, token) {
 // on backup-code entry beyond the normal login attempt), short enough to
 // type by hand.
 function generateBackupCodes(count = 10) {
-  const codes = []
-  for (let i = 0; i < count; i++) {
-    const raw = crypto.randomBytes(5).toString('hex').toUpperCase() // 10 hex chars
-    codes.push(`${raw.slice(0, 5)}-${raw.slice(5, 10)}`)
-  }
-  return codes
+    const codes = [];
+    for (let i = 0; i < count; i++) {
+        const raw = crypto.randomBytes(5).toString("hex").toUpperCase(); // 10 hex chars
+        codes.push(`${raw.slice(0, 5)}-${raw.slice(5, 10)}`);
+    }
+    return codes;
 }
 
 async function hashBackupCodes(codes) {
-  return Promise.all(codes.map((c) => bcrypt.hash(c, 10)))
+    return Promise.all(codes.map((c) => bcrypt.hash(c, 10)));
 }
 
 // Consumes the FIRST matching hash (one-shot) and returns the remaining
 // hash list to persist - each backup code works exactly once.
 async function consumeBackupCode(hashedCodes, presented) {
-  const normalized = String(presented || '').trim().toUpperCase()
-  if (!normalized) return null
-  for (let i = 0; i < hashedCodes.length; i++) {
-    if (await bcrypt.compare(normalized, hashedCodes[i])) {
-      return [...hashedCodes.slice(0, i), ...hashedCodes.slice(i + 1)]
+    const normalized = String(presented || "")
+        .trim()
+        .toUpperCase();
+    if (!normalized) {
+        return null;
     }
-  }
-  return null
+    for (let i = 0; i < hashedCodes.length; i++) {
+        if (await bcrypt.compare(normalized, hashedCodes[i])) {
+            return [...hashedCodes.slice(0, i), ...hashedCodes.slice(i + 1)];
+        }
+    }
+    return null;
 }
 
 function createPendingChallenge(accountId) {
-  const token = crypto.randomBytes(32).toString('hex')
-  pendingStore.set(token, { accountId, expiresAt: Date.now() + PENDING_TTL_MS })
-  return token
+    const token = crypto.randomBytes(32).toString("hex");
+    pendingStore.set(token, { accountId, expiresAt: Date.now() + PENDING_TTL_MS });
+    return token;
 }
 
 // One-shot: deletes on read whether or not it was still valid, so a
 // pending token can never be replayed even within its TTL.
 function consumePendingChallenge(token) {
-  const entry = pendingStore.get(String(token || ''))
-  if (!entry) return null
-  pendingStore.delete(token)
-  if (Date.now() > entry.expiresAt) return null
-  return entry.accountId
+    const entry = pendingStore.get(String(token || ""));
+    if (!entry) {
+        return null;
+    }
+    pendingStore.delete(token);
+    if (Date.now() > entry.expiresAt) {
+        return null;
+    }
+    return entry.accountId;
 }
 
 module.exports = {
-  generateSecret,
-  otpauthUrl,
-  qrCodeDataUrl,
-  verifyTotp,
-  generateBackupCodes,
-  hashBackupCodes,
-  consumeBackupCode,
-  createPendingChallenge,
-  consumePendingChallenge,
-  encryptSecret,
-  decryptSecret,
-}
+    consumeBackupCode,
+    consumePendingChallenge,
+    createPendingChallenge,
+    decryptSecret,
+    encryptSecret,
+    generateBackupCodes,
+    generateSecret,
+    hashBackupCodes,
+    otpauthUrl,
+    qrCodeDataUrl,
+    verifyTotp,
+};

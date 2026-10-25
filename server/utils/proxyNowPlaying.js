@@ -28,14 +28,14 @@
 // 15min - see sessionTracker.js), since that window is exactly how long a
 // native session lingers as "active" after the provider's final checkpoint.
 // Kept at the same ~5min margin above that window as before (was 20 vs 15).
-const RECENTLY_CLOSED_MS = 23 * 60 * 1000
-const { proxyDisplayTitle } = require('./proxyTitle')
+const RECENTLY_CLOSED_MS = 23 * 60 * 1000;
+const { proxyDisplayTitle } = require("./proxyTitle");
 // Same title or not - by IMDb id where both sides have one, else by the
 // tidied name. See titleMatch.js for why "contains" was not good enough.
-const { normalizeTitle, pairMatches } = require('./titleMatch')
+const { normalizeTitle, pairMatches } = require("./titleMatch");
 // Only connections that have shown they are playing - a source warmed up or
 // checked by an app is one request and then nothing (proxyPlaying.js).
-const { isPlayingConnection } = require('./proxyPlaying')
+const { isPlayingConnection } = require("./proxyPlaying");
 
 // AIOStreams only bumps a connection's `lastSeen` when a new byte-range
 // request actually comes in - it does NOT expire/close the connection just
@@ -57,426 +57,491 @@ const { isPlayingConnection } = require('./proxyPlaying')
 // resume-from-deep-buffer needs no new proxy request either. Do not resurrect
 // that behavior - use this constant only for the softer "possibly paused"
 // hint below, never to hide a still-`isActive` row.
-const PAUSED_STALE_MS = 3 * 60 * 1000
+const PAUSED_STALE_MS = 3 * 60 * 1000;
 
 // Addresses already announced as a new device by this process.
-const announcedDevices = new Set()
+const announcedDevices = new Set();
 
 /** How a proxy row is known, for comparing against a library title. */
-const describe = (row) => ({ id: row.metadataItemId || null, titles: [proxyDisplayTitle(row), row.displayName].filter(Boolean) })
+const describe = (row) => ({
+    id: row.metadataItemId || null,
+    titles: [proxyDisplayTitle(row), row.displayName].filter(Boolean),
+});
 
-async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPlaying, { isConfirming } = {}) {
-  let proxySessions
-  let recentlyClosedSessions
-  try {
-    // Only connections that are playing (proxyPlaying.js) - a source an app
-    // warmed up is recorded, but isn't someone watching.
-    proxySessions = (await prisma.proxyStreamSession.findMany({
-      where: { accountId, isActive: true },
-      orderBy: { startTime: 'desc' },
-    })).filter(isPlayingConnection)
-    // Also load streams the proxy recently finished. The proxy is
-    // authoritative for content it carries: if it saw a stream and that
-    // stream has ended, a native "still watching" entry for the same title is
-    // a stale echo (native only learns of a session when the provider writes
-    // a checkpoint - at stop, for Nuvio - and then holds it "active" for its
-    // whole freshness window). Suppressing those keeps an exited stream from
-    // lingering in Now Playing. Content the proxy NEVER carried (e.g. usenet
-    // via newznab, which bypasses the proxy entirely) has no such signal, so
-    // its native entry is left alone - native is the only truth for it.
-    recentlyClosedSessions = (await prisma.proxyStreamSession.findMany({
-      where: {
-        accountId,
-        isActive: false,
-        endTime: { gte: new Date(Date.now() - RECENTLY_CLOSED_MS) },
-      },
-      orderBy: { endTime: 'desc' },
-    })).filter(isPlayingConnection)
-  } catch (error) {
-    console.warn('[ProxyNowPlaying] Failed to fetch proxy sessions:', error.message)
-    return watchSessionNowPlaying
-  }
-
-  // A "live" row is only as fresh as the last poll that worked. When the
-  // monitor has not confirmed anything lately (AIOStreams unreachable, its
-  // sign-in refused), those rows are not shown as playing - they would
-  // otherwise sit there until the monitor recovered. Streams the proxy saw
-  // end still count: that knowledge does not go stale.
-  const confirming = typeof isConfirming === 'function'
-    ? isConfirming(accountId)
-    : require('./proxyStreamMonitor').isProxyMonitorConfirming(accountId)
-  if (!confirming) proxySessions = []
-
-  if (proxySessions.length === 0 && recentlyClosedSessions.length === 0) {
-    return watchSessionNowPlaying
-  }
-
-  // Which managed user a client IP resolved to, the last time there was a
-  // real signal for it (see disambiguateMatch below) - the smarter
-  // tiebreaker for ambiguous same-email attributions, learned over time
-  // instead of a fixed AIOSTREAMS_FALLBACK_USER_IDS order.
-  let ipAffinityByIp = new Map()
-  // Device claims: the admin's explicit "this IP is this person" - the
-  // authoritative tier above every learned/guessed resolution below.
-  let claimsByIp = new Map()
-  try {
-    const [affinityRows, claimRows] = await Promise.all([
-      prisma.proxyUserIpAffinity.findMany({ where: { accountId } }),
-      prisma.proxyDeviceClaim.findMany({ where: { accountId } }),
-    ])
-    ipAffinityByIp = new Map(affinityRows.map((r) => [r.clientIp, r.userId]))
-    claimsByIp = new Map(claimRows.map((r) => [r.clientIp, r.userId]))
-  } catch {} // tables may not exist yet on a very-first boot before db push runs
-
-  const userByUsername = new Map(
-    users.filter((u) => u.username).map((u) => [u.username.toLowerCase(), u])
-  )
-  // Secondary match: local-part of email (e.g. "someuser" from
-  // "someuser@example.com"). Handles the common case where one AIOStreams
-  // login covers multiple per-provider SlickSync profiles that share the same
-  // email but have provider-specific usernames that don't match the AIOStreams
-  // username at all.
-  const userByEmailLocalPart = new Map(
-    users
-      .filter((u) => u.email && u.email.includes('@'))
-      .map((u) => [u.email.split('@')[0].toLowerCase(), u])
-  )
-  // Every native entry a person has, not just one: someone can have the film
-  // they just finished and the one they started both open, and the stream
-  // has to be compared against each.
-  const watchSessionsByUserId = new Map()
-  for (const np of watchSessionNowPlaying) {
-    if (!np.user || !np.user.id) continue
-    if (!watchSessionsByUserId.has(np.user.id)) watchSessionsByUserId.set(np.user.id, [])
-    watchSessionsByUserId.get(np.user.id).push(np)
-  }
-
-  const result = []
-  // Tracks, per user, the normalized titles of proxy-covered streams - NOT
-  // just which users have any active proxy row. A stale/unrelated active
-  // proxy connection (AIOStreams keeps rows active up to 6h - see the
-  // grouping comment below) or a debrid stream watched earlier must not
-  // blank out a genuinely different, still-active WatchSession entry for
-  // the same user (e.g. a usenet stream that never routes through the
-  // proxy at all) - only the specific title the proxy is covering should
-  // be suppressed from the WatchSession pass below.
-  const coveredByUser = new Map()
-  // Same idea, but for titles the proxy recently FINISHED carrying - used only
-  // to suppress a native entry that's a stale echo of an already-ended stream.
-  const recentlyClosedByUser = new Map()
-
-  // Fallback: AIOStreams only has one login username, but a single person
-  // can have multiple per-provider SlickSync profiles (e.g. one Stremio
-  // profile, one Nuvio profile) that don't match that username at all.
-  // AIOSTREAMS_FALLBACK_USER_IDS lists which SlickSync user IDs should
-  // receive proxy-detected activity when the username lookup above finds
-  // no match, rather than silently dropping it. Comma-separated, set in
-  // this app's own .env.
-  const fallbackUserIds = (process.env.AIOSTREAMS_FALLBACK_USER_IDS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const usersById = new Map(users.map((u) => [u.id, u]))
-
-  // Returns { user, confident }. `confident` means this resolution came from
-  // real evidence (a unique match, or a title match against a live native
-  // session) rather than a guess - only confident resolutions get written
-  // back into ipAffinityByIp, so a guess can never reinforce itself into a
-  // permanent wrong answer.
-  function disambiguateMatch(candidates, proxyRow, clientIp, confidentIfUnique) {
-    if (candidates.length <= 1) return { user: candidates[0] || null, confident: confidentIfUnique }
-
-    // Device claim first: a human said outright whose device this is, which
-    // outranks every inference below - including the title match, whose
-    // whole job is guessing what a human could simply have told us.
-    // Confident, so the affinity row aligns with the claim too.
-    if (clientIp) {
-      const claimedUserId = claimsByIp.get(clientIp)
-      if (claimedUserId) {
-        const claimed = candidates.find((u) => u.id === claimedUserId)
-        if (claimed) return { user: claimed, confident: true }
-      }
+async function mergeProxyNowPlaying(
+    prisma,
+    accountId,
+    users,
+    watchSessionNowPlaying,
+    { isConfirming } = {}
+) {
+    let proxySessions;
+    let recentlyClosedSessions;
+    try {
+        // Only connections that are playing (proxyPlaying.js) - a source an app
+        // warmed up is recorded, but isn't someone watching.
+        proxySessions = (
+            await prisma.proxyStreamSession.findMany({
+                orderBy: { startTime: "desc" },
+                where: { accountId, isActive: true },
+            })
+        ).filter(isPlayingConnection);
+        // Also load streams the proxy recently finished. The proxy is
+        // authoritative for content it carries: if it saw a stream and that
+        // stream has ended, a native "still watching" entry for the same title is
+        // a stale echo (native only learns of a session when the provider writes
+        // a checkpoint - at stop, for Nuvio - and then holds it "active" for its
+        // whole freshness window). Suppressing those keeps an exited stream from
+        // lingering in Now Playing. Content the proxy NEVER carried (e.g. usenet
+        // via newznab, which bypasses the proxy entirely) has no such signal, so
+        // its native entry is left alone - native is the only truth for it.
+        recentlyClosedSessions = (
+            await prisma.proxyStreamSession.findMany({
+                orderBy: { endTime: "desc" },
+                where: {
+                    accountId,
+                    endTime: { gte: new Date(Date.now() - RECENTLY_CLOSED_MS) },
+                    isActive: false,
+                },
+            })
+        ).filter(isPlayingConnection);
+    } catch (error) {
+        console.warn("[ProxyNowPlaying] Failed to fetch proxy sessions:", error.message);
+        return watchSessionNowPlaying;
     }
 
-    const described = describe(proxyRow)
-    const titleMatch = candidates.find((u) =>
-      (watchSessionsByUserId.get(u.id) || []).some((np) => pairMatches(described, np.item)))
-    if (titleMatch) return { user: titleMatch, confident: true }
-
-    // No title-match signal available (common while a stream is mid-playback
-    // and native hasn't checkpointed yet - native only writes a session at
-    // pause/stop). Next best guess: which candidate this exact client IP
-    // resolved to the last time there WAS a real signal - most households
-    // have one device per person on a fairly stable local IP, so this beats
-    // a fixed id order without needing a fresh confirmation every time.
-    if (clientIp) {
-      const affinityUserId = ipAffinityByIp.get(clientIp)
-      if (affinityUserId) {
-        const affinityMatch = candidates.find((u) => u.id === affinityUserId)
-        if (affinityMatch) return { user: affinityMatch, confident: false }
-      }
+    // A "live" row is only as fresh as the last poll that worked. When the
+    // monitor has not confirmed anything lately (AIOStreams unreachable, its
+    // sign-in refused), those rows are not shown as playing - they would
+    // otherwise sit there until the monitor recovered. Streams the proxy saw
+    // end still count: that knowledge does not go stale.
+    const confirming =
+        typeof isConfirming === "function"
+            ? isConfirming(accountId)
+            : require("./proxyStreamMonitor").isProxyMonitorConfirming(accountId);
+    if (!confirming) {
+        proxySessions = [];
     }
 
-    // No affinity learned for this IP yet either. Use the fallback list's
-    // order as a last-resort tiebreaker: whichever candidate appears
-    // earliest in AIOSTREAMS_FALLBACK_USER_IDS wins, rather than picking
-    // candidates[0] in arbitrary database row order. Not confident - this is
-    // exactly the guess the affinity tier above exists to eventually replace.
-    if (fallbackUserIds.length > 0) {
-      const byFallbackOrder = candidates
-        .map((u) => ({ u, rank: fallbackUserIds.indexOf(u.id) }))
-        .filter((c) => c.rank !== -1)
-        .sort((a, b) => a.rank - b.rank)
-      if (byFallbackOrder.length > 0) return { user: byFallbackOrder[0].u, confident: false }
+    if (proxySessions.length === 0 && recentlyClosedSessions.length === 0) {
+        return watchSessionNowPlaying;
     }
 
-    return { user: candidates[0], confident: false }
-  }
+    // Which managed user a client IP resolved to, the last time there was a
+    // real signal for it (see disambiguateMatch below) - the smarter
+    // tiebreaker for ambiguous same-email attributions, learned over time
+    // instead of a fixed AIOSTREAMS_FALLBACK_USER_IDS order.
+    let ipAffinityByIp = new Map();
+    // Device claims: the admin's explicit "this IP is this person" - the
+    // authoritative tier above every learned/guessed resolution below.
+    let claimsByIp = new Map();
+    try {
+        const [affinityRows, claimRows] = await Promise.all([
+            prisma.proxyUserIpAffinity.findMany({ where: { accountId } }),
+            prisma.proxyDeviceClaim.findMany({ where: { accountId } }),
+        ]);
+        ipAffinityByIp = new Map(affinityRows.map((r) => [r.clientIp, r.userId]));
+        claimsByIp = new Map(claimRows.map((r) => [r.clientIp, r.userId]));
+    } catch {
+        // Unavailable optional records leave the current result in place.
+    } // tables may not exist yet on a very-first boot before db push runs
 
-  // Group active proxy rows by normalized title before attributing them.
-  // Seeking/rewinding creates a new connection (different byte-range
-  // request) while the old one sometimes lingers as "active" - AIOStreams
-  // keeps stale connections active up to 6h unless explicitly told the
-  // request ended. Without grouping, the old and new rows for the SAME
-  // real viewing session could get disambiguated to two DIFFERENT
-  // profiles independently, showing as a split/duplicate entry. Grouping
-  // ensures every row for one title gets the same single attribution.
-  // Rows that matched the same real title are one group whatever their
-  // filenames said - a viewer who switched from one release of a film to
-  // another mid-way, an Italian-named release next to an English one, is
-  // one person watching one thing.
-  const groupedByTitle = new Map()
-  for (const proxy of proxySessions) {
-    const key = proxy.metadataItemId || normalizeTitle(proxyDisplayTitle(proxy)) || proxy.url
-    if (!groupedByTitle.has(key)) groupedByTitle.set(key, [])
-    groupedByTitle.get(key).push(proxy)
-  }
-
-  for (const group of groupedByTitle.values()) {
-    // Use the most recently active row in the group as the representative
-    // for display fields (poster, displayName, liveness) - the freshest one
-    // is most likely the real current connection, not a stale leftover.
-    const representative = group.reduce((latest, p) =>
-      p.lastSeenAt > latest.lastSeenAt ? p : latest
-    )
-    // Earliest startTime across the whole group is used for the reported
-    // watch duration - a seek creates a new connection with a new (later)
-    // startTime, and using the representative's own startTime alone would
-    // make "Watching for Xm" reset toward 0 after every seek instead of
-    // counting continuously from when viewing actually began. The
-    // representative's own startTime is kept too (lastConnectionStartTime,
-    // below) rather than discarded, in case a future UI wants to show
-    // something like "resumed 2m ago" alongside the total duration.
-    const earliestStartTime = group.reduce((earliest, p) =>
-      p.startTime < earliest ? p.startTime : earliest
-    , representative.startTime)
-
-    // Most recent poll cycle that reconfirmed ANY connection in this group is
-    // still in AIOStreams' own active-connection list - see the elapsedSeconds
-    // comment below for why this, not lastSeenAt, is the freeze basis.
-    const mostRecentPollConfirmation = group.reduce((latest, p) =>
-      p.updatedAt > latest ? p.updatedAt : latest
-    , representative.updatedAt)
-
-    let candidates = []
-    // True only when `candidates` came from a genuinely unique match
-    // (username or email), not an arbitrary configured list - a fallback
-    // list that happens to resolve to exactly one valid id is still just a
-    // guess, not evidence, and must not be recorded as confirmed affinity.
-    let candidatesAreRealMatch = false
-    const aiostreamsUserLower = (representative.aiostreamsUser || '').toLowerCase()
-    const directMatch = userByUsername.get(aiostreamsUserLower)
-    const emailMatch = userByEmailLocalPart.get(aiostreamsUserLower)
-
-    if (directMatch) {
-      candidates = [directMatch]
-      candidatesAreRealMatch = true
-    } else if (emailMatch) {
-      // One AIOStreams login, multiple per-provider profiles sharing an
-      // email - matched by email local-part rather than username.
-      candidates = users.filter(
-        (u) => u.email && u.email.split('@')[0].toLowerCase() === aiostreamsUserLower
-      )
-      candidatesAreRealMatch = true
-    } else if (fallbackUserIds.length > 0) {
-      candidates = fallbackUserIds
-        .map((id) => usersById.get(id))
-        .filter(Boolean)
-    }
-
-    if (candidates.length === 0) continue // no direct match and no usable fallback - skip rather than guess
-
-    const { user, confident } = disambiguateMatch(candidates, representative, representative.clientIp, candidatesAreRealMatch)
-    if (!user) continue
-
-    // Learn from this resolution for next time - only when it's real
-    // evidence, not a guess (see disambiguateMatch's own comment on why).
-    if (confident && representative.clientIp) {
-      // Checked against ipAffinityByIp's initial snapshot (loaded once above,
-      // before this loop) - an IP this account has never confidently
-      // resolved before, for ANY user, streaming for the first time. Fired
-      // BEFORE the upsert below (which would otherwise make every later
-      // check in this same poll see it as already-known) and the map is
-      // updated immediately after so a second representative sharing this
-      // IP later in the same poll doesn't fire twice.
-      if (!ipAffinityByIp.has(representative.clientIp)) {
-        ipAffinityByIp.set(representative.clientIp, user.id)
-        // Two requests building this list at once both read the address as
-        // unknown; say it once.
-        const announceKey = `${accountId}:${representative.clientIp}`
-        if (!announcedDevices.has(announceKey)) {
-          announcedDevices.add(announceKey)
-          notifyNewDevice(prisma, accountId, user, representative.clientIp).catch(() => {})
+    const userByUsername = new Map(
+        users.filter((u) => u.username).map((u) => [u.username.toLowerCase(), u])
+    );
+    // Secondary match: local-part of email (e.g. "someuser" from
+    // "someuser@example.com"). Handles the common case where one AIOStreams
+    // login covers multiple per-provider SlickSync profiles that share the same
+    // email but have provider-specific usernames that don't match the AIOStreams
+    // username at all.
+    const userByEmailLocalPart = new Map(
+        users
+            .filter((u) => u.email?.includes("@"))
+            .map((u) => [u.email.split("@")[0].toLowerCase(), u])
+    );
+    // Every native entry a person has, not just one: someone can have the film
+    // they just finished and the one they started both open, and the stream
+    // has to be compared against each.
+    const watchSessionsByUserId = new Map();
+    for (const np of watchSessionNowPlaying) {
+        if (!np.user?.id) {
+            continue;
         }
-      }
-      prisma.proxyUserIpAffinity.upsert({
-        where: { accountId_clientIp: { accountId, clientIp: representative.clientIp } },
-        create: { accountId, clientIp: representative.clientIp, userId: user.id },
-        update: { userId: user.id, confirmedAt: new Date() },
-      }).catch(() => {}) // best-effort, never blocks building the Now Playing list
+        if (!watchSessionsByUserId.has(np.user.id)) {
+            watchSessionsByUserId.set(np.user.id, []);
+        }
+        watchSessionsByUserId.get(np.user.id).push(np);
     }
 
-    const described = describe(representative)
-    if (!coveredByUser.has(user.id)) coveredByUser.set(user.id, [])
-    coveredByUser.get(user.id).push(described)
-    const theirSessions = watchSessionsByUserId.get(user.id) || []
-    // Only borrow a WatchSession's item/videoId if it is about the same
-    // title the proxy detected - a session of theirs about something else
-    // (the film they just finished, a sequel's original) must not be shown
-    // as if it were the proxied content. User identity (avatar/username/
-    // email) is about the person, not the content, so any of their entries
-    // can supply it.
-    const existing = theirSessions.find((np) => pairMatches(described, np.item)) || null
-    const existingTitleMatches = !!existing
+    const result = [];
+    // Tracks, per user, the normalized titles of proxy-covered streams - NOT
+    // just which users have any active proxy row. A stale/unrelated active
+    // proxy connection (AIOStreams keeps rows active up to 6h - see the
+    // grouping comment below) or a debrid stream watched earlier must not
+    // blank out a genuinely different, still-active WatchSession entry for
+    // the same user (e.g. a usenet stream that never routes through the
+    // proxy at all) - only the specific title the proxy is covering should
+    // be suppressed from the WatchSession pass below.
+    const coveredByUser = new Map();
+    // Same idea, but for titles the proxy recently FINISHED carrying - used only
+    // to suppress a native entry that's a stale echo of an already-ended stream.
+    const recentlyClosedByUser = new Map();
 
-    result.push({
-      user: theirSessions[0]?.user ?? {
-        id: user.id,
-        username: user.username || user.email,
-        email: user.email,
-        colorIndex: user.colorIndex || 0,
-        avatarUrl: user.avatarUrl || null,
-        useGravatar: user.useGravatar ?? false,
-      },
-      item: existingTitleMatches ? existing.item : {
-        // The matched title's id, type and name where the lookup found one.
-        id: representative.metadataItemId || null,
-        name: proxyDisplayTitle(representative) || 'Unknown',
-        type: representative.metadataItemType || null,
-        year: ((representative.displayName || '').match(/\((\d{4})\)\s*$/) || [])[1] || null,
-        poster: representative.posterUrl || null,
-        season: null,
-        episode: null,
-      },
-      videoId: existingTitleMatches ? existing.videoId : null,
-      // Same borrow-if-same-title rule as item/videoId above - the proxy
-      // itself has no semantic playback position (it only sees byte-range
-      // requests), so this is native's data riding along on the proxy's
-      // liveness signal, not something the proxy actually knows.
-      lastPosition: existingTitleMatches ? (existing.lastPosition ?? null) : null,
-      totalDuration: existingTitleMatches ? (existing.totalDuration ?? null) : null,
-      ...(existingTitleMatches && existing.stremioAppUrl ? { stremioAppUrl: existing.stremioAppUrl, nuvioAppUrl: existing.nuvioAppUrl } : {}),
-      // Proxy startTime/liveness is the authoritative signal here, not
-      // whatever the WatchSession entry (if any) happened to record.
-      watchedAt: earliestStartTime.toISOString(),
-      watchedAtTimestamp: earliestStartTime.getTime(),
-      startTime: earliestStartTime,
-      // Most recent connection's own start time (e.g. when the last seek
-      // happened) - kept separately, not used for duration display.
-      lastConnectionStartTime: representative.startTime.toISOString(),
-      // A "possibly paused" label was tried here and pulled (2026-07-29,
-      // same day) - confirmed against real usage that a fast debrid
-      // connection (TorBox) routinely front-loads an entire file within
-      // seconds, so the request-cadence signal it was based on reads as
-      // "stale" for nearly this account's ENTIRE runtime on every normal
-      // play, not just real pauses. A label that's wrong by default is
-      // worse than no label - removed rather than left showing a
-      // confidently incorrect guess.
-      lastActivityAt: representative.lastSeenAt.toISOString(),
-      lastActivityAtTimestamp: representative.lastSeenAt.getTime(),
-      // Elapsed time we can actually stand behind, in seconds - real
-      // wall-clock elapsed while the connection is confirmed live, but
-      // frozen once we can no longer confirm that rather than continuing to
-      // climb off raw wall-clock forever (same root cause as the label
-      // above: no way to confirm real activity once requests stop; the
-      // honest fix for a NUMBER is to stop advancing it, not to keep
-      // incrementing a figure we can no longer vouch for - confirmed real
-      // case: a session showed "Watching for 49m" and climbing well after
-      // the stream had already been exited, so proxy startTime alone is not
-      // a safe basis for an ever-increasing duration display).
-      //
-      // The freeze basis is mostRecentPollConfirmation (this row's updatedAt,
-      // bumped every ~30s poll cycle for as long as AIOStreams' OWN stats
-      // still list the connection as active), NOT lastSeenAt (the last
-      // actual application-level request). Confirmed real case 2026-07-30: a
-      // StremThru/TorBox 4K stream hit lastSeenAt exactly once, ~0.8s after
-      // startTime (3 requests, then the player streamed the rest of a
-      // 20+ minute watch straight from TorBox's own CDN with zero further
-      // proxy traffic) - lastSeenAt froze the display at "~3m" for the
-      // entire watch despite proxyStreamMonitor.js's own 30s poll
-      // continuing to confirm, cycle after cycle, that AIOStreams still had
-      // this exact connection open. updatedAt reflects that ongoing
-      // reconfirmation; lastSeenAt only reflects request cadence, which this
-      // debrid pattern has none of after the first second. This still can't
-      // reintroduce the "climbing after exit" bug above: the moment
-      // AIOStreams actually drops the connection, proxyStreamMonitor.js
-      // stops touching the row (see toClose in that file), updatedAt stops
-      // advancing right along with it, and the row is closed outright
-      // shortly after - same safety property as before, just anchored to a
-      // signal that doesn't go stale within the first second of a fast
-      // debrid stream.
-      elapsedSeconds: Math.max(0, Math.floor(
-        (Math.min(Date.now(), mostRecentPollConfirmation.getTime() + PAUSED_STALE_MS) - earliestStartTime.getTime()) / 1000
-      )),
-      // True once elapsedSeconds above has stopped advancing (no poll
-      // reconfirmation for PAUSED_STALE_MS) - lets the UI stop ticking a
-      // frozen number live instead of implying it's still counting up.
-      elapsedFrozen: (Date.now() - mostRecentPollConfirmation.getTime()) > PAUSED_STALE_MS,
-      source: 'aiostreams-proxy',
-    })
-  }
+    // Fallback: AIOStreams only has one login username, but a single person
+    // can have multiple per-provider SlickSync profiles (e.g. one Stremio
+    // profile, one Nuvio profile) that don't match that username at all.
+    // AIOSTREAMS_FALLBACK_USER_IDS lists which SlickSync user IDs should
+    // receive proxy-detected activity when the username lookup above finds
+    // no match, rather than silently dropping it. Comma-separated, set in
+    // this app's own .env.
+    const fallbackUserIds = (process.env.AIOSTREAMS_FALLBACK_USER_IDS || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const usersById = new Map(users.map((u) => [u.id, u]));
 
-  // Titles the proxy recently FINISHED carrying, per user. A native entry for
-  // one of these is a stale echo of a stream the proxy knows already ended -
-  // drop it so an exited stream doesn't linger in Now Playing for the length
-  // of native's freshness window.
-  for (const closed of recentlyClosedSessions) {
-    const aiostreamsUserLower = (closed.aiostreamsUser || '').toLowerCase()
-    let candidates = []
-    const directMatch = userByUsername.get(aiostreamsUserLower)
-    const emailMatch = userByEmailLocalPart.get(aiostreamsUserLower)
-    if (directMatch) {
-      candidates = [directMatch]
-    } else if (emailMatch) {
-      candidates = users.filter(
-        (u) => u.email && u.email.split('@')[0].toLowerCase() === aiostreamsUserLower
-      )
-    } else if (fallbackUserIds.length > 0) {
-      candidates = fallbackUserIds.map((id) => usersById.get(id)).filter(Boolean)
+    // Returns { user, confident }. `confident` means this resolution came from
+    // real evidence (a unique match, or a title match against a live native
+    // session) rather than a guess - only confident resolutions get written
+    // back into ipAffinityByIp, so a guess can never reinforce itself into a
+    // permanent wrong answer.
+    function disambiguateMatch(candidates, proxyRow, clientIp, confidentIfUnique) {
+        if (candidates.length <= 1) {
+            return { confident: confidentIfUnique, user: candidates[0] || null };
+        }
+
+        // Device claim first: a human said outright whose device this is, which
+        // outranks every inference below - including the title match, whose
+        // whole job is guessing what a human could simply have told us.
+        // Confident, so the affinity row aligns with the claim too.
+        if (clientIp) {
+            const claimedUserId = claimsByIp.get(clientIp);
+            if (claimedUserId) {
+                const claimed = candidates.find((u) => u.id === claimedUserId);
+                if (claimed) {
+                    return { confident: true, user: claimed };
+                }
+            }
+        }
+
+        const described = describe(proxyRow);
+        const titleMatch = candidates.find((u) =>
+            (watchSessionsByUserId.get(u.id) || []).some((np) => pairMatches(described, np.item))
+        );
+        if (titleMatch) {
+            return { confident: true, user: titleMatch };
+        }
+
+        // No title-match signal available (common while a stream is mid-playback
+        // and native hasn't checkpointed yet - native only writes a session at
+        // pause/stop). Next best guess: which candidate this exact client IP
+        // resolved to the last time there WAS a real signal - most households
+        // have one device per person on a fairly stable local IP, so this beats
+        // a fixed id order without needing a fresh confirmation every time.
+        if (clientIp) {
+            const affinityUserId = ipAffinityByIp.get(clientIp);
+            if (affinityUserId) {
+                const affinityMatch = candidates.find((u) => u.id === affinityUserId);
+                if (affinityMatch) {
+                    return { confident: false, user: affinityMatch };
+                }
+            }
+        }
+
+        // No affinity learned for this IP yet either. Use the fallback list's
+        // order as a last-resort tiebreaker: whichever candidate appears
+        // earliest in AIOSTREAMS_FALLBACK_USER_IDS wins, rather than picking
+        // candidates[0] in arbitrary database row order. Not confident - this is
+        // exactly the guess the affinity tier above exists to eventually replace.
+        if (fallbackUserIds.length > 0) {
+            const byFallbackOrder = candidates
+                .map((u) => ({ rank: fallbackUserIds.indexOf(u.id), u }))
+                .filter((c) => c.rank !== -1)
+                .sort((a, b) => a.rank - b.rank);
+            if (byFallbackOrder.length > 0) {
+                return { confident: false, user: byFallbackOrder[0].u };
+            }
+        }
+
+        return { confident: false, user: candidates[0] };
     }
-    // A closed stream can't be disambiguated by a live title match, so mark
-    // the title as recently-carried for every candidate this login maps to.
-    // That's deliberate: it only ever suppresses a native entry for THAT
-    // exact title, which the proxy has confirmed ended.
-    for (const candidate of candidates) {
-      if (!recentlyClosedByUser.has(candidate.id)) recentlyClosedByUser.set(candidate.id, [])
-      recentlyClosedByUser.get(candidate.id).push(describe(closed))
+
+    // Group active proxy rows by normalized title before attributing them.
+    // Seeking/rewinding creates a new connection (different byte-range
+    // request) while the old one sometimes lingers as "active" - AIOStreams
+    // keeps stale connections active up to 6h unless explicitly told the
+    // request ended. Without grouping, the old and new rows for the SAME
+    // real viewing session could get disambiguated to two DIFFERENT
+    // profiles independently, showing as a split/duplicate entry. Grouping
+    // ensures every row for one title gets the same single attribution.
+    // Rows that matched the same real title are one group whatever their
+    // filenames said - a viewer who switched from one release of a film to
+    // another mid-way, an Italian-named release next to an English one, is
+    // one person watching one thing.
+    const groupedByTitle = new Map();
+    for (const proxy of proxySessions) {
+        const key = proxy.metadataItemId || normalizeTitle(proxyDisplayTitle(proxy)) || proxy.url;
+        if (!groupedByTitle.has(key)) {
+            groupedByTitle.set(key, []);
+        }
+        groupedByTitle.get(key).push(proxy);
     }
-  }
 
-  for (const np of watchSessionNowPlaying) {
-    const uid = np.user && np.user.id
-    const active = uid ? coveredByUser.get(uid) : null
-    const ended = uid ? recentlyClosedByUser.get(uid) : null
+    for (const group of groupedByTitle.values()) {
+        // Use the most recently active row in the group as the representative
+        // for display fields (poster, displayName, liveness) - the freshest one
+        // is most likely the real current connection, not a stale leftover.
+        const representative = group.reduce((latest, p) =>
+            p.lastSeenAt > latest.lastSeenAt ? p : latest
+        );
+        // Earliest startTime across the whole group is used for the reported
+        // watch duration - a seek creates a new connection with a new (later)
+        // startTime, and using the representative's own startTime alone would
+        // make "Watching for Xm" reset toward 0 after every seek instead of
+        // counting continuously from when viewing actually began. The
+        // representative's own startTime is kept too (lastConnectionStartTime,
+        // below) rather than discarded, in case a future UI wants to show
+        // something like "resumed 2m ago" alongside the total duration.
+        const earliestStartTime = group.reduce(
+            (earliest, p) => (p.startTime < earliest ? p.startTime : earliest),
+            representative.startTime
+        );
 
-    // Superseded when the proxy is currently carrying this title (the proxy
-    // entry above replaces it), or recently finished carrying it (stale echo).
-    const matches = (streams) => !!streams && streams.some((d) => pairMatches(d, np.item))
-    const isSuperseded = matches(active) || matches(ended)
-    if (!isSuperseded) result.push(np)
-  }
+        // Most recent poll cycle that reconfirmed ANY connection in this group is
+        // still in AIOStreams' own active-connection list - see the elapsedSeconds
+        // comment below for why this, not lastSeenAt, is the freeze basis.
+        const mostRecentPollConfirmation = group.reduce(
+            (latest, p) => (p.updatedAt > latest ? p.updatedAt : latest),
+            representative.updatedAt
+        );
 
-  return result
+        let candidates = [];
+        // True only when `candidates` came from a genuinely unique match
+        // (username or email), not an arbitrary configured list - a fallback
+        // list that happens to resolve to exactly one valid id is still just a
+        // guess, not evidence, and must not be recorded as confirmed affinity.
+        let candidatesAreRealMatch = false;
+        const aiostreamsUserLower = (representative.aiostreamsUser || "").toLowerCase();
+        const directMatch = userByUsername.get(aiostreamsUserLower);
+        const emailMatch = userByEmailLocalPart.get(aiostreamsUserLower);
+
+        if (directMatch) {
+            candidates = [directMatch];
+            candidatesAreRealMatch = true;
+        } else if (emailMatch) {
+            // One AIOStreams login, multiple per-provider profiles sharing an
+            // email - matched by email local-part rather than username.
+            candidates = users.filter(
+                (u) => u.email && u.email.split("@")[0].toLowerCase() === aiostreamsUserLower
+            );
+            candidatesAreRealMatch = true;
+        } else if (fallbackUserIds.length > 0) {
+            candidates = fallbackUserIds.map((id) => usersById.get(id)).filter(Boolean);
+        }
+
+        if (candidates.length === 0) {
+            continue; // no direct match and no usable fallback - skip rather than guess
+        }
+
+        const { user, confident } = disambiguateMatch(
+            candidates,
+            representative,
+            representative.clientIp,
+            candidatesAreRealMatch
+        );
+        if (!user) {
+            continue;
+        }
+
+        // Learn from this resolution for next time - only when it's real
+        // evidence, not a guess (see disambiguateMatch's own comment on why).
+        if (confident && representative.clientIp) {
+            // Checked against ipAffinityByIp's initial snapshot (loaded once above,
+            // before this loop) - an IP this account has never confidently
+            // resolved before, for ANY user, streaming for the first time. Fired
+            // BEFORE the upsert below (which would otherwise make every later
+            // check in this same poll see it as already-known) and the map is
+            // updated immediately after so a second representative sharing this
+            // IP later in the same poll doesn't fire twice.
+            if (!ipAffinityByIp.has(representative.clientIp)) {
+                ipAffinityByIp.set(representative.clientIp, user.id);
+                // Two requests building this list at once both read the address as
+                // unknown; say it once.
+                const announceKey = `${accountId}:${representative.clientIp}`;
+                if (!announcedDevices.has(announceKey)) {
+                    announcedDevices.add(announceKey);
+                    notifyNewDevice(prisma, accountId, user, representative.clientIp).catch(
+                        () => undefined
+                    );
+                }
+            }
+            prisma.proxyUserIpAffinity
+                .upsert({
+                    create: { accountId, clientIp: representative.clientIp, userId: user.id },
+                    update: { confirmedAt: new Date(), userId: user.id },
+                    where: { accountId_clientIp: { accountId, clientIp: representative.clientIp } },
+                })
+                .catch(() => undefined); // best-effort, never blocks building the Now Playing list
+        }
+
+        const described = describe(representative);
+        if (!coveredByUser.has(user.id)) {
+            coveredByUser.set(user.id, []);
+        }
+        coveredByUser.get(user.id).push(described);
+        const theirSessions = watchSessionsByUserId.get(user.id) || [];
+        // Only borrow a WatchSession's item/videoId if it is about the same
+        // title the proxy detected - a session of theirs about something else
+        // (the film they just finished, a sequel's original) must not be shown
+        // as if it were the proxied content. User identity (avatar/username/
+        // email) is about the person, not the content, so any of their entries
+        // can supply it.
+        const existing = theirSessions.find((np) => pairMatches(described, np.item)) || null;
+        const existingTitleMatches = !!existing;
+
+        result.push({
+            item: existingTitleMatches
+                ? existing.item
+                : {
+                      episode: null,
+                      // The matched title's id, type and name where the lookup found one.
+                      id: representative.metadataItemId || null,
+                      name: proxyDisplayTitle(representative) || "Unknown",
+                      poster: representative.posterUrl || null,
+                      season: null,
+                      type: representative.metadataItemType || null,
+                      year:
+                          ((representative.displayName || "").match(/\((\d{4})\)\s*$/) || [])[1] ||
+                          null,
+                  },
+            // Same borrow-if-same-title rule as item/videoId above - the proxy
+            // itself has no semantic playback position (it only sees byte-range
+            // requests), so this is native's data riding along on the proxy's
+            // liveness signal, not something the proxy actually knows.
+            lastPosition: existingTitleMatches ? (existing.lastPosition ?? null) : null,
+            totalDuration: existingTitleMatches ? (existing.totalDuration ?? null) : null,
+            user: theirSessions[0]?.user ?? {
+                avatarUrl: user.avatarUrl || null,
+                colorIndex: user.colorIndex || 0,
+                email: user.email,
+                id: user.id,
+                useGravatar: user.useGravatar ?? false,
+                username: user.username || user.email,
+            },
+            videoId: existingTitleMatches ? existing.videoId : null,
+            ...(existingTitleMatches && existing.stremioAppUrl
+                ? { nuvioAppUrl: existing.nuvioAppUrl, stremioAppUrl: existing.stremioAppUrl }
+                : {}),
+            // True once elapsedSeconds above has stopped advancing (no poll
+            // reconfirmation for PAUSED_STALE_MS) - lets the UI stop ticking a
+            // frozen number live instead of implying it's still counting up.
+            elapsedFrozen: Date.now() - mostRecentPollConfirmation.getTime() > PAUSED_STALE_MS,
+            // Elapsed time we can actually stand behind, in seconds - real
+            // wall-clock elapsed while the connection is confirmed live, but
+            // frozen once we can no longer confirm that rather than continuing to
+            // climb off raw wall-clock forever (same root cause as the label
+            // above: no way to confirm real activity once requests stop; the
+            // honest fix for a NUMBER is to stop advancing it, not to keep
+            // incrementing a figure we can no longer vouch for - confirmed real
+            // case: a session showed "Watching for 49m" and climbing well after
+            // the stream had already been exited, so proxy startTime alone is not
+            // a safe basis for an ever-increasing duration display).
+            //
+            // The freeze basis is mostRecentPollConfirmation (this row's updatedAt,
+            // bumped every ~30s poll cycle for as long as AIOStreams' OWN stats
+            // still list the connection as active), NOT lastSeenAt (the last
+            // actual application-level request). Confirmed real case 2026-07-30: a
+            // StremThru/TorBox 4K stream hit lastSeenAt exactly once, ~0.8s after
+            // startTime (3 requests, then the player streamed the rest of a
+            // 20+ minute watch straight from TorBox's own CDN with zero further
+            // proxy traffic) - lastSeenAt froze the display at "~3m" for the
+            // entire watch despite proxyStreamMonitor.js's own 30s poll
+            // continuing to confirm, cycle after cycle, that AIOStreams still had
+            // this exact connection open. updatedAt reflects that ongoing
+            // reconfirmation; lastSeenAt only reflects request cadence, which this
+            // debrid pattern has none of after the first second. This still can't
+            // reintroduce the "climbing after exit" bug above: the moment
+            // AIOStreams actually drops the connection, proxyStreamMonitor.js
+            // stops touching the row (see toClose in that file), updatedAt stops
+            // advancing right along with it, and the row is closed outright
+            // shortly after - same safety property as before, just anchored to a
+            // signal that doesn't go stale within the first second of a fast
+            // debrid stream.
+            elapsedSeconds: Math.max(
+                0,
+                Math.floor(
+                    (Math.min(Date.now(), mostRecentPollConfirmation.getTime() + PAUSED_STALE_MS) -
+                        earliestStartTime.getTime()) /
+                        1000
+                )
+            ),
+            // A "possibly paused" label was tried here and pulled (2026-07-29,
+            // same day) - confirmed against real usage that a fast debrid
+            // connection (TorBox) routinely front-loads an entire file within
+            // seconds, so the request-cadence signal it was based on reads as
+            // "stale" for nearly this account's ENTIRE runtime on every normal
+            // play, not just real pauses. A label that's wrong by default is
+            // worse than no label - removed rather than left showing a
+            // confidently incorrect guess.
+            lastActivityAt: representative.lastSeenAt.toISOString(),
+            lastActivityAtTimestamp: representative.lastSeenAt.getTime(),
+            // Most recent connection's own start time (e.g. when the last seek
+            // happened) - kept separately, not used for duration display.
+            lastConnectionStartTime: representative.startTime.toISOString(),
+            source: "aiostreams-proxy",
+            startTime: earliestStartTime,
+            // Proxy startTime/liveness is the authoritative signal here, not
+            // whatever the WatchSession entry (if any) happened to record.
+            watchedAt: earliestStartTime.toISOString(),
+            watchedAtTimestamp: earliestStartTime.getTime(),
+        });
+    }
+
+    // Titles the proxy recently FINISHED carrying, per user. A native entry for
+    // one of these is a stale echo of a stream the proxy knows already ended -
+    // drop it so an exited stream doesn't linger in Now Playing for the length
+    // of native's freshness window.
+    for (const closed of recentlyClosedSessions) {
+        const aiostreamsUserLower = (closed.aiostreamsUser || "").toLowerCase();
+        let candidates = [];
+        const directMatch = userByUsername.get(aiostreamsUserLower);
+        const emailMatch = userByEmailLocalPart.get(aiostreamsUserLower);
+        if (directMatch) {
+            candidates = [directMatch];
+        } else if (emailMatch) {
+            candidates = users.filter(
+                (u) => u.email && u.email.split("@")[0].toLowerCase() === aiostreamsUserLower
+            );
+        } else if (fallbackUserIds.length > 0) {
+            candidates = fallbackUserIds.map((id) => usersById.get(id)).filter(Boolean);
+        }
+        // A closed stream can't be disambiguated by a live title match, so mark
+        // the title as recently-carried for every candidate this login maps to.
+        // That's deliberate: it only ever suppresses a native entry for THAT
+        // exact title, which the proxy has confirmed ended.
+        for (const candidate of candidates) {
+            if (!recentlyClosedByUser.has(candidate.id)) {
+                recentlyClosedByUser.set(candidate.id, []);
+            }
+            recentlyClosedByUser.get(candidate.id).push(describe(closed));
+        }
+    }
+
+    for (const np of watchSessionNowPlaying) {
+        const uid = np.user?.id;
+        const active = uid ? coveredByUser.get(uid) : null;
+        const ended = uid ? recentlyClosedByUser.get(uid) : null;
+
+        // Superseded when the proxy is currently carrying this title (the proxy
+        // entry above replaces it), or recently finished carrying it (stale echo).
+        const matches = (streams) => !!streams && streams.some((d) => pairMatches(d, np.item));
+        const isSuperseded = matches(active) || matches(ended);
+        if (!isSuperseded) {
+            result.push(np);
+        }
+    }
+
+    return result;
 }
 
 // New-device alert - same push+bell pattern as every other notifyOn* type
@@ -486,15 +551,17 @@ async function mergeProxyNowPlaying(prisma, accountId, users, watchSessionNowPla
 // user - see the call site's comment for exactly what "confident" and
 // "never seen before" mean here.
 async function notifyNewDevice(prisma, accountId, user, clientIp) {
-  try {
-    const { notifyPushForType } = require('./pushNotifications')
-    await notifyPushForType(prisma, accountId, 'notifyOnNewDevice', {
-      title: '📱 New device detected',
-      body: `${user.username || 'A user'}'s stream was just seen from an IP we haven't confirmed before (${clientIp}) - worth checking if that's expected.`,
-      icon: '/android-chrome-192x192.png',
-      url: `/users/${user.id}`,
-    })
-  } catch {}
+    try {
+        const { notifyPushForType } = require("./pushNotifications");
+        await notifyPushForType(prisma, accountId, "notifyOnNewDevice", {
+            body: `${user.username || "A user"}'s stream was just seen from an IP we haven't confirmed before (${clientIp}) - worth checking if that's expected.`,
+            icon: "/android-chrome-192x192.png",
+            title: "📱 New device detected",
+            url: `/users/${user.id}`,
+        });
+    } catch {
+        // Unavailable optional records leave the current result in place.
+    }
 }
 
-module.exports = { mergeProxyNowPlaying }
+module.exports = { mergeProxyNowPlaying };

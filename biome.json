@@ -1,0 +1,103 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "extends": ["ultracite/biome/core", "ultracite/biome/next"],
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "noConsole": "off",
+        "noAlert": "off",
+        "useAwait": "off",
+        "noEqualsToNull": "off",
+        "noBitwiseOperators": "off",
+        "noUnnecessaryConditions": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "off"
+      },
+      "performance": {
+        "noJsxPropsBind": "off",
+        "useTopLevelRegex": "off",
+        "noAwaitInLoops": "off",
+        "noDelete": "off",
+        "noBarrelFile": "off",
+        "noImgElement": "off"
+      },
+      "style": {
+        "noNestedTernary": "off",
+        "noDescendingSpecificity": "off",
+        "noIncrementDecrement": "off",
+        "useDestructuring": "off",
+        "useDefaultParameterLast": "off",
+        "useDefaultSwitchClause": "off",
+        "useFilenamingConvention": {
+          "level": "error",
+          "options": {
+            "requireAscii": true,
+            "strictCase": false,
+            "filenameCases": ["camelCase", "PascalCase", "kebab-case"]
+          }
+        }
+      },
+      "complexity": {
+        "noForEach": "off",
+        "noVoid": "off",
+        "noExcessiveCognitiveComplexity": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "indentWidth": 4,
+      "lineWidth": 100
+    }
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "!!**/node_modules",
+      "!!**/.next",
+      "!!data",
+      "!!logs",
+      "!!work",
+      "!!prisma/migrations",
+      "!!**/*.min.js"
+    ]
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["server/**/*.js", "scripts/**/*.js", "test/**/*.js"],
+      "javascript": {
+        "globals": [
+          "__dirname",
+          "__filename",
+          "Buffer",
+          "process",
+          "module",
+          "require",
+          "exports",
+          "global",
+          "setImmediate"
+        ]
+      }
+    },
+    {
+      "includes": ["package.json", "client/package.json"],
+      "assist": {
+        "actions": {
+          "source": {
+            "useSortedPackageJson": "off"
+          }
+        }
+      }
+    }
+  ]
+}

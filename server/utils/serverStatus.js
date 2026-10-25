@@ -8,50 +8,90 @@
 //   test for a server outage - utils/connectionAlerts.js)
 // - partial: it answers, but some people's sign-ins are rejected or failing
 
-const { serverKeyOf } = require('./jellyfinServerCollections')
+const { serverKeyOf } = require("./jellyfinServerCollections");
 
-const KIND_LABELS = { jellyfin: 'Jellyfin', aiostreams: 'AIOStreams', aiometadata: 'AIOMetadata' }
+const KIND_LABELS = { aiometadata: "AIOMetadata", aiostreams: "AIOStreams", jellyfin: "Jellyfin" };
 
 function stateOf(person) {
-  const error = person.providerConnectionError || ''
-  if (!error) return 'ok'
-  return /^Reconnect needed:/i.test(error) ? 'reconnect' : 'issue'
-}
-
-async function serverStatusList(prisma, accountId, { versions = (rows) => require('./serverVersions').annotate(rows) } = {}) {
-  const people = await prisma.user.findMany({
-    where: { accountId, isActive: true, providerType: 'jellyfin', jellyfinServerUrl: { not: null } },
-    select: { id: true, username: true, jellyfinServerUrl: true, jellyfinServerId: true, jellyfinServerKind: true, providerConnectionError: true, providerConnectionErrorAt: true },
-    orderBy: { username: 'asc' },
-  })
-  const { displayServer } = require('../providers/jellyfinAuth')
-  const servers = new Map()
-  for (const p of people) {
-    const key = serverKeyOf(p)
-    if (!key) continue
-    if (!servers.has(key)) {
-      servers.set(key, { key, kind: p.jellyfinServerKind || 'jellyfin', label: KIND_LABELS[p.jellyfinServerKind] || 'Jellyfin', address: displayServer(p.jellyfinServerUrl), url: p.jellyfinServerUrl, people: [] })
+    const error = person.providerConnectionError || "";
+    if (!error) {
+        return "ok";
     }
-    servers.get(key).people.push({
-      id: p.id,
-      name: p.username || 'Someone',
-      state: stateOf(p),
-      error: p.providerConnectionError ? p.providerConnectionError.replace(/^(Reconnect needed|Connection issue):\s*/i, '').slice(0, 200) : null,
-      since: p.providerConnectionErrorAt || null,
-    })
-  }
-  const rows = [...servers.values()].map((s) => {
-    const failing = s.people.filter((p) => p.state !== 'ok')
-    const down = s.people.length > 0 && s.people.every((p) => p.state === 'issue')
-    const status = down ? 'down' : failing.length ? 'partial' : 'up'
-    const since = down ? new Date(Math.min(...s.people.map((p) => new Date(p.since || Date.now()).getTime()))).toISOString() : null
-    return { ...s, status, since, failingCount: failing.length }
-  })
-  // The version each runs, and whether a newer one is out (utils/serverVersions.js).
-  let annotated = rows
-  try { annotated = await versions(rows) } catch { /* shown without */ }
-  // Their address with the configuration in it stays on the server.
-  return annotated.map(({ url, ...row }) => row)
+    return /^Reconnect needed:/i.test(error) ? "reconnect" : "issue";
 }
 
-module.exports = { serverStatusList }
+async function serverStatusList(
+    prisma,
+    accountId,
+    { versions = (rows) => require("./serverVersions").annotate(rows) } = {}
+) {
+    const people = await prisma.user.findMany({
+        orderBy: { username: "asc" },
+        select: {
+            id: true,
+            jellyfinServerId: true,
+            jellyfinServerKind: true,
+            jellyfinServerUrl: true,
+            providerConnectionError: true,
+            providerConnectionErrorAt: true,
+            username: true,
+        },
+        where: {
+            accountId,
+            isActive: true,
+            jellyfinServerUrl: { not: null },
+            providerType: "jellyfin",
+        },
+    });
+    const { displayServer } = require("../providers/jellyfinAuth");
+    const servers = new Map();
+    for (const p of people) {
+        const key = serverKeyOf(p);
+        if (!key) {
+            continue;
+        }
+        if (!servers.has(key)) {
+            servers.set(key, {
+                address: displayServer(p.jellyfinServerUrl),
+                key,
+                kind: p.jellyfinServerKind || "jellyfin",
+                label: KIND_LABELS[p.jellyfinServerKind] || "Jellyfin",
+                people: [],
+                url: p.jellyfinServerUrl,
+            });
+        }
+        servers.get(key).people.push({
+            error: p.providerConnectionError
+                ? p.providerConnectionError
+                      .replace(/^(Reconnect needed|Connection issue):\s*/i, "")
+                      .slice(0, 200)
+                : null,
+            id: p.id,
+            name: p.username || "Someone",
+            since: p.providerConnectionErrorAt || null,
+            state: stateOf(p),
+        });
+    }
+    const rows = [...servers.values()].map((s) => {
+        const failing = s.people.filter((p) => p.state !== "ok");
+        const down = s.people.length > 0 && s.people.every((p) => p.state === "issue");
+        const status = down ? "down" : failing.length ? "partial" : "up";
+        const since = down
+            ? new Date(
+                  Math.min(...s.people.map((p) => new Date(p.since || Date.now()).getTime()))
+              ).toISOString()
+            : null;
+        return { ...s, failingCount: failing.length, since, status };
+    });
+    // The version each runs, and whether a newer one is out (utils/serverVersions.js).
+    let annotated = rows;
+    try {
+        annotated = await versions(rows);
+    } catch {
+        /* shown without */
+    }
+    // Their address with the configuration in it stays on the server.
+    return annotated.map(({ url, ...row }) => row);
+}
+
+module.exports = { serverStatusList };

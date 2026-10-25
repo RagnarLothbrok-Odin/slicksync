@@ -1,4 +1,4 @@
-import { isLiveConnected, LIVE_STATE_EVENT } from './liveState';
+import { isLiveConnected, LIVE_STATE_EVENT } from "./liveState";
 
 /**
  * A polling loop that knows when it is not needed.
@@ -18,46 +18,64 @@ import { isLiveConnected, LIVE_STATE_EVENT } from './liveState';
  * Returns the stop function, to be returned from the effect that started it.
  */
 export function startAdaptivePoll(fn: () => void, fastMs: number, slowMs: number): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let lastRun = Date.now();
-  let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastRun = Date.now();
+    let stopped = false;
 
-  const interval = () => (isLiveConnected() ? slowMs : fastMs);
-  const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+    const interval = () => (isLiveConnected() ? slowMs : fastMs);
+    const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
-  const schedule = () => {
-    if (stopped) return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(tick, interval());
-  };
-  const tick = () => {
-    if (stopped) return;
-    if (visible()) {
-      lastRun = Date.now();
-      fn();
-    }
+    const schedule = () => {
+        if (stopped) {
+            return;
+        }
+        if (timer) {
+            clearTimeout(timer);
+        }
+        timer = setTimeout(tick, interval());
+    };
+    const tick = () => {
+        if (stopped) {
+            return;
+        }
+        if (visible()) {
+            lastRun = Date.now();
+            fn();
+        }
+        schedule();
+    };
+    const onVisibility = () => {
+        if (!visible() || stopped) {
+            return;
+        }
+        if (Date.now() - lastRun >= fastMs) {
+            lastRun = Date.now();
+            fn();
+        }
+        schedule();
+    };
+    // The stream connecting or dropping changes the cadence from the next
+    // tick; nothing fires immediately.
+    const onLiveState = () => schedule();
+
     schedule();
-  };
-  const onVisibility = () => {
-    if (!visible() || stopped) return;
-    if (Date.now() - lastRun >= fastMs) {
-      lastRun = Date.now();
-      fn();
+    if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", onVisibility);
     }
-    schedule();
-  };
-  // The stream connecting or dropping changes the cadence from the next
-  // tick; nothing fires immediately.
-  const onLiveState = () => schedule();
+    if (typeof window !== "undefined") {
+        window.addEventListener(LIVE_STATE_EVENT, onLiveState);
+    }
 
-  schedule();
-  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
-  if (typeof window !== 'undefined') window.addEventListener(LIVE_STATE_EVENT, onLiveState);
-
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
-    if (typeof window !== 'undefined') window.removeEventListener(LIVE_STATE_EVENT, onLiveState);
-  };
+    return () => {
+        stopped = true;
+        if (timer) {
+            clearTimeout(timer);
+        }
+        if (typeof document !== "undefined") {
+            document.removeEventListener("visibilitychange", onVisibility);
+        }
+        if (typeof window !== "undefined") {
+            window.removeEventListener(LIVE_STATE_EVENT, onLiveState);
+        }
+    };
 }

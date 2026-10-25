@@ -1,62 +1,68 @@
-'use client';
+"use client";
 
-import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import {
-    XMarkIcon,
-    KeyIcon,
-    ShieldCheckIcon,
-    ClipboardDocumentIcon,
     CheckIcon,
+    ClipboardDocumentIcon,
     ExclamationTriangleIcon,
+    KeyIcon,
     LinkIcon,
-} from '@heroicons/react/24/outline';
-import { api } from '@/lib/api';
-import { copyToClipboard } from '@/lib/clipboard';
-import { toast } from '@/components/ui/Toast';
-import { PasswordToggleButton } from '@/components/ui/Input';
-import { providerTypeLabel, providerBadgeVariant } from '@/lib/providers';
+    XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
+import { PasswordToggleButton } from "@/components/ui/Input";
+import { toast } from "@/components/ui/Toast";
+import { api } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
+import { providerTypeLabel } from "@/lib/providers";
 
 interface AccountModalProps {
-    isOpen: boolean;
-    onClose: () => void;
     accountInfo: {
         uuid?: string | null;
         email?: string | null;
-        linkedProvider?: 'stremio' | 'nuvio' | null;
+        linkedProvider?: "stremio" | "nuvio" | null;
     };
+    isOpen: boolean;
     onAccountUpdated: () => void;
+    onClose: () => void;
 }
 
 type ModalView =
-    | 'main'            // Show options based on account type
-    | 'unlink-stremio'  // Confirm: keep UUID only
-    | 'unlink-uuid'     // Confirm: keep Stremio only
-    | 'set-credentials' // Add/change UUID + password
-    | 'link-stremio'    // Link Stremio via OAuth (redirects to login)
-    | 'success';        // Show result (e.g., UUID)
+    | "main" // Show options based on account type
+    | "unlink-stremio" // Confirm: keep UUID only
+    | "unlink-uuid" // Confirm: keep Stremio only
+    | "set-credentials" // Add/change UUID + password
+    | "link-stremio" // Link Stremio via OAuth (redirects to login)
+    | "success"; // Show result (e.g., UUID)
 
 /**
  * Account management modal for the PanelSwitcher dropdown.
  * Allows users to manage their auth methods (UUID/Stremio linking).
  */
-export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }: AccountModalProps) {
+export function AccountModal({
+    isOpen,
+    onClose,
+    accountInfo,
+    onAccountUpdated,
+}: AccountModalProps) {
+    const fieldId1 = useId();
     const [mounted, setMounted] = useState(false);
     useEffect(() => {
         setMounted(true);
     }, []);
 
-    const [view, setView] = useState<ModalView>('main');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
+    const [view, setView] = useState<ModalView>("main");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
     const [passwordVisible, setPasswordVisible] = useState(false);
     const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
 
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [resultUuid, setResultUuid] = useState<string | null>(null);
-    const [resultMessage, setResultMessage] = useState<string>('');
+    const [resultMessage, setResultMessage] = useState<string>("");
     const [copied, setCopied] = useState(false);
 
     const hasUuid = !!accountInfo.uuid;
@@ -66,18 +72,19 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     // column - there's only one "linked identity" slot, so hasStremio really
     // means "some provider is linked". linkedProvider says which one.
     // Fallback to 'stremio' for accounts linked before this field existed.
-    const linkedProvider: 'stremio' | 'nuvio' = accountInfo.linkedProvider === 'nuvio' ? 'nuvio' : 'stremio';
+    const linkedProvider: "stremio" | "nuvio" =
+        accountInfo.linkedProvider === "nuvio" ? "nuvio" : "stremio";
     const providerLabel = providerTypeLabel(linkedProvider);
 
     const resetState = () => {
-        setView('main');
-        setPassword('');
-        setConfirmPassword('');
+        setView("main");
+        setPassword("");
+        setConfirmPassword("");
 
         setError(null);
         setIsLoading(false);
         setResultUuid(null);
-        setResultMessage('');
+        setResultMessage("");
         setCopied(false);
     };
 
@@ -89,7 +96,7 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     // Keep UUID only — remove Stremio
     const handleUnlinkStremio = async () => {
         if (!password) {
-            setError('Password is required');
+            setError("Password is required");
             return;
         }
         setError(null);
@@ -98,11 +105,11 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             const result = await api.unlinkStremio(password);
             setResultUuid(result.uuid);
             setResultMessage(result.message);
-            setView('success');
+            setView("success");
             onAccountUpdated();
             toast.success(`${providerLabel} unlinked — UUID only`);
-        } catch (err: any) {
-            setError(err.message || 'Failed to unlink Stremio');
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to unlink Stremio"));
         } finally {
             setIsLoading(false);
         }
@@ -115,11 +122,11 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
         try {
             const result = await api.unlinkUuid();
             setResultMessage(result.message);
-            setView('success');
+            setView("success");
             onAccountUpdated();
             toast.success(`UUID removed — ${providerLabel} only`);
-        } catch (err: any) {
-            setError(err.message || 'Failed to remove UUID');
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to remove UUID"));
         } finally {
             setIsLoading(false);
         }
@@ -128,11 +135,11 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     // Set/change UUID + password
     const handleSetCredentials = async () => {
         if (!password || password.length < 4) {
-            setError('Password must be at least 4 characters');
+            setError("Password must be at least 4 characters");
             return;
         }
         if (password !== confirmPassword) {
-            setError('Passwords do not match');
+            setError("Passwords do not match");
             return;
         }
         setError(null);
@@ -141,11 +148,11 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             const result = await api.setCredentials(password);
             setResultUuid(result.uuid);
             setResultMessage(result.message);
-            setView('success');
+            setView("success");
             onAccountUpdated();
-            toast.success(hasUuid ? 'Password updated' : 'UUID & password set');
-        } catch (err: any) {
-            setError(err.message || 'Failed to set credentials');
+            toast.success(hasUuid ? "Password updated" : "UUID & password set");
+        } catch (err) {
+            setError(readErrorMessage(err, "Failed to set credentials"));
         } finally {
             setIsLoading(false);
         }
@@ -154,7 +161,7 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     const handleCopyUuid = (uuid: string) => {
         copyToClipboard(uuid);
         setCopied(true);
-        toast.success('UUID copied to clipboard');
+        toast.success("UUID copied to clipboard");
         setTimeout(() => setCopied(false), 2000);
     };
 
@@ -162,7 +169,7 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     const handleLinkStremio = () => {
         // The login page already supports Stremio login for admin accounts.
         // When they log in with Stremio there, it links to their account.
-        window.location.href = '/login?mode=admin&linkStremio=1';
+        window.location.href = "/login?mode=admin&linkStremio=1";
     };
 
     // Link Nuvio — same idea as handleLinkStremio, the login page's admin
@@ -172,46 +179,56 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     // managed User with this same email already connected to Nuvio - unlike
     // Stremio linking, it can't create that link from a bare login alone.
     const handleLinkNuvio = () => {
-        window.location.href = '/login?mode=admin&linkNuvio=1';
+        window.location.href = "/login?mode=admin&linkNuvio=1";
     };
 
     const renderMain = () => (
         <div className="space-y-3">
             {/* Current status */}
             <div
-                className="rounded-xl p-4 space-y-2"
-                style={{ backgroundColor: 'var(--color-bg-subtle)', border: '1px solid var(--color-surface-border)' }}
+                className="space-y-2 rounded-xl p-4"
+                style={{
+                    backgroundColor: "var(--color-bg-subtle)",
+                    border: "1px solid var(--color-surface-border)",
+                }}
             >
                 <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${hasUuid ? 'bg-success' : 'dot-off'}`} />
-                    <span className="text-sm" style={{ color: 'var(--color-text)' }}>
+                    <div className={`h-2 w-2 rounded-full ${hasUuid ? "bg-success" : "dot-off"}`} />
+                    <span className="text-sm" style={{ color: "var(--color-text)" }}>
                         {/* Full value lives on the Settings page now (with a copy
                             button) - this is just the linking-status indicator that
                             decides which buttons render below, not a lookup spot. */}
-                        UUID: {hasUuid ? <span style={{ color: 'var(--color-success)' }}>Set</span> : <span style={{ color: 'var(--color-text-muted)' }}>Not set</span>}
-                    </span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${(hasStremio && linkedProvider === 'stremio') ? 'bg-success' : 'dot-off'}`} />
-                    <span className="text-sm" style={{ color: 'var(--color-text)' }}>
-                        Stremio: {(hasStremio && linkedProvider === 'stremio') ? (
-                            <span className="opacity-70">
-                                {accountInfo.email}
-                            </span>
+                        UUID:{" "}
+                        {hasUuid ? (
+                            <span style={{ color: "var(--color-success)" }}>Set</span>
                         ) : (
-                            <span style={{ color: 'var(--color-text-muted)' }}>Unlinked</span>
+                            <span style={{ color: "var(--color-text-muted)" }}>Not set</span>
                         )}
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${(hasStremio && linkedProvider === 'nuvio') ? 'bg-success' : 'dot-off'}`} />
-                    <span className="text-sm" style={{ color: 'var(--color-text)' }}>
-                        Nuvio: {(hasStremio && linkedProvider === 'nuvio') ? (
-                            <span className="opacity-70">
-                                {accountInfo.email}
-                            </span>
+                    <div
+                        className={`h-2 w-2 rounded-full ${hasStremio && linkedProvider === "stremio" ? "bg-success" : "dot-off"}`}
+                    />
+                    <span className="text-sm" style={{ color: "var(--color-text)" }}>
+                        Stremio:{" "}
+                        {hasStremio && linkedProvider === "stremio" ? (
+                            <span className="opacity-70">{accountInfo.email}</span>
                         ) : (
-                            <span style={{ color: 'var(--color-text-muted)' }}>Unlinked</span>
+                            <span style={{ color: "var(--color-text-muted)" }}>Unlinked</span>
+                        )}
+                    </span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div
+                        className={`h-2 w-2 rounded-full ${hasStremio && linkedProvider === "nuvio" ? "bg-success" : "dot-off"}`}
+                    />
+                    <span className="text-sm" style={{ color: "var(--color-text)" }}>
+                        Nuvio:{" "}
+                        {hasStremio && linkedProvider === "nuvio" ? (
+                            <span className="opacity-70">{accountInfo.email}</span>
+                        ) : (
+                            <span style={{ color: "var(--color-text-muted)" }}>Unlinked</span>
                         )}
                     </span>
                 </div>
@@ -221,30 +238,67 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             {hasBoth && (
                 <>
                     <button
-                        onClick={() => { setView('unlink-uuid'); setError(null); setPassword(''); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200"
-                        style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-warning)'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-surface-border)'; }}
+                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200"
+                        onClick={() => {
+                            setView("unlink-uuid");
+                            setError(null);
+                            setPassword("");
+                        }}
+                        onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor =
+                                "var(--color-warning)";
+                        }}
+                        onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor =
+                                "var(--color-surface-border)";
+                        }}
+                        style={{
+                            backgroundColor: "var(--color-bg-subtle)",
+                            border: "1px solid var(--color-surface-border)",
+                            color: "var(--color-text)",
+                        }}
+                        type="button"
                     >
-                        <ExclamationTriangleIcon className="w-5 h-5" style={{ color: 'var(--color-warning)' }} />
+                        <ExclamationTriangleIcon
+                            className="h-5 w-5"
+                            style={{ color: "var(--color-warning)" }}
+                        />
                         <div className="text-left">
-                            <p className="text-sm font-medium">Keep {providerLabel} Only</p>
-                            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Remove UUID & password - {providerLabel} becomes your only way in</p>
+                            <p className="font-medium text-sm">Keep {providerLabel} Only</p>
+                            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                                Remove UUID & password - {providerLabel} becomes your only way in
+                            </p>
                         </div>
                     </button>
 
                     <button
-                        onClick={() => { setView('unlink-stremio'); setError(null); setPassword(''); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200"
-                        style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-primary)'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-surface-border)'; }}
+                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200"
+                        onClick={() => {
+                            setView("unlink-stremio");
+                            setError(null);
+                            setPassword("");
+                        }}
+                        onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor =
+                                "var(--color-primary)";
+                        }}
+                        onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor =
+                                "var(--color-surface-border)";
+                        }}
+                        style={{
+                            backgroundColor: "var(--color-bg-subtle)",
+                            border: "1px solid var(--color-surface-border)",
+                            color: "var(--color-text)",
+                        }}
+                        type="button"
                     >
-                        <KeyIcon className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
+                        <KeyIcon className="h-5 w-5" style={{ color: "var(--color-primary)" }} />
                         <div className="text-left">
-                            <p className="text-sm font-medium">Keep UUID Only</p>
-                            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Unlink {providerLabel} account, keep your password as a fallback</p>
+                            <p className="font-medium text-sm">Keep UUID Only</p>
+                            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                                Unlink {providerLabel} account, keep your password as a fallback
+                            </p>
                         </div>
                     </button>
                 </>
@@ -253,16 +307,34 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             {/* Stremio-only: add credentials */}
             {hasStremio && !hasUuid && (
                 <button
-                    onClick={() => { setView('set-credentials'); setError(null); setPassword(''); setConfirmPassword(''); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-primary)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-surface-border)'; }}
+                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200"
+                    onClick={() => {
+                        setView("set-credentials");
+                        setError(null);
+                        setPassword("");
+                        setConfirmPassword("");
+                    }}
+                    onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor =
+                            "var(--color-primary)";
+                    }}
+                    onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor =
+                            "var(--color-surface-border)";
+                    }}
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                        color: "var(--color-text)",
+                    }}
+                    type="button"
                 >
-                    <KeyIcon className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
+                    <KeyIcon className="h-5 w-5" style={{ color: "var(--color-primary)" }} />
                     <div className="text-left">
-                        <p className="text-sm font-medium">Add UUID & Password</p>
-                        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Enable credential-based login</p>
+                        <p className="font-medium text-sm">Add UUID & Password</p>
+                        <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                            Enable credential-based login
+                        </p>
                     </div>
                 </button>
             )}
@@ -270,16 +342,32 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             {/* UUID-only: link Stremio */}
             {hasUuid && !hasStremio && (
                 <button
+                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200"
                     onClick={handleLinkStremio}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-primary)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-surface-border)'; }}
+                    onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor =
+                            "var(--color-primary)";
+                    }}
+                    onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor =
+                            "var(--color-surface-border)";
+                    }}
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                        color: "var(--color-text)",
+                    }}
+                    type="button"
                 >
-                    <LinkIcon className="w-5 h-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+                    <LinkIcon
+                        className="h-5 w-5 shrink-0"
+                        style={{ color: "var(--color-primary)" }}
+                    />
                     <div className="text-left">
-                        <p className="text-sm font-medium">Link Stremio</p>
-                        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Connect your Stremio account</p>
+                        <p className="font-medium text-sm">Link Stremio</p>
+                        <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                            Connect your Stremio account
+                        </p>
                     </div>
                 </button>
             )}
@@ -290,19 +378,35 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             {hasUuid && !hasStremio && (
                 <>
                     <button
+                        className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200"
                         onClick={handleLinkNuvio}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200"
-                        style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-primary)'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-surface-border)'; }}
+                        onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor =
+                                "var(--color-primary)";
+                        }}
+                        onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor =
+                                "var(--color-surface-border)";
+                        }}
+                        style={{
+                            backgroundColor: "var(--color-bg-subtle)",
+                            border: "1px solid var(--color-surface-border)",
+                            color: "var(--color-text)",
+                        }}
+                        type="button"
                     >
-                        <LinkIcon className="w-5 h-5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+                        <LinkIcon
+                            className="h-5 w-5 shrink-0"
+                            style={{ color: "var(--color-primary)" }}
+                        />
                         <div className="text-left">
-                            <p className="text-sm font-medium">Link Nuvio</p>
-                            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Sign in to the admin dashboard with Nuvio instead of a password</p>
+                            <p className="font-medium text-sm">Link Nuvio</p>
+                            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                                Sign in to the admin dashboard with Nuvio instead of a password
+                            </p>
                         </div>
                     </button>
-                    <p className="text-xs px-1" style={{ color: 'var(--color-text-subtle)' }}>
+                    <p className="px-1 text-xs" style={{ color: "var(--color-text-subtle)" }}>
                         Requires a managed user with this same email already connected to Nuvio.
                     </p>
                 </>
@@ -311,16 +415,34 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
             {/* Change password (always shown when UUID exists) */}
             {hasUuid && (
                 <button
-                    onClick={() => { setView('set-credentials'); setError(null); setPassword(''); setConfirmPassword(''); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-text-muted)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-surface-border)'; }}
+                    className="flex w-full items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200"
+                    onClick={() => {
+                        setView("set-credentials");
+                        setError(null);
+                        setPassword("");
+                        setConfirmPassword("");
+                    }}
+                    onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor =
+                            "var(--color-text-muted)";
+                    }}
+                    onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.borderColor =
+                            "var(--color-surface-border)";
+                    }}
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                        color: "var(--color-text)",
+                    }}
+                    type="button"
                 >
-                    <KeyIcon className="w-5 h-5" style={{ color: 'var(--color-text-muted)' }} />
+                    <KeyIcon className="h-5 w-5" style={{ color: "var(--color-text-muted)" }} />
                     <div className="text-left">
-                        <p className="text-sm font-medium">Change Password</p>
-                        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Update your UUID password</p>
+                        <p className="font-medium text-sm">Change Password</p>
+                        <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                            Update your UUID password
+                        </p>
                     </div>
                 </button>
             )}
@@ -330,67 +452,99 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     const renderUnlinkStremio = () => (
         <div className="space-y-4">
             <div
-                className="rounded-xl p-4 flex items-start gap-3"
-                style={{ backgroundColor: 'var(--color-warning-muted, rgba(245, 158, 11, 0.1))' }}
+                className="flex items-start gap-3 rounded-xl p-4"
+                style={{ backgroundColor: "var(--color-warning-muted, rgba(245, 158, 11, 0.1))" }}
             >
-                <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-warning)' }} />
+                <ExclamationTriangleIcon
+                    className="mt-0.5 h-5 w-5 flex-shrink-0"
+                    style={{ color: "var(--color-warning)" }}
+                />
                 <div>
-                    <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>Keep UUID Only</p>
-                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                        This will unlink your {providerLabel} account. You&apos;ll only be able to log in with your UUID and password.
+                    <p className="font-medium text-sm" style={{ color: "var(--color-text)" }}>
+                        Keep UUID Only
                     </p>
-                    <p className="text-xs mt-2 font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                    <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                        This will unlink your {providerLabel} account. You&apos;ll only be able to
+                        log in with your UUID and password.
+                    </p>
+                    <p
+                        className="mt-2 font-mono text-xs"
+                        style={{ color: "var(--color-text-muted)" }}
+                    >
                         Your UUID: {accountInfo.uuid}
                     </p>
                 </div>
             </div>
 
             <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                <label
+                    className="mb-1.5 block font-medium text-xs"
+                    htmlFor={`${fieldId1}-1`}
+                    style={{ color: "var(--color-text-muted)" }}
+                >
                     Enter your password to confirm
                 </label>
                 <div className="relative">
                     <input
-                        type={passwordVisible ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => { setPassword(e.target.value); setError(null); }}
-                        placeholder="Password"
-                        className={`w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none ${error ? 'bd-err' : 'bd-ok'}`}
-                        style={{
-                            backgroundColor: 'var(--color-bg-subtle)',
-                            color: 'var(--color-text)',
+                        className={`w-full rounded-xl py-2.5 pr-12 pl-4 text-sm focus:outline-none ${error ? "bd-err" : "bd-ok"}`}
+                        id={`${fieldId1}-1`}
+                        onChange={(e) => {
+                            setPassword(e.target.value);
+                            setError(null);
                         }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleUnlinkStremio(); }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                handleUnlinkStremio();
+                            }
+                        }}
+                        placeholder="Password"
+                        style={{
+                            backgroundColor: "var(--color-bg-subtle)",
+                            color: "var(--color-text)",
+                        }}
+                        type={passwordVisible ? "text" : "password"}
+                        value={password}
                     />
-                    <PasswordToggleButton visible={passwordVisible} onToggle={() => setPasswordVisible((v) => !v)} />
+                    <PasswordToggleButton
+                        onToggle={() => setPasswordVisible((v) => !v)}
+                        visible={passwordVisible}
+                    />
                 </div>
                 {error && (
-                    <p className="mt-1.5 text-xs" style={{ color: 'var(--color-error)' }}>{error}</p>
+                    <p className="mt-1.5 text-xs" style={{ color: "var(--color-error)" }}>
+                        {error}
+                    </p>
                 )}
             </div>
 
             <div className="flex gap-2">
                 <button
-                    onClick={() => setView('main')}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
+                    className="flex-1 rounded-xl py-2.5 font-medium text-sm transition-all"
+                    onClick={() => setView("main")}
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                        color: "var(--color-text)",
+                    }}
+                    type="button"
                 >
                     Cancel
                 </button>
                 <button
-                    onClick={handleUnlinkStremio}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 font-medium text-sm transition-all"
                     disabled={isLoading || !password}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
+                    onClick={handleUnlinkStremio}
                     style={{
-                        backgroundColor: 'var(--color-warning)',
-                        color: '#fff',
-                        opacity: (isLoading || !password) ? 0.6 : 1,
+                        backgroundColor: "var(--color-warning)",
+                        color: "#fff",
+                        opacity: isLoading || !password ? 0.6 : 1,
                     }}
+                    type="button"
                 >
                     {isLoading ? (
-                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     ) : (
-                        'Confirm'
+                        "Confirm"
                     )}
                 </button>
             </div>
@@ -400,44 +554,64 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     const renderUnlinkUuid = () => (
         <div className="space-y-4">
             <div
-                className="rounded-xl p-4 flex items-start gap-3"
-                style={{ backgroundColor: 'var(--color-warning-muted, rgba(245, 158, 11, 0.1))', border: '1px solid var(--color-warning)' }}
+                className="flex items-start gap-3 rounded-xl p-4"
+                style={{
+                    backgroundColor: "var(--color-warning-muted, rgba(245, 158, 11, 0.1))",
+                    border: "1px solid var(--color-warning)",
+                }}
             >
-                <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-warning)' }} />
+                <ExclamationTriangleIcon
+                    className="mt-0.5 h-5 w-5 flex-shrink-0"
+                    style={{ color: "var(--color-warning)" }}
+                />
                 <div>
-                    <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>This removes your only fallback login</p>
-                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-                        Your UUID and password will be deleted. From then on, {providerLabel} ({accountInfo.email}) is the <em>only</em> way to sign in - if {providerLabel} has an outage, a bug, or your account there has an issue, you will not be able to get into this admin dashboard until that's resolved on their end. There is no password fallback once this is done.
+                    <p className="font-medium text-sm" style={{ color: "var(--color-text)" }}>
+                        This removes your only fallback login
+                    </p>
+                    <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                        Your UUID and password will be deleted. From then on, {providerLabel} (
+                        {accountInfo.email}) is the <em>only</em> way to sign in - if{" "}
+                        {providerLabel} has an outage, a bug, or your account there has an issue,
+                        you will not be able to get into this admin dashboard until that's resolved
+                        on their end. There is no password fallback once this is done.
                     </p>
                 </div>
             </div>
 
             {error && (
-                <p className="text-sm text-center" style={{ color: 'var(--color-error)' }}>{error}</p>
+                <p className="text-center text-sm" style={{ color: "var(--color-error)" }}>
+                    {error}
+                </p>
             )}
 
             <div className="flex gap-2">
                 <button
-                    onClick={() => setView('main')}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
+                    className="flex-1 rounded-xl py-2.5 font-medium text-sm transition-all"
+                    onClick={() => setView("main")}
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                        color: "var(--color-text)",
+                    }}
+                    type="button"
                 >
                     Cancel
                 </button>
                 <button
-                    onClick={handleUnlinkUuid}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 font-medium text-sm transition-all"
                     disabled={isLoading}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
+                    onClick={handleUnlinkUuid}
                     style={{
-                        backgroundColor: 'var(--color-warning)',
-                        color: 'var(--color-bg)',
+                        backgroundColor: "var(--color-warning)",
+                        color: "var(--color-bg)",
                         opacity: isLoading ? 0.6 : 1,
                     }}
+                    type="button"
                 >
                     {isLoading ? (
-                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     ) : (
-                        'Remove password anyway'
+                        "Remove password anyway"
                     )}
                 </button>
             </div>
@@ -446,79 +620,115 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
 
     const renderSetCredentials = () => (
         <div className="space-y-4">
-            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
                 {hasUuid
-                    ? 'Choose a new password for your account.'
-                    : 'A UUID will be generated for you. Choose a password to enable credential-based login.'}
+                    ? "Choose a new password for your account."
+                    : "A UUID will be generated for you. Choose a password to enable credential-based login."}
             </p>
 
             <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                <label
+                    className="mb-1.5 block font-medium text-xs"
+                    htmlFor={`${fieldId1}-2`}
+                    style={{ color: "var(--color-text-muted)" }}
+                >
                     New Password
                 </label>
                 <div className="relative">
                     <input
-                        type={passwordVisible ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => { setPassword(e.target.value); setError(null); }}
-                        placeholder="At least 4 characters"
-                        className={`w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none ${error ? 'bd-err' : 'bd-ok'}`}
-                        style={{
-                            backgroundColor: 'var(--color-bg-subtle)',
-                            color: 'var(--color-text)',
+                        className={`w-full rounded-xl py-2.5 pr-12 pl-4 text-sm focus:outline-none ${error ? "bd-err" : "bd-ok"}`}
+                        id={`${fieldId1}-2`}
+                        onChange={(e) => {
+                            setPassword(e.target.value);
+                            setError(null);
                         }}
+                        placeholder="At least 4 characters"
+                        style={{
+                            backgroundColor: "var(--color-bg-subtle)",
+                            color: "var(--color-text)",
+                        }}
+                        type={passwordVisible ? "text" : "password"}
+                        value={password}
                     />
-                    <PasswordToggleButton visible={passwordVisible} onToggle={() => setPasswordVisible((v) => !v)} />
+                    <PasswordToggleButton
+                        onToggle={() => setPasswordVisible((v) => !v)}
+                        visible={passwordVisible}
+                    />
                 </div>
             </div>
 
             <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-muted)' }}>
+                <label
+                    className="mb-1.5 block font-medium text-xs"
+                    htmlFor={`${fieldId1}-3`}
+                    style={{ color: "var(--color-text-muted)" }}
+                >
                     Confirm Password
                 </label>
                 <div className="relative">
                     <input
-                        type={confirmPasswordVisible ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(e) => { setConfirmPassword(e.target.value); setError(null); }}
-                        placeholder="Repeat password"
-                        className={`w-full pl-4 pr-12 py-2.5 rounded-xl text-sm focus:outline-none ${error?.includes('match') ? 'bd-err' : 'bd-ok'}`}
-                        style={{
-                            backgroundColor: 'var(--color-bg-subtle)',
-                            color: 'var(--color-text)',
+                        className={`w-full rounded-xl py-2.5 pr-12 pl-4 text-sm focus:outline-none ${error?.includes("match") ? "bd-err" : "bd-ok"}`}
+                        id={`${fieldId1}-3`}
+                        onChange={(e) => {
+                            setConfirmPassword(e.target.value);
+                            setError(null);
                         }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleSetCredentials(); }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                handleSetCredentials();
+                            }
+                        }}
+                        placeholder="Repeat password"
+                        style={{
+                            backgroundColor: "var(--color-bg-subtle)",
+                            color: "var(--color-text)",
+                        }}
+                        type={confirmPasswordVisible ? "text" : "password"}
+                        value={confirmPassword}
                     />
-                    <PasswordToggleButton visible={confirmPasswordVisible} onToggle={() => setConfirmPasswordVisible((v) => !v)} />
+                    <PasswordToggleButton
+                        onToggle={() => setConfirmPasswordVisible((v) => !v)}
+                        visible={confirmPasswordVisible}
+                    />
                 </div>
             </div>
 
             {error && (
-                <p className="text-xs" style={{ color: 'var(--color-error)' }}>{error}</p>
+                <p className="text-xs" style={{ color: "var(--color-error)" }}>
+                    {error}
+                </p>
             )}
 
             <div className="flex gap-2">
                 <button
-                    onClick={() => setView('main')}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', color: 'var(--color-text)', border: '1px solid var(--color-surface-border)' }}
+                    className="flex-1 rounded-xl py-2.5 font-medium text-sm transition-all"
+                    onClick={() => setView("main")}
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                        color: "var(--color-text)",
+                    }}
+                    type="button"
                 >
                     Cancel
                 </button>
                 <button
-                    onClick={handleSetCredentials}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 font-medium text-sm transition-all"
                     disabled={isLoading || !password || !confirmPassword}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
+                    onClick={handleSetCredentials}
                     style={{
-                        backgroundColor: 'var(--color-primary)',
-                        color: 'var(--color-bg)',
-                        opacity: (isLoading || !password || !confirmPassword) ? 0.6 : 1,
+                        backgroundColor: "var(--color-primary)",
+                        color: "var(--color-bg)",
+                        opacity: isLoading || !password || !confirmPassword ? 0.6 : 1,
                     }}
+                    type="button"
                 >
                     {isLoading ? (
-                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : hasUuid ? (
+                        "Update Password"
                     ) : (
-                        hasUuid ? 'Update Password' : 'Set Credentials'
+                        "Set Credentials"
                     )}
                 </button>
             </div>
@@ -528,40 +738,60 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
     const renderSuccess = () => (
         <div className="space-y-4 text-center">
             <div
-                className="w-12 h-12 mx-auto rounded-full flex items-center justify-center"
-                style={{ backgroundColor: 'var(--color-success-muted)' }}
+                className="mx-auto flex h-12 w-12 items-center justify-center rounded-full"
+                style={{ backgroundColor: "var(--color-success-muted)" }}
             >
-                <CheckIcon className="w-6 h-6" style={{ color: 'var(--color-success)' }} />
+                <CheckIcon className="h-6 w-6" style={{ color: "var(--color-success)" }} />
             </div>
-            <p className="text-sm" style={{ color: 'var(--color-text)' }}>{resultMessage}</p>
+            <p className="text-sm" style={{ color: "var(--color-text)" }}>
+                {resultMessage}
+            </p>
 
             {resultUuid && (
                 <div
-                    className="rounded-xl p-3 flex items-center justify-between gap-2"
-                    style={{ backgroundColor: 'var(--color-bg-subtle)', border: '1px solid var(--color-surface-border)' }}
+                    className="flex items-center justify-between gap-2 rounded-xl p-3"
+                    style={{
+                        backgroundColor: "var(--color-bg-subtle)",
+                        border: "1px solid var(--color-surface-border)",
+                    }}
                 >
-                    <div className="text-left min-w-0">
-                        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Your UUID</p>
-                        <p className="text-sm font-mono truncate" style={{ color: 'var(--color-text)' }}>{resultUuid}</p>
+                    <div className="min-w-0 text-left">
+                        <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                            Your UUID
+                        </p>
+                        <p
+                            className="truncate font-mono text-sm"
+                            style={{ color: "var(--color-text)" }}
+                        >
+                            {resultUuid}
+                        </p>
                     </div>
                     <button
+                        className="flex-shrink-0 rounded-lg p-2 transition-all"
                         onClick={() => handleCopyUuid(resultUuid)}
-                        className="flex-shrink-0 p-2 rounded-lg transition-all"
-                        style={{ backgroundColor: 'var(--color-surface-hover)' }}
+                        style={{ backgroundColor: "var(--color-surface-hover)" }}
+                        type="button"
                     >
                         {copied ? (
-                            <CheckIcon className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
+                            <CheckIcon
+                                className="h-4 w-4"
+                                style={{ color: "var(--color-success)" }}
+                            />
                         ) : (
-                            <ClipboardDocumentIcon className="w-4 h-4" style={{ color: 'var(--color-text-muted)' }} />
+                            <ClipboardDocumentIcon
+                                className="h-4 w-4"
+                                style={{ color: "var(--color-text-muted)" }}
+                            />
                         )}
                     </button>
                 </div>
             )}
 
             <button
+                className="w-full rounded-xl py-2.5 font-medium text-sm transition-all"
                 onClick={handleClose}
-                className="w-full py-2.5 rounded-xl text-sm font-medium transition-all"
-                style={{ backgroundColor: 'var(--color-primary)', color: 'var(--color-bg)' }}
+                style={{ backgroundColor: "var(--color-primary)", color: "var(--color-bg)" }}
+                type="button"
             >
                 Done
             </button>
@@ -570,13 +800,20 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
 
     const getTitle = () => {
         switch (view) {
-            case 'main': return 'Account';
-            case 'unlink-stremio': return 'Keep UUID Only';
-            case 'unlink-uuid': return `Keep ${providerLabel} Only`;
-            case 'set-credentials': return hasUuid ? 'Change Password' : 'Add Credentials';
-            case 'link-stremio': return 'Link Stremio';
-            case 'success': return 'Success';
-            default: return 'Account';
+            case "main":
+                return "Account";
+            case "unlink-stremio":
+                return "Keep UUID Only";
+            case "unlink-uuid":
+                return `Keep ${providerLabel} Only`;
+            case "set-credentials":
+                return hasUuid ? "Change Password" : "Add Credentials";
+            case "link-stremio":
+                return "Link Stremio";
+            case "success":
+                return "Success";
+            default:
+                return "Account";
         }
     };
 
@@ -586,52 +823,60 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
                 <>
                     {/* Backdrop */}
                     <motion.div
-                        initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
                         className="fixed inset-0 z-[100]"
-                        style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+                        exit={{ opacity: 0 }}
+                        initial={{ opacity: 0 }}
                         onClick={handleClose}
+                        style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
                     />
 
                     {/* Modal */}
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
+                        className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center p-4"
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         transition={{ duration: 0.2 }}
-                        className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none"
                     >
                         <div
-                            className="w-full rounded-2xl overflow-hidden shadow-2xl pointer-events-auto"
-                            style={{
-                                backgroundColor: 'var(--color-surface)',
-                                border: '1px solid var(--color-surface-border)',
-                                maxWidth: '384px',
-                            }}
+                            className="pointer-events-auto w-full overflow-hidden rounded-2xl shadow-2xl"
                             onClick={(e) => e.stopPropagation()}
+                            role="none"
+                            style={{
+                                backgroundColor: "var(--color-surface)",
+                                border: "1px solid var(--color-surface-border)",
+                                maxWidth: "384px",
+                            }}
                         >
                             {/* Header */}
-                            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--color-surface-border)' }}>
-                                <h3 className="text-base font-semibold" style={{ color: 'var(--color-text)' }}>
+                            <div
+                                className="flex items-center justify-between px-6 py-4"
+                                style={{ borderBottom: "1px solid var(--color-surface-border)" }}
+                            >
+                                <h3
+                                    className="font-semibold text-base"
+                                    style={{ color: "var(--color-text)" }}
+                                >
                                     {getTitle()}
                                 </h3>
                                 <button
+                                    className="hov-surface rounded-lg p-1.5 transition-all"
                                     onClick={handleClose}
-                                    className="p-1.5 rounded-lg transition-all hov-surface"
-                                    style={{ color: 'var(--color-text-muted)' }}
+                                    style={{ color: "var(--color-text-muted)" }}
+                                    type="button"
                                 >
-                                    <XMarkIcon className="w-5 h-5" />
+                                    <XMarkIcon className="h-5 w-5" />
                                 </button>
                             </div>
 
                             {/* Content */}
                             <div className="px-6 py-5">
-                                {view === 'main' && renderMain()}
-                                {view === 'unlink-stremio' && renderUnlinkStremio()}
-                                {view === 'unlink-uuid' && renderUnlinkUuid()}
-                                {view === 'set-credentials' && renderSetCredentials()}
-                                {view === 'success' && renderSuccess()}
+                                {view === "main" && renderMain()}
+                                {view === "unlink-stremio" && renderUnlinkStremio()}
+                                {view === "unlink-uuid" && renderUnlinkUuid()}
+                                {view === "set-credentials" && renderSetCredentials()}
+                                {view === "success" && renderSuccess()}
                             </div>
                         </div>
                     </motion.div>
@@ -640,6 +885,8 @@ export function AccountModal({ isOpen, onClose, accountInfo, onAccountUpdated }:
         </AnimatePresence>
     );
 
-    if (!mounted) return null;
+    if (!mounted) {
+        return null;
+    }
     return createPortal(modalContent, document.body);
 }

@@ -1,8 +1,8 @@
-const crypto = require('crypto')
+const crypto = require("node:crypto");
 
 // In-memory session DEK store keyed by accountId
-const accountDekStore = new Map()
-const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000 // 8 hours
+const accountDekStore = new Map();
+const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 // NOTE: `getServerKey`, `aesGcmEncrypt`, `aesGcmDecrypt` were previously each
 // defined TWICE in this file — a throw-if-unset stub at the top, then the real
@@ -12,226 +12,265 @@ const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000 // 8 hours
 
 // -------------------- Envelope/Public helpers --------------------
 function scryptKey(password, salt, keyLen = 32) {
-  return new Promise((resolve, reject) => {
-    crypto.scrypt(String(password), String(salt), keyLen, { N: 1 << 14, r: 8, p: 1 }, (err, derivedKey) => {
-      if (err) return reject(err)
-      resolve(Buffer.from(derivedKey))
-    })
-  })
+    return new Promise((resolve, reject) => {
+        crypto.scrypt(
+            String(password),
+            String(salt),
+            keyLen,
+            { N: 1 << 14, p: 1, r: 8 },
+            (err, derivedKey) => {
+                if (err) {
+                    return reject(err);
+                }
+                resolve(Buffer.from(derivedKey));
+            }
+        );
+    });
 }
 
-function hkdfSha256(ikm, salt, info = 'syncio-hkdf', length = 32) {
-  const prk = crypto.createHmac('sha256', Buffer.from(salt)).update(Buffer.from(ikm)).digest()
-  let t = Buffer.alloc(0)
-  let okm = Buffer.alloc(0)
-  let i = 0
-  while (okm.length < length) {
-    i += 1
-    t = crypto.createHmac('sha256', prk).update(Buffer.concat([t, Buffer.from(info), Buffer.from([i])])).digest()
-    okm = Buffer.concat([okm, t])
-  }
-  return okm.slice(0, length)
+function hkdfSha256(ikm, salt, info = "syncio-hkdf", length = 32) {
+    const prk = crypto.createHmac("sha256", Buffer.from(salt)).update(Buffer.from(ikm)).digest();
+    let t = Buffer.alloc(0);
+    let okm = Buffer.alloc(0);
+    let i = 0;
+    while (okm.length < length) {
+        i += 1;
+        t = crypto
+            .createHmac("sha256", prk)
+            .update(Buffer.concat([t, Buffer.from(info), Buffer.from([i])]))
+            .digest();
+        okm = Buffer.concat([okm, t]);
+    }
+    return okm.slice(0, length);
 }
 
 function deriveDek(serverKeyBuf, userKeyBuf) {
-  // Combine server and user keys via HKDF to a 32-byte DEK
-  return hkdfSha256(userKeyBuf, serverKeyBuf, 'syncio-dek', 32)
+    // Combine server and user keys via HKDF to a 32-byte DEK
+    return hkdfSha256(userKeyBuf, serverKeyBuf, "syncio-dek", 32);
 }
 
 function setAccountDek(accountId, dek, ttlMs = DEFAULT_TTL_MS) {
-  if (!accountId || !dek) return
-  accountDekStore.set(String(accountId), { dek: Buffer.from(dek), expiresAt: Date.now() + ttlMs })
+    if (!(accountId && dek)) {
+        return;
+    }
+    accountDekStore.set(String(accountId), {
+        dek: Buffer.from(dek),
+        expiresAt: Date.now() + ttlMs,
+    });
 }
 
 function getAccountDek(accountId) {
-  if (!accountId) return null
-  const entry = accountDekStore.get(String(accountId))
-  if (!entry) return null
-  if (Date.now() > entry.expiresAt) {
-    accountDekStore.delete(String(accountId))
-    return null
-  }
-  return entry.dek
+    if (!accountId) {
+        return null;
+    }
+    const entry = accountDekStore.get(String(accountId));
+    if (!entry) {
+        return null;
+    }
+    if (Date.now() > entry.expiresAt) {
+        accountDekStore.delete(String(accountId));
+        return null;
+    }
+    return entry.dek;
 }
 
 function clearAccountDek(accountId) {
-  if (!accountId) return
-  accountDekStore.delete(String(accountId))
+    if (!accountId) {
+        return;
+    }
+    accountDekStore.delete(String(accountId));
 }
 
-module.exports.scryptKey = scryptKey
-module.exports.hkdfSha256 = hkdfSha256
-module.exports.deriveDek = deriveDek
-module.exports.setAccountDek = setAccountDek
-module.exports.getAccountDek = getAccountDek
-module.exports.clearAccountDek = clearAccountDek
+module.exports.scryptKey = scryptKey;
+module.exports.hkdfSha256 = hkdfSha256;
+module.exports.deriveDek = deriveDek;
+module.exports.setAccountDek = setAccountDek;
+module.exports.getAccountDek = getAccountDek;
+module.exports.clearAccountDek = clearAccountDek;
 
 // AES-256-GCM helpers with explicit iv/tag packaging
 // Stored format (base64): iv|ct|tag
 
 function getServerKey() {
-  // Delegate to keyManager, which is the single source of truth for the
-  // encryption key: it uses ENCRYPTION_KEY when set, else auto-generates and
-  // persists a random 32-byte key to disk (mode 0o600) on first boot.
-  //
-  // Reading process.env.ENCRYPTION_KEY directly here — the old behavior —
-  // silently bypassed that safety net and fell back to a HARDCODED default
-  // key when the env was unset. On a public fork of this repo, that meant
-  // anyone could decrypt vault data from any deployment that hadn't set the
-  // env var, since the default key was visible in the source. keyManager
-  // eliminates that class of bug by construction.
-  //
-  // require()'d lazily rather than at module top: encryption.js is required
-  // by config.js's dependency chain, and keyManager sits alongside it — a
-  // top-level require here would be fine today but risks a circular-import
-  // trap if config's shape changes later.
-  const { ENCRYPTION_KEY } = require('./keyManager')
-  return ENCRYPTION_KEY
+    // Delegate to keyManager, which is the single source of truth for the
+    // encryption key: it uses ENCRYPTION_KEY when set, else auto-generates and
+    // persists a random 32-byte key to disk (mode 0o600) on first boot.
+    //
+    // Reading process.env.ENCRYPTION_KEY directly here — the old behavior —
+    // silently bypassed that safety net and fell back to a HARDCODED default
+    // key when the env was unset. On a public fork of this repo, that meant
+    // anyone could decrypt vault data from any deployment that hadn't set the
+    // env var, since the default key was visible in the source. keyManager
+    // eliminates that class of bug by construction.
+    //
+    // require()'d lazily rather than at module top: encryption.js is required
+    // by config.js's dependency chain, and keyManager sits alongside it — a
+    // top-level require here would be fine today but risks a circular-import
+    // trap if config's shape changes later.
+    const { ENCRYPTION_KEY } = require("./keyManager");
+    return ENCRYPTION_KEY;
 }
 
 function aesGcmEncrypt(key, plaintext, aad) {
-  const iv = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
-  if (aad) cipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(String(aad)))
-  const ct = Buffer.concat([cipher.update(Buffer.from(plaintext, 'utf8')), cipher.final()])
-  const tag = cipher.getAuthTag()
-  // Use a more reliable separator format: iv:ct:tag
-  return `${iv.toString('base64')}:${ct.toString('base64')}:${tag.toString('base64')}`
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    if (aad) {
+        cipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(String(aad)));
+    }
+    const ct = Buffer.concat([cipher.update(Buffer.from(plaintext, "utf8")), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    // Use a more reliable separator format: iv:ct:tag
+    return `${iv.toString("base64")}:${ct.toString("base64")}:${tag.toString("base64")}`;
 }
 
 function aesGcmDecrypt(key, payload, aad) {
-  // Handle both old format (base64 with pipes) and new format (colon-separated)
-  if (payload.includes(':')) {
-    // New format: iv:ct:tag
-    const parts = payload.split(':')
-    if (parts.length !== 3) {
-      throw new Error('Invalid encrypted data format')
+    // Handle both old format (base64 with pipes) and new format (colon-separated)
+    if (payload.includes(":")) {
+        // New format: iv:ct:tag
+        const parts = payload.split(":");
+        if (parts.length !== 3) {
+            throw new Error("Invalid encrypted data format");
+        }
+        const iv = Buffer.from(parts[0], "base64");
+        const ct = Buffer.from(parts[1], "base64");
+        const tag = Buffer.from(parts[2], "base64");
+
+        const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+        if (aad) {
+            decipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(String(aad)));
+        }
+        decipher.setAuthTag(tag);
+        const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
+        return pt.toString("utf8");
     }
-    const iv = Buffer.from(parts[0], 'base64')
-    const ct = Buffer.from(parts[1], 'base64')
-    const tag = Buffer.from(parts[2], 'base64')
-    
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
-    if (aad) decipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(String(aad)))
-    decipher.setAuthTag(tag)
-    const pt = Buffer.concat([decipher.update(ct), decipher.final()])
-    return pt.toString('utf8')
-  } else {
     // Old format: base64 with pipes (for backward compatibility)
-    const buf = Buffer.from(payload, 'base64')
-    const firstSplit = splitOnce(buf, Buffer.from('|'))
-    const iv = firstSplit[0]
-    const secondSplit = splitOnce(firstSplit[1], Buffer.from('|'))
-    const ct = secondSplit[0]
-    const tag = secondSplit[1]
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
-    if (aad) decipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(String(aad)))
-    decipher.setAuthTag(tag)
-    const pt = Buffer.concat([decipher.update(ct), decipher.final()])
-    return pt.toString('utf8')
-  }
+    const buf = Buffer.from(payload, "base64");
+    const firstSplit = splitOnce(buf, Buffer.from("|"));
+    const iv = firstSplit[0];
+    const secondSplit = splitOnce(firstSplit[1], Buffer.from("|"));
+    const ct = secondSplit[0];
+    const tag = secondSplit[1];
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    if (aad) {
+        decipher.setAAD(Buffer.isBuffer(aad) ? aad : Buffer.from(String(aad)));
+    }
+    decipher.setAuthTag(tag);
+    const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
+    return pt.toString("utf8");
 }
 
 function splitOnce(buf, delim) {
-  const idx = buf.indexOf(delim)
-  if (idx === -1) return [buf, Buffer.alloc(0)]
-  return [buf.subarray(0, idx), buf.subarray(idx + delim.length)]
+    const idx = buf.indexOf(delim);
+    if (idx === -1) {
+        return [buf, Buffer.alloc(0)];
+    }
+    return [buf.subarray(0, idx), buf.subarray(idx + delim.length)];
 }
 
 // Additional encryption functions
 function selectKeyForRequest(req) {
-  const { getAccountId } = require('./helpers');
-  const accountId = getAccountId(req);
-  if (!accountId) return getServerKey();
-  const dek = getAccountDek(accountId);
-  return dek || getServerKey();
+    const { getAccountId } = require("./helpers");
+    const accountId = getAccountId(req);
+    if (!accountId) {
+        return getServerKey();
+    }
+    const dek = getAccountDek(accountId);
+    return dek || getServerKey();
 }
 
 function encrypt(text, req) {
-  const key = selectKeyForRequest(req);
-  return aesGcmEncrypt(key, text);
+    const key = selectKeyForRequest(req);
+    return aesGcmEncrypt(key, text);
 }
 
 function decrypt(text, req) {
-  const key = selectKeyForRequest(req);
-  try {
-    return aesGcmDecrypt(key, text);
-  } catch (err) {
-    // If this used the server key (no per-account DEK), try any fallback keys
-    // persisted by keyManager before giving up — covers the case where
-    // ENCRYPTION_KEY was changed/rotated after data was already encrypted.
-    const { getAccountId } = require('./helpers');
-    const accountId = getAccountId(req);
-    const usedAccountDek = accountId && getAccountDek(accountId);
-    if (!usedAccountDek) {
-      const { ENCRYPTION_KEY_FALLBACKS } = require('./config');
-      for (const fallbackKey of (ENCRYPTION_KEY_FALLBACKS || [])) {
-        try {
-          return aesGcmDecrypt(fallbackKey, text);
-        } catch {}
-      }
+    const key = selectKeyForRequest(req);
+    try {
+        return aesGcmDecrypt(key, text);
+    } catch (err) {
+        // If this used the server key (no per-account DEK), try any fallback keys
+        // persisted by keyManager before giving up — covers the case where
+        // ENCRYPTION_KEY was changed/rotated after data was already encrypted.
+        const { getAccountId } = require("./helpers");
+        const accountId = getAccountId(req);
+        const usedAccountDek = accountId && getAccountDek(accountId);
+        if (!usedAccountDek) {
+            const { ENCRYPTION_KEY_FALLBACKS } = require("./config");
+            for (const fallbackKey of ENCRYPTION_KEY_FALLBACKS || []) {
+                try {
+                    return aesGcmDecrypt(fallbackKey, text);
+                } catch {
+                    // An unavailable key leaves the fallback value or next key candidate in use.
+                }
+            }
+        }
+        throw err;
     }
-    throw err;
-  }
 }
 
 function getAccountHmacKey(req) {
-  const { getAccountId } = require('./helpers');
-  const accountId = getAccountId(req);
-  if (!accountId) return getServerKey();
-  const dek = getAccountDek(accountId);
-  return dek || getServerKey();
+    const { getAccountId } = require("./helpers");
+    const accountId = getAccountId(req);
+    if (!accountId) {
+        return getServerKey();
+    }
+    const dek = getAccountDek(accountId);
+    return dek || getServerKey();
 }
 
 function encryptIf(value, req) {
-  if (value == null) return null;
-  return encrypt(typeof value === 'string' ? value : JSON.stringify(value), req);
+    if (value == null) {
+        return null;
+    }
+    return encrypt(typeof value === "string" ? value : JSON.stringify(value), req);
 }
 
 function decryptIf(value, req) {
-  if (value == null) return null;
-  try {
-    return decrypt(value, req);
-  } catch {
-    return value;
-  }
+    if (value == null) {
+        return null;
+    }
+    try {
+        return decrypt(value, req);
+    } catch {
+        return value;
+    }
 }
 
 function getDecryptedManifestUrl(addon, req) {
-  if (!addon || !addon.manifestUrl) return null;
-  try {
-    return decrypt(addon.manifestUrl, req);
-  } catch {
-    return null;
-  }
+    if (!addon?.manifestUrl) {
+        return null;
+    }
+    try {
+        return decrypt(addon.manifestUrl, req);
+    } catch {
+        return null;
+    }
 }
 
 function decryptWithFallback(payload, req) {
-  try {
-    return decrypt(payload, req);
-  } catch {
-    return String(payload);
-  }
+    try {
+        return decrypt(payload, req);
+    } catch {
+        return String(payload);
+    }
 }
 
 module.exports = {
-  getServerKey,
-  aesGcmEncrypt,
-  aesGcmDecrypt,
-  scryptKey,
-  hkdfSha256,
-  deriveDek,
-  setAccountDek,
-  getAccountDek,
-  clearAccountDek,
-  selectKeyForRequest,
-  encrypt,
-  decrypt,
-  getAccountHmacKey,
-  encryptIf,
-  decryptIf,
-  getDecryptedManifestUrl,
-  decryptWithFallback
-}
-
-
+    aesGcmDecrypt,
+    aesGcmEncrypt,
+    clearAccountDek,
+    decrypt,
+    decryptIf,
+    decryptWithFallback,
+    deriveDek,
+    encrypt,
+    encryptIf,
+    getAccountDek,
+    getAccountHmacKey,
+    getDecryptedManifestUrl,
+    getServerKey,
+    hkdfSha256,
+    scryptKey,
+    selectKeyForRequest,
+    setAccountDek,
+};

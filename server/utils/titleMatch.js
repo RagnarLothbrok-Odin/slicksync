@@ -34,75 +34,133 @@
 // For a film nothing here is "starts with" or "contains" on its own: that is
 // what let a sequel through.
 
-const EPISODE_MARKER = /\s+(s\d{1,2}\s?e\d{1,3}|\d{1,2}x\d{1,3}|e\d{1,3}|season\s+\d{1,2})\b.*$/
+const EPISODE_MARKER = /\s+(s\d{1,2}\s?e\d{1,3}|\d{1,2}x\d{1,3}|e\d{1,3}|season\s+\d{1,2})\b.*$/;
 // Series only: episode, season and air-date forms without an SxxExx.
-const SERIES_MARKER = /\s+(ep\s?\d{1,4}|episode\s+\d{1,4}|s\d{1,2}|\d{1,2}(?:st|nd|rd|th)\s+season|(?:19|20)\d{2}\s\d{2}\s\d{2}|\d{2}\s\d{2}\s(?:19|20)\d{2})\b.*$/
+const SERIES_MARKER =
+    /\s+(ep\s?\d{1,4}|episode\s+\d{1,4}|s\d{1,2}|\d{1,2}(?:st|nd|rd|th)\s+season|(?:19|20)\d{2}\s\d{2}\s\d{2}|\d{2}\s\d{2}\s(?:19|20)\d{2})\b.*$/;
 // Series only: a country or a year a release puts after the show's name.
-const SERIES_TAIL = /\s+(?:us|uk|au|ca|nz|(?:19|20)\d{2})$/
+const SERIES_TAIL = /\s+(?:us|uk|au|ca|nz|(?:19|20)\d{2})$/;
 // Series only, after a short name: a number with letters on it ("05v2", "05 bd"),
 // or ova/oad/ona/special, or part/pt/vol with a number or roman numeral.
-const SERIES_RELEASE_WORDING = /^(?:\d[a-z0-9]*(?:\s.*)?|(?:ova|oad|ona|special)(?:\s.*)?|(?:part|pt|vol)\s(?:\d{1,3}|[ivx]{1,4})(?:\s.*)?)$/
+const SERIES_RELEASE_WORDING =
+    /^(?:\d[a-z0-9]*(?:\s.*)?|(?:ova|oad|ona|special)(?:\s.*)?|(?:part|pt|vol)\s(?:\d{1,3}|[ivx]{1,4})(?:\s.*)?)$/;
 // Film only: every one of the extra words has to be one of these.
 const EDITION_WORDS = new Set([
-  'the', 'extended', 'director', 'directors', 's', 'cut', 'final', 'unrated', 'uncut', 'theatrical', 'imax',
-  'remastered', 'remaster', 'restored', 'restoration', 'special', 'edition', 'redux', 'ultimate', 'criterion',
-  'collector', 'collectors', 'anniversary', 'version', '4k',
-])
+    "the",
+    "extended",
+    "director",
+    "directors",
+    "s",
+    "cut",
+    "final",
+    "unrated",
+    "uncut",
+    "theatrical",
+    "imax",
+    "remastered",
+    "remaster",
+    "restored",
+    "restoration",
+    "special",
+    "edition",
+    "redux",
+    "ultimate",
+    "criterion",
+    "collector",
+    "collectors",
+    "anniversary",
+    "version",
+    "4k",
+]);
 // ...and at least one of these, so "the" alone is not an edition.
-const EDITION_ANCHORS = new Set(['extended', 'cut', 'unrated', 'uncut', 'theatrical', 'imax', 'remastered', 'remaster', 'restored', 'restoration', 'edition', 'redux', 'criterion', 'version'])
+const EDITION_ANCHORS = new Set([
+    "extended",
+    "cut",
+    "unrated",
+    "uncut",
+    "theatrical",
+    "imax",
+    "remastered",
+    "remaster",
+    "restored",
+    "restoration",
+    "edition",
+    "redux",
+    "criterion",
+    "version",
+]);
 
 /** Lowercase, year and punctuation dropped. "Obsession (2025)" -> "obsession". */
 function normalizeTitle(name) {
-  return (name || '')
-    .toLowerCase()
-    .replace(/\(\d{4}\)/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
+    return (name || "")
+        .toLowerCase()
+        .replace(/\(\d{4}\)/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
 }
 
 /** The title itself: release tags off the front, episode marker and what follows off the end. */
 function titleCore(name, { series = false } = {}) {
-  const whole = normalizeTitle(name)
-  // A title that is nothing but a bracket group ("[REC]") is the title.
-  const untagged = normalizeTitle(String(name || '').replace(/^(\s*\[[^\]]*\]\s*)+/, '')) || whole
-  if (!series) return untagged.replace(EPISODE_MARKER, '').trim()
-  // The series forms first: "2nd season 05" has to go whole, before the
-  // plain "season 05" marker takes only its second half.
-  let core = untagged.replace(SERIES_MARKER, '').replace(EPISODE_MARKER, '').trim()
-  // Never strip a name down to nothing: "1923" is a show.
-  while (SERIES_TAIL.test(core)) core = core.replace(SERIES_TAIL, '').trim()
-  return core
+    const whole = normalizeTitle(name);
+    // A title that is nothing but a bracket group ("[REC]") is the title.
+    const untagged =
+        normalizeTitle(String(name || "").replace(/^(\s*\[[^\]]*\]\s*)+/, "")) || whole;
+    if (!series) {
+        return untagged.replace(EPISODE_MARKER, "").trim();
+    }
+    // The series forms first: "2nd season 05" has to go whole, before the
+    // plain "season 05" marker takes only its second half.
+    let core = untagged.replace(SERIES_MARKER, "").replace(EPISODE_MARKER, "").trim();
+    // Never strip a name down to nothing: "1923" is a show.
+    while (SERIES_TAIL.test(core)) {
+        core = core.replace(SERIES_TAIL, "").trim();
+    }
+    return core;
 }
 
 // "blade runner the final cut" against "blade runner".
 function editionOf(long, short) {
-  if (!long.startsWith(`${short} `)) return false
-  const extra = long.slice(short.length + 1).split(' ')
-  return extra.every((w) => EDITION_WORDS.has(w)) && extra.some((w) => EDITION_ANCHORS.has(w))
+    if (!long.startsWith(`${short} `)) {
+        return false;
+    }
+    const extra = long.slice(short.length + 1).split(" ");
+    return extra.every((w) => EDITION_WORDS.has(w)) && extra.some((w) => EDITION_ANCHORS.has(w));
 }
 
 function sameTitle(a, b, { series = false } = {}) {
-  const x = titleCore(a, { series })
-  const y = titleCore(b, { series })
-  if (!x || !y) return false
-  if (x === y) return true
-  if (!series) return editionOf(x, y) || editionOf(y, x)
-  // "show 05" against "show", either way round.
-  const numbered = (long, short) => {
-    if (!long.startsWith(`${short} `)) return false
-    const rest = long.slice(short.length + 1)
-    if (/^\d{1,4}$/.test(rest)) return true
-    // A name long enough to be itself: whatever follows it is that show's own
-    // release wording ("band of brothers part 3", "attack on titan 05v2 bd").
-    if (short.length >= 8 || short.includes(' ')) return true
-    // A short name ("dune", "ncis") is also the start of other shows, so only
-    // the wording a release uses for an episode counts.
-    return SERIES_RELEASE_WORDING.test(rest)
-  }
-  return numbered(x, y) || numbered(y, x)
+    const x = titleCore(a, { series });
+    const y = titleCore(b, { series });
+    if (!(x && y)) {
+        return false;
+    }
+    if (x === y) {
+        return true;
+    }
+    if (!series) {
+        return editionOf(x, y) || editionOf(y, x);
+    }
+    // "show 05" against "show", either way round.
+    const numbered = (long, short) => {
+        if (!long.startsWith(`${short} `)) {
+            return false;
+        }
+        const rest = long.slice(short.length + 1);
+        if (/^\d{1,4}$/.test(rest)) {
+            return true;
+        }
+        // A name long enough to be itself: whatever follows it is that show's own
+        // release wording ("band of brothers part 3", "attack on titan 05v2 bd").
+        if (short.length >= 8 || short.includes(" ")) {
+            return true;
+        }
+        // A short name ("dune", "ncis") is also the start of other shows, so only
+        // the wording a release uses for an episode counts.
+        return SERIES_RELEASE_WORDING.test(rest);
+    };
+    return numbered(x, y) || numbered(y, x);
 }
 
-const isImdbId = (id) => /^tt\d+$/.test(String(id || ''))
+const isImdbId = (id) => /^tt\d+$/.test(String(id || ""));
 
 /**
  * A proxy stream against a library item.
@@ -110,10 +168,14 @@ const isImdbId = (id) => /^tt\d+$/.test(String(id || ''))
  * `item`:  { id, name, type }
  */
 function pairMatches(proxy, item) {
-  if (!proxy || !item) return false
-  if (isImdbId(proxy.id) && isImdbId(item.id)) return proxy.id === item.id
-  const series = item.type === 'series'
-  return (proxy.titles || []).some((t) => sameTitle(t, item.name, { series }))
+    if (!(proxy && item)) {
+        return false;
+    }
+    if (isImdbId(proxy.id) && isImdbId(item.id)) {
+        return proxy.id === item.id;
+    }
+    const series = item.type === "series";
+    return (proxy.titles || []).some((t) => sameTitle(t, item.name, { series }));
 }
 
-module.exports = { normalizeTitle, titleCore, sameTitle, pairMatches, isImdbId }
+module.exports = { isImdbId, normalizeTitle, pairMatches, sameTitle, titleCore };

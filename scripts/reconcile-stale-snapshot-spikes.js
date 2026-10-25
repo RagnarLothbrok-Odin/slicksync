@@ -28,47 +28,63 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/reconcile-stale-snapshot-spikes.js
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/reconcile-stale-snapshot-spikes.js --apply
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 function fmt(seconds) {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = seconds % 60
-  return `${h}h ${m}m ${s}s`
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h}h ${m}m ${s}s`;
 }
 
 async function main() {
-  const apply = process.argv.includes('--apply')
-  const thresholdArg = process.argv.find((a) => a.startsWith('--threshold='))
-  const THRESHOLD_SECONDS = thresholdArg ? Number(thresholdArg.split('=')[1]) : 900 // 15 min
+    const apply = process.argv.includes("--apply");
+    const thresholdArg = process.argv.find((a) => a.startsWith("--threshold="));
+    const THRESHOLD_SECONDS = thresholdArg ? Number(thresholdArg.split("=")[1]) : 900; // 15 min
 
-  const prisma = new PrismaClient()
-  try {
-    const oversized = await prisma.watchActivity.findMany({
-      where: { watchTimeSeconds: { gt: THRESHOLD_SECONDS } },
-      select: { id: true, userId: true, itemId: true, itemType: true, watchTimeSeconds: true, date: true, createdAt: true },
-      orderBy: { watchTimeSeconds: 'desc' },
-    })
+    const prisma = new PrismaClient();
+    try {
+        const oversized = await prisma.watchActivity.findMany({
+            orderBy: { watchTimeSeconds: "desc" },
+            select: {
+                createdAt: true,
+                date: true,
+                id: true,
+                itemId: true,
+                itemType: true,
+                userId: true,
+                watchTimeSeconds: true,
+            },
+            where: { watchTimeSeconds: { gt: THRESHOLD_SECONDS } },
+        });
 
-    console.log(`WatchActivity rows over ${fmt(THRESHOLD_SECONDS)} in a single delta: ${oversized.length}\n`)
-    for (const a of oversized) {
-      console.log(`  ${a.id}  user=${a.userId}  ${a.itemId} (${a.itemType})  ${fmt(a.watchTimeSeconds)}  date=${a.date.toISOString().split('T')[0]}  created=${a.createdAt.toISOString()}`)
+        console.log(
+            `WatchActivity rows over ${fmt(THRESHOLD_SECONDS)} in a single delta: ${oversized.length}\n`
+        );
+        for (const a of oversized) {
+            console.log(
+                `  ${a.id}  user=${a.userId}  ${a.itemId} (${a.itemType})  ${fmt(a.watchTimeSeconds)}  date=${a.date.toISOString().split("T")[0]}  created=${a.createdAt.toISOString()}`
+            );
+        }
+
+        if (oversized.length === 0) {
+            console.log("Nothing to do.");
+        } else if (apply) {
+            const r = await prisma.watchActivity.deleteMany({
+                where: { id: { in: oversized.map((a) => a.id) } },
+            });
+            console.log(`\nDeleted ${r.count} row(s).`);
+        } else {
+            console.log(
+                "\nDry run only - review each row above before deciding, then re-run with --apply."
+            );
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-
-    if (oversized.length === 0) {
-      console.log('Nothing to do.')
-    } else if (apply) {
-      const r = await prisma.watchActivity.deleteMany({ where: { id: { in: oversized.map((a) => a.id) } } })
-      console.log(`\nDeleted ${r.count} row(s).`)
-    } else {
-      console.log('\nDry run only - review each row above before deciding, then re-run with --apply.')
-    }
-  } finally {
-    await prisma.$disconnect()
-  }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

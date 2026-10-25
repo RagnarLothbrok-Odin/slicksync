@@ -9,47 +9,57 @@
 //      keeps the old key around as a decrypt-only fallback so existing data doesn't
 //      become unreadable — new data is encrypted under the new env key.
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
 
-const KEY_FILE = path.join(process.cwd(), 'data', 'server_secret.key');
+const KEY_FILE = path.join(process.cwd(), "data", "server_secret.key");
 
 function ensureDataDir() {
-  const dir = path.dirname(KEY_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const dir = path.dirname(KEY_FILE);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
 }
 
 function normalizeToBuffer(raw) {
-  if (!raw) return null;
-  try {
-    if (/^[A-Za-z0-9+/=]+$/.test(raw) && raw.length >= 44) {
-      const b = Buffer.from(raw, 'base64');
-      if (b.length >= 32) return b.subarray(0, 32);
+    if (!raw) {
+        return null;
     }
-  } catch {}
-  return Buffer.from(String(raw).padEnd(32, '0').slice(0, 32), 'utf8');
+    try {
+        if (/^[A-Za-z0-9+/=]+$/.test(raw) && raw.length >= 44) {
+            const b = Buffer.from(raw, "base64");
+            if (b.length >= 32) {
+                return b.subarray(0, 32);
+            }
+        }
+    } catch {
+        // Use the raw-key normalization below when base64 decoding fails.
+    }
+    return Buffer.from(String(raw).padEnd(32, "0").slice(0, 32), "utf8");
 }
 
 function readPersistedKey() {
-  try {
-    if (fs.existsSync(KEY_FILE)) {
-      const raw = fs.readFileSync(KEY_FILE, 'utf8').trim();
-      if (raw) return Buffer.from(raw, 'base64');
+    try {
+        if (fs.existsSync(KEY_FILE)) {
+            const raw = fs.readFileSync(KEY_FILE, "utf8").trim();
+            if (raw) {
+                return Buffer.from(raw, "base64");
+            }
+        }
+    } catch (err) {
+        console.error("[keyManager] failed to read persisted key:", err.message);
     }
-  } catch (err) {
-    console.error('[keyManager] failed to read persisted key:', err.message);
-  }
-  return null;
+    return null;
 }
 
 function persistKey(buf) {
-  try {
-    ensureDataDir();
-    fs.writeFileSync(KEY_FILE, buf.toString('base64'), { mode: 0o600 });
-  } catch (err) {
-    console.error('[keyManager] failed to persist key:', err.message);
-  }
+    try {
+        ensureDataDir();
+        fs.writeFileSync(KEY_FILE, buf.toString("base64"), { mode: 0o600 });
+    } catch (err) {
+        console.error("[keyManager] failed to persist key:", err.message);
+    }
 }
 
 // Historical hardcoded default. Before keyManager existed, encryption.js
@@ -59,51 +69,54 @@ function persistKey(buf) {
 // nuvioRefreshToken with this key, silently. Kept here as a decrypt-only
 // fallback so that data stays readable after v1.25.1 rerouted the read
 // path through this module. Never used for new writes.
-const LEGACY_HARDCODED_DEFAULT = 'syncio-default-key-32chars-please-change!!';
+const LEGACY_HARDCODED_DEFAULT = "syncio-default-key-32chars-please-change!!";
 
 function resolveKeys() {
-  const envRaw = process.env.ENCRYPTION_KEY || '';
-  const persisted = readPersistedKey();
+    const envRaw = process.env.ENCRYPTION_KEY || "";
+    const persisted = readPersistedKey();
 
-  let current;
-  const fallbacks = [];
+    let current;
+    const fallbacks = [];
 
-  if (envRaw) {
-    current = normalizeToBuffer(envRaw);
-    if (persisted && !persisted.equals(current)) {
-      fallbacks.push(persisted);
-      console.warn(
-        '[keyManager] ENCRYPTION_KEY differs from the previously persisted key. ' +
-        'Using the env key for new data; keeping the old key as a decrypt-only fallback ' +
-        'so existing data stays readable.'
-      );
+    if (envRaw) {
+        current = normalizeToBuffer(envRaw);
+        if (persisted && !persisted.equals(current)) {
+            fallbacks.push(persisted);
+            console.warn(
+                "[keyManager] ENCRYPTION_KEY differs from the previously persisted key. " +
+                    "Using the env key for new data; keeping the old key as a decrypt-only fallback " +
+                    "so existing data stays readable."
+            );
+        }
+    } else if (persisted) {
+        current = persisted;
+    } else {
+        current = crypto.randomBytes(32);
+        persistKey(current);
+        console.warn(
+            "[keyManager] No ENCRYPTION_KEY set in env — generated and persisted a new key at " +
+                KEY_FILE +
+                ". Set ENCRYPTION_KEY in your .env to pin this key across fresh volumes " +
+                "(e.g. `openssl rand -base64 32`), or back up " +
+                KEY_FILE +
+                " alongside your database."
+        );
     }
-  } else if (persisted) {
-    current = persisted;
-  } else {
-    current = crypto.randomBytes(32);
-    persistKey(current);
-    console.warn(
-      '[keyManager] No ENCRYPTION_KEY set in env — generated and persisted a new key at ' +
-      KEY_FILE + '. Set ENCRYPTION_KEY in your .env to pin this key across fresh volumes ' +
-      '(e.g. `openssl rand -base64 32`), or back up ' + KEY_FILE + ' alongside your database.'
-    );
-  }
 
-  // Legacy fallback — ALWAYS included (deduped against current), so any
-  // data encrypted with the pre-v1.25.1 hardcoded default still decrypts.
-  const legacyKey = normalizeToBuffer(LEGACY_HARDCODED_DEFAULT);
-  if (!current.equals(legacyKey) && !fallbacks.some((f) => f.equals(legacyKey))) {
-    fallbacks.push(legacyKey);
-  }
+    // Legacy fallback — ALWAYS included (deduped against current), so any
+    // data encrypted with the pre-v1.25.1 hardcoded default still decrypts.
+    const legacyKey = normalizeToBuffer(LEGACY_HARDCODED_DEFAULT);
+    if (!(current.equals(legacyKey) || fallbacks.some((f) => f.equals(legacyKey)))) {
+        fallbacks.push(legacyKey);
+    }
 
-  return { current, fallbacks };
+    return { current, fallbacks };
 }
 
 const { current, fallbacks } = resolveKeys();
 
 module.exports = {
-  KEY_FILE,
-  ENCRYPTION_KEY: current,
-  ENCRYPTION_KEY_FALLBACKS: fallbacks
+    ENCRYPTION_KEY: current,
+    ENCRYPTION_KEY_FALLBACKS: fallbacks,
+    KEY_FILE,
 };

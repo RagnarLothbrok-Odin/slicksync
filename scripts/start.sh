@@ -90,7 +90,7 @@ if [ "$INSTANCE" = "public" ]; then
   # touches). Confirmed live 2026-08-20: this exact mistake took
   # slicksync.vip down a second time, immediately after "fixing" the first
   # outage - see scripts/safe-db-push.js for the full writeup.
-  node scripts/safe-db-push.js || true
+  bun scripts/safe-db-push.js || true
 else
   # --skip-generate: the client is generated when the image is built. A
   # container run as a different user than the image's (common, to match a
@@ -117,13 +117,13 @@ if [ "${NEXT_DEV:-false}" = "true" ] || [ "${NODE_ENV:-production}" = "developme
 fi
 if [ "$WANT_DEV" = "true" ]; then
   echo "🔧 Running Next.js in DEVELOPMENT mode (non-minified errors enabled)"
-  cd /app/client && npx next dev -H 0.0.0.0 -p ${FRONTEND_PORT:-3000} &
+  cd /app/client && bunx --no-install next dev -H 0.0.0.0 -p ${FRONTEND_PORT:-3000} &
 else
   echo "🚀 Running Next.js in PRODUCTION mode"
   # The standalone server (output: 'standalone') reads its port from PORT,
   # not a -p flag, and finds its files beside itself.
-  if [ -f "/app/client/.next/standalone/server.js" ]; then
-    cd /app/client/.next/standalone && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun server.js &
+  if [ -f "/app/client/.next/standalone/client/server.js" ]; then
+    cd /app/client/.next/standalone/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun server.js &
   else
     cd /app/client && HOSTNAME=0.0.0.0 PORT=${FRONTEND_PORT:-3000} bun run start &
   fi

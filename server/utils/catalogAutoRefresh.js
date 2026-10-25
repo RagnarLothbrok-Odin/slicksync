@@ -10,69 +10,86 @@
 // skipping a list on ticks where it isn't due yet, rather than running a
 // second weekly timer - one scheduler, per-list gating.
 
-let refreshTimer = null
-const INTERVAL_HOURS = 24
-const WEEKLY_MIN_GAP_MS = 7 * 24 * 60 * 60 * 1000
+let refreshTimer = null;
+const INTERVAL_HOURS = 24;
+const WEEKLY_MIN_GAP_MS = 7 * 24 * 60 * 60 * 1000;
 
 async function runCatalogAutoRefresh(prisma) {
-  try {
-    const { refreshListFromSourceForAccount } = require('./listImport')
-    // Two kinds of self-updating catalog ride this same tick: URL-imported
-    // ones (re-pull the source) and Smart Catalogs (re-evaluate the stored
-    // rule). Both are opt-in via autoRefresh; which one a list is depends on
-    // whether it carries a source URL or a rule.
-    const lists = await prisma.customList.findMany({
-      where: {
-        autoRefresh: true,
-        OR: [{ importSourceUrl: { not: null } }, { smartRuleJson: { not: null } }],
-      },
-    })
-    let ok = 0
-    let skipped = 0
-    for (const list of lists) {
-      if (list.autoRefreshFrequency === 'weekly' && list.lastAutoRefreshAt) {
-        const sinceLast = Date.now() - new Date(list.lastAutoRefreshAt).getTime()
-        if (sinceLast < WEEKLY_MIN_GAP_MS) { skipped++; continue }
-      }
-      try {
-        if (list.smartRuleJson) {
-          const { refreshSmartCatalog } = require('./smartCatalogs')
-          const { resolveTmdbKeyForAccount } = require('./listImport')
-          const tmdbKey = await resolveTmdbKeyForAccount(prisma, list.accountId)
-          const result = await refreshSmartCatalog(prisma, list.accountId, list, tmdbKey)
-          // null = could not evaluate (no key, TMDb down). The catalog keeps
-          // whatever it already had rather than being emptied.
-          if (result) ok++
-          else skipped++
-          continue
+    try {
+        const { refreshListFromSourceForAccount } = require("./listImport");
+        // Two kinds of self-updating catalog ride this same tick: URL-imported
+        // ones (re-pull the source) and Smart Catalogs (re-evaluate the stored
+        // rule). Both are opt-in via autoRefresh; which one a list is depends on
+        // whether it carries a source URL or a rule.
+        const lists = await prisma.customList.findMany({
+            where: {
+                autoRefresh: true,
+                OR: [{ importSourceUrl: { not: null } }, { smartRuleJson: { not: null } }],
+            },
+        });
+        let ok = 0;
+        let skipped = 0;
+        for (const list of lists) {
+            if (list.autoRefreshFrequency === "weekly" && list.lastAutoRefreshAt) {
+                const sinceLast = Date.now() - new Date(list.lastAutoRefreshAt).getTime();
+                if (sinceLast < WEEKLY_MIN_GAP_MS) {
+                    skipped++;
+                    continue;
+                }
+            }
+            try {
+                if (list.smartRuleJson) {
+                    const { refreshSmartCatalog } = require("./smartCatalogs");
+                    const { resolveTmdbKeyForAccount } = require("./listImport");
+                    const tmdbKey = await resolveTmdbKeyForAccount(prisma, list.accountId);
+                    const result = await refreshSmartCatalog(prisma, list.accountId, list, tmdbKey);
+                    // null = could not evaluate (no key, TMDb down). The catalog keeps
+                    // whatever it already had rather than being emptied.
+                    if (result) {
+                        ok++;
+                    } else {
+                        skipped++;
+                    }
+                    continue;
+                }
+                const { items } = await refreshListFromSourceForAccount(
+                    prisma,
+                    list.accountId,
+                    list
+                );
+                await prisma.customList.update({
+                    data: { itemsJson: JSON.stringify(items), lastAutoRefreshAt: new Date() },
+                    where: { id: list.id },
+                });
+                ok++;
+            } catch (err) {
+                console.warn(
+                    `[CatalogAutoRefresh] Failed for list ${list.id} (${list.name}):`,
+                    err?.message || err
+                );
+            }
         }
-        const { items } = await refreshListFromSourceForAccount(prisma, list.accountId, list)
-        await prisma.customList.update({
-          where: { id: list.id },
-          data: { itemsJson: JSON.stringify(items), lastAutoRefreshAt: new Date() },
-        })
-        ok++
-      } catch (err) {
-        console.warn(`[CatalogAutoRefresh] Failed for list ${list.id} (${list.name}):`, err?.message || err)
-      }
+        if (lists.length > 0) {
+            console.log(
+                `[CatalogAutoRefresh] ${ok}/${lists.length} catalogs refreshed${skipped > 0 ? ` (${skipped} not due yet)` : ""}`
+            );
+        }
+    } catch (err) {
+        console.warn("[CatalogAutoRefresh] Run failed:", err?.message || err);
     }
-    if (lists.length > 0) console.log(`[CatalogAutoRefresh] ${ok}/${lists.length} catalogs refreshed${skipped > 0 ? ` (${skipped} not due yet)` : ''}`)
-  } catch (err) {
-    console.warn('[CatalogAutoRefresh] Run failed:', err?.message || err)
-  }
 }
 
 function scheduleCatalogAutoRefresh(prisma) {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-  const intervalMs = INTERVAL_HOURS * 60 * 60 * 1000
-  // Run once shortly after boot (staggered well past the other boot-time
-  // schedulers), then daily.
-  setTimeout(() => runCatalogAutoRefresh(prisma), 90 * 1000)
-  refreshTimer = setInterval(() => runCatalogAutoRefresh(prisma), intervalMs)
-  console.log(`[CatalogAutoRefresh] Scheduled every ${INTERVAL_HOURS}h`)
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+    const intervalMs = INTERVAL_HOURS * 60 * 60 * 1000;
+    // Run once shortly after boot (staggered well past the other boot-time
+    // schedulers), then daily.
+    setTimeout(() => runCatalogAutoRefresh(prisma), 90 * 1000);
+    refreshTimer = setInterval(() => runCatalogAutoRefresh(prisma), intervalMs);
+    console.log(`[CatalogAutoRefresh] Scheduled every ${INTERVAL_HOURS}h`);
 }
 
-module.exports = { scheduleCatalogAutoRefresh, runCatalogAutoRefresh }
+module.exports = { runCatalogAutoRefresh, scheduleCatalogAutoRefresh };

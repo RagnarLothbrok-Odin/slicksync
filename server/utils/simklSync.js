@@ -24,21 +24,21 @@
 // checking against a real account before trusting timestamps land correctly
 // rather than just "watched now".
 
-const { authHeaders, resolveSimklClientIdForAccount, SIMKL_BASE } = require('./simklAuth')
+const { authHeaders, resolveSimklClientIdForAccount, SIMKL_BASE } = require("./simklAuth");
 
-const MAX_ROWS_PER_SWEEP = 500
-const ACTIVITY_CHECK_TIMEOUT_MS = 10_000
+const MAX_ROWS_PER_SWEEP = 500;
+const ACTIVITY_CHECK_TIMEOUT_MS = 10_000;
 
 function isImdb(id) {
-  return typeof id === 'string' && /^tt\d+/.test(id)
+    return typeof id === "string" && /^tt\d+/.test(id);
 }
 
 async function simklFetch(path, clientId, accessToken, options = {}) {
-  const res = await fetch(`${SIMKL_BASE}${path}`, {
-    ...options,
-    headers: { ...authHeaders(clientId, accessToken), ...(options.headers || {}) },
-  })
-  return res
+    const res = await fetch(`${SIMKL_BASE}${path}`, {
+        ...options,
+        headers: { ...authHeaders(clientId, accessToken), ...(options.headers || {}) },
+    });
+    return res;
 }
 
 // ---- push: SlickSync -> Simkl ---------------------------------------------
@@ -50,83 +50,133 @@ async function simklFetch(path, clientId, accessToken, options = {}) {
  * see the module comment above.
  */
 async function pushNewWatches(prisma, user) {
-  if (!user.simklAccessToken) return null
-  const { decrypt } = require('./encryption')
-  const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId })
-  const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId)
-  const since = user.simklLastPushAt ? new Date(user.simklLastPushAt) : new Date(0)
+    if (!user.simklAccessToken) {
+        return null;
+    }
+    const { decrypt } = require("./encryption");
+    const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId });
+    const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId);
+    const since = user.simklLastPushAt ? new Date(user.simklLastPushAt) : new Date(0);
 
-  const [episodes, movies] = await Promise.all([
-    prisma.episodeWatchHistory.findMany({
-      where: { accountId: user.accountId, userId: user.id, createdAt: { gt: since } },
-      select: { showId: true, showName: true, season: true, episode: true, watchedAt: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
-      take: MAX_ROWS_PER_SWEEP,
-    }),
-    prisma.movieWatchHistory.findMany({
-      where: { accountId: user.accountId, userId: user.id, createdAt: { gt: since } },
-      select: { itemId: true, itemName: true, watchedAt: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
-      take: MAX_ROWS_PER_SWEEP,
-    }),
-  ])
+    const [episodes, movies] = await Promise.all([
+        prisma.episodeWatchHistory.findMany({
+            orderBy: { createdAt: "asc" },
+            select: {
+                createdAt: true,
+                episode: true,
+                season: true,
+                showId: true,
+                showName: true,
+                watchedAt: true,
+            },
+            take: MAX_ROWS_PER_SWEEP,
+            where: { accountId: user.accountId, createdAt: { gt: since }, userId: user.id },
+        }),
+        prisma.movieWatchHistory.findMany({
+            orderBy: { createdAt: "asc" },
+            select: { createdAt: true, itemId: true, itemName: true, watchedAt: true },
+            take: MAX_ROWS_PER_SWEEP,
+            where: { accountId: user.accountId, createdAt: { gt: since }, userId: user.id },
+        }),
+    ]);
 
-  if (episodes.length === 0 && movies.length === 0) return { synced: 0, movies: 0, episodes: 0 }
+    if (episodes.length === 0 && movies.length === 0) {
+        return { episodes: 0, movies: 0, synced: 0 };
+    }
 
-  // Safe frontier: the newest createdAt up to which BOTH tables are fully
-  // drained this sweep. If a table hit the page cap, the frontier can't
-  // advance past its last fetched row - otherwise the next sweep would skip
-  // the un-fetched tail (data loss) or resend rows already sent (duplicate
-  // plays on Simkl).
-  const maxOf = (rows) => (rows.length ? Math.max(...rows.map((r) => new Date(r.createdAt).getTime())) : -Infinity)
-  let frontier = Math.max(maxOf(episodes), maxOf(movies))
-  if (episodes.length === MAX_ROWS_PER_SWEEP) frontier = Math.min(frontier, maxOf(episodes))
-  if (movies.length === MAX_ROWS_PER_SWEEP) frontier = Math.min(frontier, maxOf(movies))
-  const withinFrontier = (r) => new Date(r.createdAt).getTime() <= frontier
+    // Safe frontier: the newest createdAt up to which BOTH tables are fully
+    // drained this sweep. If a table hit the page cap, the frontier can't
+    // advance past its last fetched row - otherwise the next sweep would skip
+    // the un-fetched tail (data loss) or resend rows already sent (duplicate
+    // plays on Simkl).
+    const maxOf = (rows) =>
+        rows.length
+            ? Math.max(...rows.map((r) => new Date(r.createdAt).getTime()))
+            : Number.NEGATIVE_INFINITY;
+    let frontier = Math.max(maxOf(episodes), maxOf(movies));
+    if (episodes.length === MAX_ROWS_PER_SWEEP) {
+        frontier = Math.min(frontier, maxOf(episodes));
+    }
+    if (movies.length === MAX_ROWS_PER_SWEEP) {
+        frontier = Math.min(frontier, maxOf(movies));
+    }
+    const withinFrontier = (r) => new Date(r.createdAt).getTime() <= frontier;
 
-  const showMap = new Map() // showId -> { title, seasons: Map<season, episodes[]> }
-  let episodeCount = 0
-  for (const e of episodes) {
-    if (!withinFrontier(e)) continue
-    if (!isImdb(e.showId) || e.season == null || e.episode == null) continue
-    if (!showMap.has(e.showId)) showMap.set(e.showId, { title: e.showName, seasons: new Map() })
-    const entry = showMap.get(e.showId)
-    if (!entry.seasons.has(e.season)) entry.seasons.set(e.season, [])
-    entry.seasons.get(e.season).push({ number: e.episode, watched_at: new Date(e.watchedAt).toISOString() })
-    episodeCount++
-  }
+    const showMap = new Map(); // showId -> { title, seasons: Map<season, episodes[]> }
+    let episodeCount = 0;
+    for (const e of episodes) {
+        if (!withinFrontier(e)) {
+            continue;
+        }
+        if (!isImdb(e.showId) || e.season == null || e.episode == null) {
+            continue;
+        }
+        if (!showMap.has(e.showId)) {
+            showMap.set(e.showId, { seasons: new Map(), title: e.showName });
+        }
+        const entry = showMap.get(e.showId);
+        if (!entry.seasons.has(e.season)) {
+            entry.seasons.set(e.season, []);
+        }
+        entry.seasons
+            .get(e.season)
+            .push({ number: e.episode, watched_at: new Date(e.watchedAt).toISOString() });
+        episodeCount++;
+    }
 
-  const showsPayload = [...showMap.entries()].map(([showId, { title, seasons }]) => ({
-    title,
-    ids: { imdb: showId },
-    seasons: [...seasons.entries()].map(([number, eps]) => ({ number, episodes: eps })),
-  }))
+    const showsPayload = [...showMap.entries()].map(([showId, { title, seasons }]) => ({
+        ids: { imdb: showId },
+        seasons: [...seasons.entries()].map(([number, eps]) => ({ episodes: eps, number })),
+        title,
+    }));
 
-  const moviesPayload = []
-  for (const m of movies) {
-    if (!withinFrontier(m)) continue
-    if (!isImdb(m.itemId)) continue
-    moviesPayload.push({ title: m.itemName, ids: { imdb: m.itemId }, watched_at: new Date(m.watchedAt).toISOString() })
-  }
+    const moviesPayload = [];
+    for (const m of movies) {
+        if (!withinFrontier(m)) {
+            continue;
+        }
+        if (!isImdb(m.itemId)) {
+            continue;
+        }
+        moviesPayload.push({
+            ids: { imdb: m.itemId },
+            title: m.itemName,
+            watched_at: new Date(m.watchedAt).toISOString(),
+        });
+    }
 
-  const newWatermark = new Date(frontier)
+    const newWatermark = new Date(frontier);
 
-  if (showsPayload.length === 0 && moviesPayload.length === 0) {
-    await prisma.user.update({ where: { id: user.id }, data: { simklLastPushAt: newWatermark } })
-    return { synced: 0, movies: 0, episodes: 0 }
-  }
+    if (showsPayload.length === 0 && moviesPayload.length === 0) {
+        await prisma.user.update({
+            data: { simklLastPushAt: newWatermark },
+            where: { id: user.id },
+        });
+        return { episodes: 0, movies: 0, synced: 0 };
+    }
 
-  const body = {}
-  if (moviesPayload.length) body.movies = moviesPayload
-  if (showsPayload.length) body.shows = showsPayload
+    const body = {};
+    if (moviesPayload.length) {
+        body.movies = moviesPayload;
+    }
+    if (showsPayload.length) {
+        body.shows = showsPayload;
+    }
 
-  const res = await simklFetch('/sync/history', clientId, accessToken, { method: 'POST', body: JSON.stringify(body) })
-  if (!res.ok) {
-    // Leave the watermark untouched so the next sweep retries this batch.
-    throw new Error(`Simkl /sync/history failed (${res.status})`)
-  }
-  await prisma.user.update({ where: { id: user.id }, data: { simklLastPushAt: newWatermark } })
-  return { synced: moviesPayload.length + episodeCount, movies: moviesPayload.length, episodes: episodeCount }
+    const res = await simklFetch("/sync/history", clientId, accessToken, {
+        body: JSON.stringify(body),
+        method: "POST",
+    });
+    if (!res.ok) {
+        // Leave the watermark untouched so the next sweep retries this batch.
+        throw new Error(`Simkl /sync/history failed (${res.status})`);
+    }
+    await prisma.user.update({ data: { simklLastPushAt: newWatermark }, where: { id: user.id } });
+    return {
+        episodes: episodeCount,
+        movies: moviesPayload.length,
+        synced: moviesPayload.length + episodeCount,
+    };
 }
 
 // ---- pull: Simkl -> SlickSync -----------------------------------------------
@@ -138,16 +188,22 @@ async function pushNewWatches(prisma, user) {
  * on a timer, per Simkl's own docs warning against that.
  */
 async function getChangedCategories(clientId, accessToken, previousState) {
-  const res = await simklFetch('/sync/activities', clientId, accessToken, { signal: AbortSignal.timeout(ACTIVITY_CHECK_TIMEOUT_MS) })
-  if (!res.ok) throw new Error(`Simkl /sync/activities failed (${res.status})`)
-  const activities = await res.json()
-  const prev = previousState ? JSON.parse(previousState) : {}
-  const changed = []
-  for (const category of ['movies', 'tv_shows', 'anime']) {
-    const currentAll = activities?.[category]?.all
-    if (currentAll && currentAll !== prev?.[category]?.all) changed.push(category)
-  }
-  return { changed, activities }
+    const res = await simklFetch("/sync/activities", clientId, accessToken, {
+        signal: AbortSignal.timeout(ACTIVITY_CHECK_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+        throw new Error(`Simkl /sync/activities failed (${res.status})`);
+    }
+    const activities = await res.json();
+    const prev = previousState ? JSON.parse(previousState) : {};
+    const changed = [];
+    for (const category of ["movies", "tv_shows", "anime"]) {
+        const currentAll = activities?.[category]?.all;
+        if (currentAll && currentAll !== prev?.[category]?.all) {
+            changed.push(category);
+        }
+    }
+    return { activities, changed };
 }
 
 /**
@@ -158,85 +214,136 @@ async function getChangedCategories(clientId, accessToken, previousState) {
  * connected / nothing changed.
  */
 async function pullWatchHistory(prisma, user) {
-  if (!user.simklAccessToken) return null
-  const { decrypt } = require('./encryption')
-  const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId })
-  const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId)
-
-  const { changed, activities } = await getChangedCategories(clientId, accessToken, user.simklSyncState)
-  if (changed.length === 0) return { pulled: 0, movies: 0, episodes: 0 }
-
-  let movieCount = 0
-  let episodeCount = 0
-
-  for (const category of changed) {
-    const type = category === 'movies' ? 'movies' : 'shows'
-    // episode_watched_at=yes is what actually puts a watched_at timestamp on
-    // each episode below - without it the per-episode watched_at this code
-    // reads wouldn't be there at all.
-    const extraParams = type === 'shows' ? '&extended=full&episode_watched_at=yes' : ''
-    const res = await simklFetch(`/sync/all-items/${type}/completed?${extraParams}`, clientId, accessToken)
-    if (!res.ok) {
-      console.warn(`[SimklSync] /sync/all-items/${type} failed (${res.status}) for user ${user.id}`)
-      continue
+    if (!user.simklAccessToken) {
+        return null;
     }
-    const items = await res.json().catch(() => [])
-    if (!Array.isArray(items)) continue
+    const { decrypt } = require("./encryption");
+    const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId });
+    const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId);
 
-    if (type === 'movies') {
-      for (const item of items) {
-        const imdb = item?.movie?.ids?.imdb
-        if (!isImdb(imdb) || !item?.last_watched) continue
-        const watchedAt = new Date(item.last_watched)
-        if (isNaN(watchedAt.getTime())) continue
-        await prisma.movieWatchHistory.upsert({
-          where: { accountId_userId_itemId: { accountId: user.accountId, userId: user.id, itemId: imdb } },
-          create: {
-            accountId: user.accountId, userId: user.id, itemId: imdb,
-            itemName: item.movie.title || imdb, poster: item.movie.poster || null,
-            watchedAt, completed: true,
-          },
-          update: { watchedAt, completed: true },
-        }).catch(() => {}) // best-effort - a native pipeline row for the same item wins on unique-constraint conflicts it can't cleanly merge into
-        movieCount++
-      }
-    } else {
-      for (const item of items) {
-        const showImdb = item?.show?.ids?.imdb
-        if (!isImdb(showImdb)) continue
-        for (const season of item.seasons || []) {
-          for (const ep of season.episodes || []) {
-            if (!ep?.watched_at) continue
-            const watchedAt = new Date(ep.watched_at)
-            if (isNaN(watchedAt.getTime())) continue
-            const videoId = `${showImdb}:${season.number}:${ep.episode}`
-            await prisma.episodeWatchHistory.upsert({
-              where: { accountId_userId_videoId: { accountId: user.accountId, userId: user.id, videoId } },
-              create: {
-                accountId: user.accountId, userId: user.id, showId: showImdb,
-                showName: item.show.title || showImdb, videoId,
-                season: season.number, episode: ep.episode,
-                poster: item.show.poster || null, watchedAt, completed: true,
-              },
-              update: { watchedAt, completed: true },
-            }).catch(() => {})
-            episodeCount++
-          }
+    const { changed, activities } = await getChangedCategories(
+        clientId,
+        accessToken,
+        user.simklSyncState
+    );
+    if (changed.length === 0) {
+        return { episodes: 0, movies: 0, pulled: 0 };
+    }
+
+    let movieCount = 0;
+    let episodeCount = 0;
+
+    for (const category of changed) {
+        const type = category === "movies" ? "movies" : "shows";
+        // episode_watched_at=yes is what actually puts a watched_at timestamp on
+        // each episode below - without it the per-episode watched_at this code
+        // reads wouldn't be there at all.
+        const extraParams = type === "shows" ? "&extended=full&episode_watched_at=yes" : "";
+        const res = await simklFetch(
+            `/sync/all-items/${type}/completed?${extraParams}`,
+            clientId,
+            accessToken
+        );
+        if (!res.ok) {
+            console.warn(
+                `[SimklSync] /sync/all-items/${type} failed (${res.status}) for user ${user.id}`
+            );
+            continue;
         }
-      }
+        const items = await res.json().catch(() => []);
+        if (!Array.isArray(items)) {
+            continue;
+        }
+
+        if (type === "movies") {
+            for (const item of items) {
+                const imdb = item?.movie?.ids?.imdb;
+                if (!(isImdb(imdb) && item?.last_watched)) {
+                    continue;
+                }
+                const watchedAt = new Date(item.last_watched);
+                if (Number.isNaN(watchedAt.getTime())) {
+                    continue;
+                }
+                await prisma.movieWatchHistory
+                    .upsert({
+                        create: {
+                            accountId: user.accountId,
+                            completed: true,
+                            itemId: imdb,
+                            itemName: item.movie.title || imdb,
+                            poster: item.movie.poster || null,
+                            userId: user.id,
+                            watchedAt,
+                        },
+                        update: { completed: true, watchedAt },
+                        where: {
+                            accountId_userId_itemId: {
+                                accountId: user.accountId,
+                                itemId: imdb,
+                                userId: user.id,
+                            },
+                        },
+                    })
+                    .catch(() => undefined); // best-effort - a native pipeline row for the same item wins on unique-constraint conflicts it can't cleanly merge into
+                movieCount++;
+            }
+        } else {
+            for (const item of items) {
+                const showImdb = item?.show?.ids?.imdb;
+                if (!isImdb(showImdb)) {
+                    continue;
+                }
+                for (const season of item.seasons || []) {
+                    for (const ep of season.episodes || []) {
+                        if (!ep?.watched_at) {
+                            continue;
+                        }
+                        const watchedAt = new Date(ep.watched_at);
+                        if (Number.isNaN(watchedAt.getTime())) {
+                            continue;
+                        }
+                        const videoId = `${showImdb}:${season.number}:${ep.episode}`;
+                        await prisma.episodeWatchHistory
+                            .upsert({
+                                create: {
+                                    accountId: user.accountId,
+                                    completed: true,
+                                    episode: ep.episode,
+                                    poster: item.show.poster || null,
+                                    season: season.number,
+                                    showId: showImdb,
+                                    showName: item.show.title || showImdb,
+                                    userId: user.id,
+                                    videoId,
+                                    watchedAt,
+                                },
+                                update: { completed: true, watchedAt },
+                                where: {
+                                    accountId_userId_videoId: {
+                                        accountId: user.accountId,
+                                        userId: user.id,
+                                        videoId,
+                                    },
+                                },
+                            })
+                            .catch(() => undefined);
+                        episodeCount++;
+                    }
+                }
+            }
+        }
     }
-  }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { simklSyncState: JSON.stringify(activities), simklLastPullAt: new Date() },
-  })
+    await prisma.user.update({
+        data: { simklLastPullAt: new Date(), simklSyncState: JSON.stringify(activities) },
+        where: { id: user.id },
+    });
 
-  return { pulled: movieCount + episodeCount, movies: movieCount, episodes: episodeCount }
+    return { episodes: episodeCount, movies: movieCount, pulled: movieCount + episodeCount };
 }
 
 // ---- scheduler --------------------------------------------------------------
-
 
 /**
  * Push ratings set in SlickTrax up to Simkl (POST /sync/ratings).
@@ -253,43 +360,66 @@ async function pullWatchHistory(prisma, user) {
  * whole show. Overall ratings (season 0) are the ones both sides agree on.
  */
 async function pushRatings(prisma, user) {
-  if (!user.simklAccessToken) return null
-  const { decrypt } = require('./encryption')
-  const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId })
-  const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId)
-  const since = user.simklLastRatingPushAt ? new Date(user.simklLastRatingPushAt) : new Date(0)
+    if (!user.simklAccessToken) {
+        return null;
+    }
+    const { decrypt } = require("./encryption");
+    const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId });
+    const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId);
+    const since = user.simklLastRatingPushAt ? new Date(user.simklLastRatingPushAt) : new Date(0);
 
-  const ratings = await prisma.titleRating.findMany({
-    where: { accountId: user.accountId, season: 0, updatedAt: { gt: since } },
-    orderBy: { updatedAt: 'asc' },
-    take: MAX_ROWS_PER_SWEEP,
-  })
-  if (ratings.length === 0) return { pushed: 0 }
+    const ratings = await prisma.titleRating.findMany({
+        orderBy: { updatedAt: "asc" },
+        take: MAX_ROWS_PER_SWEEP,
+        where: { accountId: user.accountId, season: 0, updatedAt: { gt: since } },
+    });
+    if (ratings.length === 0) {
+        return { pushed: 0 };
+    }
 
-  // Same frontier discipline as pushNewWatches: never advance past the last
-  // row actually fetched, or a capped page silently drops its own tail.
-  const frontier = new Date(Math.max(...ratings.map((r) => new Date(r.updatedAt).getTime())))
+    // Same frontier discipline as pushNewWatches: never advance past the last
+    // row actually fetched, or a capped page silently drops its own tail.
+    const frontier = new Date(Math.max(...ratings.map((r) => new Date(r.updatedAt).getTime())));
 
-  const movies = []
-  const shows = []
-  for (const r of ratings) {
-    if (!isImdb(r.itemId)) continue
-    const entry = { title: r.itemName || undefined, ids: { imdb: r.itemId }, rating: r.rating, rated_at: new Date(r.updatedAt).toISOString() }
-    ;(r.itemType === 'series' ? shows : movies).push(entry)
-  }
-  if (movies.length === 0 && shows.length === 0) {
-    await prisma.user.update({ where: { id: user.id }, data: { simklLastRatingPushAt: frontier } })
-    return { pushed: 0 }
-  }
+    const movies = [];
+    const shows = [];
+    for (const r of ratings) {
+        if (!isImdb(r.itemId)) {
+            continue;
+        }
+        const entry = {
+            ids: { imdb: r.itemId },
+            rated_at: new Date(r.updatedAt).toISOString(),
+            rating: r.rating,
+            title: r.itemName || undefined,
+        };
+        (r.itemType === "series" ? shows : movies).push(entry);
+    }
+    if (movies.length === 0 && shows.length === 0) {
+        await prisma.user.update({
+            data: { simklLastRatingPushAt: frontier },
+            where: { id: user.id },
+        });
+        return { pushed: 0 };
+    }
 
-  const body = {}
-  if (movies.length) body.movies = movies
-  if (shows.length) body.shows = shows
-  const res = await simklFetch('/sync/ratings', clientId, accessToken, { method: 'POST', body: JSON.stringify(body) })
-  if (!res.ok) throw new Error(`Simkl /sync/ratings failed (${res.status})`)
+    const body = {};
+    if (movies.length) {
+        body.movies = movies;
+    }
+    if (shows.length) {
+        body.shows = shows;
+    }
+    const res = await simklFetch("/sync/ratings", clientId, accessToken, {
+        body: JSON.stringify(body),
+        method: "POST",
+    });
+    if (!res.ok) {
+        throw new Error(`Simkl /sync/ratings failed (${res.status})`);
+    }
 
-  await prisma.user.update({ where: { id: user.id }, data: { simklLastRatingPushAt: frontier } })
-  return { pushed: movies.length + shows.length }
+    await prisma.user.update({ data: { simklLastRatingPushAt: frontier }, where: { id: user.id } });
+    return { pushed: movies.length + shows.length };
 }
 
 /**
@@ -303,93 +433,131 @@ async function pushRatings(prisma, user) {
  * rule the history importers follow.
  */
 async function pullRatings(prisma, user) {
-  if (!user.simklAccessToken) return null
-  const { decrypt } = require('./encryption')
-  const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId })
-  const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId)
-
-  let filled = 0
-  for (const type of ['movies', 'shows']) {
-    const res = await simklFetch(`/sync/ratings/${type}`, clientId, accessToken)
-    if (!res.ok) continue
-    const data = await res.json().catch(() => null)
-    const rows = Array.isArray(data) ? data : (Array.isArray(data?.[type]) ? data[type] : [])
-    for (const row of rows.slice(0, MAX_ROWS_PER_SWEEP)) {
-      const media = row?.movie || row?.show || row
-      const imdb = media?.ids?.imdb
-      const rating = Number(row?.rating ?? row?.user_rating)
-      if (!isImdb(imdb) || !Number.isFinite(rating) || rating < 1 || rating > 10) continue
-      const itemType = type === 'movies' ? 'movie' : 'series'
-      const existing = await prisma.titleRating.findFirst({ where: { accountId: user.accountId, itemId: imdb, season: 0 } })
-      if (existing) continue // never overwrite a stated local opinion
-      await prisma.titleRating.create({
-        data: { accountId: user.accountId, itemId: imdb, itemType, season: 0, rating: Math.round(rating), itemName: media?.title || null },
-      }).catch(() => {})
-      filled++
+    if (!user.simklAccessToken) {
+        return null;
     }
-  }
-  return { filled }
+    const { decrypt } = require("./encryption");
+    const accessToken = decrypt(user.simklAccessToken, { appAccountId: user.accountId });
+    const clientId = await resolveSimklClientIdForAccount(prisma, user.accountId);
+
+    let filled = 0;
+    for (const type of ["movies", "shows"]) {
+        const res = await simklFetch(`/sync/ratings/${type}`, clientId, accessToken);
+        if (!res.ok) {
+            continue;
+        }
+        const data = await res.json().catch(() => null);
+        const rows = Array.isArray(data) ? data : Array.isArray(data?.[type]) ? data[type] : [];
+        for (const row of rows.slice(0, MAX_ROWS_PER_SWEEP)) {
+            const media = row?.movie || row?.show || row;
+            const imdb = media?.ids?.imdb;
+            const rating = Number(row?.rating ?? row?.user_rating);
+            if (!(isImdb(imdb) && Number.isFinite(rating)) || rating < 1 || rating > 10) {
+                continue;
+            }
+            const itemType = type === "movies" ? "movie" : "series";
+            const existing = await prisma.titleRating.findFirst({
+                where: { accountId: user.accountId, itemId: imdb, season: 0 },
+            });
+            if (existing) {
+                continue; // never overwrite a stated local opinion
+            }
+            await prisma.titleRating
+                .create({
+                    data: {
+                        accountId: user.accountId,
+                        itemId: imdb,
+                        itemName: media?.title || null,
+                        itemType,
+                        rating: Math.round(rating),
+                        season: 0,
+                    },
+                })
+                .catch(() => undefined);
+            filled++;
+        }
+    }
+    return { filled };
 }
 
 async function sweepAllUsers(prisma) {
-  const users = await prisma.user.findMany({
-    where: { simklAccessToken: { not: null } },
-    select: { id: true, accountId: true, username: true, simklAccessToken: true, simklSyncState: true, simklLastPushAt: true, simklLastRatingPushAt: true },
-  })
-  for (const user of users) {
-    try {
-      const pulled = await pullWatchHistory(prisma, user)
-      if (pulled && pulled.pulled > 0) {
-        console.log(`[SimklSync] Pulled ${pulled.pulled} item(s) (${pulled.movies} movie, ${pulled.episodes} episode) for user ${user.username}`)
-      }
-    } catch (e) {
-      console.warn(`[SimklSync] Pull failed for user ${user.username}:`, e?.message)
+    const users = await prisma.user.findMany({
+        select: {
+            accountId: true,
+            id: true,
+            simklAccessToken: true,
+            simklLastPushAt: true,
+            simklLastRatingPushAt: true,
+            simklSyncState: true,
+            username: true,
+        },
+        where: { simklAccessToken: { not: null } },
+    });
+    for (const user of users) {
+        try {
+            const pulled = await pullWatchHistory(prisma, user);
+            if (pulled && pulled.pulled > 0) {
+                console.log(
+                    `[SimklSync] Pulled ${pulled.pulled} item(s) (${pulled.movies} movie, ${pulled.episodes} episode) for user ${user.username}`
+                );
+            }
+        } catch (e) {
+            console.warn(`[SimklSync] Pull failed for user ${user.username}:`, e?.message);
+        }
+        try {
+            const pushed = await pushNewWatches(prisma, user);
+            if (pushed && pushed.synced > 0) {
+                console.log(
+                    `[SimklSync] Pushed ${pushed.synced} item(s) (${pushed.movies} movie, ${pushed.episodes} episode) for user ${user.username}`
+                );
+            }
+        } catch (e) {
+            console.warn(`[SimklSync] Push failed for user ${user.username}:`, e?.message);
+        }
+        // Ratings ride the same 30-minute sweep. Kept in their own try blocks so
+        // a ratings failure never stops history syncing, which is the feature
+        // people actually notice.
+        try {
+            const pulledRatings = await pullRatings(prisma, user);
+            if (pulledRatings && pulledRatings.filled > 0) {
+                console.log(
+                    `[SimklSync] Filled ${pulledRatings.filled} rating(s) from Simkl for user ${user.username}`
+                );
+            }
+        } catch (e) {
+            console.warn(`[SimklSync] Rating pull failed for user ${user.username}:`, e?.message);
+        }
+        try {
+            const pushedRatings = await pushRatings(prisma, user);
+            if (pushedRatings && pushedRatings.pushed > 0) {
+                console.log(
+                    `[SimklSync] Pushed ${pushedRatings.pushed} rating(s) for user ${user.username}`
+                );
+            }
+        } catch (e) {
+            console.warn(`[SimklSync] Rating push failed for user ${user.username}:`, e?.message);
+        }
     }
-    try {
-      const pushed = await pushNewWatches(prisma, user)
-      if (pushed && pushed.synced > 0) {
-        console.log(`[SimklSync] Pushed ${pushed.synced} item(s) (${pushed.movies} movie, ${pushed.episodes} episode) for user ${user.username}`)
-      }
-    } catch (e) {
-      console.warn(`[SimklSync] Push failed for user ${user.username}:`, e?.message)
-    }
-    // Ratings ride the same 30-minute sweep. Kept in their own try blocks so
-    // a ratings failure never stops history syncing, which is the feature
-    // people actually notice.
-    try {
-      const pulledRatings = await pullRatings(prisma, user)
-      if (pulledRatings && pulledRatings.filled > 0) {
-        console.log(`[SimklSync] Filled ${pulledRatings.filled} rating(s) from Simkl for user ${user.username}`)
-      }
-    } catch (e) {
-      console.warn(`[SimklSync] Rating pull failed for user ${user.username}:`, e?.message)
-    }
-    try {
-      const pushedRatings = await pushRatings(prisma, user)
-      if (pushedRatings && pushedRatings.pushed > 0) {
-        console.log(`[SimklSync] Pushed ${pushedRatings.pushed} rating(s) for user ${user.username}`)
-      }
-    } catch (e) {
-      console.warn(`[SimklSync] Rating push failed for user ${user.username}:`, e?.message)
-    }
-  }
 }
 
-let simklTimer = null
-const SWEEP_INTERVAL_MS = 30 * 60 * 1000 // 30m - watch history is time-sensitive, unlike e.g. the 6h vault/DB-size checks
+let simklTimer = null;
+const SWEEP_INTERVAL_MS = 30 * 60 * 1000; // 30m - watch history is time-sensitive, unlike e.g. the 6h vault/DB-size checks
 
 function scheduleSimklSync(prisma) {
-  if (simklTimer) return
-  const run = () => sweepAllUsers(prisma).catch((e) => console.warn('[SimklSync] Sweep failed:', e?.message))
-  run()
-  simklTimer = setInterval(run, SWEEP_INTERVAL_MS)
+    if (simklTimer) {
+        return;
+    }
+    const run = () =>
+        sweepAllUsers(prisma).catch((e) => console.warn("[SimklSync] Sweep failed:", e?.message));
+    run();
+    simklTimer = setInterval(run, SWEEP_INTERVAL_MS);
 }
 
 module.exports = {
-  pushRatings,
-  pullRatings,
-  pushNewWatches,
-  pullWatchHistory,
-  sweepAllUsers,
-  scheduleSimklSync,
-}
+    pullRatings,
+    pullWatchHistory,
+    pushNewWatches,
+    pushRatings,
+    scheduleSimklSync,
+    sweepAllUsers,
+};

@@ -14,113 +14,152 @@
 // When digest mode is off (the default), none of this runs - every call
 // site's existing instant-send behavior is completely unchanged.
 
-const { postDiscord } = require('./notify')
-const { sendPushToAccount } = require('./pushNotifications')
+const { postDiscord } = require("./notify");
+const { sendPushToAccount } = require("./pushNotifications");
 
 const CATEGORY_LABELS = {
-  episode: '📺 New Episodes',
-  sync: '🔄 Syncs',
-  vault: '🔐 Vault',
-  addon_health: '🧩 Addon Health',
-  connection: '📡 Connections',
-}
+    addon_health: "🧩 Addon Health",
+    connection: "📡 Connections",
+    episode: "📺 New Episodes",
+    sync: "🔄 Syncs",
+    vault: "🔐 Vault",
+};
 
-const MAX_LINES_PER_CATEGORY = 10
+const MAX_LINES_PER_CATEGORY = 10;
 
 function parseSyncConfig(rawSync) {
-  let cfg = rawSync
-  if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = {} } }
-  return cfg || {}
+    let cfg = rawSync;
+    if (typeof cfg === "string") {
+        try {
+            cfg = JSON.parse(cfg);
+        } catch {
+            cfg = {};
+        }
+    }
+    return cfg || {};
 }
 
 async function isDigestEnabled(prisma, accountId) {
-  try {
-    const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-    return parseSyncConfig(account?.sync)?.notifyDigestEnabled === true
-  } catch {
-    return false
-  }
+    try {
+        const account = await prisma.appAccount.findUnique({
+            select: { sync: true },
+            where: { id: accountId },
+        });
+        return parseSyncConfig(account?.sync)?.notifyDigestEnabled === true;
+    } catch {
+        return false;
+    }
 }
 
 /** Called instead of an instant send when digest mode is on. */
 async function queueDigestEntry(prisma, accountId, category, summary) {
-  try {
-    await prisma.notificationDigestEntry.create({ data: { accountId, category, summary } })
-  } catch (e) {
-    console.warn('[NotificationDigest] Failed to queue entry:', e?.message)
-  }
+    try {
+        await prisma.notificationDigestEntry.create({ data: { accountId, category, summary } });
+    } catch (e) {
+        console.warn("[NotificationDigest] Failed to queue entry:", e?.message);
+    }
 }
 
 /** Checks every account; sends + clears the digest for any that are due. */
 async function sendDueDigests(prisma) {
-  const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } })
-  for (const account of accounts) {
-    try {
-      const cfg = parseSyncConfig(account.sync)
-      if (cfg.notifyDigestEnabled !== true) continue
+    const accounts = await prisma.appAccount.findMany({ select: { id: true, sync: true } });
+    for (const account of accounts) {
+        try {
+            const cfg = parseSyncConfig(account.sync);
+            if (cfg.notifyDigestEnabled !== true) {
+                continue;
+            }
 
-      const frequency = cfg.notifyDigestFrequency === 'weekly' ? 'weekly' : 'daily'
-      const intervalMs = (frequency === 'weekly' ? 7 : 1) * 24 * 60 * 60 * 1000
-      const lastSentAt = cfg.notifyDigestLastSentAt ? new Date(cfg.notifyDigestLastSentAt) : null
-      if (lastSentAt && Date.now() - lastSentAt.getTime() < intervalMs) continue
+            const frequency = cfg.notifyDigestFrequency === "weekly" ? "weekly" : "daily";
+            const intervalMs = (frequency === "weekly" ? 7 : 1) * 24 * 60 * 60 * 1000;
+            const lastSentAt = cfg.notifyDigestLastSentAt
+                ? new Date(cfg.notifyDigestLastSentAt)
+                : null;
+            if (lastSentAt && Date.now() - lastSentAt.getTime() < intervalMs) {
+                continue;
+            }
 
-      const entries = await prisma.notificationDigestEntry.findMany({
-        where: { accountId: account.id, ...(lastSentAt ? { createdAt: { gt: lastSentAt } } : {}) },
-        orderBy: { createdAt: 'asc' },
-      })
+            const entries = await prisma.notificationDigestEntry.findMany({
+                orderBy: { createdAt: "asc" },
+                where: {
+                    accountId: account.id,
+                    ...(lastSentAt ? { createdAt: { gt: lastSentAt } } : {}),
+                },
+            });
 
-      // Nothing happened this period - still advance lastSentAt below so the
-      // next check doesn't re-scan the same empty window, but don't send a
-      // pointless "nothing happened" notification.
-      if (entries.length > 0) {
-        const byCategory = new Map()
-        for (const e of entries) {
-          if (!byCategory.has(e.category)) byCategory.set(e.category, [])
-          byCategory.get(e.category).push(e.summary)
+            // Nothing happened this period - still advance lastSentAt below so the
+            // next check doesn't re-scan the same empty window, but don't send a
+            // pointless "nothing happened" notification.
+            if (entries.length > 0) {
+                const byCategory = new Map();
+                for (const e of entries) {
+                    if (!byCategory.has(e.category)) {
+                        byCategory.set(e.category, []);
+                    }
+                    byCategory.get(e.category).push(e.summary);
+                }
+                const cadenceLabel = frequency === "weekly" ? "Weekly" : "Daily";
+
+                // Push + bell (primary) - one condensed line, Discord gets the full
+                // per-item breakdown since it has room for it.
+                const pushSummary = [...byCategory.entries()]
+                    .map(
+                        ([category, summaries]) =>
+                            `${summaries.length} ${(CATEGORY_LABELS[category] || category).replace(/^\S+\s/, "")}`
+                    )
+                    .join(" · ");
+                await sendPushToAccount(prisma, account.id, {
+                    body: pushSummary,
+                    icon: "/android-chrome-192x192.png",
+                    title: `SlickSync ${cadenceLabel} Digest`,
+                    url: "/activity",
+                }).catch(() => undefined);
+
+                // Discord (secondary) - only if a webhook is actually configured.
+                if (cfg.webhookUrl) {
+                    const lines = [`**SlickSync ${cadenceLabel} Digest**`];
+                    for (const [category, summaries] of byCategory) {
+                        lines.push(
+                            `\n**${CATEGORY_LABELS[category] || category}** (${summaries.length})`
+                        );
+                        for (const s of summaries.slice(0, MAX_LINES_PER_CATEGORY)) {
+                            lines.push(`• ${s}`);
+                        }
+                        if (summaries.length > MAX_LINES_PER_CATEGORY) {
+                            lines.push(`…and ${summaries.length - MAX_LINES_PER_CATEGORY} more`);
+                        }
+                    }
+                    await postDiscord(cfg.webhookUrl, lines.join("\n")).catch(() => undefined);
+                }
+
+                await prisma.notificationDigestEntry.deleteMany({
+                    where: { id: { in: entries.map((e) => e.id) } },
+                });
+            }
+
+            // A fresh read: cfg was read before the push and Discord sends above.
+            await require("./accountSync").setAccountSyncKeys(prisma, account.id, {
+                notifyDigestLastSentAt: new Date().toISOString(),
+            });
+        } catch (e) {
+            console.warn(
+                `[NotificationDigest] Failed processing account ${account.id}:`,
+                e?.message
+            );
         }
-        const cadenceLabel = frequency === 'weekly' ? 'Weekly' : 'Daily'
-
-        // Push + bell (primary) - one condensed line, Discord gets the full
-        // per-item breakdown since it has room for it.
-        const pushSummary = [...byCategory.entries()]
-          .map(([category, summaries]) => `${summaries.length} ${(CATEGORY_LABELS[category] || category).replace(/^\S+\s/, '')}`)
-          .join(' · ')
-        await sendPushToAccount(prisma, account.id, {
-          title: `SlickSync ${cadenceLabel} Digest`,
-          body: pushSummary,
-          icon: '/android-chrome-192x192.png',
-          url: '/activity',
-        }).catch(() => {})
-
-        // Discord (secondary) - only if a webhook is actually configured.
-        if (cfg.webhookUrl) {
-          const lines = [`**SlickSync ${cadenceLabel} Digest**`]
-          for (const [category, summaries] of byCategory) {
-            lines.push(`\n**${CATEGORY_LABELS[category] || category}** (${summaries.length})`)
-            for (const s of summaries.slice(0, MAX_LINES_PER_CATEGORY)) lines.push(`• ${s}`)
-            if (summaries.length > MAX_LINES_PER_CATEGORY) lines.push(`…and ${summaries.length - MAX_LINES_PER_CATEGORY} more`)
-          }
-          await postDiscord(cfg.webhookUrl, lines.join('\n')).catch(() => {})
-        }
-
-        await prisma.notificationDigestEntry.deleteMany({ where: { id: { in: entries.map((e) => e.id) } } })
-      }
-
-      // A fresh read: cfg was read before the push and Discord sends above.
-      await require('./accountSync').setAccountSyncKeys(prisma, account.id, { notifyDigestLastSentAt: new Date().toISOString() })
-    } catch (e) {
-      console.warn(`[NotificationDigest] Failed processing account ${account.id}:`, e?.message)
     }
-  }
 }
 
-const POLL_INTERVAL_MS = 60 * 60 * 1000 // hourly - cheap, the interval math above gates the actual send
-const FIRST_RUN_DELAY_MS = 5 * 60 * 1000
+const POLL_INTERVAL_MS = 60 * 60 * 1000; // hourly - cheap, the interval math above gates the actual send
+const FIRST_RUN_DELAY_MS = 5 * 60 * 1000;
 
 function scheduleNotificationDigest(prisma) {
-  const run = () => sendDueDigests(prisma).catch((e) => console.warn('[NotificationDigest] Poll failed:', e?.message))
-  setTimeout(run, FIRST_RUN_DELAY_MS)
-  setInterval(run, POLL_INTERVAL_MS)
+    const run = () =>
+        sendDueDigests(prisma).catch((e) =>
+            console.warn("[NotificationDigest] Poll failed:", e?.message)
+        );
+    setTimeout(run, FIRST_RUN_DELAY_MS);
+    setInterval(run, POLL_INTERVAL_MS);
 }
 
-module.exports = { isDigestEnabled, queueDigestEntry, sendDueDigests, scheduleNotificationDigest }
+module.exports = { isDigestEnabled, queueDigestEntry, scheduleNotificationDigest, sendDueDigests };

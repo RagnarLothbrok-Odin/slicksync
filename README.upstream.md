@@ -1,6 +1,16 @@
-# Credits
+# Project lineage and upstream credits
 
-SlickSync is a fork of [Syncio](https://github.com/iamneur0/syncio) by
+This repository is maintained independently by **Ragnar Lothbrok** at
+[RagnarLothbrok-Odin/slicksync](https://github.com/RagnarLothbrok-Odin/slicksync).
+Its upstream is [slicknsliding/slicksync](https://github.com/slicknsliding/slicksync),
+maintained by **slicknsliding**. Upstream changes may be incorporated selectively;
+issues and pull requests for this fork belong in this repository.
+
+The feature descriptions below document the inherited upstream project. They
+are historical context, rather than a list of changes made by this fork.
+See [README.md](./README.md) for the current fork's usage and installation.
+
+Upstream SlickSync is a fork of [Syncio](https://github.com/iamneur0/syncio) by
 **neur0**, with additional features and ideas credited to
 [AIOManager](https://github.com/Sonicx161/AIOManager) by **Sonicx161**.
 

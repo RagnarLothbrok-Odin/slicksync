@@ -30,82 +30,119 @@
 // Not the main user's own PIN: that is SlickSync's sign-in to the whole
 // configuration.
 
-const { safeFetch, instancePolicy } = require('./safeUrl')
-const crypto = require('crypto')
-const { readConfig, writeConfig, rebaseline, noteOutsideChanges, instanceBase } = require('./aiostreamsConfig')
+const { safeFetch, instancePolicy } = require("./safeUrl");
+const crypto = require("node:crypto");
+const {
+    readConfig,
+    writeConfig,
+    rebaseline,
+    noteOutsideChanges,
+    instanceBase,
+} = require("./aiostreamsConfig");
 
-const PIN = /^\d{4,12}$/
-const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
+const PIN = /^\d{4,12}$/;
+const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 function fail(message, status = 400) {
-  return Object.assign(new Error(message), { status })
+    return Object.assign(new Error(message), { status });
 }
 
 /** AIOStreams' own Jellyfin user id for a persona. */
 function personaUserId(configUuid, personaId) {
-  return crypto.createHash('sha256').update(`jellyfin-persona:${configUuid}:${personaId}`).digest('hex').slice(0, 32)
+    return crypto
+        .createHash("sha256")
+        .update(`jellyfin-persona:${configUuid}:${personaId}`)
+        .digest("hex")
+        .slice(0, 32);
 }
 
 function canManage(owner) {
-  return owner?.providerType === 'jellyfin' && owner.jellyfinServerKind === 'aiostreams' && !!owner.aioConfigId && !!owner.aioConfigPassword
+    return (
+        owner?.providerType === "jellyfin" &&
+        owner.jellyfinServerKind === "aiostreams" &&
+        !!owner.aioConfigId &&
+        !!owner.aioConfigPassword
+    );
 }
 
 function accessFor(owner, decrypt) {
-  if (!canManage(owner)) {
-    throw fail(`SlickSync needs ${owner?.username || 'their'}'s AIOStreams configuration password for this - reconnect them with it.`, 409)
-  }
-  return {
-    serverUrl: owner.jellyfinServerUrl,
-    account: owner.aioConfigId,
-    password: decrypt(owner.aioConfigPassword, { appAccountId: owner.accountId || 'default' }),
-  }
+    if (!canManage(owner)) {
+        throw fail(
+            `SlickSync needs ${owner?.username || "their"}'s AIOStreams configuration password for this - reconnect them with it.`,
+            409
+        );
+    }
+    return {
+        account: owner.aioConfigId,
+        password: decrypt(owner.aioConfigPassword, { appAccountId: owner.accountId || "default" }),
+        serverUrl: owner.jellyfinServerUrl,
+    };
 }
 
 async function save(prisma, owner, access, config) {
-  try {
-    await noteOutsideChanges(prisma, owner, await readConfig(access))
-  } catch (e) {
-    console.warn('[AioHousehold] could not compare with the last look:', e?.message)
-  }
-  try {
-    await writeConfig(access, config)
-  } catch (e) {
-    throw fail(e?.message || 'AIOStreams refused the change', 409)
-  }
-  try {
-    await rebaseline(prisma, owner, await readConfig(access))
-  } catch (e) {
-    console.warn('[AioHousehold] could not re-read the configuration after saving:', e?.message)
-  }
+    try {
+        await noteOutsideChanges(prisma, owner, await readConfig(access));
+    } catch (e) {
+        console.warn("[AioHousehold] could not compare with the last look:", e?.message);
+    }
+    try {
+        await writeConfig(access, config);
+    } catch (e) {
+        throw fail(e?.message || "AIOStreams refused the change", 409);
+    }
+    try {
+        await rebaseline(prisma, owner, await readConfig(access));
+    } catch (e) {
+        console.warn(
+            "[AioHousehold] could not re-read the configuration after saving:",
+            e?.message
+        );
+    }
 }
 
 async function maxPersonas(owner) {
-  try {
-    const res = await safeFetch(`${instanceBase(owner.jellyfinServerUrl)}/api/v1/status`, { signal: AbortSignal.timeout(15000) }, instancePolicy())
-    const body = await res.json()
-    return Number(body?.data?.settings?.jellyfin?.maxPersonas) || 0
-  } catch {
-    return 0
-  }
+    try {
+        const res = await safeFetch(
+            `${instanceBase(owner.jellyfinServerUrl)}/api/v1/status`,
+            { signal: AbortSignal.timeout(15_000) },
+            instancePolicy()
+        );
+        const body = await res.json();
+        return Number(body?.data?.settings?.jellyfin?.maxPersonas) || 0;
+    } catch {
+        return 0;
+    }
 }
 
 /** Sign one household user in, once, and keep the sign-in on their profile. */
 async function signInOnce(prisma, encrypt, owner, { jellyfinUserId, name }, password, pin) {
-  const profiles = require('./jellyfinProfiles')
-  const names = profiles.loginNamesFor('aiostreams', owner.jellyfinServerUrl, owner.aioConfigId, { name })
-  const secret = pin ? `${password}/${pin}` : password
-  const signed = await profiles.signInAs(owner.jellyfinServerUrl, names, jellyfinUserId, secret, profiles.handToHolders(prisma, encrypt, owner.jellyfinServerUrl)).catch(() => ({ token: null }))
-  await profiles.saveHousehold(prisma, encrypt, owner, [{
-    jellyfinUserId,
-    name,
-    loginName: signed.loginName || names.join('\n') || name,
-    token: signed.token || null,
-    needsPin: !signed.token && !!pin,
-  }])
-  return !!signed.token
+    const profiles = require("./jellyfinProfiles");
+    const names = profiles.loginNamesFor("aiostreams", owner.jellyfinServerUrl, owner.aioConfigId, {
+        name,
+    });
+    const secret = pin ? `${password}/${pin}` : password;
+    const signed = await profiles
+        .signInAs(
+            owner.jellyfinServerUrl,
+            names,
+            jellyfinUserId,
+            secret,
+            profiles.handToHolders(prisma, encrypt, owner.jellyfinServerUrl)
+        )
+        .catch(() => ({ token: null }));
+    await profiles.saveHousehold(prisma, encrypt, owner, [
+        {
+            jellyfinUserId,
+            loginName: signed.loginName || names.join("\n") || name,
+            name,
+            needsPin: !signed.token && !!pin,
+            token: signed.token || null,
+        },
+    ]);
+    return !!signed.token;
 }
 
-const ADDRESS_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
+const ADDRESS_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 /**
  * A personal sign-in address code: 10 random letters and digits (what
@@ -113,18 +150,26 @@ const ADDRESS_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
  * this configuration.
  */
 function newAddress(personas) {
-  const used = new Set(personas.map((p) => p?.address).filter(Boolean))
-  for (;;) {
-    let code = ''
-    for (let i = 0; i < 10; i++) code += ADDRESS_CHARS[crypto.randomInt(ADDRESS_CHARS.length)]
-    if (!used.has(code)) return code
-  }
+    const used = new Set(personas.map((p) => p?.address).filter(Boolean));
+    for (;;) {
+        let code = "";
+        for (let i = 0; i < 10; i++) {
+            code += ADDRESS_CHARS[crypto.randomInt(ADDRESS_CHARS.length)];
+        }
+        if (!used.has(code)) {
+            return code;
+        }
+    }
 }
 
 function personalInfo(owner, persona) {
-  const separate = persona.hidden === true
-  const address = separate && persona.address ? String(persona.address) : null
-  return { separate, address, url: address ? `${instanceBase(owner.jellyfinServerUrl)}/jellyfin/p/${address}` : null }
+    const separate = persona.hidden === true;
+    const address = separate && persona.address ? String(persona.address) : null;
+    return {
+        address,
+        separate,
+        url: address ? `${instanceBase(owner.jellyfinServerUrl)}/jellyfin/p/${address}` : null,
+    };
 }
 
 /**
@@ -135,50 +180,89 @@ function personalInfo(owner, persona) {
  * configuration can't be read or SlickSync has no access to it.
  */
 async function personalSettings(decrypt, owner, profiles) {
-  if (!canManage(owner)) return null
-  try {
-    const config = await readConfig(accessFor(owner, decrypt))
-    const uuid = config.uuid || owner.aioConfigId
-    const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : []
-    const out = {}
-    for (const profile of profiles) {
-      const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId)
-      if (persona) out[profile.id] = personalInfo(owner, persona)
+    if (!canManage(owner)) {
+        return null;
     }
-    return out
-  } catch (e) {
-    console.warn('[AioHousehold] could not read personal addresses:', e?.message)
-    return null
-  }
+    try {
+        const config = await readConfig(accessFor(owner, decrypt));
+        const uuid = config.uuid || owner.aioConfigId;
+        const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : [];
+        const out = {};
+        for (const profile of profiles) {
+            const persona = personas.find(
+                (p) => personaUserId(uuid, p.id) === profile.jellyfinUserId
+            );
+            if (persona) {
+                out[profile.id] = personalInfo(owner, persona);
+            }
+        }
+        return out;
+    } catch (e) {
+        console.warn("[AioHousehold] could not read personal addresses:", e?.message);
+        return null;
+    }
 }
 
 /** Add a household user. Returns { tracked } - whether it is tracked already. */
 async function addPersona(prisma, decrypt, encrypt, owner, { name, pin, history, separate }) {
-  const access = accessFor(owner, decrypt)
-  const clean = String(name || '').trim()
-  if (!clean || clean.length > 32) throw fail('A name is 1 to 32 characters')
-  const lock = pin == null || pin === '' ? null : String(pin)
-  if (lock && !PIN.test(lock)) throw fail('A PIN is 4 to 12 digits')
-  const mode = history === 'shared' ? 'shared' : 'own'
+    const access = accessFor(owner, decrypt);
+    const clean = String(name || "").trim();
+    if (!clean || clean.length > 32) {
+        throw fail("A name is 1 to 32 characters");
+    }
+    const lock = pin == null || pin === "" ? null : String(pin);
+    if (lock && !PIN.test(lock)) {
+        throw fail("A PIN is 4 to 12 digits");
+    }
+    const mode = history === "shared" ? "shared" : "own";
 
-  const config = await readConfig(access)
-  const uuid = config.uuid || owner.aioConfigId
-  config.jellyfin = config.jellyfin && typeof config.jellyfin === 'object' ? config.jellyfin : {}
-  const personas = Array.isArray(config.jellyfin.personas) ? config.jellyfin.personas : []
-  const taken = [config.jellyfin.primary?.name, ...personas.map((p) => p.name)].filter(Boolean).map((n) => String(n).toLowerCase())
-  if (taken.includes(clean.toLowerCase())) throw fail(`There is already a household user called ${clean}`)
-  const max = await maxPersonas(owner)
-  if (max > 0 && personas.length >= max) throw fail(`This AIOStreams allows ${max} household users, and there are ${personas.length} already.`, 409)
+    const config = await readConfig(access);
+    const uuid = config.uuid || owner.aioConfigId;
+    config.jellyfin = config.jellyfin && typeof config.jellyfin === "object" ? config.jellyfin : {};
+    const personas = Array.isArray(config.jellyfin.personas) ? config.jellyfin.personas : [];
+    const taken = [config.jellyfin.primary?.name, ...personas.map((p) => p.name)]
+        .filter(Boolean)
+        .map((n) => String(n).toLowerCase());
+    if (taken.includes(clean.toLowerCase())) {
+        throw fail(`There is already a household user called ${clean}`);
+    }
+    const max = await maxPersonas(owner);
+    if (max > 0 && personas.length >= max) {
+        throw fail(
+            `This AIOStreams allows ${max} household users, and there are ${personas.length} already.`,
+            409
+        );
+    }
 
-  let id = clean.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'user'
-  if (!ID.test(id) || personas.some((p) => p.id === id)) id = `${id.slice(0, 20)}-${crypto.randomBytes(3).toString('hex')}`.replace(/^-+/, '')
-  // Never trackers on a shared one: it uses the main user's.
-  const persona = { id, name: clean, history: mode, ...(lock ? { lock } : {}), ...(separate === true ? { hidden: true, address: newAddress(personas) } : {}) }
-  config.jellyfin.personas = [...personas, persona]
-  await save(prisma, owner, access, config)
+    let id =
+        clean
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 24) || "user";
+    if (!ID.test(id) || personas.some((p) => p.id === id)) {
+        id = `${id.slice(0, 20)}-${crypto.randomBytes(3).toString("hex")}`.replace(/^-+/, "");
+    }
+    // Never trackers on a shared one: it uses the main user's.
+    const persona = {
+        history: mode,
+        id,
+        name: clean,
+        ...(lock ? { lock } : {}),
+        ...(separate === true ? { address: newAddress(personas), hidden: true } : {}),
+    };
+    config.jellyfin.personas = [...personas, persona];
+    await save(prisma, owner, access, config);
 
-  const tracked = await signInOnce(prisma, encrypt, owner, { jellyfinUserId: personaUserId(uuid, id), name: clean }, access.password, lock)
-  return { tracked, ...(persona.hidden ? { personal: personalInfo(owner, persona) } : {}) }
+    const tracked = await signInOnce(
+        prisma,
+        encrypt,
+        owner,
+        { jellyfinUserId: personaUserId(uuid, id), name: clean },
+        access.password,
+        lock
+    );
+    return { tracked, ...(persona.hidden ? { personal: personalInfo(owner, persona) } : {}) };
 }
 
 /**
@@ -190,51 +274,91 @@ async function addPersona(prisma, decrypt, encrypt, owner, { name, pin, history,
  * { separate, address, url }.
  */
 async function setPersonaSeparation(prisma, decrypt, owner, profile, mode) {
-  if (!['on', 'off', 'renew'].includes(mode)) throw fail('Choose on, off or renew')
-  const access = accessFor(owner, decrypt)
-  const config = await readConfig(access)
-  const uuid = config.uuid || owner.aioConfigId
-  const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : []
-  const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId)
-  if (!persona) throw fail(`${profile.name} isn't a household user in this AIOStreams configuration any more.`, 409)
-  if (mode === 'renew' && persona.hidden !== true) throw fail(`${persona.name} isn't kept separate, so there is no address to renew.`, 409)
+    if (!["on", "off", "renew"].includes(mode)) {
+        throw fail("Choose on, off or renew");
+    }
+    const access = accessFor(owner, decrypt);
+    const config = await readConfig(access);
+    const uuid = config.uuid || owner.aioConfigId;
+    const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : [];
+    const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId);
+    if (!persona) {
+        throw fail(
+            `${profile.name} isn't a household user in this AIOStreams configuration any more.`,
+            409
+        );
+    }
+    if (mode === "renew" && persona.hidden !== true) {
+        throw fail(`${persona.name} isn't kept separate, so there is no address to renew.`, 409);
+    }
 
-  const already = persona.hidden === true && !!persona.address
-  if (mode === 'on' && already) return personalInfo(owner, persona)
-  if (mode === 'off' && persona.hidden !== true && !persona.address) return personalInfo(owner, persona)
-  if (mode === 'off') {
-    delete persona.hidden
-    delete persona.address
-  } else {
-    persona.hidden = true
-    persona.address = newAddress(personas)
-  }
-  await save(prisma, owner, access, config)
-  return personalInfo(owner, persona)
+    const already = persona.hidden === true && !!persona.address;
+    if (mode === "on" && already) {
+        return personalInfo(owner, persona);
+    }
+    if (mode === "off" && persona.hidden !== true && !persona.address) {
+        return personalInfo(owner, persona);
+    }
+    if (mode === "off") {
+        delete persona.hidden;
+        delete persona.address;
+    } else {
+        persona.hidden = true;
+        persona.address = newAddress(personas);
+    }
+    await save(prisma, owner, access, config);
+    return personalInfo(owner, persona);
 }
 
 /** Change a household user's PIN, or remove it (pin null). Returns { tracked }. */
 async function setPersonaPin(prisma, decrypt, encrypt, owner, profile, pin) {
-  const access = accessFor(owner, decrypt)
-  const lock = pin == null || pin === '' ? null : String(pin)
-  if (lock && !PIN.test(lock)) throw fail('A PIN is 4 to 12 digits')
+    const access = accessFor(owner, decrypt);
+    const lock = pin == null || pin === "" ? null : String(pin);
+    if (lock && !PIN.test(lock)) {
+        throw fail("A PIN is 4 to 12 digits");
+    }
 
-  const config = await readConfig(access)
-  const uuid = config.uuid || owner.aioConfigId
-  const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : []
-  const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId)
-  if (!persona) throw fail(`${profile.name} isn't a household user in this AIOStreams configuration any more.`, 409)
-  if (lock) persona.lock = lock
-  else delete persona.lock
-  await save(prisma, owner, access, config)
+    const config = await readConfig(access);
+    const uuid = config.uuid || owner.aioConfigId;
+    const personas = Array.isArray(config?.jellyfin?.personas) ? config.jellyfin.personas : [];
+    const persona = personas.find((p) => personaUserId(uuid, p.id) === profile.jellyfinUserId);
+    if (!persona) {
+        throw fail(
+            `${profile.name} isn't a household user in this AIOStreams configuration any more.`,
+            409
+        );
+    }
+    if (lock) {
+        persona.lock = lock;
+    } else {
+        delete persona.lock;
+    }
+    await save(prisma, owner, access, config);
 
-  const tracked = await signInOnce(prisma, encrypt, owner, { jellyfinUserId: profile.jellyfinUserId, name: persona.name }, access.password, lock)
-  // The old sign-in stopped working with the change; without a new one the
-  // card asks for the PIN rather than holding a dead token.
-  if (!tracked) {
-    await prisma.jellyfinProfile.update({ where: { id: profile.id }, data: { token: null, needsPin: !!lock } })
-  }
-  return { tracked }
+    const tracked = await signInOnce(
+        prisma,
+        encrypt,
+        owner,
+        { jellyfinUserId: profile.jellyfinUserId, name: persona.name },
+        access.password,
+        lock
+    );
+    // The old sign-in stopped working with the change; without a new one the
+    // card asks for the PIN rather than holding a dead token.
+    if (!tracked) {
+        await prisma.jellyfinProfile.update({
+            data: { needsPin: !!lock, token: null },
+            where: { id: profile.id },
+        });
+    }
+    return { tracked };
 }
 
-module.exports = { addPersona, setPersonaPin, setPersonaSeparation, personalSettings, personaUserId, canManage }
+module.exports = {
+    addPersona,
+    canManage,
+    personalSettings,
+    personaUserId,
+    setPersonaPin,
+    setPersonaSeparation,
+};

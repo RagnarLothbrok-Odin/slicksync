@@ -11,46 +11,47 @@
 // book bodies. This is the same subject reduced to six strokes: one hat,
 // one brim, three book edges, one spine mark.
 export function WizardBooksIcon({
-  className,
-  title,
-  style,
+    className,
+    title,
+    style,
 }: {
-  className?: string;
-  title?: string;
-  style?: React.CSSProperties;
+    className?: string;
+    title?: string;
+    style?: React.CSSProperties;
 }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className}
-      style={style}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      xmlns="http://www.w3.org/2000/svg"
-      role={title ? 'img' : 'presentation'}
-      aria-hidden={title ? undefined : true}
-    >
-      {title ? <title>{title}</title> : null}
+    return (
+        <svg
+            aria-hidden={title ? undefined : true}
+            aria-label={title}
+            className={className}
+            fill="none"
+            role={title ? "img" : "presentation"}
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            style={style}
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            {title ? <title>{title}</title> : null}
 
-      {/* Hat: one continuous outline - up the left side, over the drooping
+            {/* Hat: one continuous outline - up the left side, over the drooping
           tip, back down the right side to the brim. */}
-      <path d="M8.5 9.6c.7-3.2 2.4-5.9 4.4-7 .9-.5 1.6 0 1.5 1.1-.1 1.1-.7 2.2-1.5 3.1.9-.1 1.7-.6 2.2-1.4" />
-      <path d="M13 6.8c1 .7 1.9 1.7 2.5 2.8" />
+            <path d="M8.5 9.6c.7-3.2 2.4-5.9 4.4-7 .9-.5 1.6 0 1.5 1.1-.1 1.1-.7 2.2-1.5 3.1.9-.1 1.7-.6 2.2-1.4" />
+            <path d="M13 6.8c1 .7 1.9 1.7 2.5 2.8" />
 
-      {/* Brim - a single wide sweep, not a closed ellipse. */}
-      <path d="M6 10.2c1.6.8 3.7 1.2 6 1.2s4.4-.4 6-1.2" />
+            {/* Brim - a single wide sweep, not a closed ellipse. */}
+            <path d="M6 10.2c1.6.8 3.7 1.2 6 1.2s4.4-.4 6-1.2" />
 
-      {/* Books - three edges with clear air between them, which reads as a
+            {/* Books - three edges with clear air between them, which reads as a
           stack far better than three outlined bodies do at this size. */}
-      <path d="M6.5 14h11" />
-      <path d="M5 17h14" />
-      <path d="M6.5 20h11" />
+            <path d="M6.5 14h11" />
+            <path d="M5 17h14" />
+            <path d="M6.5 20h11" />
 
-      {/* One spine mark, to stop the three lines reading as a hamburger. */}
-      <path d="M9 14v6" />
-    </svg>
-  );
+            {/* One spine mark, to stop the three lines reading as a hamburger. */}
+            <path d="M9 14v6" />
+        </svg>
+    );
 }

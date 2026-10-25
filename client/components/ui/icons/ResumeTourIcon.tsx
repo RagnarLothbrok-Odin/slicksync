@@ -25,39 +25,40 @@
 // Same Heroicons 24/outline conventions as its neighbours: 24x24, fill:none,
 // 1.5 stroke in currentColor, round caps and joins.
 export function ResumeTourIcon({
-  className,
-  title,
-  style,
+    className,
+    title,
+    style,
 }: {
-  className?: string;
-  title?: string;
-  style?: React.CSSProperties;
+    className?: string;
+    title?: string;
+    style?: React.CSSProperties;
 }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className}
-      style={style}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      xmlns="http://www.w3.org/2000/svg"
-      role={title ? 'img' : 'presentation'}
-      aria-hidden={title ? undefined : true}
-    >
-      {title ? <title>{title}</title> : null}
+    return (
+        <svg
+            aria-hidden={title ? undefined : true}
+            aria-label={title}
+            className={className}
+            fill="none"
+            role={title ? "img" : "presentation"}
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            style={style}
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            {title ? <title>{title}</title> : null}
 
-      {/* The post. */}
-      <path d="M12 4.5V20" />
+            {/* The post. */}
+            <path d="M12 4.5V20" />
 
-      {/* Upper board, pointing forward. */}
-      <path d="M12 6h5.6l2.2 2.4-2.2 2.4H12" />
+            {/* Upper board, pointing forward. */}
+            <path d="M12 6h5.6l2.2 2.4-2.2 2.4H12" />
 
-      {/* Lower board, pointing back - two boards read as a signpost, where a
+            {/* Lower board, pointing back - two boards read as a signpost, where a
           single one reads as a flag. */}
-      <path d="M12 12.4H6.4l-2.2 2.4 2.2 2.4H12" />
-    </svg>
-  );
+            <path d="M12 12.4H6.4l-2.2 2.4 2.2 2.4H12" />
+        </svg>
+    );
 }

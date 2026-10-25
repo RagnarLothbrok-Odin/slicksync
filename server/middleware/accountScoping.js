@@ -17,21 +17,20 @@
  * `accountId: getAccountId(req)` filters - see server/utils/helpers/database.js.
  */
 function createAccountScopingMiddleware() {
-  return function accountScopingMiddleware(req, res, next) {
-    if (!req.appAccountId) {
-      // If instance is private, use default account ID
-      const { INSTANCE_TYPE } = require('../utils/config')
-      if (INSTANCE_TYPE !== 'public') {
-        req.appAccountId = 'default'
-      } else {
-        console.error('🚨 Account scoping middleware called without appAccountId!')
-        return res.status(401).json({ error: 'Authentication required' })
-      }
-    }
-    next()
-  }
+    return function accountScopingMiddleware(req, res, next) {
+        if (!req.appAccountId) {
+            // If instance is private, use default account ID
+            const { INSTANCE_TYPE } = require("../utils/config");
+            if (INSTANCE_TYPE === "public") {
+                console.error("🚨 Account scoping middleware called without appAccountId!");
+                return res.status(401).json({ error: "Authentication required" });
+            }
+            req.appAccountId = "default";
+        }
+        next();
+    };
 }
 
 module.exports = {
-  createAccountScopingMiddleware
-}
+    createAccountScopingMiddleware,
+};

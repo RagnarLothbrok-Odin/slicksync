@@ -10,26 +10,30 @@
  * requests to one upstream is a good way to be rate-limited.
  */
 async function mapLimit(items, limit, fn) {
-  const list = Array.isArray(items) ? items : [...items]
-  const results = new Array(list.length)
-  let next = 0
-  const worker = async () => {
-    while (true) {
-      const i = next++
-      if (i >= list.length) return
-      results[i] = await fn(list[i], i)
+    const list = Array.isArray(items) ? items : [...items];
+    const results = new Array(list.length);
+    let next = 0;
+    const worker = async () => {
+        while (true) {
+            const i = next++;
+            if (i >= list.length) {
+                return;
+            }
+            results[i] = await fn(list[i], i);
+        }
+    };
+    // Every worker is allowed to finish before a failure is raised. With a
+    // plain Promise.all the first rejection returns immediately and leaves the
+    // other workers running against a result nobody will read - in-flight
+    // requests nothing is waiting for. Both of today's callers hand in a
+    // function that cannot throw, so this only matters for the next one.
+    const workers = Math.max(1, Math.min(limit, list.length));
+    const settled = await Promise.allSettled(Array.from({ length: workers }, worker));
+    const failed = settled.find((s) => s.status === "rejected");
+    if (failed) {
+        throw failed.reason;
     }
-  }
-  // Every worker is allowed to finish before a failure is raised. With a
-  // plain Promise.all the first rejection returns immediately and leaves the
-  // other workers running against a result nobody will read - in-flight
-  // requests nothing is waiting for. Both of today's callers hand in a
-  // function that cannot throw, so this only matters for the next one.
-  const workers = Math.max(1, Math.min(limit, list.length))
-  const settled = await Promise.allSettled(Array.from({ length: workers }, worker))
-  const failed = settled.find((s) => s.status === 'rejected')
-  if (failed) throw failed.reason
-  return results
+    return results;
 }
 
-module.exports = { mapLimit }
+module.exports = { mapLimit };

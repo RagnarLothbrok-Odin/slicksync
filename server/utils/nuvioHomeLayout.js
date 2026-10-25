@@ -18,83 +18,113 @@
 //     is written to every bucket that exists plus the shared one, so it
 //     lands wherever a given device happens to look.
 
-const { safeFetch, instancePolicy } = require('./safeUrl')
-const PLATFORMS = ['home_catalog_shared', 'mobile', 'desktop']
+const { safeFetch, instancePolicy } = require("./safeUrl");
+const PLATFORMS = ["home_catalog_shared", "mobile", "desktop"];
 
 function parseBlob(raw) {
-  if (!raw) return null
-  let v = raw
-  if (typeof v === 'string') { try { v = JSON.parse(v) } catch { return null } }
-  return v && typeof v === 'object' ? v : null
+    if (!raw) {
+        return null;
+    }
+    let v = raw;
+    if (typeof v === "string") {
+        try {
+            v = JSON.parse(v);
+        } catch {
+            return null;
+        }
+    }
+    return v && typeof v === "object" ? v : null;
 }
 
 function isValidItem(i) {
-  return i && typeof i.addon_id === 'string' && typeof i.catalog_id === 'string'
+    return i && typeof i.addon_id === "string" && typeof i.catalog_id === "string";
 }
 
 /** Reads every bucket, returning the blobs plus which one has the most rows. */
 async function readAllBuckets(provider, profileId) {
-  const buckets = {}
-  for (const platform of PLATFORMS) {
-    try {
-      const rows = await provider.getHomeCatalogSettings(profileId, platform)
-      const blob = parseBlob(rows?.[0]?.settings_json)
-      if (blob) buckets[platform] = blob
-    } catch { /* unreadable bucket - treated as absent */ }
-  }
-  // The richest bucket is the honest source of truth: a device that has
-  // never synced leaves an empty blob behind, and editing from that would
-  // present an empty home screen as if it were the real arrangement.
-  let source = null
-  for (const [platform, blob] of Object.entries(buckets)) {
-    const n = Array.isArray(blob.items) ? blob.items.filter(isValidItem).length : 0
-    if (!source || n > source.count) source = { platform, blob, count: n }
-  }
-  return { buckets, source }
+    const buckets = {};
+    for (const platform of PLATFORMS) {
+        try {
+            const rows = await provider.getHomeCatalogSettings(profileId, platform);
+            const blob = parseBlob(rows?.[0]?.settings_json);
+            if (blob) {
+                buckets[platform] = blob;
+            }
+        } catch {
+            /* unreadable bucket - treated as absent */
+        }
+    }
+    // The richest bucket is the honest source of truth: a device that has
+    // never synced leaves an empty blob behind, and editing from that would
+    // present an empty home screen as if it were the real arrangement.
+    let source = null;
+    for (const [platform, blob] of Object.entries(buckets)) {
+        const n = Array.isArray(blob.items) ? blob.items.filter(isValidItem).length : 0;
+        if (!source || n > source.count) {
+            source = { blob, count: n, platform };
+        }
+    }
+    return { buckets, source };
 }
 
 // Addon manifests, fetched from their transport URLs and cached briefly.
 // Same approach routes/users.js already uses when enriching Nuvio addons -
 // the provider's own addon list carries no catalogs at all.
-const manifestCache = new Map()
-const MANIFEST_TTL_MS = 10 * 60 * 1000
+const manifestCache = new Map();
+const MANIFEST_TTL_MS = 10 * 60 * 1000;
 
 async function fetchManifest(transportUrl, opts) {
-  if (!transportUrl) return null
-  // SlickTrax is served by this instance, so its manifest is built rather
-  // than fetched - see utils/localTraxManifest.js. Deliberately ahead of the
-  // cache: it is cheap, always current, and never blocked by whatever sits
-  // in front of this instance's hostname.
-  if (opts?.prisma) {
-    const { localTraxManifest } = require('./localTraxManifest')
-    const local = await localTraxManifest(opts.prisma, transportUrl)
-    if (local) return local
-  }
-  const hit = manifestCache.get(transportUrl)
-  if (hit && Date.now() - hit.at < MANIFEST_TTL_MS) return hit.value
-  const url = transportUrl.endsWith('.json') ? transportUrl : `${transportUrl.replace(/\/$/, '')}/manifest.json`
-  try {
-    const res = await safeFetch(url, { signal: AbortSignal.timeout(6000) }, instancePolicy())
-    if (!res.ok) return null
-    const json = await res.json()
-    // Bounded: one entry per addon address ever seen, and these were never
-    // removed. Ten minutes old or past the cap, the oldest goes.
-    if (manifestCache.size >= 200) {
-      const now = Date.now()
-      for (const [k, v] of manifestCache) if (now - v.at > MANIFEST_TTL_MS) manifestCache.delete(k)
-      while (manifestCache.size >= 200) {
-        const oldest = manifestCache.keys().next().value
-        if (oldest === undefined) break
-        manifestCache.delete(oldest)
-      }
+    if (!transportUrl) {
+        return null;
     }
-    manifestCache.set(transportUrl, { value: json, at: Date.now() })
-    return json
-  } catch {
-    // A slow or dead addon just means that row keeps its raw id - never a
-    // failure of the whole editor.
-    return null
-  }
+    // SlickTrax is served by this instance, so its manifest is built rather
+    // than fetched - see utils/localTraxManifest.js. Deliberately ahead of the
+    // cache: it is cheap, always current, and never blocked by whatever sits
+    // in front of this instance's hostname.
+    if (opts?.prisma) {
+        const { localTraxManifest } = require("./localTraxManifest");
+        const local = await localTraxManifest(opts.prisma, transportUrl);
+        if (local) {
+            return local;
+        }
+    }
+    const hit = manifestCache.get(transportUrl);
+    if (hit && Date.now() - hit.at < MANIFEST_TTL_MS) {
+        return hit.value;
+    }
+    const url = transportUrl.endsWith(".json")
+        ? transportUrl
+        : `${transportUrl.replace(/\/$/, "")}/manifest.json`;
+    try {
+        const res = await safeFetch(url, { signal: AbortSignal.timeout(6000) }, instancePolicy());
+        if (!res.ok) {
+            return null;
+        }
+        const json = await res.json();
+        // Bounded: one entry per addon address ever seen, and these were never
+        // removed. Ten minutes old or past the cap, the oldest goes.
+        if (manifestCache.size >= 200) {
+            const now = Date.now();
+            for (const [k, v] of manifestCache) {
+                if (now - v.at > MANIFEST_TTL_MS) {
+                    manifestCache.delete(k);
+                }
+            }
+            while (manifestCache.size >= 200) {
+                const oldest = manifestCache.keys().next().value;
+                if (oldest === undefined) {
+                    break;
+                }
+                manifestCache.delete(oldest);
+            }
+        }
+        manifestCache.set(transportUrl, { at: Date.now(), value: json });
+        return json;
+    } catch {
+        // A slow or dead addon just means that row keeps its raw id - never a
+        // failure of the whole editor.
+        return null;
+    }
 }
 
 /**
@@ -103,83 +133,101 @@ async function fetchManifest(transportUrl, opts) {
  * currently installs that the arrangement has never mentioned.
  */
 async function readLayoutForEdit(provider, profileId, liveAddons, opts) {
-  const { buckets, source } = await readAllBuckets(provider, profileId)
-  const arranged = (Array.isArray(source?.blob?.items) ? source.blob.items : []).filter(isValidItem)
+    const { buckets, source } = await readAllBuckets(provider, profileId);
+    const arranged = (Array.isArray(source?.blob?.items) ? source.blob.items : []).filter(
+        isValidItem
+    );
 
-  // addon id -> { name, catalogs: Map(type:catalogId -> catalog name) }
-  //
-  // Built from each addon's REAL manifest, fetched from its transport URL.
-  // That fetch is not optional: Nuvio stores only { url, name } per addon
-  // ("urlOnly" sync), so the provider hands back a stub whose `id` is the
-  // transport URL and whose `catalogs` array is empty - while the layout
-  // blob keys rows by the addon's true manifest id ("aio-metadata"). Those
-  // two can never match, which is why every row previously showed a raw
-  // catalog id and claimed the addon wasn't installed.
-  const addonList = Array.isArray(liveAddons)
-    ? liveAddons
-    : (Array.isArray(liveAddons?.addons) ? liveAddons.addons : [])
-  const manifests = await Promise.all(addonList.map((a) => fetchManifest(a?.transportUrl, opts)))
-  const byAddon = new Map()
-  addonList.forEach((addon, i) => {
-    // Prefer the fetched manifest; fall back to whatever the provider gave.
-    const manifest = manifests[i] || addon?.manifest || addon
-    const addonId = manifest?.id
-    if (!addonId) return
-    const catalogs = new Map()
-    for (const c of Array.isArray(manifest?.catalogs) ? manifest.catalogs : []) {
-      if (c?.id) catalogs.set(`${c.type}:${c.id}`, c.name || c.id)
+    // addon id -> { name, catalogs: Map(type:catalogId -> catalog name) }
+    //
+    // Built from each addon's REAL manifest, fetched from its transport URL.
+    // That fetch is not optional: Nuvio stores only { url, name } per addon
+    // ("urlOnly" sync), so the provider hands back a stub whose `id` is the
+    // transport URL and whose `catalogs` array is empty - while the layout
+    // blob keys rows by the addon's true manifest id ("aio-metadata"). Those
+    // two can never match, which is why every row previously showed a raw
+    // catalog id and claimed the addon wasn't installed.
+    const addonList = Array.isArray(liveAddons)
+        ? liveAddons
+        : Array.isArray(liveAddons?.addons)
+          ? liveAddons.addons
+          : [];
+    const manifests = await Promise.all(addonList.map((a) => fetchManifest(a?.transportUrl, opts)));
+    const byAddon = new Map();
+    addonList.forEach((addon, i) => {
+        // Prefer the fetched manifest; fall back to whatever the provider gave.
+        const manifest = manifests[i] || addon?.manifest || addon;
+        const addonId = manifest?.id;
+        if (!addonId) {
+            return;
+        }
+        const catalogs = new Map();
+        for (const c of Array.isArray(manifest?.catalogs) ? manifest.catalogs : []) {
+            if (c?.id) {
+                catalogs.set(`${c.type}:${c.id}`, c.name || c.id);
+            }
+        }
+        byAddon.set(addonId, { catalogs, name: manifest?.name || addon?.transportName || addonId });
+    });
+
+    const label = (item) => {
+        const addon = byAddon.get(item.addon_id);
+        return {
+            addonName: addon?.name || item.addon_id,
+            catalogName: addon?.catalogs?.get(`${item.type}:${item.catalog_id}`) || item.catalog_id,
+            // A row whose addon is no longer installed still renders in the editor
+            // (removing it is a decision, not something to do behind their back).
+            orphaned: !addon,
+        };
+    };
+
+    const seen = new Set(arranged.map((i) => `${i.addon_id}:${i.type}:${i.catalog_id}`));
+    const items = arranged
+        .slice()
+        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
+        .map((i) => ({
+            addon_id: i.addon_id,
+            arranged: true,
+            catalog_id: i.catalog_id,
+            collection_id: typeof i.collection_id === "string" ? i.collection_id : "",
+            custom_title: typeof i.custom_title === "string" ? i.custom_title : "",
+            enabled: i.enabled !== false,
+            is_collection: i.is_collection === true,
+            type: i.type,
+            ...label(i),
+        }));
+
+    const unarranged = [];
+    for (const [addonId, addon] of byAddon.entries()) {
+        for (const [key, name] of addon.catalogs.entries()) {
+            const [type, catalogId] = key.split(":");
+            if (seen.has(`${addonId}:${type}:${catalogId}`)) {
+                continue;
+            }
+            unarranged.push({
+                addon_id: addonId,
+                addonName: addon.name,
+                arranged: false,
+                catalog_id: catalogId,
+                catalogName: name,
+                collection_id: "",
+                custom_title: "",
+                enabled: true,
+                is_collection: false,
+                orphaned: false,
+                type,
+            });
+        }
     }
-    byAddon.set(addonId, { name: manifest?.name || addon?.transportName || addonId, catalogs })
-  })
 
-  const label = (item) => {
-    const addon = byAddon.get(item.addon_id)
     return {
-      addonName: addon?.name || item.addon_id,
-      catalogName: addon?.catalogs?.get(`${item.type}:${item.catalog_id}`) || item.catalog_id,
-      // A row whose addon is no longer installed still renders in the editor
-      // (removing it is a decision, not something to do behind their back).
-      orphaned: !addon,
-    }
-  }
-
-  const seen = new Set(arranged.map((i) => `${i.addon_id}:${i.type}:${i.catalog_id}`))
-  const items = arranged
-    .slice()
-    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
-    .map((i) => ({
-      addon_id: i.addon_id,
-      type: i.type,
-      catalog_id: i.catalog_id,
-      enabled: i.enabled !== false,
-      custom_title: typeof i.custom_title === 'string' ? i.custom_title : '',
-      collection_id: typeof i.collection_id === 'string' ? i.collection_id : '',
-      is_collection: i.is_collection === true,
-      arranged: true,
-      ...label(i),
-    }))
-
-  const unarranged = []
-  for (const [addonId, addon] of byAddon.entries()) {
-    for (const [key, name] of addon.catalogs.entries()) {
-      const [type, catalogId] = key.split(':')
-      if (seen.has(`${addonId}:${type}:${catalogId}`)) continue
-      unarranged.push({
-        addon_id: addonId, type, catalog_id: catalogId,
-        enabled: true, custom_title: '', collection_id: '', is_collection: false,
-        arranged: false, addonName: addon.name, catalogName: name, orphaned: false,
-      })
-    }
-  }
-
-  return {
-    items,
-    unarranged,
-    sourcePlatform: source?.platform || null,
-    buckets: Object.keys(buckets),
-    hideCatalogUnderline: source?.blob?.hide_catalog_underline === true,
-    hideUnreleasedContent: source?.blob?.hide_unreleased_content === true,
-  }
+        buckets: Object.keys(buckets),
+        hideCatalogUnderline: source?.blob?.hide_catalog_underline === true,
+        hideUnreleasedContent: source?.blob?.hide_unreleased_content === true,
+        items,
+        sourcePlatform: source?.platform || null,
+        unarranged,
+    };
 }
 
 /**
@@ -190,38 +238,43 @@ async function readLayoutForEdit(provider, profileId, liveAddons, opts) {
  * one stray field is enough for the client to discard the whole blob.
  */
 async function writeLayout(provider, profileId, items) {
-  const clean = []
-  items.forEach((raw, index) => {
-    if (!isValidItem(raw)) return
-    clean.push({
-      addon_id: String(raw.addon_id),
-      type: String(raw.type || 'movie'),
-      catalog_id: String(raw.catalog_id),
-      enabled: raw.enabled !== false,
-      order: index,
-      custom_title: typeof raw.custom_title === 'string' ? raw.custom_title.slice(0, 200) : '',
-      collection_id: typeof raw.collection_id === 'string' ? raw.collection_id : '',
-      is_collection: raw.is_collection === true,
-    })
-  })
-  if (clean.length === 0) throw new Error('Refusing to write an empty home layout')
+    const clean = [];
+    items.forEach((raw, index) => {
+        if (!isValidItem(raw)) {
+            return;
+        }
+        clean.push({
+            addon_id: String(raw.addon_id),
+            catalog_id: String(raw.catalog_id),
+            collection_id: typeof raw.collection_id === "string" ? raw.collection_id : "",
+            custom_title:
+                typeof raw.custom_title === "string" ? raw.custom_title.slice(0, 200) : "",
+            enabled: raw.enabled !== false,
+            is_collection: raw.is_collection === true,
+            order: index,
+            type: String(raw.type || "movie"),
+        });
+    });
+    if (clean.length === 0) {
+        throw new Error("Refusing to write an empty home layout");
+    }
 
-  const { buckets } = await readAllBuckets(provider, profileId)
-  // Write to every bucket that exists, and always seed the shared one, so
-  // the edit reaches whichever bucket a given device reads.
-  const targets = new Set([...Object.keys(buckets), 'home_catalog_shared'])
-  let written = 0
-  for (const platform of targets) {
-    const existing = buckets[platform] || {}
-    await provider.pushHomeCatalogSettings(profileId, platform, {
-      ...existing,
-      items: clean,
-      hide_catalog_underline: existing.hide_catalog_underline === true,
-      hide_unreleased_content: existing.hide_unreleased_content === true,
-    })
-    written++
-  }
-  return { rows: clean.length, buckets: written }
+    const { buckets } = await readAllBuckets(provider, profileId);
+    // Write to every bucket that exists, and always seed the shared one, so
+    // the edit reaches whichever bucket a given device reads.
+    const targets = new Set([...Object.keys(buckets), "home_catalog_shared"]);
+    let written = 0;
+    for (const platform of targets) {
+        const existing = buckets[platform] || {};
+        await provider.pushHomeCatalogSettings(profileId, platform, {
+            ...existing,
+            hide_catalog_underline: existing.hide_catalog_underline === true,
+            hide_unreleased_content: existing.hide_unreleased_content === true,
+            items: clean,
+        });
+        written++;
+    }
+    return { buckets: written, rows: clean.length };
 }
 
-module.exports = { readLayoutForEdit, writeLayout, readAllBuckets, fetchManifest }
+module.exports = { fetchManifest, readAllBuckets, readLayoutForEdit, writeLayout };

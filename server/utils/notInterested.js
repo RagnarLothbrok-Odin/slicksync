@@ -8,12 +8,12 @@
  * item (e.g. a stale client retry) is a no-op, not a duplicate-key error.
  */
 async function markNotInterested(prisma, accountId, itemId, itemType) {
-  const accountIdValue = accountId || 'default'
-  await prisma.notInterestedItem.upsert({
-    where: { accountId_itemId: { accountId: accountIdValue, itemId } },
-    create: { accountId: accountIdValue, itemId, itemType },
-    update: {}
-  })
+    const accountIdValue = accountId || "default";
+    await prisma.notInterestedItem.upsert({
+        create: { accountId: accountIdValue, itemId, itemType },
+        update: {},
+        where: { accountId_itemId: { accountId: accountIdValue, itemId } },
+    });
 }
 
 /**
@@ -22,12 +22,12 @@ async function markNotInterested(prisma, accountId, itemId, itemType) {
  * candidates, so it drops into the existing filter expression directly.
  */
 async function getNotInterestedIds(prisma, accountId) {
-  const accountIdValue = accountId || 'default'
-  const rows = await prisma.notInterestedItem.findMany({
-    where: { accountId: accountIdValue },
-    select: { itemId: true }
-  })
-  return new Set(rows.map((r) => r.itemId))
+    const accountIdValue = accountId || "default";
+    const rows = await prisma.notInterestedItem.findMany({
+        select: { itemId: true },
+        where: { accountId: accountIdValue },
+    });
+    return new Set(rows.map((r) => r.itemId));
 }
 
 /**
@@ -37,11 +37,11 @@ async function getNotInterestedIds(prisma, accountId) {
  * itemType.
  */
 async function getNotInterestedItems(prisma, accountId) {
-  const accountIdValue = accountId || 'default'
-  return prisma.notInterestedItem.findMany({
-    where: { accountId: accountIdValue },
-    select: { itemId: true, itemType: true }
-  })
+    const accountIdValue = accountId || "default";
+    return prisma.notInterestedItem.findMany({
+        select: { itemId: true, itemType: true },
+        where: { accountId: accountIdValue },
+    });
 }
 
-module.exports = { markNotInterested, getNotInterestedIds, getNotInterestedItems }
+module.exports = { getNotInterestedIds, getNotInterestedItems, markNotInterested };

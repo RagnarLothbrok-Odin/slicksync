@@ -1,2275 +1,3905 @@
-const { createDefaultAvatar } = require('../utils/defaultAvatar')
-const express = require('express');
-const { publicMessage } = require('../utils/publicError');
-const fs = require('fs');
-const path = require('path');
-const bcrypt = require('bcryptjs')
-const { decrypt, encrypt } = require('../utils/encryption')
-const { DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID } = require('../utils/config')
-const { postDiscord } = require('../utils/notify')
-const { DEFAULT_TIMEZONE } = require('../utils/dateUtils')
-const { normalizeOmdbApiKey } = require('../utils/omdb')
+const { createDefaultAvatar } = require("../utils/defaultAvatar");
+const express = require("express");
+const { publicMessage } = require("../utils/publicError");
+const fs = require("node:fs");
+const path = require("node:path");
+const bcrypt = require("bcryptjs");
+const { decrypt, encrypt } = require("../utils/encryption");
+const { DEFAULT_ACCOUNT_ID, DEFAULT_ACCOUNT_UUID } = require("../utils/config");
+const { postDiscord } = require("../utils/notify");
+const { DEFAULT_TIMEZONE } = require("../utils/dateUtils");
+const { normalizeOmdbApiKey } = require("../utils/omdb");
 
 // A LumiereDB address as typed or pasted -> just the server's base.
 function normalizeLumiere(raw) {
-  return require('../utils/lumiere').normalizeAddress(typeof raw === 'string' ? raw : '')
+    return require("../utils/lumiere").normalizeAddress(typeof raw === "string" ? raw : "");
 }
 
-module.exports = ({ prisma, INSTANCE_TYPE, getAccountDek, getDecryptedManifestUrl, getAccountId }) => {
-  const router = express.Router();
+module.exports = ({
+    prisma,
+    INSTANCE_TYPE,
+    getAccountDek,
+    getDecryptedManifestUrl,
+    getAccountId,
+}) => {
+    const router = express.Router();
 
-  const ensureDefaultAccount = async () => {
-    const privatePassword = process.env.PRIVATE_ACCOUNT_PASSWORD || 'private-mode'
-    const defaultSyncPayload = JSON.stringify({ enabled: false, frequency: '0', safe: true, mode: 'normal', webhookUrl: null, notifyOnActivity: false, notifyOnSync: false, notifyOnInvite: false })
+    const ensureDefaultAccount = async () => {
+        const privatePassword = process.env.PRIVATE_ACCOUNT_PASSWORD || "private-mode";
+        const defaultSyncPayload = JSON.stringify({
+            enabled: false,
+            frequency: "0",
+            mode: "normal",
+            notifyOnActivity: false,
+            notifyOnInvite: false,
+            notifyOnSync: false,
+            safe: true,
+            webhookUrl: null,
+        });
 
-    let account = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } })
-    if (!account) {
-      const passwordHash = await bcrypt.hash(privatePassword, 12)
-      account = await prisma.appAccount.create({
-        data: {
-          avatarUrl: createDefaultAvatar(),
-          id: DEFAULT_ACCOUNT_ID,
-          uuid: DEFAULT_ACCOUNT_UUID,
-          passwordHash,
-          sync: defaultSyncPayload
-        }
-      })
-      return account
-    }
-
-    const updates = {}
-    if (!account.uuid || account.uuid !== DEFAULT_ACCOUNT_UUID) {
-      updates.uuid = DEFAULT_ACCOUNT_UUID
-    }
-    if (!account.passwordHash) {
-      updates.passwordHash = await bcrypt.hash(privatePassword, 12)
-    }
-    if (!account.sync) {
-      updates.sync = defaultSyncPayload
-    }
-
-    if (Object.keys(updates).length) {
-      account = await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: updates })
-    }
-
-    return account
-  }
-
-  router.get('/account-info', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        const account = await ensureDefaultAccount()
-        return res.json({
-          id: DEFAULT_ACCOUNT_ID,
-          uuid: account?.uuid || DEFAULT_ACCOUNT_UUID,
-        })
-      }
-
-      if (!req.appAccountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-
-      const account = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { id: true, uuid: true } })
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' })
-      }
-      return res.json(account)
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to load account info', error: publicMessage(e, 'Failed to load account info') })
-    }
-  })
-
-  // PUT /account-avatar - set or clear the admin's own profile picture
-  // (full URL or /uploads/avatars/<file> from the shared avatar upload endpoint)
-  router.put('/account-avatar', async (req, res) => {
-    try {
-      const { avatarUrl } = req.body || {}
-      const accountId = INSTANCE_TYPE !== 'public' ? (await ensureDefaultAccount()).id : req.appAccountId
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-      await prisma.appAccount.update({ where: { id: accountId }, data: { avatarUrl: avatarUrl || null } })
-      return res.json({ avatarUrl: avatarUrl || null })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to update avatar', error: publicMessage(e, 'Failed to update avatar') })
-    }
-  })
-
-  // PUT /account-display-name - self-service nickname, set by the account
-  // holder themselves (Settings). Only meaningful in public multi-tenant
-  // mode - it's what makes an account recognizable on the superadmin panel
-  // instead of by raw UUID, but that panel only ever reads it, never writes.
-  router.put('/account-display-name', async (req, res) => {
-    try {
-      const { displayName } = req.body || {}
-      const accountId = INSTANCE_TYPE !== 'public' ? (await ensureDefaultAccount()).id : req.appAccountId
-      if (!accountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-      const trimmed = displayName === null || displayName === undefined ? null : String(displayName).trim().slice(0, 60) || null
-      await prisma.appAccount.update({ where: { id: accountId }, data: { displayName: trimmed } })
-      return res.json({ displayName: trimmed })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to update display name', error: publicMessage(e, 'Failed to update display name') })
-    }
-  })
-
-  // Backup settings endpoints - only available in private mode
-  if (INSTANCE_TYPE !== 'public') {
-    // Use centralized backup utilities
-    const {
-      BACKUP_DIR,
-      ensureBackupDir,
-      readBackupFrequencyDays,
-      writeBackupFrequencyDays,
-      performBackupOnce,
-      clearBackupSchedule,
-      scheduleBackups
-    } = require('../utils/backup');
-
-    // Filenames are always generated by performBackupOnce() as
-    // config-backup-<ISO-ish timestamp>.json - allow-listing that exact
-    // shape (plus a plain path.basename check below) is defense against
-    // path traversal via a crafted :filename param, since these three
-    // routes read/write/delete files on disk from a URL segment.
-    const isValidBackupFilename = (name) =>
-      typeof name === 'string' &&
-      /^config-backup-[0-9T-]+\.json$/.test(name) &&
-      path.basename(name) === name;
-
-    // GET /settings/backups - list backups on disk, newest first. Each
-    // entry's `validation` comes from the sidecar file backupValidation.js
-    // writes right after the backup itself - absent (not re-computed here)
-    // for backups written before that existed.
-    router.get('/backups', async (req, res) => {
-      try {
-        ensureBackupDir()
-        const files = fs.readdirSync(BACKUP_DIR).filter(isValidBackupFilename)
-        const backups = files.map((filename) => {
-          const stat = fs.statSync(path.join(BACKUP_DIR, filename))
-          let validation = null
-          try {
-            const validationFile = path.join(BACKUP_DIR, filename.replace(/\.json$/, '.validation.json'))
-            if (fs.existsSync(validationFile)) validation = JSON.parse(fs.readFileSync(validationFile, 'utf8'))
-          } catch {}
-          return { filename, size: stat.size, createdAt: stat.mtime.toISOString(), validation }
-        }).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        return res.json(backups)
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to list backups', error: publicMessage(e, 'Failed to list backups') })
-      }
-    })
-
-    // GET /settings/db-size - SQLite file size history for the Tasks page's
-    // storage chart. Read-only; { supported: false } in public/Postgres mode.
-    router.get('/db-size', async (req, res) => {
-      try {
-        const { getDbSizeReport } = require('../utils/dbSizeMonitor')
-        const report = await getDbSizeReport(prisma, getAccountId(req) || DEFAULT_ACCOUNT_ID)
-        return res.json(report)
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to get DB size report', error: publicMessage(e, 'Failed to get DB size report') })
-      }
-    })
-
-    // GET /settings/backups/:filename/download - raw backup file
-    router.get('/backups/:filename/download', async (req, res) => {
-      try {
-        if (!isValidBackupFilename(req.params.filename)) {
-          return res.status(400).json({ message: 'Invalid backup filename' })
-        }
-        const filePath = path.join(BACKUP_DIR, req.params.filename)
-        if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Backup not found' })
-        return res.download(filePath, req.params.filename)
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to download backup', error: publicMessage(e, 'Failed to download backup') })
-      }
-    })
-
-    // POST /settings/backups/:filename/restore - DESTRUCTIVE: replaces all
-    // current users/groups/addons with the backup's contents. Reads the
-    // file server-side and forwards it into the existing, already-battle-
-    // tested /public-auth/config-import handler (same internal-fetch
-    // pattern performBackupOnce() already uses to call sibling endpoints)
-    // rather than duplicating its import-ordering logic here.
-    // GET /settings/backups/:filename/diff - what a restore would actually
-    // change, computed BEFORE anything is touched. Restore replaces this
-    // account's users/groups/addons with the file's contents (see
-    // config-import), so "restore" without this was a leap of faith: no way
-    // to know whether Tuesday's backup still contains the addon you added
-    // Wednesday. Names only in the response - it feeds a confirmation
-    // dialog, not an export.
-    router.get('/backups/:filename/diff', async (req, res) => {
-      try {
-        if (!isValidBackupFilename(req.params.filename)) {
-          return res.status(400).json({ message: 'Invalid backup filename' })
-        }
-        const filePath = path.join(BACKUP_DIR, req.params.filename)
-        if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Backup not found' })
-        let parsed
-        try { parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch {
-          return res.status(422).json({ message: 'Backup file is not valid JSON' })
-        }
-        const data = parsed.data || parsed
-        const accountId = getAccountId(req) || 'default'
-
-        const bAddons = Array.isArray(data.addons) ? data.addons : []
-        const bUsers = Array.isArray(data.users) ? data.users : []
-        const bGroups = Array.isArray(data.groups) ? data.groups : []
-
-        const [curAddons, curUsers, curGroups] = await Promise.all([
-          prisma.addon.findMany({ where: { accountId }, select: { name: true, manifestUrl: true } }),
-          prisma.user.findMany({ where: { accountId }, select: { username: true } }),
-          prisma.group.findMany({ where: { accountId }, select: { name: true } }),
-        ])
-
-        const norm = (v) => String(v || '').trim().toLowerCase()
-        const diffNames = (backupNames, currentNames) => {
-          const b = new Set(backupNames.map(norm))
-          const c = new Set(currentNames.map(norm))
-          return {
-            added: backupNames.filter((n) => n && !c.has(norm(n))),
-            removed: currentNames.filter((n) => n && !b.has(norm(n))),
-          }
+        let account = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID } });
+        if (!account) {
+            const passwordHash = await bcrypt.hash(privatePassword, 12);
+            account = await prisma.appAccount.create({
+                data: {
+                    avatarUrl: createDefaultAvatar(),
+                    id: DEFAULT_ACCOUNT_ID,
+                    passwordHash,
+                    sync: defaultSyncPayload,
+                    uuid: DEFAULT_ACCOUNT_UUID,
+                },
+            });
+            return account;
         }
 
-        // Addons additionally get "changed": same name, different URL - the
-        // case where a restore silently rewinds a config edit (or a key
-        // rotation) is exactly what someone previewing needs to see.
-        const curUrlByName = new Map()
-        for (const a of curAddons) {
-          let url = null
-          try { url = getDecryptedManifestUrl(a, req) } catch { url = null }
-          curUrlByName.set(norm(a.name), url)
+        const updates = {};
+        if (!account.uuid || account.uuid !== DEFAULT_ACCOUNT_UUID) {
+            updates.uuid = DEFAULT_ACCOUNT_UUID;
         }
-        const changed = []
-        for (const a of bAddons) {
-          const cur = curUrlByName.get(norm(a.name))
-          const bUrl = a.manifestUrl || a.transportUrl || null
-          if (cur && bUrl && cur !== bUrl) changed.push(a.name)
+        if (!account.passwordHash) {
+            updates.passwordHash = await bcrypt.hash(privatePassword, 12);
+        }
+        if (!account.sync) {
+            updates.sync = defaultSyncPayload;
         }
 
-        const addons = diffNames(bAddons.map((a) => a.name), curAddons.map((a) => a.name))
-        return res.json({
-          backupDate: (() => { try { return fs.statSync(filePath).mtime.toISOString() } catch { return null } })(),
-          addons: { ...addons, changed },
-          users: diffNames(bUsers.map((u) => u.username || u.name), curUsers.map((u) => u.username)),
-          groups: diffNames(bGroups.map((g) => g.name), curGroups.map((g) => g.name)),
-          counts: { backup: { addons: bAddons.length, users: bUsers.length, groups: bGroups.length }, current: { addons: curAddons.length, users: curUsers.length, groups: curGroups.length } },
-        })
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to diff backup', error: publicMessage(e, 'Failed to diff backup') })
-      }
-    })
-
-    router.post('/backups/:filename/restore', async (req, res) => {
-      try {
-        if (!isValidBackupFilename(req.params.filename)) {
-          return res.status(400).json({ message: 'Invalid backup filename' })
+        if (Object.keys(updates).length) {
+            account = await prisma.appAccount.update({
+                data: updates,
+                where: { id: DEFAULT_ACCOUNT_ID },
+            });
         }
-        const filePath = path.join(BACKUP_DIR, req.params.filename)
-        if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Backup not found' })
 
-        const jsonData = fs.readFileSync(filePath, 'utf8')
-        const baseUrl = `http://localhost:${process.env.PORT || 4000}`
-        // The caller's own sign-in goes along: with a login set, the import
-        // route sits behind it (and its CSRF check) like every other.
-        const rsp = await fetch(`${baseUrl}/api/public-auth/config-import`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}),
-            ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
-            ...(req.headers['x-csrf-token'] ? { 'x-csrf-token': req.headers['x-csrf-token'] } : {}),
-          },
-          body: JSON.stringify({ jsonData }),
-        })
-        const result = await rsp.json().catch(() => ({}))
-        if (!rsp.ok) {
-          return res.status(rsp.status).json(result?.message ? result : { message: 'Restore failed' })
-        }
-        return res.json(result)
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to restore backup', error: publicMessage(e, 'Failed to restore backup') })
-      }
-    })
+        return account;
+    };
 
-
-    // POST /settings/backups/:filename/restore-user - Time Machine scoped to
-    // ONE person: rewinds a single user's config (identity, provider
-    // connection, exclusions, notification prefs, group memberships) to what
-    // the backup holds, touching nobody else. body: { userId, preview } -
-    // preview:true computes the per-user diff and applies NOTHING, which is
-    // what the confirmation dialog shows. The full restore stays what it
-    // was; this exists because one person's mishap should not cost the
-    // whole household a rewind.
-    //
-    // Deliberately preserved (never rewound): guardStateJson, lastSyncedAt/
-    // syncStatus, traxToken/traxAddonEnabled - live machinery, not config;
-    // rewinding the trax token would silently kill the URL already synced
-    // onto devices. Watch history is untouched - backups never carried it.
-    router.post('/backups/:filename/restore-user', async (req, res) => {
-      try {
-        if (!isValidBackupFilename(req.params.filename)) {
-          return res.status(400).json({ message: 'Invalid backup filename' })
-        }
-        const filePath = path.join(BACKUP_DIR, req.params.filename)
-        if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Backup not found' })
-        let parsed
-        try { parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch {
-          return res.status(422).json({ message: 'Backup file is not valid JSON' })
-        }
-        const data = parsed.data || parsed
-        const accountId = getAccountId(req) || 'default'
-        const { userId, preview } = req.body || {}
-        if (!userId) return res.status(400).json({ message: 'userId is required' })
-
-        const current = await prisma.user.findFirst({ where: { id: userId, accountId } })
-        if (!current) return res.status(404).json({ message: 'User not found (a fully deleted user is restored from the Trash, not from here)' })
-
-        const norm = (v) => String(v || '').trim().toLowerCase()
-        const bUsers = Array.isArray(data.users) ? data.users : []
-        const bUser = bUsers.find((u) => u.id === userId) || bUsers.find((u) => norm(u.username || u.name) === norm(current.username))
-        if (!bUser) return res.status(404).json({ message: `"${current.username}" is not in this backup` })
-
-        // Backup exports store excludedAddons as NAMES (portable); the live
-        // row stores ids. Translate back through the current addon list -
-        // a name that no longer exists here simply drops out.
-        const curAddons = await prisma.addon.findMany({ where: { accountId }, select: { id: true, name: true } })
-        const addonIdByName = new Map(curAddons.map((a) => [norm(a.name), a.id]))
-        let excludedIds = null
+    router.get("/account-info", async (req, res) => {
         try {
-          const names = JSON.parse(bUser.excludedAddons || '[]')
-          if (Array.isArray(names)) {
-            excludedIds = JSON.stringify(names.map((n) => addonIdByName.get(norm(n)) || null).filter(Boolean))
-          }
-        } catch {}
+            if (INSTANCE_TYPE !== "public") {
+                const account = await ensureDefaultAccount();
+                return res.json({
+                    id: DEFAULT_ACCOUNT_ID,
+                    uuid: account?.uuid || DEFAULT_ACCOUNT_UUID,
+                });
+            }
 
-        const plainFields = ['username', 'email', 'isActive', 'expiresAt', 'colorIndex', 'avatarUrl', 'providerType', 'discordWebhookUrl', 'discordUserId', 'notifyOnWatch', 'activityVisibility', 'apiKey', 'protectedAddons', 'jellyfinServerUrl', 'jellyfinServerId', 'jellyfinServerKind', 'jellyfinUserId', 'jellyfinUserName', 'aioConfigId']
-        const updates = {}
-        const changedFields = []
-        // On an instance serving strangers an uploaded file is not proof of
-        // who someone is on a server: a row carrying another household's
-        // server address and user id would be handed that person's next
-        // sign-in. Which provider and which server identity a person has are
-        // left as they are there; they change by signing in (Reconnect).
-        const identityFromFile = INSTANCE_TYPE !== 'public'
-        const identityFields = new Set(['providerType', 'jellyfinServerUrl', 'jellyfinServerId', 'jellyfinServerKind', 'jellyfinUserId', 'jellyfinUserName', 'jellyfinToken'])
-        for (const f of plainFields) {
-          if (!(f in bUser)) continue
-          if (!identityFromFile && identityFields.has(f)) continue
-          const bVal = f === 'expiresAt' && bUser[f] ? new Date(bUser[f]) : bUser[f]
-          const differs = f === 'expiresAt'
-            ? String(current[f] || '') !== String(bVal || '')
-            : (current[f] ?? null) !== (bVal ?? null)
-          if (differs) { updates[f] = bVal; changedFields.push(f) }
-        }
-        if (excludedIds !== null && excludedIds !== (current.excludedAddons || '[]')) {
-          updates.excludedAddons = excludedIds
-          changedFields.push('excludedAddons')
-        }
-        // Provider credentials arrive DECRYPTED in the backup (that is what
-        // makes it portable) - re-encrypt before they touch the row, and
-        // report only that the connection changes, never any value.
-        for (const [field, label] of [['stremioAuthKey', 'Stremio connection'], ['nuvioRefreshToken', 'Nuvio connection'], ['jellyfinToken', 'Jellyfin connection'], ['aioConfigPassword', 'AIOStreams configuration access']]) {
-          if (!(field in bUser)) continue
-          if (!identityFromFile && identityFields.has(field)) continue
-          let currentPlain = null
-          try { currentPlain = current[field] ? decrypt(current[field], req) : null } catch {}
-          const bVal = bUser[field] || null
-          if ((currentPlain || null) !== (bVal || null)) {
-            updates[field] = bVal ? encrypt(bVal, req) : null
-            changedFields.push(label)
-          }
-        }
-        if ('nuvioUserId' in bUser && (current.nuvioUserId || null) !== (bUser.nuvioUserId || null)) {
-          updates.nuvioUserId = bUser.nuvioUserId || null
-          if (!changedFields.includes('Nuvio connection')) changedFields.push('Nuvio connection')
-        }
+            if (!req.appAccountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
 
-        // Group membership: what the backup says this user belonged to,
-        // applied against the groups that exist NOW (matched by id, then
-        // name). Groups only in the backup are reported, not resurrected -
-        // that is the full restore's job.
-        const bGroups = Array.isArray(data.groups) ? data.groups : []
-        // Export groups are NORMALIZED: membership is a `users` array of
-        // USERNAMES (confirmed against a real backup file - no ids anywhere
-        // in the export). Older/raw shapes with a userIds JSON string are
-        // handled too, matching by either id or username.
-        const bUserName = norm(bUser.username || bUser.name)
-        const memberInBackup = (g) => {
-          let members = g.users
-          if (!Array.isArray(members)) {
-            try { members = JSON.parse(g.userIds || '[]') } catch { members = [] }
-          }
-          if (!Array.isArray(members)) return false
-          return members.some((m) => m === bUser.id || m === userId || norm(m) === bUserName)
-        }
-        const backupMemberKeys = new Set(bGroups.filter(memberInBackup).flatMap((g) => [g.id, norm(g.name)]))
-        const curGroups = await prisma.group.findMany({ where: { accountId } })
-        const groupsJoin = []
-        const groupsLeave = []
-        for (const g of curGroups) {
-          let ids = []
-          try { ids = JSON.parse(g.userIds || '[]') } catch {}
-          const isMember = ids.includes(userId)
-          const shouldBe = backupMemberKeys.has(g.id) || backupMemberKeys.has(norm(g.name))
-          if (shouldBe && !isMember) {
-            groupsJoin.push(g.name)
-          } else if (!shouldBe && isMember) {
-            groupsLeave.push(g.name)
-          }
-        }
-        const missingGroups = bGroups
-          .filter(memberInBackup)
-          .filter((g) => !curGroups.some((cg) => cg.id === g.id || norm(cg.name) === norm(g.name)))
-          .map((g) => g.name)
-
-        const summary = {
-          username: current.username,
-          backupUsername: bUser.username || bUser.name || null,
-          changedFields,
-          groupsJoin,
-          groupsLeave,
-          missingGroups,
-          nothingToDo: changedFields.length === 0 && groupsJoin.length === 0 && groupsLeave.length === 0,
-        }
-        if (preview === true) return res.json({ preview: true, ...summary })
-        if (summary.nothingToDo) return res.json({ applied: false, ...summary })
-
-        // Undo net: the user's CURRENT state goes to the Trash before the
-        // rewind - kind 'userstate' updates the row back in place.
-        try {
-          const groupsNow = curGroups.filter((g) => { try { return JSON.parse(g.userIds || '[]').includes(userId) } catch { return false } })
-          await prisma.trashItem.create({
-            data: {
-              accountId,
-              kind: 'userstate',
-              label: `${current.username} - state before per-user restore`,
-              payload: JSON.stringify({ user: current, groupIds: groupsNow.map((g) => g.id) }),
-            },
-          })
+            const account = await prisma.appAccount.findUnique({
+                select: { id: true, uuid: true },
+                where: { id: req.appAccountId },
+            });
+            if (!account) {
+                return res.status(404).json({ message: "Account not found" });
+            }
+            return res.json(account);
         } catch (e) {
-          return res.status(500).json({ message: `Could not archive the current state first - restore aborted (${publicMessage(e, 'unknown error')})` })
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to load account info"),
+                message: "Failed to load account info",
+            });
         }
+    });
 
-        if (Object.keys(updates).length > 0) {
-          await prisma.user.update({ where: { id: userId }, data: updates })
-        }
-        // Membership is read again and written under the household's
-        // membership queue: the lists read above may have changed since.
-        await require('../utils/helpers/database').withMembershipLock(accountId, async () => {
-          for (const g of await prisma.group.findMany({ where: { accountId } })) {
-            let ids
-            try { ids = JSON.parse(g.userIds || '[]') } catch { continue }
-            if (!Array.isArray(ids)) continue
-            const isMember = ids.includes(userId)
-            const shouldBe = backupMemberKeys.has(g.id) || backupMemberKeys.has(norm(g.name))
-            if (shouldBe && !isMember) {
-              await prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify([...ids, userId]) } })
-            } else if (!shouldBe && isMember) {
-              await prisma.group.update({ where: { id: g.id }, data: { userIds: JSON.stringify(ids.filter((i) => i !== userId)) } })
-            }
-          }
-        })
-        return res.json({ applied: true, ...summary })
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to restore user', error: publicMessage(e, 'Failed to restore user') })
-      }
-    })
-
-    // POST /settings/migration/offer - mint a one-code migration offer for
-    // THIS instance's data. See routes/migration.js for the model.
-    router.post('/migration/offer', async (req, res) => {
-      try {
-        const accountId = getAccountId(req) || 'default'
-        const own = require('../utils/ownAddress')
-        let base = await own.publicBase(prisma, accountId)
-        if (!base) {
-          const reqBase = own.requestBase(req)
-          if (require('../utils/streamGate').deviceReachable(reqBase)) base = reqBase
-        }
-        if (!base) return res.status(400).json({ message: 'No reachable address known for this instance - the new server must be able to fetch from this one. Set PUBLIC_APP_URL, or open this page via the address your devices use.' })
-        const { mintOffer, encodeCode } = require('./migration')
-        const { token, passphrase } = mintOffer(accountId)
-        return res.json({ code: encodeCode(base, token, passphrase), expiresInMinutes: 15 })
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to create migration code', error: publicMessage(e, 'Failed to create migration code') })
-      }
-    })
-
-    // POST /settings/migration/receive - paste a code on the NEW instance:
-    // fetches the bundle from the old one and restores it here. DESTRUCTIVE
-    // like every restore - meant for a fresh instance.
-    router.post('/migration/receive', async (req, res) => {
-      try {
-        const { decodeCode } = require('./migration')
-        const parsed = decodeCode(req.body?.code)
-        if (!parsed) return res.status(400).json({ message: 'That is not a migration code' })
-        const accountId = getAccountId(req) || 'default'
-
-        // The address inside the code is fetched by this server, and so is
-        // wherever that sends it on to. On an instance serving other
-        // households, a code must not point it at the server's own network; a
-        // household's own install may use its LAN (utils/safeUrl.js).
-        let bundle
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 30000)
+    // PUT /account-avatar - set or clear the admin's own profile picture
+    // (full URL or /uploads/avatars/<file> from the shared avatar upload endpoint)
+    router.put("/account-avatar", async (req, res) => {
         try {
-          const { safeFetch, instancePolicy } = require('../utils/safeUrl')
-          const rsp = await safeFetch(`${parsed.u.replace(/\/+$/, '')}/api/migration/bundle?token=${encodeURIComponent(parsed.t)}`, { signal: controller.signal }, instancePolicy())
-          clearTimeout(timer)
-          const body = await rsp.json().catch(() => ({}))
-          if (!rsp.ok) return res.status(502).json({ message: body?.error || `The old instance answered ${rsp.status}` })
-          bundle = body?.kit
+            const { avatarUrl } = req.body || {};
+            const accountId =
+                INSTANCE_TYPE === "public" ? req.appAccountId : (await ensureDefaultAccount()).id;
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            await prisma.appAccount.update({
+                data: { avatarUrl: avatarUrl || null },
+                where: { id: accountId },
+            });
+            return res.json({ avatarUrl: avatarUrl || null });
         } catch (e) {
-          clearTimeout(timer)
-          if (['blocked host', 'unsupported protocol', 'invalid url'].includes(e?.message)) {
-            return res.status(400).json({ message: 'That migration code points at an address this instance can’t use' })
-          }
-          return res.status(502).json({ message: `Could not reach the old instance at ${parsed.u} - both servers must be able to see each other. (${publicMessage(e, 'network error')})` })
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to update avatar"),
+                message: "Failed to update avatar",
+            });
         }
-        if (!bundle) return res.status(502).json({ message: 'The old instance returned no bundle' })
+    });
 
-        const { restoreKit } = require('../utils/disasterRecoveryKit')
-        const { encrypt } = require('../utils/encryption')
-        const result = await restoreKit(prisma, accountId, parsed.k, bundle, req, { encrypt })
-        return res.json(result)
-      } catch (e) {
-        console.error('[Migration] receive failed:', e?.message)
-        return res.status(500).json({ message: publicMessage(e, 'Migration failed') })
-      }
-    })
-
-    // POST /settings/disaster-recovery-kit/export - unlike the regular
-    // config backup above (Users/Groups/Addons only), this also bundles
-    // every Vault secret, decrypted and re-encrypted under the passphrase
-    // supplied here instead of this instance's own ENCRYPTION_KEY - so the
-    // resulting file is portable to a brand-new instance if this one and
-    // its key are both lost. Manual/on-demand only, never scheduled.
-    router.post('/disaster-recovery-kit/export', async (req, res) => {
-      try {
-        const accountId = getAccountId(req) || 'default'
-        const { passphrase } = req.body || {}
-        const { buildKit } = require('../utils/disasterRecoveryKit')
-        const kit = await buildKit(prisma, accountId, passphrase, req, { decrypt })
-        // Stamp when a kit was last produced, so the staleness reminder
-        // (utils/recoveryKitReminder.js) can tell "never exported" from
-        // "exported recently". Best-effort: failing to record this must
-        // never fail the export the operator actually asked for.
+    // PUT /account-display-name - self-service nickname, set by the account
+    // holder themselves (Settings). Only meaningful in public multi-tenant
+    // mode - it's what makes an account recognizable on the superadmin panel
+    // instead of by raw UUID, but that panel only ever reads it, never writes.
+    router.put("/account-display-name", async (req, res) => {
         try {
-          const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-          let cfg = acc?.sync
-          if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = {} } }
-          const nextCfg = { ...(cfg && typeof cfg === 'object' ? cfg : {}), lastRecoveryKitExportAt: new Date().toISOString() }
-          try {
-            await prisma.appAccount.update({ where: { id: accountId }, data: { sync: nextCfg } })
-          } catch {
-            await prisma.appAccount.update({ where: { id: accountId }, data: { sync: JSON.stringify(nextCfg) } })
-          }
-        } catch { /* stamp is best-effort */ }
-        res.setHeader('Content-Disposition', `attachment; filename="slicksync-recovery-kit-${new Date().toISOString().split('T')[0]}.json"`)
-        return res.json(kit)
-      } catch (e) {
-        return res.status(400).json({ message: publicMessage(e, 'Failed to build recovery kit') })
-      }
-    })
-
-    // POST /settings/disaster-recovery-kit/import - DESTRUCTIVE, same as
-    // restore-from-backup (replaces current Users/Groups/Addons), PLUS
-    // creates a new Vault entry for every secret in the kit, re-encrypted
-    // under THIS instance's own current ENCRYPTION_KEY.
-    router.post('/disaster-recovery-kit/import', async (req, res) => {
-      try {
-        const accountId = getAccountId(req) || 'default'
-        const { passphrase, kit } = req.body || {}
-        const { restoreKit } = require('../utils/disasterRecoveryKit')
-        const result = await restoreKit(prisma, accountId, passphrase, kit, req, { encrypt })
-        return res.json(result)
-      } catch (e) {
-        return res.status(400).json({ message: publicMessage(e, 'Failed to restore recovery kit') })
-      }
-    })
-
-    // POST /settings/mosaic/generate-now - manual trigger for the monthly
-    // poster mosaic, mainly so the feature can be tried/tested without
-    // waiting for the scheduler's own month-rollover check. Defaults to the
-    // most recently completed month (same target the scheduler picks);
-    // optionally accepts { month: "YYYY-MM" } to regenerate/test a specific
-    // one. No webhook required - generateAndPostMosaic falls back to a
-    // plain push+bell text summary when cfg.webhookUrl is unset.
-    router.post('/mosaic/generate-now', async (req, res) => {
-      try {
-        const accountId = getAccountId(req) || 'default'
-        const { getAccountMonthString, previousMonthString, resolveAccountTimezone } = require('../utils/dateUtils')
-        const { generateAndPostMosaic } = require('../utils/posterMosaic')
-
-        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-        let cfg = acc?.sync
-        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = {} } }
-        cfg = cfg || {}
-
-        const timeZone = await resolveAccountTimezone(prisma, accountId)
-        const month = (typeof req.body?.month === 'string' && /^\d{4}-\d{2}$/.test(req.body.month))
-          ? req.body.month
-          : previousMonthString(getAccountMonthString(new Date(), timeZone))
-
-        const result = await generateAndPostMosaic(prisma, accountId, cfg.webhookUrl, month, timeZone)
-        return res.json(result)
-      } catch (e) {
-        return res.status(500).json({ message: publicMessage(e, 'Failed to generate mosaic') })
-      }
-    })
-
-    // DELETE /settings/backups/:filename
-    router.delete('/backups/:filename', async (req, res) => {
-      try {
-        if (!isValidBackupFilename(req.params.filename)) {
-          return res.status(400).json({ message: 'Invalid backup filename' })
+            const { displayName } = req.body || {};
+            const accountId =
+                INSTANCE_TYPE === "public" ? req.appAccountId : (await ensureDefaultAccount()).id;
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            const trimmed =
+                displayName === null || displayName === undefined
+                    ? null
+                    : String(displayName).trim().slice(0, 60) || null;
+            await prisma.appAccount.update({
+                data: { displayName: trimmed },
+                where: { id: accountId },
+            });
+            return res.json({ displayName: trimmed });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to update display name"),
+                message: "Failed to update display name",
+            });
         }
-        const filePath = path.join(BACKUP_DIR, req.params.filename)
-        if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Backup not found' })
-        fs.unlinkSync(filePath)
+    });
+
+    // Backup settings endpoints - only available in private mode
+    if (INSTANCE_TYPE !== "public") {
+        // Use centralized backup utilities
+        const {
+            BACKUP_DIR,
+            ensureBackupDir,
+            readBackupFrequencyDays,
+            writeBackupFrequencyDays,
+            performBackupOnce,
+            clearBackupSchedule: _clearBackupSchedule,
+            scheduleBackups,
+        } = require("../utils/backup");
+
+        // Filenames are always generated by performBackupOnce() as
+        // config-backup-<ISO-ish timestamp>.json - allow-listing that exact
+        // shape (plus a plain path.basename check below) is defense against
+        // path traversal via a crafted :filename param, since these three
+        // routes read/write/delete files on disk from a URL segment.
+        const isValidBackupFilename = (name) =>
+            typeof name === "string" &&
+            /^config-backup-[0-9T-]+\.json$/.test(name) &&
+            path.basename(name) === name;
+
+        // GET /settings/backups - list backups on disk, newest first. Each
+        // entry's `validation` comes from the sidecar file backupValidation.js
+        // writes right after the backup itself - absent (not re-computed here)
+        // for backups written before that existed.
+        router.get("/backups", async (_req, res) => {
+            try {
+                ensureBackupDir();
+                const files = fs.readdirSync(BACKUP_DIR).filter(isValidBackupFilename);
+                const backups = files
+                    .map((filename) => {
+                        const stat = fs.statSync(path.join(BACKUP_DIR, filename));
+                        let validation = null;
+                        try {
+                            const validationFile = path.join(
+                                BACKUP_DIR,
+                                filename.replace(/\.json$/, ".validation.json")
+                            );
+                            if (fs.existsSync(validationFile)) {
+                                validation = JSON.parse(fs.readFileSync(validationFile, "utf8"));
+                            }
+                        } catch {
+                            // Malformed optional data leaves the existing fallback in place.
+                        }
+                        return {
+                            createdAt: stat.mtime.toISOString(),
+                            filename,
+                            size: stat.size,
+                            validation,
+                        };
+                    })
+                    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+                return res.json(backups);
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to list backups"),
+                    message: "Failed to list backups",
+                });
+            }
+        });
+
+        // GET /settings/db-size - SQLite file size history for the Tasks page's
+        // storage chart. Read-only; { supported: false } in public/Postgres mode.
+        router.get("/db-size", async (req, res) => {
+            try {
+                const { getDbSizeReport } = require("../utils/dbSizeMonitor");
+                const report = await getDbSizeReport(
+                    prisma,
+                    getAccountId(req) || DEFAULT_ACCOUNT_ID
+                );
+                return res.json(report);
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to get DB size report"),
+                    message: "Failed to get DB size report",
+                });
+            }
+        });
+
+        // GET /settings/backups/:filename/download - raw backup file
+        router.get("/backups/:filename/download", async (req, res) => {
+            try {
+                if (!isValidBackupFilename(req.params.filename)) {
+                    return res.status(400).json({ message: "Invalid backup filename" });
+                }
+                const filePath = path.join(BACKUP_DIR, req.params.filename);
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ message: "Backup not found" });
+                }
+                return res.download(filePath, req.params.filename);
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to download backup"),
+                    message: "Failed to download backup",
+                });
+            }
+        });
+
+        // POST /settings/backups/:filename/restore - DESTRUCTIVE: replaces all
+        // current users/groups/addons with the backup's contents. Reads the
+        // file server-side and forwards it into the existing, already-battle-
+        // tested /public-auth/config-import handler (same internal-fetch
+        // pattern performBackupOnce() already uses to call sibling endpoints)
+        // rather than duplicating its import-ordering logic here.
+        // GET /settings/backups/:filename/diff - what a restore would actually
+        // change, computed BEFORE anything is touched. Restore replaces this
+        // account's users/groups/addons with the file's contents (see
+        // config-import), so "restore" without this was a leap of faith: no way
+        // to know whether Tuesday's backup still contains the addon you added
+        // Wednesday. Names only in the response - it feeds a confirmation
+        // dialog, not an export.
+        router.get("/backups/:filename/diff", async (req, res) => {
+            try {
+                if (!isValidBackupFilename(req.params.filename)) {
+                    return res.status(400).json({ message: "Invalid backup filename" });
+                }
+                const filePath = path.join(BACKUP_DIR, req.params.filename);
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ message: "Backup not found" });
+                }
+                let parsed;
+                try {
+                    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+                } catch {
+                    return res.status(422).json({ message: "Backup file is not valid JSON" });
+                }
+                const data = parsed.data || parsed;
+                const accountId = getAccountId(req) || "default";
+
+                const bAddons = Array.isArray(data.addons) ? data.addons : [];
+                const bUsers = Array.isArray(data.users) ? data.users : [];
+                const bGroups = Array.isArray(data.groups) ? data.groups : [];
+
+                const [curAddons, curUsers, curGroups] = await Promise.all([
+                    prisma.addon.findMany({
+                        select: { manifestUrl: true, name: true },
+                        where: { accountId },
+                    }),
+                    prisma.user.findMany({ select: { username: true }, where: { accountId } }),
+                    prisma.group.findMany({ select: { name: true }, where: { accountId } }),
+                ]);
+
+                const norm = (v) =>
+                    String(v || "")
+                        .trim()
+                        .toLowerCase();
+                const diffNames = (backupNames, currentNames) => {
+                    const b = new Set(backupNames.map(norm));
+                    const c = new Set(currentNames.map(norm));
+                    return {
+                        added: backupNames.filter((n) => n && !c.has(norm(n))),
+                        removed: currentNames.filter((n) => n && !b.has(norm(n))),
+                    };
+                };
+
+                // Addons additionally get "changed": same name, different URL - the
+                // case where a restore silently rewinds a config edit (or a key
+                // rotation) is exactly what someone previewing needs to see.
+                const curUrlByName = new Map();
+                for (const a of curAddons) {
+                    let url = null;
+                    try {
+                        url = getDecryptedManifestUrl(a, req);
+                    } catch {
+                        url = null;
+                    }
+                    curUrlByName.set(norm(a.name), url);
+                }
+                const changed = [];
+                for (const a of bAddons) {
+                    const cur = curUrlByName.get(norm(a.name));
+                    const bUrl = a.manifestUrl || a.transportUrl || null;
+                    if (cur && bUrl && cur !== bUrl) {
+                        changed.push(a.name);
+                    }
+                }
+
+                const addons = diffNames(
+                    bAddons.map((a) => a.name),
+                    curAddons.map((a) => a.name)
+                );
+                return res.json({
+                    addons: { ...addons, changed },
+                    backupDate: (() => {
+                        try {
+                            return fs.statSync(filePath).mtime.toISOString();
+                        } catch {
+                            return null;
+                        }
+                    })(),
+                    counts: {
+                        backup: {
+                            addons: bAddons.length,
+                            groups: bGroups.length,
+                            users: bUsers.length,
+                        },
+                        current: {
+                            addons: curAddons.length,
+                            groups: curGroups.length,
+                            users: curUsers.length,
+                        },
+                    },
+                    groups: diffNames(
+                        bGroups.map((g) => g.name),
+                        curGroups.map((g) => g.name)
+                    ),
+                    users: diffNames(
+                        bUsers.map((u) => u.username || u.name),
+                        curUsers.map((u) => u.username)
+                    ),
+                });
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to diff backup"),
+                    message: "Failed to diff backup",
+                });
+            }
+        });
+
+        router.post("/backups/:filename/restore", async (req, res) => {
+            try {
+                if (!isValidBackupFilename(req.params.filename)) {
+                    return res.status(400).json({ message: "Invalid backup filename" });
+                }
+                const filePath = path.join(BACKUP_DIR, req.params.filename);
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ message: "Backup not found" });
+                }
+
+                const jsonData = fs.readFileSync(filePath, "utf8");
+                const baseUrl = `http://localhost:${process.env.PORT || 4000}`;
+                // The caller's own sign-in goes along: with a login set, the import
+                // route sits behind it (and its CSRF check) like every other.
+                const rsp = await fetch(`${baseUrl}/api/public-auth/config-import`, {
+                    body: JSON.stringify({ jsonData }),
+                    headers: {
+                        "Content-Type": "application/json",
+                        ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}),
+                        ...(req.headers.authorization
+                            ? { authorization: req.headers.authorization }
+                            : {}),
+                        ...(req.headers["x-csrf-token"]
+                            ? { "x-csrf-token": req.headers["x-csrf-token"] }
+                            : {}),
+                    },
+                    method: "POST",
+                });
+                const result = await rsp.json().catch(() => ({}));
+                if (!rsp.ok) {
+                    return res
+                        .status(rsp.status)
+                        .json(result?.message ? result : { message: "Restore failed" });
+                }
+                return res.json(result);
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to restore backup"),
+                    message: "Failed to restore backup",
+                });
+            }
+        });
+
+        // POST /settings/backups/:filename/restore-user - Time Machine scoped to
+        // ONE person: rewinds a single user's config (identity, provider
+        // connection, exclusions, notification prefs, group memberships) to what
+        // the backup holds, touching nobody else. body: { userId, preview } -
+        // preview:true computes the per-user diff and applies NOTHING, which is
+        // what the confirmation dialog shows. The full restore stays what it
+        // was; this exists because one person's mishap should not cost the
+        // whole household a rewind.
+        //
+        // Deliberately preserved (never rewound): guardStateJson, lastSyncedAt/
+        // syncStatus, traxToken/traxAddonEnabled - live machinery, not config;
+        // rewinding the trax token would silently kill the URL already synced
+        // onto devices. Watch history is untouched - backups never carried it.
+        router.post("/backups/:filename/restore-user", async (req, res) => {
+            try {
+                if (!isValidBackupFilename(req.params.filename)) {
+                    return res.status(400).json({ message: "Invalid backup filename" });
+                }
+                const filePath = path.join(BACKUP_DIR, req.params.filename);
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ message: "Backup not found" });
+                }
+                let parsed;
+                try {
+                    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+                } catch {
+                    return res.status(422).json({ message: "Backup file is not valid JSON" });
+                }
+                const data = parsed.data || parsed;
+                const accountId = getAccountId(req) || "default";
+                const { userId, preview } = req.body || {};
+                if (!userId) {
+                    return res.status(400).json({ message: "userId is required" });
+                }
+
+                const current = await prisma.user.findFirst({ where: { accountId, id: userId } });
+                if (!current) {
+                    return res.status(404).json({
+                        message:
+                            "User not found (a fully deleted user is restored from the Trash, not from here)",
+                    });
+                }
+
+                const norm = (v) =>
+                    String(v || "")
+                        .trim()
+                        .toLowerCase();
+                const bUsers = Array.isArray(data.users) ? data.users : [];
+                const bUser =
+                    bUsers.find((u) => u.id === userId) ||
+                    bUsers.find((u) => norm(u.username || u.name) === norm(current.username));
+                if (!bUser) {
+                    return res
+                        .status(404)
+                        .json({ message: `"${current.username}" is not in this backup` });
+                }
+
+                // Backup exports store excludedAddons as NAMES (portable); the live
+                // row stores ids. Translate back through the current addon list -
+                // a name that no longer exists here simply drops out.
+                const curAddons = await prisma.addon.findMany({
+                    select: { id: true, name: true },
+                    where: { accountId },
+                });
+                const addonIdByName = new Map(curAddons.map((a) => [norm(a.name), a.id]));
+                let excludedIds = null;
+                try {
+                    const names = JSON.parse(bUser.excludedAddons || "[]");
+                    if (Array.isArray(names)) {
+                        excludedIds = JSON.stringify(
+                            names.map((n) => addonIdByName.get(norm(n)) || null).filter(Boolean)
+                        );
+                    }
+                } catch {
+                    // Malformed optional data leaves the existing fallback in place.
+                }
+
+                const plainFields = [
+                    "username",
+                    "email",
+                    "isActive",
+                    "expiresAt",
+                    "colorIndex",
+                    "avatarUrl",
+                    "providerType",
+                    "discordWebhookUrl",
+                    "discordUserId",
+                    "notifyOnWatch",
+                    "activityVisibility",
+                    "apiKey",
+                    "protectedAddons",
+                    "jellyfinServerUrl",
+                    "jellyfinServerId",
+                    "jellyfinServerKind",
+                    "jellyfinUserId",
+                    "jellyfinUserName",
+                    "aioConfigId",
+                ];
+                const updates = {};
+                const changedFields = [];
+                // On an instance serving strangers an uploaded file is not proof of
+                // who someone is on a server: a row carrying another household's
+                // server address and user id would be handed that person's next
+                // sign-in. Which provider and which server identity a person has are
+                // left as they are there; they change by signing in (Reconnect).
+                const identityFromFile = INSTANCE_TYPE !== "public";
+                const identityFields = new Set([
+                    "providerType",
+                    "jellyfinServerUrl",
+                    "jellyfinServerId",
+                    "jellyfinServerKind",
+                    "jellyfinUserId",
+                    "jellyfinUserName",
+                    "jellyfinToken",
+                ]);
+                for (const f of plainFields) {
+                    if (!(f in bUser)) {
+                        continue;
+                    }
+                    if (!identityFromFile && identityFields.has(f)) {
+                        continue;
+                    }
+                    const bVal = f === "expiresAt" && bUser[f] ? new Date(bUser[f]) : bUser[f];
+                    const differs =
+                        f === "expiresAt"
+                            ? String(current[f] || "") !== String(bVal || "")
+                            : (current[f] ?? null) !== (bVal ?? null);
+                    if (differs) {
+                        updates[f] = bVal;
+                        changedFields.push(f);
+                    }
+                }
+                if (excludedIds !== null && excludedIds !== (current.excludedAddons || "[]")) {
+                    updates.excludedAddons = excludedIds;
+                    changedFields.push("excludedAddons");
+                }
+                // Provider credentials arrive DECRYPTED in the backup (that is what
+                // makes it portable) - re-encrypt before they touch the row, and
+                // report only that the connection changes, never any value.
+                for (const [field, label] of [
+                    ["stremioAuthKey", "Stremio connection"],
+                    ["nuvioRefreshToken", "Nuvio connection"],
+                    ["jellyfinToken", "Jellyfin connection"],
+                    ["aioConfigPassword", "AIOStreams configuration access"],
+                ]) {
+                    if (!(field in bUser)) {
+                        continue;
+                    }
+                    if (!identityFromFile && identityFields.has(field)) {
+                        continue;
+                    }
+                    let currentPlain = null;
+                    try {
+                        currentPlain = current[field] ? decrypt(current[field], req) : null;
+                    } catch {
+                        // An unavailable key leaves the fallback value or next key candidate in use.
+                    }
+                    const bVal = bUser[field] || null;
+                    if ((currentPlain || null) !== (bVal || null)) {
+                        updates[field] = bVal ? encrypt(bVal, req) : null;
+                        changedFields.push(label);
+                    }
+                }
+                if (
+                    "nuvioUserId" in bUser &&
+                    (current.nuvioUserId || null) !== (bUser.nuvioUserId || null)
+                ) {
+                    updates.nuvioUserId = bUser.nuvioUserId || null;
+                    if (!changedFields.includes("Nuvio connection")) {
+                        changedFields.push("Nuvio connection");
+                    }
+                }
+
+                // Group membership: what the backup says this user belonged to,
+                // applied against the groups that exist NOW (matched by id, then
+                // name). Groups only in the backup are reported, not resurrected -
+                // that is the full restore's job.
+                const bGroups = Array.isArray(data.groups) ? data.groups : [];
+                // Export groups are NORMALIZED: membership is a `users` array of
+                // USERNAMES (confirmed against a real backup file - no ids anywhere
+                // in the export). Older/raw shapes with a userIds JSON string are
+                // handled too, matching by either id or username.
+                const bUserName = norm(bUser.username || bUser.name);
+                const memberInBackup = (g) => {
+                    let members = g.users;
+                    if (!Array.isArray(members)) {
+                        try {
+                            members = JSON.parse(g.userIds || "[]");
+                        } catch {
+                            members = [];
+                        }
+                    }
+                    if (!Array.isArray(members)) {
+                        return false;
+                    }
+                    return members.some(
+                        (m) => m === bUser.id || m === userId || norm(m) === bUserName
+                    );
+                };
+                const backupMemberKeys = new Set(
+                    bGroups.filter(memberInBackup).flatMap((g) => [g.id, norm(g.name)])
+                );
+                const curGroups = await prisma.group.findMany({ where: { accountId } });
+                const groupsJoin = [];
+                const groupsLeave = [];
+                for (const g of curGroups) {
+                    let ids = [];
+                    try {
+                        ids = JSON.parse(g.userIds || "[]");
+                    } catch {
+                        // Malformed optional data leaves the existing fallback in place.
+                    }
+                    const isMember = ids.includes(userId);
+                    const shouldBe =
+                        backupMemberKeys.has(g.id) || backupMemberKeys.has(norm(g.name));
+                    if (shouldBe && !isMember) {
+                        groupsJoin.push(g.name);
+                    } else if (!shouldBe && isMember) {
+                        groupsLeave.push(g.name);
+                    }
+                }
+                const missingGroups = bGroups
+                    .filter(memberInBackup)
+                    .filter(
+                        (g) =>
+                            !curGroups.some(
+                                (cg) => cg.id === g.id || norm(cg.name) === norm(g.name)
+                            )
+                    )
+                    .map((g) => g.name);
+
+                const summary = {
+                    backupUsername: bUser.username || bUser.name || null,
+                    changedFields,
+                    groupsJoin,
+                    groupsLeave,
+                    missingGroups,
+                    nothingToDo:
+                        changedFields.length === 0 &&
+                        groupsJoin.length === 0 &&
+                        groupsLeave.length === 0,
+                    username: current.username,
+                };
+                if (preview === true) {
+                    return res.json({ preview: true, ...summary });
+                }
+                if (summary.nothingToDo) {
+                    return res.json({ applied: false, ...summary });
+                }
+
+                // Undo net: the user's CURRENT state goes to the Trash before the
+                // rewind - kind 'userstate' updates the row back in place.
+                try {
+                    const groupsNow = curGroups.filter((g) => {
+                        try {
+                            return JSON.parse(g.userIds || "[]").includes(userId);
+                        } catch {
+                            return false;
+                        }
+                    });
+                    await prisma.trashItem.create({
+                        data: {
+                            accountId,
+                            kind: "userstate",
+                            label: `${current.username} - state before per-user restore`,
+                            payload: JSON.stringify({
+                                groupIds: groupsNow.map((g) => g.id),
+                                user: current,
+                            }),
+                        },
+                    });
+                } catch (e) {
+                    return res.status(500).json({
+                        message: `Could not archive the current state first - restore aborted (${publicMessage(e, "unknown error")})`,
+                    });
+                }
+
+                if (Object.keys(updates).length > 0) {
+                    await prisma.user.update({ data: updates, where: { id: userId } });
+                }
+                // Membership is read again and written under the household's
+                // membership queue: the lists read above may have changed since.
+                await require("../utils/helpers/database").withMembershipLock(
+                    accountId,
+                    async () => {
+                        for (const g of await prisma.group.findMany({ where: { accountId } })) {
+                            let ids;
+                            try {
+                                ids = JSON.parse(g.userIds || "[]");
+                            } catch {
+                                continue;
+                            }
+                            if (!Array.isArray(ids)) {
+                                continue;
+                            }
+                            const isMember = ids.includes(userId);
+                            const shouldBe =
+                                backupMemberKeys.has(g.id) || backupMemberKeys.has(norm(g.name));
+                            if (shouldBe && !isMember) {
+                                await prisma.group.update({
+                                    data: { userIds: JSON.stringify([...ids, userId]) },
+                                    where: { id: g.id },
+                                });
+                            } else if (!shouldBe && isMember) {
+                                await prisma.group.update({
+                                    data: {
+                                        userIds: JSON.stringify(ids.filter((i) => i !== userId)),
+                                    },
+                                    where: { id: g.id },
+                                });
+                            }
+                        }
+                    }
+                );
+                return res.json({ applied: true, ...summary });
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to restore user"),
+                    message: "Failed to restore user",
+                });
+            }
+        });
+
+        // POST /settings/migration/offer - mint a one-code migration offer for
+        // THIS instance's data. See routes/migration.js for the model.
+        router.post("/migration/offer", async (req, res) => {
+            try {
+                const accountId = getAccountId(req) || "default";
+                const own = require("../utils/ownAddress");
+                let base = await own.publicBase(prisma, accountId);
+                if (!base) {
+                    const reqBase = own.requestBase(req);
+                    if (require("../utils/streamGate").deviceReachable(reqBase)) {
+                        base = reqBase;
+                    }
+                }
+                if (!base) {
+                    return res.status(400).json({
+                        message:
+                            "No reachable address known for this instance - the new server must be able to fetch from this one. Set PUBLIC_APP_URL, or open this page via the address your devices use.",
+                    });
+                }
+                const { mintOffer, encodeCode } = require("./migration");
+                const { token, passphrase } = mintOffer(accountId);
+                return res.json({
+                    code: encodeCode(base, token, passphrase),
+                    expiresInMinutes: 15,
+                });
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to create migration code"),
+                    message: "Failed to create migration code",
+                });
+            }
+        });
+
+        // POST /settings/migration/receive - paste a code on the NEW instance:
+        // fetches the bundle from the old one and restores it here. DESTRUCTIVE
+        // like every restore - meant for a fresh instance.
+        router.post("/migration/receive", async (req, res) => {
+            try {
+                const { decodeCode } = require("./migration");
+                const parsed = decodeCode(req.body?.code);
+                if (!parsed) {
+                    return res.status(400).json({ message: "That is not a migration code" });
+                }
+                const accountId = getAccountId(req) || "default";
+
+                // The address inside the code is fetched by this server, and so is
+                // wherever that sends it on to. On an instance serving other
+                // households, a code must not point it at the server's own network; a
+                // household's own install may use its LAN (utils/safeUrl.js).
+                let bundle;
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 30_000);
+                try {
+                    const { safeFetch, instancePolicy } = require("../utils/safeUrl");
+                    const rsp = await safeFetch(
+                        `${parsed.u.replace(/\/+$/, "")}/api/migration/bundle?token=${encodeURIComponent(parsed.t)}`,
+                        { signal: controller.signal },
+                        instancePolicy()
+                    );
+                    clearTimeout(timer);
+                    const body = await rsp.json().catch(() => ({}));
+                    if (!rsp.ok) {
+                        return res.status(502).json({
+                            message: body?.error || `The old instance answered ${rsp.status}`,
+                        });
+                    }
+                    bundle = body?.kit;
+                } catch (e) {
+                    clearTimeout(timer);
+                    if (
+                        ["blocked host", "unsupported protocol", "invalid url"].includes(e?.message)
+                    ) {
+                        return res.status(400).json({
+                            message:
+                                "That migration code points at an address this instance can’t use",
+                        });
+                    }
+                    return res.status(502).json({
+                        message: `Could not reach the old instance at ${parsed.u} - both servers must be able to see each other. (${publicMessage(e, "network error")})`,
+                    });
+                }
+                if (!bundle) {
+                    return res.status(502).json({ message: "The old instance returned no bundle" });
+                }
+
+                const { restoreKit } = require("../utils/disasterRecoveryKit");
+                const { encrypt: encryptLocal } = require("../utils/encryption");
+                const result = await restoreKit(prisma, accountId, parsed.k, bundle, req, {
+                    encrypt: encryptLocal,
+                });
+                return res.json(result);
+            } catch (e) {
+                console.error("[Migration] receive failed:", e?.message);
+                return res.status(500).json({ message: publicMessage(e, "Migration failed") });
+            }
+        });
+
+        // POST /settings/disaster-recovery-kit/export - unlike the regular
+        // config backup above (Users/Groups/Addons only), this also bundles
+        // every Vault secret, decrypted and re-encrypted under the passphrase
+        // supplied here instead of this instance's own ENCRYPTION_KEY - so the
+        // resulting file is portable to a brand-new instance if this one and
+        // its key are both lost. Manual/on-demand only, never scheduled.
+        router.post("/disaster-recovery-kit/export", async (req, res) => {
+            try {
+                const accountId = getAccountId(req) || "default";
+                const { passphrase } = req.body || {};
+                const { buildKit } = require("../utils/disasterRecoveryKit");
+                const kit = await buildKit(prisma, accountId, passphrase, req, { decrypt });
+                // Stamp when a kit was last produced, so the staleness reminder
+                // (utils/recoveryKitReminder.js) can tell "never exported" from
+                // "exported recently". Best-effort: failing to record this must
+                // never fail the export the operator actually asked for.
+                try {
+                    const acc = await prisma.appAccount.findUnique({
+                        select: { sync: true },
+                        where: { id: accountId },
+                    });
+                    let cfg = acc?.sync;
+                    if (typeof cfg === "string") {
+                        try {
+                            cfg = JSON.parse(cfg);
+                        } catch {
+                            cfg = {};
+                        }
+                    }
+                    const nextCfg = {
+                        ...(cfg && typeof cfg === "object" ? cfg : {}),
+                        lastRecoveryKitExportAt: new Date().toISOString(),
+                    };
+                    try {
+                        await prisma.appAccount.update({
+                            data: { sync: nextCfg },
+                            where: { id: accountId },
+                        });
+                    } catch {
+                        await prisma.appAccount.update({
+                            data: { sync: JSON.stringify(nextCfg) },
+                            where: { id: accountId },
+                        });
+                    }
+                } catch {
+                    /* stamp is best-effort */
+                }
+                res.setHeader(
+                    "Content-Disposition",
+                    `attachment; filename="slicksync-recovery-kit-${new Date().toISOString().split("T")[0]}.json"`
+                );
+                return res.json(kit);
+            } catch (e) {
+                return res
+                    .status(400)
+                    .json({ message: publicMessage(e, "Failed to build recovery kit") });
+            }
+        });
+
+        // POST /settings/disaster-recovery-kit/import - DESTRUCTIVE, same as
+        // restore-from-backup (replaces current Users/Groups/Addons), PLUS
+        // creates a new Vault entry for every secret in the kit, re-encrypted
+        // under THIS instance's own current ENCRYPTION_KEY.
+        router.post("/disaster-recovery-kit/import", async (req, res) => {
+            try {
+                const accountId = getAccountId(req) || "default";
+                const { passphrase, kit } = req.body || {};
+                const { restoreKit } = require("../utils/disasterRecoveryKit");
+                const result = await restoreKit(prisma, accountId, passphrase, kit, req, {
+                    encrypt,
+                });
+                return res.json(result);
+            } catch (e) {
+                return res
+                    .status(400)
+                    .json({ message: publicMessage(e, "Failed to restore recovery kit") });
+            }
+        });
+
+        // POST /settings/mosaic/generate-now - manual trigger for the monthly
+        // poster mosaic, mainly so the feature can be tried/tested without
+        // waiting for the scheduler's own month-rollover check. Defaults to the
+        // most recently completed month (same target the scheduler picks);
+        // optionally accepts { month: "YYYY-MM" } to regenerate/test a specific
+        // one. No webhook required - generateAndPostMosaic falls back to a
+        // plain push+bell text summary when cfg.webhookUrl is unset.
+        router.post("/mosaic/generate-now", async (req, res) => {
+            try {
+                const accountId = getAccountId(req) || "default";
+                const {
+                    getAccountMonthString,
+                    previousMonthString,
+                    resolveAccountTimezone,
+                } = require("../utils/dateUtils");
+                const { generateAndPostMosaic } = require("../utils/posterMosaic");
+
+                const acc = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                let cfg = acc?.sync;
+                if (typeof cfg === "string") {
+                    try {
+                        cfg = JSON.parse(cfg);
+                    } catch {
+                        cfg = {};
+                    }
+                }
+                cfg = cfg || {};
+
+                const timeZone = await resolveAccountTimezone(prisma, accountId);
+                const month =
+                    typeof req.body?.month === "string" && /^\d{4}-\d{2}$/.test(req.body.month)
+                        ? req.body.month
+                        : previousMonthString(getAccountMonthString(new Date(), timeZone));
+
+                const result = await generateAndPostMosaic(
+                    prisma,
+                    accountId,
+                    cfg.webhookUrl,
+                    month,
+                    timeZone
+                );
+                return res.json(result);
+            } catch (e) {
+                return res
+                    .status(500)
+                    .json({ message: publicMessage(e, "Failed to generate mosaic") });
+            }
+        });
+
+        // DELETE /settings/backups/:filename
+        router.delete("/backups/:filename", async (req, res) => {
+            try {
+                if (!isValidBackupFilename(req.params.filename)) {
+                    return res.status(400).json({ message: "Invalid backup filename" });
+                }
+                const filePath = path.join(BACKUP_DIR, req.params.filename);
+                if (!fs.existsSync(filePath)) {
+                    return res.status(404).json({ message: "Backup not found" });
+                }
+                fs.unlinkSync(filePath);
+                try {
+                    const validationFile = filePath.replace(/\.json$/, ".validation.json");
+                    if (fs.existsSync(validationFile)) {
+                        fs.unlinkSync(validationFile);
+                    }
+                } catch {
+                    // Cleanup is best effort when the resource is already unavailable.
+                }
+                return res.json({ success: true });
+            } catch (e) {
+                return res.status(500).json({
+                    error: publicMessage(e, "Failed to delete backup"),
+                    message: "Failed to delete backup",
+                });
+            }
+        });
+
+        const _backupTimer = null;
+
+        // Initialize backup schedule on startup
+        scheduleBackups(readBackupFrequencyDays(), prisma);
+
+        // Get backup frequency setting
+        router.get("/backup-frequency", async (_req, res) => {
+            try {
+                return res.json({ days: readBackupFrequencyDays() });
+            } catch {
+                return res.status(500).json({ message: "Failed to read backup frequency" });
+            }
+        });
+
+        // Update backup frequency setting
+        router.put("/backup-frequency", async (req, res) => {
+            try {
+                const days = Number(req.body?.days || 0);
+                if (!Number.isFinite(days) || days < 0) {
+                    return res.status(400).json({ message: "Invalid days" });
+                }
+                writeBackupFrequencyDays(days);
+                scheduleBackups(days, prisma);
+                return res.json({ days, message: "Backup frequency updated" });
+            } catch {
+                return res.status(500).json({ message: "Failed to update backup frequency" });
+            }
+        });
+
+        // Manual backup trigger
+        // POST /settings/update-rollback - back to the image recorded before the
+        // last self-update (see performRollback for the retag mechanism).
+        router.post("/update-rollback", async (_req, res) => {
+            if (INSTANCE_TYPE === "public") {
+                return denyInPublic(res);
+            }
+            try {
+                const { performRollback } = require("../utils/selfUpdate");
+                return res.json(await performRollback());
+            } catch (e) {
+                return res
+                    .status(e?.status || 500)
+                    .json({ message: publicMessage(e, "Rollback failed") });
+            }
+        });
+
+        router.post("/backup-now", async (_req, res) => {
+            try {
+                await performBackupOnce(prisma);
+                return res.json({ message: "Backup started" });
+            } catch {
+                return res.status(500).json({ message: "Failed to start backup" });
+            }
+        });
+    }
+
+    // Backup frequency endpoints - available in all modes (public returns disabled)
+    router.get("/backup-frequency", async (_req, res) => {
         try {
-          const validationFile = filePath.replace(/\.json$/, '.validation.json')
-          if (fs.existsSync(validationFile)) fs.unlinkSync(validationFile)
-        } catch {}
-        return res.json({ success: true })
-      } catch (e) {
-        return res.status(500).json({ message: 'Failed to delete backup', error: publicMessage(e, 'Failed to delete backup') })
-      }
-    })
-
-    let backupTimer = null
-
-    // Initialize backup schedule on startup
-    scheduleBackups(readBackupFrequencyDays(), prisma)
-
-    // Get backup frequency setting
-    router.get('/backup-frequency', async (req, res) => {
-      try {
-        return res.json({ days: readBackupFrequencyDays() })
-      } catch {
-        return res.status(500).json({ message: 'Failed to read backup frequency' })
-      }
-    })
-
-    // Update backup frequency setting
-    router.put('/backup-frequency', async (req, res) => {
-      try {
-        const days = Number(req.body?.days || 0)
-        if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
-        writeBackupFrequencyDays(days)
-        scheduleBackups(days, prisma)
-        return res.json({ message: 'Backup frequency updated', days })
-      } catch {
-        return res.status(500).json({ message: 'Failed to update backup frequency' })
-      }
-    })
-
-    // Manual backup trigger
-    // POST /settings/update-rollback - back to the image recorded before the
-  // last self-update (see performRollback for the retag mechanism).
-  router.post('/update-rollback', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { performRollback } = require('../utils/selfUpdate')
-      return res.json(await performRollback())
-    } catch (e) {
-      return res.status(e?.status || 500).json({ message: publicMessage(e, 'Rollback failed') })
-    }
-  })
-
-  router.post('/backup-now', async (req, res) => {
-      try {
-        await performBackupOnce(prisma)
-        return res.json({ message: 'Backup started' })
-      } catch {
-        return res.status(500).json({ message: 'Failed to start backup' })
-      }
-    })
-  }
-
-  // Backup frequency endpoints - available in all modes (public returns disabled)
-  router.get('/backup-frequency', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE === 'public') {
-        // Backups are not supported in public mode
-        return res.json({ days: 0 })
-      }
-      const { readBackupFrequencyDays } = require('../utils/backup')
-      return res.json({ days: readBackupFrequencyDays() })
-    } catch {
-      return res.status(500).json({ message: 'Failed to read backup frequency' })
-    }
-  })
-
-  router.put('/backup-frequency', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE === 'public') {
-        return res.status(403).json({ message: 'Backups are not available in public mode' })
-      }
-      const { writeBackupFrequencyDays, scheduleBackups } = require('../utils/backup')
-      const days = Number(req.body?.days || 0)
-      if (!Number.isFinite(days) || days < 0) return res.status(400).json({ message: 'Invalid days' })
-      writeBackupFrequencyDays(days)
-      scheduleBackups(days, prisma)
-      return res.json({ message: 'Backup frequency updated', days })
-    } catch {
-      return res.status(500).json({ message: 'Failed to update backup frequency' })
-    }
-  })
-
-  // --- Off-site backup targets (utils/backupTargets.js) ---
-  // Private mode only, same as backups themselves: in public mode the
-  // operator backs up the Postgres instance, not per-account JSON.
-  const denyInPublic = (res) => res.status(403).json({ message: 'Not available in public mode' })
-  const redactTargets = (s) => ({
-    ...s,
-    s3: { ...s.s3, secretAccessKey: s.s3.secretAccessKey ? '********' : '' },
-    webdav: { ...s.webdav, password: s.webdav.password ? '********' : '' },
-    encryptPassphrase: s.encryptPassphrase ? '********' : '',
-  })
-
-  router.get('/backup-targets', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { getSettings } = require('../utils/backupTargets')
-      return res.json(redactTargets(getSettings()))
-    } catch {
-      return res.status(500).json({ message: 'Failed to read backup targets' })
-    }
-  })
-
-  router.put('/backup-targets', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { getSettings, saveSettings } = require('../utils/backupTargets')
-      const body = req.body || {}
-      const current = getSettings()
-      const patch = {}
-      if (body.type && ['none', 's3', 'webdav'].includes(body.type)) patch.type = body.type
-      if (body.keepLocal !== undefined) {
-        const n = Math.floor(Number(body.keepLocal))
-        if (!Number.isFinite(n) || n < 0 || n > 1000) return res.status(400).json({ message: 'keepLocal must be between 0 and 1000' })
-        patch.keepLocal = n
-      }
-      // A masked secret coming back from the UI means "unchanged" - never
-      // overwrite a real stored key with the asterisks we sent out.
-      if (body.s3) {
-        patch.s3 = { ...current.s3, ...body.s3 }
-        if (body.s3.secretAccessKey === '********') patch.s3.secretAccessKey = current.s3.secretAccessKey
-      }
-      if (body.webdav) {
-        patch.webdav = { ...current.webdav, ...body.webdav }
-        if (body.webdav.password === '********') patch.webdav.password = current.webdav.password
-      }
-      if (body.encryptPassphrase !== undefined) {
-        // Same masked-secret contract as the credentials above; an explicit
-        // empty string turns encryption off.
-        patch.encryptPassphrase = body.encryptPassphrase === '********'
-          ? current.encryptPassphrase
-          : String(body.encryptPassphrase || '')
-      }
-      return res.json(redactTargets(saveSettings(patch)))
-    } catch {
-      return res.status(500).json({ message: 'Failed to save backup targets' })
-    }
-  })
-
-  router.post('/backup-targets/test', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { getSettings, testTarget } = require('../utils/backupTargets')
-      // Tests what is SAVED, so the result reflects what backups will
-      // actually use rather than an unsaved draft.
-      const result = await testTarget(getSettings())
-      return res.json(result)
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: publicMessage(e, 'Test failed') })
-    }
-  })
-
-  // --- Full-data backups (utils/dataBackup.js) ---
-  // Private/SQLite only, same boundary as db-maintenance: in public mode the
-  // Postgres database belongs to whoever hosts it.
-  router.get('/data-backup', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { getSettings, listSnapshots, getDbFilePath } = require('../utils/dataBackup')
-      return res.json({
-        ...getSettings(),
-        available: Boolean(getDbFilePath()),
-        // Drives the UI's "off-site copies need a passphrase" notice without
-        // ever handing the passphrase itself back out.
-        hasPassphrase: Boolean(String(require('../utils/backupTargets').getSettings().encryptPassphrase || '').trim()),
-        snapshots: listSnapshots(),
-      })
-    } catch {
-      return res.status(500).json({ message: 'Failed to read data backup settings' })
-    }
-  })
-
-  router.put('/data-backup', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { saveSettings } = require('../utils/dataBackup')
-      const body = req.body || {}
-      const patch = {}
-      for (const key of ['enabled', 'offsite']) {
-        if (key in body) patch[key] = !!body[key]
-      }
-      if ('frequencyDays' in body) {
-        const n = Math.floor(Number(body.frequencyDays))
-        if (!Number.isFinite(n) || n < 1 || n > 30) return res.status(400).json({ message: 'frequencyDays must be between 1 and 30' })
-        patch.frequencyDays = n
-      }
-      if ('keepLocal' in body) {
-        const n = Math.floor(Number(body.keepLocal))
-        if (!Number.isFinite(n) || n < 1 || n > 100) return res.status(400).json({ message: 'keepLocal must be between 1 and 100' })
-        patch.keepLocal = n
-      }
-      return res.json(saveSettings(patch))
-    } catch {
-      return res.status(500).json({ message: 'Failed to save data backup settings' })
-    }
-  })
-
-  router.post('/data-backup/run', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { runDataBackupOnce } = require('../utils/dataBackup')
-      const result = await runDataBackupOnce(prisma)
-      if (!result) return res.status(400).json({ message: 'Not applicable on this instance' })
-      return res.json(result)
-    } catch (e) {
-      return res.status(500).json({ message: publicMessage(e, 'Snapshot failed') })
-    }
-  })
-
-  router.get('/data-backup/:filename/download', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { resolveSnapshotPath } = require('../utils/dataBackup')
-      const full = resolveSnapshotPath(req.params.filename)
-      if (!full) return res.status(404).json({ message: 'Snapshot not found' })
-      return res.download(full)
-    } catch {
-      return res.status(500).json({ message: 'Download failed' })
-    }
-  })
-
-  router.delete('/data-backup/:filename', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { resolveSnapshotPath } = require('../utils/dataBackup')
-      const full = resolveSnapshotPath(req.params.filename)
-      if (!full) return res.status(404).json({ message: 'Snapshot not found' })
-      require('fs').unlinkSync(full)
-      return res.json({ success: true })
-    } catch (e) {
-      return res.status(500).json({ message: publicMessage(e, 'Delete failed') })
-    }
-  })
-
-  // --- Database maintenance (utils/dbMaintenance.js) ---
-  router.get('/db-maintenance', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { getSettings, getDbFilePath } = require('../utils/dbMaintenance')
-      return res.json({ ...getSettings(), available: !!getDbFilePath() })
-    } catch {
-      return res.status(500).json({ message: 'Failed to read maintenance settings' })
-    }
-  })
-
-  router.put('/db-maintenance', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { saveSettings } = require('../utils/dbMaintenance')
-      const body = req.body || {}
-      const patch = {}
-      for (const key of ['vacuumEnabled', 'integrityCheckEnabled', 'pruneLogsEnabled', 'pruneNotificationsEnabled']) {
-        if (key in body) patch[key] = !!body[key]
-      }
-      if ('pruneNotificationsDays' in body) {
-        const days = Number(body.pruneNotificationsDays)
-        if (!Number.isFinite(days) || days < 1 || days > 365) {
-          return res.status(400).json({ message: 'pruneNotificationsDays must be between 1 and 365' })
-        }
-        patch.pruneNotificationsDays = Math.round(days)
-      }
-      return res.json(saveSettings(patch))
-    } catch {
-      return res.status(500).json({ message: 'Failed to save maintenance settings' })
-    }
-  })
-
-  // Run one maintenance action on demand. Integrity check is read-only;
-  // vacuum refuses itself when disk space is short; prune only touches the
-  // two capped log tables (see dbMaintenance.js).
-  router.post('/db-maintenance/run', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { runVacuum, runIntegrityCheck, pruneLogs, pruneNotifications } = require('../utils/dbMaintenance')
-      const action = String(req.body?.action || '')
-      if (action === 'integrity') return res.json(await runIntegrityCheck(prisma))
-      if (action === 'vacuum') return res.json(await runVacuum(prisma))
-      if (action === 'prune') return res.json(await pruneLogs(prisma))
-      if (action === 'pruneNotifications') return res.json(await pruneNotifications(prisma))
-      return res.status(400).json({ message: 'action must be integrity, vacuum, prune, or pruneNotifications' })
-    } catch (e) {
-      return res.status(500).json({ message: publicMessage(e, 'Maintenance action failed') })
-    }
-  })
-
-  // --- Applying an update (utils/selfUpdate.js) ---
-  router.get('/update-capability', async (req, res) => {
-    try {
-      const { getUpdateCapability } = require('../utils/selfUpdate')
-      return res.json(await getUpdateCapability())
-    } catch (e) {
-      return res.status(500).json({ message: publicMessage(e, 'Failed to check update capability') })
-    }
-  })
-
-  router.post('/update-apply', async (req, res) => {
-    if (INSTANCE_TYPE === 'public') return denyInPublic(res)
-    try {
-      const { performSelfUpdate } = require('../utils/selfUpdate')
-      const result = await performSelfUpdate(prisma, { backupOpts: { INSTANCE_TYPE } })
-      return res.json(result)
-    } catch (e) {
-      return res.status(e?.status || 500).json({ message: publicMessage(e, 'Update failed') })
-    }
-  })
-
-  router.post('/backup-now', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE === 'public') {
-        return res.status(403).json({ message: 'Backups are not available in public mode' })
-      }
-      const { performBackupOnce } = require('../utils/backup')
-      await performBackupOnce(prisma)
-      return res.json({ message: 'Backup started' })
-    } catch {
-      return res.status(500).json({ message: 'Failed to start backup' })
-    }
-  })
-
-  // Sync settings endpoints - available in all modes
-  const {
-    readSyncFrequencyMinutes,
-    writeSyncFrequencyMinutes,
-    scheduleSyncs
-  } = require('../utils/syncScheduler');
-
-  // Per-account sync settings (AUTH mode)
-  router.get('/account-sync', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        const account = await ensureDefaultAccount()
-        let syncCfg = account?.sync
-        if (syncCfg && typeof syncCfg === 'string') {
-          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-        }
-
-        const minutes = readSyncFrequencyMinutes()
-        const derivedFrequency = minutes === 1 ? '1m' : (minutes >= 1440 ? `${Math.round(minutes / 1440)}d` : `${minutes}m`)
-
-        const enabled = syncCfg && typeof syncCfg === 'object'
-          ? syncCfg.enabled !== false
-          : minutes > 0
-        // The address devices reach this instance at, learned (utils/ownAddress.js).
-        const ownAddress = await require('../utils/ownAddress').publicBase(prisma, account?.id || 'default').catch(() => '')
-
-        const response = {
-          enabled,
-          frequency: (syncCfg && typeof syncCfg === 'object' && syncCfg.frequency) ? String(syncCfg.frequency).trim() : derivedFrequency,
-          safe: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.safe === 'boolean') ? syncCfg.safe : true,
-          mode: (syncCfg && typeof syncCfg === 'object' && syncCfg.mode === 'advanced') ? 'advanced' : 'normal',
-          webhookUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.webhookUrl === 'string') ? syncCfg.webhookUrl : '',
-          useCustomFields: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((syncCfg && typeof syncCfg === 'object' && typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false),
-          notifyOnActivity: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnActivity === true : false,
-          notifyOnSync: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnSync === true : false,
-          notifyOnInvite: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnInvite === true : false,
-          notifyOnVault: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnVault === true : false,
-          notifyOnAddonHealth: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnAddonHealth === true : false,
-          notifyOnBackup: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnBackup === true : false,
-          notifyOnProxyHealth: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnProxyHealth === true : false,
-          notifyOnConnectionHealth: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnConnectionHealth !== false : true,
-          notifyOnUpdateAvailable: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnUpdateAvailable === true : false,
-          notifyOnRecoveryKitStale: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnRecoveryKitStale === true : false,
-          lastRecoveryKitExportAt: (syncCfg && typeof syncCfg === 'object') ? (syncCfg.lastRecoveryKitExportAt || null) : null,
-          notifyOnMosaic: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyOnMosaic === true : false,
-          // Default true, unlike every notify toggle above - an automation
-          // notification only exists because the admin explicitly wrote a rule
-          // whose action is "notify me," so defaulting it off would mean that
-          // rule silently does nothing until Settings is opened once.
-          notifyOnAutomation: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.notifyOnAutomation === 'boolean') ? syncCfg.notifyOnAutomation : true,
-          notifyDigestEnabled: (syncCfg && typeof syncCfg === 'object') ? syncCfg.notifyDigestEnabled === true : false,
-          notifyDigestFrequency: (syncCfg && typeof syncCfg === 'object' && syncCfg.notifyDigestFrequency === 'weekly') ? 'weekly' : 'daily',
-          accountTimezone: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.accountTimezone === 'string' && syncCfg.accountTimezone.trim()) ? syncCfg.accountTimezone.trim() : DEFAULT_TIMEZONE,
-          // True when nobody has ever explicitly saved a timezone - lets the
-          // client silently auto-fill its browser-detected zone once instead
-          // of leaving it on the bare env-var/hardcoded fallback forever.
-          accountTimezoneIsDefault: !(syncCfg && typeof syncCfg === 'object' && typeof syncCfg.accountTimezone === 'string' && syncCfg.accountTimezone.trim()),
-          vaultCurrency: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.vaultCurrency === 'string' && syncCfg.vaultCurrency.trim()) ? syncCfg.vaultCurrency.trim() : 'USD',
-          // SlickTrax features (v1.29-v1.30, named "Personal Features" pre-v1.37).
-          // All default true so existing installs get the same behavior; a
-          // user who explicitly turns any off (Settings → SlickTrax) hides
-          // the corresponding UI.
-          enableWatchlist: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableWatchlist === 'boolean') ? syncCfg.enableWatchlist : true,
-          enableWatchedIndicators: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableWatchedIndicators === 'boolean') ? syncCfg.enableWatchedIndicators : true,
-          enableWatchTogether: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableWatchTogether === 'boolean') ? syncCfg.enableWatchTogether : true,
-          enableRecommendations: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableRecommendations === 'boolean') ? syncCfg.enableRecommendations : true,
-          // Opt-in, not opt-out (unlike the other SlickTrax toggles above) -
-          // autoplaying a trailer the moment a title's modal opens is
-          // disruptive enough that a first-time visitor shouldn't get it by
-          // default; explicitly turning it on in Settings is the ask.
-          enableAutoplayTrailer: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableAutoplayTrailer === 'boolean') ? syncCfg.enableAutoplayTrailer : false,
-          autoplayTrailerStartMuted: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.autoplayTrailerStartMuted === 'boolean') ? syncCfg.autoplayTrailerStartMuted : true,
-          enablePosterRatings: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enablePosterRatings === 'boolean') ? syncCfg.enablePosterRatings : false,
-          enableReactions: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableReactions === 'boolean') ? syncCfg.enableReactions : true,
-          enableWatchProviders: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableWatchProviders === 'boolean') ? syncCfg.enableWatchProviders : true,
-          // Opt-in, not opt-out (like enableAutoplayTrailer above) - auto-
-          // generating and persisting a new Catalog from a detected taste
-          // cluster is a bigger, more visible change than a scrolling
-          // recommendation row, so it needs an explicit "yes" in Settings.
-          enableAutoThemedCatalogs: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.enableAutoThemedCatalogs === 'boolean') ? syncCfg.enableAutoThemedCatalogs : false,
-          tmdbApiKey: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.tmdbApiKey === 'string') ? syncCfg.tmdbApiKey : '',
-          mdblistApiKey: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.mdblistApiKey === 'string') ? syncCfg.mdblistApiKey : '',
-          rpdbApiKey: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.rpdbApiKey === 'string') ? syncCfg.rpdbApiKey : '',
-          omdbApiKey: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.omdbApiKey === 'string') ? syncCfg.omdbApiKey : '',
-          // Backup keys, used automatically when the daily health check has
-          // found the primary failing - see resolveKeyFromSettings.
-          tmdbApiKeyBackup: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.tmdbApiKeyBackup === 'string') ? syncCfg.tmdbApiKeyBackup : '',
-          omdbApiKeyBackup: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.omdbApiKeyBackup === 'string') ? syncCfg.omdbApiKeyBackup : '',
-          mdblistApiKeyBackup: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.mdblistApiKeyBackup === 'string') ? syncCfg.mdblistApiKeyBackup : '',
-          rpdbApiKeyBackup: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.rpdbApiKeyBackup === 'string') ? syncCfg.rpdbApiKeyBackup : '',
-          simklClientId: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.simklClientId === 'string') ? syncCfg.simklClientId : '',
-          traktClientId: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.traktClientId === 'string') ? syncCfg.traktClientId : '',
-          malClientId: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.malClientId === 'string') ? syncCfg.malClientId : '',
-          publicBaseUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.publicBaseUrl === 'string') ? syncCfg.publicBaseUrl : '',
-          ownAddress,
-          nuvioServerUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.nuvioServerUrl === 'string') ? syncCfg.nuvioServerUrl : '',
-          nuvioAnonKey: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.nuvioAnonKey === 'string') ? syncCfg.nuvioAnonKey : '',
-          lumiereDbUrl: (syncCfg && typeof syncCfg === 'object' && typeof syncCfg.lumiereDbUrl === 'string') ? syncCfg.lumiereDbUrl : '',
-          // Was only in the OTHER branch's response below, so private-mode
-          // instances (which take this path) always showed "Not checked yet"
-          // on load even while the daily check was storing results the whole
-          // time. The client-side hydration fix could not help - the field
-          // it hydrated from simply never arrived on this branch.
-          keyHealth: (syncCfg && typeof syncCfg === 'object' && syncCfg.keyHealth && typeof syncCfg.keyHealth === 'object') ? syncCfg.keyHealth : {},
-          autoUpdateEnabled: (syncCfg && typeof syncCfg === 'object' && syncCfg.autoUpdateEnabled === true),
-          autoUpdateHour: (syncCfg && typeof syncCfg === 'object' && Number.isInteger(syncCfg.autoUpdateHour)) ? syncCfg.autoUpdateHour : 4,
-          keyPoolQuotaWeighting: (syncCfg && typeof syncCfg === 'object' && syncCfg.keyPoolQuotaWeighting === true),
-          quotaAutopilot: (syncCfg && typeof syncCfg === 'object' && syncCfg.quotaAutopilot === true),
-          animeSeasonalRow: (syncCfg && typeof syncCfg === 'object' && syncCfg.animeSeasonalRow === true),
-          quotaAutopilotPercent: Number.isFinite(Number(syncCfg?.quotaAutopilotPercent)) ? Number(syncCfg?.quotaAutopilotPercent) : 90,
-          keyPoolAutoRetire: (syncCfg && typeof syncCfg === 'object' && syncCfg.keyPoolAutoRetire === true),
-          tmdbApiKeyPool: Array.isArray(syncCfg?.tmdbApiKeyPool) ? syncCfg.tmdbApiKeyPool.filter((k) => typeof k === 'string') : [],
-          omdbApiKeyPool: Array.isArray(syncCfg?.omdbApiKeyPool) ? syncCfg.omdbApiKeyPool.filter((k) => typeof k === 'string') : [],
-          mdblistApiKeyPool: Array.isArray(syncCfg?.mdblistApiKeyPool) ? syncCfg.mdblistApiKeyPool.filter((k) => typeof k === 'string') : [],
-          rpdbApiKeyPool: Array.isArray(syncCfg?.rpdbApiKeyPool) ? syncCfg.rpdbApiKeyPool.filter((k) => typeof k === 'string') : [],
-        }
-
-        return res.json(response)
-      }
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
-      let syncCfg = acc?.sync || null
-      if (syncCfg && typeof syncCfg === 'string') {
-        try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-      }
-      if (syncCfg && typeof syncCfg === 'object') {
-        const safe = (typeof syncCfg.safe === 'boolean') ? syncCfg.safe : !syncCfg.unsafe
-        const mode = syncCfg.mode === 'advanced' ? 'advanced' : 'normal'
-        const frequency = (typeof syncCfg.frequency === 'string' && syncCfg.frequency.trim())
-          ? syncCfg.frequency.trim()
-          : '0'
-        const ownAddress = await require('../utils/ownAddress').publicBase(prisma, req.appAccountId).catch(() => '')
-        const resp = {
-          enabled: syncCfg.enabled !== false, safe, mode, frequency, lastRunAt: syncCfg.lastRunAt,
-          webhookUrl: syncCfg.webhookUrl || '',
-          useCustomFields: (typeof syncCfg.useCustomFields === 'boolean') ? syncCfg.useCustomFields : ((typeof syncCfg.useCustomNames === 'boolean') ? syncCfg.useCustomNames : false),
-          notifyOnActivity: syncCfg.notifyOnActivity === true,
-          notifyOnSync: syncCfg.notifyOnSync === true,
-          notifyOnInvite: syncCfg.notifyOnInvite === true,
-          notifyOnVault: syncCfg.notifyOnVault === true,
-          notifyOnAddonHealth: syncCfg.notifyOnAddonHealth === true,
-          notifyOnBackup: syncCfg.notifyOnBackup === true,
-          notifyOnProxyHealth: syncCfg.notifyOnProxyHealth === true,
-          notifyOnConnectionHealth: syncCfg.notifyOnConnectionHealth !== false,
-          notifyOnUpdateAvailable: syncCfg.notifyOnUpdateAvailable === true,
-          notifyOnRecoveryKitStale: syncCfg.notifyOnRecoveryKitStale === true,
-          lastRecoveryKitExportAt: syncCfg.lastRecoveryKitExportAt || null,
-          notifyOnMosaic: syncCfg.notifyOnMosaic === true,
-          notifyOnAutomation: typeof syncCfg.notifyOnAutomation === 'boolean' ? syncCfg.notifyOnAutomation : true,
-          notifyDigestEnabled: syncCfg.notifyDigestEnabled === true,
-          notifyDigestFrequency: syncCfg.notifyDigestFrequency === 'weekly' ? 'weekly' : 'daily',
-          accountTimezone: (typeof syncCfg.accountTimezone === 'string' && syncCfg.accountTimezone.trim()) ? syncCfg.accountTimezone.trim() : DEFAULT_TIMEZONE,
-          accountTimezoneIsDefault: !(typeof syncCfg.accountTimezone === 'string' && syncCfg.accountTimezone.trim()),
-          vaultCurrency: (typeof syncCfg.vaultCurrency === 'string' && syncCfg.vaultCurrency.trim()) ? syncCfg.vaultCurrency.trim() : 'USD',
-          enableWatchlist: typeof syncCfg.enableWatchlist === 'boolean' ? syncCfg.enableWatchlist : true,
-          enableWatchedIndicators: typeof syncCfg.enableWatchedIndicators === 'boolean' ? syncCfg.enableWatchedIndicators : true,
-          enableWatchTogether: typeof syncCfg.enableWatchTogether === 'boolean' ? syncCfg.enableWatchTogether : true,
-          enableRecommendations: typeof syncCfg.enableRecommendations === 'boolean' ? syncCfg.enableRecommendations : true,
-          enableAutoplayTrailer: typeof syncCfg.enableAutoplayTrailer === 'boolean' ? syncCfg.enableAutoplayTrailer : false,
-          autoplayTrailerStartMuted: typeof syncCfg.autoplayTrailerStartMuted === 'boolean' ? syncCfg.autoplayTrailerStartMuted : true,
-          enablePosterRatings: typeof syncCfg.enablePosterRatings === 'boolean' ? syncCfg.enablePosterRatings : false,
-          enableReactions: typeof syncCfg.enableReactions === 'boolean' ? syncCfg.enableReactions : true,
-          enableWatchProviders: typeof syncCfg.enableWatchProviders === 'boolean' ? syncCfg.enableWatchProviders : true,
-          enableAutoThemedCatalogs: typeof syncCfg.enableAutoThemedCatalogs === 'boolean' ? syncCfg.enableAutoThemedCatalogs : false,
-          tmdbApiKey: typeof syncCfg.tmdbApiKey === 'string' ? syncCfg.tmdbApiKey : '',
-          mdblistApiKey: typeof syncCfg.mdblistApiKey === 'string' ? syncCfg.mdblistApiKey : '',
-          rpdbApiKey: typeof syncCfg.rpdbApiKey === 'string' ? syncCfg.rpdbApiKey : '',
-          omdbApiKey: typeof syncCfg.omdbApiKey === 'string' ? syncCfg.omdbApiKey : '',
-          // Per-provider {ok, message, rateLimited, checkedAt} from the last
-          // key health check (manual or scheduled) - see /check-keys below
-          // and utils/metadataKeyHealth.js. Absent entirely until the first
-          // check ever runs.
-          keyHealth: (syncCfg.keyHealth && typeof syncCfg.keyHealth === 'object') ? syncCfg.keyHealth : {},
-          autoUpdateEnabled: syncCfg.autoUpdateEnabled === true,
-          autoUpdateHour: Number.isInteger(syncCfg.autoUpdateHour) ? syncCfg.autoUpdateHour : 4,
-          keyPoolQuotaWeighting: syncCfg.keyPoolQuotaWeighting === true,
-          quotaAutopilot: syncCfg.quotaAutopilot === true,
-          animeSeasonalRow: syncCfg.animeSeasonalRow === true,
-          quotaAutopilotPercent: Number.isFinite(Number(syncCfg?.quotaAutopilotPercent)) ? Number(syncCfg?.quotaAutopilotPercent) : 90,
-          keyPoolAutoRetire: syncCfg.keyPoolAutoRetire === true,
-          tmdbApiKeyPool: Array.isArray(syncCfg?.tmdbApiKeyPool) ? syncCfg.tmdbApiKeyPool.filter((k) => typeof k === 'string') : [],
-          omdbApiKeyPool: Array.isArray(syncCfg?.omdbApiKeyPool) ? syncCfg.omdbApiKeyPool.filter((k) => typeof k === 'string') : [],
-          mdblistApiKeyPool: Array.isArray(syncCfg?.mdblistApiKeyPool) ? syncCfg.mdblistApiKeyPool.filter((k) => typeof k === 'string') : [],
-          rpdbApiKeyPool: Array.isArray(syncCfg?.rpdbApiKeyPool) ? syncCfg.rpdbApiKeyPool.filter((k) => typeof k === 'string') : [],
-          simklClientId: typeof syncCfg.simklClientId === 'string' ? syncCfg.simklClientId : '',
-          traktClientId: typeof syncCfg.traktClientId === 'string' ? syncCfg.traktClientId : '',
-          malClientId: typeof syncCfg.malClientId === 'string' ? syncCfg.malClientId : '',
-          publicBaseUrl: typeof syncCfg.publicBaseUrl === 'string' ? syncCfg.publicBaseUrl : '',
-          ownAddress,
-          nuvioServerUrl: typeof syncCfg.nuvioServerUrl === 'string' ? syncCfg.nuvioServerUrl : '',
-          nuvioAnonKey: typeof syncCfg.nuvioAnonKey === 'string' ? syncCfg.nuvioAnonKey : '',
-          lumiereDbUrl: typeof syncCfg.lumiereDbUrl === 'string' ? syncCfg.lumiereDbUrl : '',
-        }
-        return res.json(resp)
-      }
-      return res.json({ enabled: false, frequency: 0, safe: true, mode: 'normal', useCustomFields: false, notifyOnActivity: false, notifyOnSync: false, notifyOnInvite: false, notifyOnVault: false, notifyOnAddonHealth: false, notifyOnBackup: false, notifyOnProxyHealth: false, notifyOnConnectionHealth: true, notifyOnUpdateAvailable: false, notifyOnRecoveryKitStale: false, lastRecoveryKitExportAt: null, notifyOnMosaic: false, notifyOnAutomation: true, notifyDigestEnabled: false, notifyDigestFrequency: 'daily', accountTimezone: DEFAULT_TIMEZONE, accountTimezoneIsDefault: true, vaultCurrency: 'USD', enableWatchlist: true, enableWatchedIndicators: true, enableWatchTogether: true, enableRecommendations: true, enableAutoplayTrailer: false, autoplayTrailerStartMuted: true, enablePosterRatings: false, enableReactions: true, enableWatchProviders: true, enableAutoThemedCatalogs: false })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to read account sync settings' })
-    }
-  })
-
-  router.put('/account-sync', async (req, res) => {
-    try {
-      const { enabled, frequency, mode, unsafe, safe, webhookUrl, useCustomFields, useCustomNames, notifyOnActivity, notifyOnSync, notifyOnInvite, notifyOnVault, notifyOnAddonHealth, notifyOnBackup, notifyOnProxyHealth, notifyOnConnectionHealth, notifyOnUpdateAvailable, notifyOnRecoveryKitStale, notifyOnMosaic, notifyOnAutomation, notifyDigestEnabled, notifyDigestFrequency, accountTimezone, vaultCurrency, enableWatchlist, enableWatchedIndicators, enableWatchTogether, enableRecommendations, enableAutoplayTrailer, autoplayTrailerStartMuted, enablePosterRatings, enableReactions, enableWatchProviders, enableAutoThemedCatalogs, tmdbApiKey, mdblistApiKey, rpdbApiKey, omdbApiKey, simklClientId, traktClientId, malClientId, publicBaseUrl, tmdbApiKeyBackup, mdblistApiKeyBackup, rpdbApiKeyBackup, omdbApiKeyBackup, nuvioServerUrl, nuvioAnonKey, lumiereDbUrl } = req.body || {}
-      // Support both useCustomFields (new) and useCustomNames (old) for backward compatibility
-      const useCustomFieldsValue = useCustomFields !== undefined ? useCustomFields : useCustomNames
-      // The server sends the person's Nuvio sign-in to this address on every
-      // sync, so an address it may not reach is refused here rather than saved.
-      // Clearing it (an empty value) is always allowed.
-      if (typeof nuvioServerUrl === 'string' && nuvioServerUrl.trim()) {
-        const problem = await require('../providers/supabase').backendAddressProblem(nuvioServerUrl)
-        if (problem) return res.status(400).json({ message: problem })
-      }
-      if (INSTANCE_TYPE !== 'public') {
-        await ensureDefaultAccount()
-        const safeMinutes = (() => {
-          if (frequency === undefined || frequency === null) return null
-          if (typeof frequency === 'number') return frequency
-          if (typeof frequency === 'string') {
-            const trimmed = frequency.trim().toLowerCase()
-            if (trimmed.endsWith('d')) {
-              const days = Number(trimmed.slice(0, -1))
-              return Number.isFinite(days) && days > 0 ? days * 1440 : null
+            if (INSTANCE_TYPE === "public") {
+                // Backups are not supported in public mode
+                return res.json({ days: 0 });
             }
-            if (trimmed.endsWith('h')) {
-              const hours = Number(trimmed.slice(0, -1))
-              return Number.isFinite(hours) && hours > 0 ? hours * 60 : null
-            }
-            if (trimmed.endsWith('m')) {
-              const mins = Number(trimmed.slice(0, -1))
-              return Number.isFinite(mins) && mins >= 0 ? mins : null
-            }
-            const raw = Number(trimmed)
-            return Number.isFinite(raw) && raw >= 0 ? raw : null
-          }
-          return null
-        })()
-
-        if (safeMinutes !== null && safeMinutes < 0) {
-          return res.status(400).json({ message: 'Invalid frequency value' })
-        }
-
-        const nextMinutes = enabled === false ? 0 : (safeMinutes ?? readSyncFrequencyMinutes())
-        if (!Number.isFinite(nextMinutes) || nextMinutes < 0) {
-          return res.status(400).json({ message: 'Invalid minutes' })
-        }
-
-        writeSyncFrequencyMinutes(nextMinutes)
-
-        const current = await prisma.appAccount.findUnique({ where: { id: DEFAULT_ACCOUNT_ID }, select: { sync: true } })
-        let syncCfg = current?.sync
-        if (syncCfg && typeof syncCfg === 'string') {
-          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-        }
-        const baseCfg = (syncCfg && typeof syncCfg === 'object') ? syncCfg : {}
-        const nextCfg = {
-          ...baseCfg,
-          enabled: enabled === undefined ? baseCfg.enabled !== false : !!enabled,
-          frequency: typeof frequency === 'string' && frequency.trim() ? frequency.trim() : baseCfg.frequency || '0',
-          safe: safe !== undefined ? !!safe : (unsafe !== undefined ? !unsafe : baseCfg.safe !== false),
-          mode: mode === 'advanced' ? 'advanced' : baseCfg.mode === 'advanced' ? 'advanced' : 'normal',
-          webhookUrl: webhookUrl !== undefined ? (webhookUrl || null) : (baseCfg.webhookUrl || null),
-          useCustomFields: useCustomFieldsValue !== undefined ? !!useCustomFieldsValue : ((baseCfg.useCustomFields !== undefined ? baseCfg.useCustomFields : (baseCfg.useCustomNames !== undefined ? baseCfg.useCustomNames : false))),
-          notifyOnActivity: notifyOnActivity !== undefined ? !!notifyOnActivity : ((baseCfg.notifyOnActivity !== undefined) ? baseCfg.notifyOnActivity : false),
-          notifyOnSync: notifyOnSync !== undefined ? !!notifyOnSync : ((baseCfg.notifyOnSync !== undefined) ? baseCfg.notifyOnSync : false),
-          notifyOnInvite: notifyOnInvite !== undefined ? !!notifyOnInvite : ((baseCfg.notifyOnInvite !== undefined) ? baseCfg.notifyOnInvite : false),
-          notifyOnVault: notifyOnVault !== undefined ? !!notifyOnVault : ((baseCfg.notifyOnVault !== undefined) ? baseCfg.notifyOnVault : false),
-          notifyOnAddonHealth: notifyOnAddonHealth !== undefined ? !!notifyOnAddonHealth : ((baseCfg.notifyOnAddonHealth !== undefined) ? baseCfg.notifyOnAddonHealth : false),
-          notifyOnBackup: notifyOnBackup !== undefined ? !!notifyOnBackup : ((baseCfg.notifyOnBackup !== undefined) ? baseCfg.notifyOnBackup : false),
-          notifyOnProxyHealth: notifyOnProxyHealth !== undefined ? !!notifyOnProxyHealth : ((baseCfg.notifyOnProxyHealth !== undefined) ? baseCfg.notifyOnProxyHealth : false),
-          notifyOnConnectionHealth: notifyOnConnectionHealth !== undefined ? !!notifyOnConnectionHealth : baseCfg.notifyOnConnectionHealth !== false,
-          notifyOnUpdateAvailable: notifyOnUpdateAvailable !== undefined ? !!notifyOnUpdateAvailable : ((baseCfg.notifyOnUpdateAvailable !== undefined) ? baseCfg.notifyOnUpdateAvailable : false),
-          notifyOnRecoveryKitStale: notifyOnRecoveryKitStale !== undefined ? !!notifyOnRecoveryKitStale : ((baseCfg.notifyOnRecoveryKitStale !== undefined) ? baseCfg.notifyOnRecoveryKitStale : false),
-          notifyOnMosaic: notifyOnMosaic !== undefined ? !!notifyOnMosaic : ((baseCfg.notifyOnMosaic !== undefined) ? baseCfg.notifyOnMosaic : false),
-          notifyOnAutomation: notifyOnAutomation !== undefined ? !!notifyOnAutomation : (typeof baseCfg.notifyOnAutomation === 'boolean' ? baseCfg.notifyOnAutomation : true),
-          notifyDigestEnabled: notifyDigestEnabled !== undefined ? !!notifyDigestEnabled : ((baseCfg.notifyDigestEnabled !== undefined) ? baseCfg.notifyDigestEnabled : false),
-          notifyDigestFrequency: notifyDigestFrequency === 'weekly' ? 'weekly' : (notifyDigestFrequency === 'daily' ? 'daily' : (baseCfg.notifyDigestFrequency === 'weekly' ? 'weekly' : 'daily')),
-          accountTimezone: typeof accountTimezone === 'string' && accountTimezone.trim() ? accountTimezone.trim() : (baseCfg.accountTimezone || DEFAULT_TIMEZONE),
-          vaultCurrency: typeof vaultCurrency === 'string' && vaultCurrency.trim() ? vaultCurrency.trim().toUpperCase() : (baseCfg.vaultCurrency || 'USD'),
-          enableWatchlist: enableWatchlist !== undefined ? !!enableWatchlist : (typeof baseCfg.enableWatchlist === 'boolean' ? baseCfg.enableWatchlist : true),
-          enableWatchedIndicators: enableWatchedIndicators !== undefined ? !!enableWatchedIndicators : (typeof baseCfg.enableWatchedIndicators === 'boolean' ? baseCfg.enableWatchedIndicators : true),
-          enableWatchTogether: enableWatchTogether !== undefined ? !!enableWatchTogether : (typeof baseCfg.enableWatchTogether === 'boolean' ? baseCfg.enableWatchTogether : true),
-          enableRecommendations: enableRecommendations !== undefined ? !!enableRecommendations : (typeof baseCfg.enableRecommendations === 'boolean' ? baseCfg.enableRecommendations : true),
-          enableAutoplayTrailer: enableAutoplayTrailer !== undefined ? !!enableAutoplayTrailer : (typeof baseCfg.enableAutoplayTrailer === 'boolean' ? baseCfg.enableAutoplayTrailer : false),
-          autoplayTrailerStartMuted: autoplayTrailerStartMuted !== undefined ? !!autoplayTrailerStartMuted : (typeof baseCfg.autoplayTrailerStartMuted === 'boolean' ? baseCfg.autoplayTrailerStartMuted : true),
-          enablePosterRatings: enablePosterRatings !== undefined ? !!enablePosterRatings : (typeof baseCfg.enablePosterRatings === 'boolean' ? baseCfg.enablePosterRatings : false),
-          enableReactions: enableReactions !== undefined ? !!enableReactions : (typeof baseCfg.enableReactions === 'boolean' ? baseCfg.enableReactions : true),
-          enableWatchProviders: enableWatchProviders !== undefined ? !!enableWatchProviders : (typeof baseCfg.enableWatchProviders === 'boolean' ? baseCfg.enableWatchProviders : true),
-          enableAutoThemedCatalogs: enableAutoThemedCatalogs !== undefined ? !!enableAutoThemedCatalogs : (typeof baseCfg.enableAutoThemedCatalogs === 'boolean' ? baseCfg.enableAutoThemedCatalogs : false),
-          // Optional TMDb API key for the cast/crew deep-dive. Trimmed; empty
-          // string clears it (falls back to the TMDB_API_KEY env var, if any).
-          tmdbApiKey: tmdbApiKey !== undefined ? (typeof tmdbApiKey === 'string' ? tmdbApiKey.trim() : '') : (baseCfg.tmdbApiKey || ''),
-          // Optional MDBList API key for List import. Free from mdblist.com ->
-          // Preferences -> API Access.
-          mdblistApiKey: mdblistApiKey !== undefined ? (typeof mdblistApiKey === 'string' ? mdblistApiKey.trim() : '') : (baseCfg.mdblistApiKey || ''),
-          // Optional RPDB (RatingPosterDB) key - free tier works, upgrades
-          // posters app-wide with rating-embedded art. Free at
-          // ratingposterdb.com.
-          rpdbApiKey: rpdbApiKey !== undefined ? (typeof rpdbApiKey === 'string' ? rpdbApiKey.trim() : '') : (baseCfg.rpdbApiKey || ''),
-          // Optional OMDb key - free at omdbapi.com/apikey.aspx. Powers
-          // Rotten Tomatoes/Metacritic ratings; per-account like the three
-          // above it, so one account's key/quota isn't silently shared by
-          // every other account on this instance.
-          omdbApiKey: omdbApiKey !== undefined ? (typeof omdbApiKey === 'string' ? normalizeOmdbApiKey(omdbApiKey.trim()) : '') : (baseCfg.omdbApiKey || ''),
-          // Backup keys - same trim/blank-clears convention as the primaries.
-          tmdbApiKeyBackup: tmdbApiKeyBackup !== undefined ? (typeof tmdbApiKeyBackup === 'string' ? tmdbApiKeyBackup.trim() : '') : (baseCfg.tmdbApiKeyBackup || ''),
-          mdblistApiKeyBackup: mdblistApiKeyBackup !== undefined ? (typeof mdblistApiKeyBackup === 'string' ? mdblistApiKeyBackup.trim() : '') : (baseCfg.mdblistApiKeyBackup || ''),
-          rpdbApiKeyBackup: rpdbApiKeyBackup !== undefined ? (typeof rpdbApiKeyBackup === 'string' ? rpdbApiKeyBackup.trim() : '') : (baseCfg.rpdbApiKeyBackup || ''),
-          omdbApiKeyBackup: omdbApiKeyBackup !== undefined ? (typeof omdbApiKeyBackup === 'string' ? omdbApiKeyBackup.trim() : '') : (baseCfg.omdbApiKeyBackup || ''),
-          simklClientId: simklClientId !== undefined ? (typeof simklClientId === 'string' ? simklClientId.trim() : '') : (baseCfg.simklClientId || ''),
-          // Trakt Client ID - public LISTS only. Trakt's public list endpoints
-          // need just a client id (no OAuth), which is why importing a list
-          // works while a full account bridge does not: Trakt limits a free
-          // account to ONE connected app, and burning that on SlickSync would
-          // cost someone their existing Trakt app.
-          traktClientId: traktClientId !== undefined ? (typeof traktClientId === 'string' ? traktClientId.trim() : '') : (baseCfg.traktClientId || ''),
-          malClientId: malClientId !== undefined ? (typeof malClientId === 'string' ? malClientId.trim() : '') : (baseCfg.malClientId || ''),
-          publicBaseUrl: publicBaseUrl !== undefined ? (typeof publicBaseUrl === 'string' ? publicBaseUrl.trim().replace(/\/+$/, '') : '') : (baseCfg.publicBaseUrl || ''),
-          nuvioServerUrl: nuvioServerUrl !== undefined ? (typeof nuvioServerUrl === 'string' ? nuvioServerUrl.trim().replace(/\/+$/, '') : '') : (baseCfg.nuvioServerUrl || ''),
-          nuvioAnonKey: nuvioAnonKey !== undefined ? (typeof nuvioAnonKey === 'string' ? nuvioAnonKey.trim() : '') : (baseCfg.nuvioAnonKey || ''),
-          // The account's own LumiereDB (utils/lumiere.js), saved as just the
-          // server's address whatever was pasted.
-          lumiereDbUrl: lumiereDbUrl !== undefined ? normalizeLumiere(lumiereDbUrl) : (baseCfg.lumiereDbUrl || ''),
-          // Drop this provider's stored health-check result the moment ITS
-          // key is the one being blanked out in this save (not on every
-          // save - `!== undefined` is only true for the single field this
-          // particular request actually touched, see handleSaveSetting on
-          // the client, which PUTs one field at a time). Otherwise a badge
-          // saved from a key that's since been removed keeps showing
-          // "Not working" against an empty field forever - confirmed live,
-          // caught from a leftover test key never cleared this way.
-          // Key Pool extras - capped at 10, trimmed, blanks dropped.
-          tmdbApiKeyPool: Array.isArray(req.body?.tmdbApiKeyPool)
-            ? req.body.tmdbApiKeyPool.map((k) => (typeof k === 'string' ? k.trim() : '')).filter(Boolean).slice(0, 10)
-            : (Array.isArray(baseCfg.tmdbApiKeyPool) ? baseCfg.tmdbApiKeyPool : []),
-          // Key Pool extras - capped at 10, trimmed, blanks dropped.
-          omdbApiKeyPool: Array.isArray(req.body?.omdbApiKeyPool)
-            ? req.body.omdbApiKeyPool.map((k) => (typeof k === 'string' ? k.trim() : '')).filter(Boolean).slice(0, 10)
-            : (Array.isArray(baseCfg.omdbApiKeyPool) ? baseCfg.omdbApiKeyPool : []),
-          // Key Pool extras - capped at 10, trimmed, blanks dropped.
-          mdblistApiKeyPool: Array.isArray(req.body?.mdblistApiKeyPool)
-            ? req.body.mdblistApiKeyPool.map((k) => (typeof k === 'string' ? k.trim() : '')).filter(Boolean).slice(0, 10)
-            : (Array.isArray(baseCfg.mdblistApiKeyPool) ? baseCfg.mdblistApiKeyPool : []),
-          // Key Pool extras - capped at 10, trimmed, blanks dropped.
-          rpdbApiKeyPool: Array.isArray(req.body?.rpdbApiKeyPool)
-            ? req.body.rpdbApiKeyPool.map((k) => (typeof k === 'string' ? k.trim() : '')).filter(Boolean).slice(0, 10)
-            : (Array.isArray(baseCfg.rpdbApiKeyPool) ? baseCfg.rpdbApiKeyPool : []),
-          autoUpdateEnabled: req.body?.autoUpdateEnabled !== undefined ? req.body.autoUpdateEnabled === true : (baseCfg.autoUpdateEnabled === true),
-          autoUpdateHour: Number.isInteger(req.body?.autoUpdateHour) ? Math.min(23, Math.max(0, req.body.autoUpdateHour)) : (Number.isInteger(baseCfg.autoUpdateHour) ? baseCfg.autoUpdateHour : 4),
-          keyPoolQuotaWeighting: req.body?.keyPoolQuotaWeighting !== undefined ? req.body.keyPoolQuotaWeighting === true : (baseCfg.keyPoolQuotaWeighting === true),
-          keyPoolAutoRetire: req.body?.keyPoolAutoRetire !== undefined ? req.body.keyPoolAutoRetire === true : (baseCfg.keyPoolAutoRetire === true),
-          // Quota autopilot: opt-in, off by default. Defers only BACKGROUND
-          // metadata enrichment once the day's usage crosses the threshold,
-          // so an evening never dies mid-browse with the allowance spent -
-          // anything actively opened still fetches (see utils/omdb.js).
-          quotaAutopilot: req.body?.quotaAutopilot !== undefined ? req.body.quotaAutopilot === true : (baseCfg.quotaAutopilot === true),
-          // Seasonal anime row in Discover (AniList). Off by default: a
-          // household that doesn't watch anime should never see it.
-          animeSeasonalRow: req.body?.animeSeasonalRow !== undefined ? req.body.animeSeasonalRow === true : (baseCfg.animeSeasonalRow === true),
-          quotaAutopilotPercent: Number.isFinite(Number(req.body?.quotaAutopilotPercent))
-            ? Math.min(99, Math.max(50, Math.round(Number(req.body.quotaAutopilotPercent))))
-            : (Number.isFinite(Number(baseCfg.quotaAutopilotPercent)) ? Number(baseCfg.quotaAutopilotPercent) : 90),
-          keyHealth: (() => {
-            const prevHealth = (baseCfg.keyHealth && typeof baseCfg.keyHealth === 'object') ? baseCfg.keyHealth : {}
-            const next = { ...prevHealth }
-            const touched = { tmdb: tmdbApiKey, omdb: omdbApiKey, mdblist: mdblistApiKey, rpdb: rpdbApiKey }
-            for (const [provider, incoming] of Object.entries(touched)) {
-              if (incoming !== undefined && (typeof incoming !== 'string' || !incoming.trim())) delete next[provider]
-            }
-            return next
-          })(),
-        }
-
-        try {
-          await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: { sync: nextCfg } })
+            const { readBackupFrequencyDays } = require("../utils/backup");
+            return res.json({ days: readBackupFrequencyDays() });
         } catch {
-          await prisma.appAccount.update({ where: { id: DEFAULT_ACCOUNT_ID }, data: { sync: JSON.stringify(nextCfg) } })
+            return res.status(500).json({ message: "Failed to read backup frequency" });
         }
+    });
 
-        const { reloadGroupAddons } = require('../routes/users')
-        const scopedWhere = require('../utils/helpers').scopedWhere
-        const decrypt = require('../utils/encryption').decrypt
-        const schedulerReq = { appAccountId: DEFAULT_ACCOUNT_ID }
-        scheduleSyncs(nextMinutes, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, schedulerReq, INSTANCE_TYPE)
-        return res.json({ message: 'Sync settings updated' })
-      }
-      // Load current config to preserve unspecified fields
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { sync: true } })
-      let current = acc?.sync || null
-      if (current && typeof current === 'string') { try { current = JSON.parse(current) } catch { current = null } }
-      const base = (current && typeof current === 'object') ? current : {}
-
-      // Build partial update only for provided fields
-      const partial = {}
-      if (enabled !== undefined) partial.enabled = !!enabled
-      if (frequency !== undefined) partial.frequency = String(frequency)
-      if (mode !== undefined) partial.mode = (mode === 'advanced') ? 'advanced' : 'normal'
-      if (safe !== undefined) partial.safe = !!safe
-      else if (unsafe !== undefined) partial.safe = !unsafe
-      if (webhookUrl !== undefined) partial.webhookUrl = webhookUrl || null
-      if (useCustomFieldsValue !== undefined) partial.useCustomFields = !!useCustomFieldsValue
-      if (notifyOnActivity !== undefined) partial.notifyOnActivity = !!notifyOnActivity
-      if (notifyOnSync !== undefined) partial.notifyOnSync = !!notifyOnSync
-      if (notifyOnInvite !== undefined) partial.notifyOnInvite = !!notifyOnInvite
-      if (notifyOnVault !== undefined) partial.notifyOnVault = !!notifyOnVault
-      if (notifyOnAddonHealth !== undefined) partial.notifyOnAddonHealth = !!notifyOnAddonHealth
-      if (notifyOnBackup !== undefined) partial.notifyOnBackup = !!notifyOnBackup
-      if (notifyOnProxyHealth !== undefined) partial.notifyOnProxyHealth = !!notifyOnProxyHealth
-      if (notifyOnConnectionHealth !== undefined) partial.notifyOnConnectionHealth = !!notifyOnConnectionHealth
-      if (notifyOnUpdateAvailable !== undefined) partial.notifyOnUpdateAvailable = !!notifyOnUpdateAvailable
-      if (notifyOnRecoveryKitStale !== undefined) partial.notifyOnRecoveryKitStale = !!notifyOnRecoveryKitStale
-      if (notifyOnMosaic !== undefined) partial.notifyOnMosaic = !!notifyOnMosaic
-      if (notifyOnAutomation !== undefined) partial.notifyOnAutomation = !!notifyOnAutomation
-      if (notifyDigestEnabled !== undefined) partial.notifyDigestEnabled = !!notifyDigestEnabled
-      if (notifyDigestFrequency !== undefined) partial.notifyDigestFrequency = notifyDigestFrequency === 'weekly' ? 'weekly' : 'daily'
-      if (typeof accountTimezone === 'string' && accountTimezone.trim()) partial.accountTimezone = accountTimezone.trim()
-      if (typeof vaultCurrency === 'string' && vaultCurrency.trim()) partial.vaultCurrency = vaultCurrency.trim().toUpperCase()
-      if (enableWatchlist !== undefined) partial.enableWatchlist = !!enableWatchlist
-      if (enableWatchedIndicators !== undefined) partial.enableWatchedIndicators = !!enableWatchedIndicators
-      if (enableWatchTogether !== undefined) partial.enableWatchTogether = !!enableWatchTogether
-      if (enableRecommendations !== undefined) partial.enableRecommendations = !!enableRecommendations
-      if (enableAutoplayTrailer !== undefined) partial.enableAutoplayTrailer = !!enableAutoplayTrailer
-      if (autoplayTrailerStartMuted !== undefined) partial.autoplayTrailerStartMuted = !!autoplayTrailerStartMuted
-      if (enablePosterRatings !== undefined) partial.enablePosterRatings = !!enablePosterRatings
-      if (enableReactions !== undefined) partial.enableReactions = !!enableReactions
-      if (enableWatchProviders !== undefined) partial.enableWatchProviders = !!enableWatchProviders
-      if (enableAutoThemedCatalogs !== undefined) partial.enableAutoThemedCatalogs = !!enableAutoThemedCatalogs
-      if (tmdbApiKey !== undefined) partial.tmdbApiKey = typeof tmdbApiKey === 'string' ? tmdbApiKey.trim() : ''
-      if (mdblistApiKey !== undefined) partial.mdblistApiKey = typeof mdblistApiKey === 'string' ? mdblistApiKey.trim() : ''
-      if (rpdbApiKey !== undefined) partial.rpdbApiKey = typeof rpdbApiKey === 'string' ? rpdbApiKey.trim() : ''
-      if (omdbApiKey !== undefined) partial.omdbApiKey = typeof omdbApiKey === 'string' ? normalizeOmdbApiKey(omdbApiKey.trim()) : ''
-      if (simklClientId !== undefined) partial.simklClientId = typeof simklClientId === 'string' ? simklClientId.trim() : ''
-      if (traktClientId !== undefined) partial.traktClientId = typeof traktClientId === 'string' ? traktClientId.trim() : ''
-      if (malClientId !== undefined) partial.malClientId = typeof malClientId === 'string' ? malClientId.trim() : ''
-      if (publicBaseUrl !== undefined) partial.publicBaseUrl = typeof publicBaseUrl === 'string' ? publicBaseUrl.trim().replace(/\/+$/, '') : ''
-      // Trailing slash stripped on save so it can't produce `//rest/v1/...`
-      // downstream regardless of how it was typed.
-      if (nuvioServerUrl !== undefined) partial.nuvioServerUrl = typeof nuvioServerUrl === 'string' ? nuvioServerUrl.trim().replace(/\/+$/, '') : ''
-      if (nuvioAnonKey !== undefined) partial.nuvioAnonKey = typeof nuvioAnonKey === 'string' ? nuvioAnonKey.trim() : ''
-      if (lumiereDbUrl !== undefined) partial.lumiereDbUrl = normalizeLumiere(lumiereDbUrl)
-
-      const nextCfg = { ...base, ...partial }
-
-      // Persist JSON (Postgres) or stringified (SQLite)
-      try {
-        await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { sync: nextCfg } })
-      } catch {
-        await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { sync: JSON.stringify(nextCfg) } })
-      }
-      // Reschedule heap with new config (scheduler will re-seed on next scheduleSyncs call)
-      const { reloadGroupAddons } = require('../routes/users');
-      const scopedWhere = require('../utils/helpers').scopedWhere;
-      const decrypt = require('../utils/encryption').decrypt;
-      scheduleSyncs(0, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE) // clear
-      scheduleSyncs(1, prisma, getAccountId, scopedWhere, decrypt, reloadGroupAddons, req, INSTANCE_TYPE) // re-seed every account; the frequency is read per account in public mode
-      return res.json({ message: 'Account sync settings updated' })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to update account sync settings', error: publicMessage(e, 'Failed to update account sync settings') })
-    }
-  })
-
-  // Theme preferences (account-scoped, so a theme choice made on one device
-  // shows up on every other device signed into the same account). Stored on
-  // AppAccount.sync.themePref — no schema migration needed. The shape is
-  // deliberately loose (just JSON) so client-side additions (new fonts, extra
-  // color overrides) don't require a server update.
-  // How viewing is judged on this account - see utils/watchSettings.js.
-  router.get('/watch-tracking', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ message: 'Unauthorized' })
-      const { getWatchSettings, DEFAULTS, LIMITS } = require('../utils/watchSettings')
-      return res.json({ ...(await getWatchSettings(prisma, accountId)), defaults: DEFAULTS, limits: LIMITS })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to read watch tracking settings' })
-    }
-  })
-
-  router.put('/watch-tracking', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ message: 'Unauthorized' })
-      if (INSTANCE_TYPE !== 'public') await ensureDefaultAccount()
-      const { normalize, clearWatchSettings, getWatchSettings, DEFAULTS, LIMITS } = require('../utils/watchSettings')
-      const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-      let syncCfg = acc?.sync
-      if (typeof syncCfg === 'string') { try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null } }
-      if (!syncCfg || typeof syncCfg !== 'object') syncCfg = {}
-      const watchTracking = normalize({ ...(syncCfg.watchTracking || {}), ...(req.body || {}) })
-      const nextCfg = { ...syncCfg, watchTracking }
-      try { await prisma.appAccount.update({ where: { id: accountId }, data: { sync: nextCfg } }) }
-      catch { await prisma.appAccount.update({ where: { id: accountId }, data: { sync: JSON.stringify(nextCfg) } }) }
-      clearWatchSettings(accountId)
-      try { require('../utils/continueWatching').invalidateContinueWatching(accountId) } catch { /* optional */ }
-      return res.json({ ...(await getWatchSettings(prisma, accountId)), defaults: DEFAULTS, limits: LIMITS })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to save watch tracking settings' })
-    }
-  })
-
-  router.get('/theme-pref', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ message: 'Unauthorized' })
-      if (INSTANCE_TYPE !== 'public') await ensureDefaultAccount()
-      const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-      let syncCfg = acc?.sync
-      if (typeof syncCfg === 'string') { try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null } }
-      const themePref = (syncCfg && typeof syncCfg === 'object' && syncCfg.themePref && typeof syncCfg.themePref === 'object')
-        ? syncCfg.themePref
-        : null
-      return res.json({ themePref })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to read theme preferences' })
-    }
-  })
-
-  router.put('/theme-pref', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ message: 'Unauthorized' })
-      if (INSTANCE_TYPE !== 'public') await ensureDefaultAccount()
-      const { themePref } = req.body || {}
-      if (themePref !== null && (typeof themePref !== 'object' || Array.isArray(themePref))) {
-        return res.status(400).json({ message: 'themePref must be an object or null' })
-      }
-      const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-      let syncCfg = acc?.sync
-      if (typeof syncCfg === 'string') { try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null } }
-      if (!syncCfg || typeof syncCfg !== 'object') syncCfg = {}
-      const nextCfg = { ...syncCfg, themePref: themePref || undefined }
-      try { await prisma.appAccount.update({ where: { id: accountId }, data: { sync: nextCfg } }) }
-      catch { await prisma.appAccount.update({ where: { id: accountId }, data: { sync: JSON.stringify(nextCfg) } }) }
-      return res.json({ themePref })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to save theme preferences' })
-    }
-  })
-
-  // POST /account-sync/discover-nuvio - point at a self-hosted Nuvio backend
-  // and let it configure itself from /.well-known/nuvio, rather than making
-  // the operator copy an anon key out of `./nuvio credentials` by hand.
-  //
-  // Returns the anon key it found so the UI can show what it's about to save
-  // - this is a publishable client key by design (it ships inside the Nuvio
-  // apps themselves), not a service-role secret, so surfacing it back to the
-  // admin who just typed the URL doesn't expose anything they don't have.
-  router.post('/account-sync/discover-nuvio', async (req, res) => {
-    try {
-      const url = typeof req.body?.url === 'string' ? req.body.url.trim() : ''
-      if (!url) return res.status(400).json({ ok: false, error: 'Enter the backend URL first' })
-      const { discoverNuvioBackend } = require('../providers/supabase')
-      const result = await discoverNuvioBackend(url)
-      // An address this server is not allowed to reach is a bad request, not
-      // a backend that failed to answer. `message` is what the page shows.
-      if (result?.refused) return res.status(400).json({ ...result, message: result.error })
-      return res.json(result)
-    } catch (error) {
-      console.error('Error discovering Nuvio backend:', error)
-      return res.status(500).json({ ok: false, error: 'Discovery failed' })
-    }
-  })
-
-  router.post('/account-sync/test-webhook', async (req, res) => {
-    try {
-      const providedUrl = typeof req.body?.webhookUrl === 'string' ? req.body.webhookUrl.trim() : ''
-      let targetUrl = providedUrl
-
-      const readAccountWebhook = async (accountId) => {
-        const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-        if (!acc) return null
-        let syncCfg = acc.sync
-        if (typeof syncCfg === 'string') {
-          try { syncCfg = JSON.parse(syncCfg) } catch { syncCfg = null }
-        }
-        if (syncCfg && typeof syncCfg === 'object' && syncCfg.webhookUrl) {
-          return String(syncCfg.webhookUrl)
-        }
-        return null
-      }
-
-      if (!targetUrl) {
-        if (INSTANCE_TYPE === 'public') {
-          if (!req.appAccountId) {
-            return res.status(401).json({ message: 'Unauthorized' })
-          }
-          targetUrl = await readAccountWebhook(req.appAccountId)
-        } else {
-          await ensureDefaultAccount()
-          targetUrl = await readAccountWebhook(DEFAULT_ACCOUNT_ID)
-        }
-      }
-
-      if (!targetUrl) {
-        return res.status(400).json({ message: 'No webhook URL configured' })
-      }
-
-      await postDiscord(targetUrl, '🔬 SlickSync test webhook message')
-      return res.json({ message: 'Test message sent' })
-    } catch (e) {
-      console.error('Failed to send webhook test:', e)
-      return res.status(500).json({ message: 'Failed to send test message', error: publicMessage(e, 'Failed to send test message') })
-    }
-  })
-
-  // Manual sync trigger
-  router.post('/sync-now', async (req, res) => {
-    try {
-      const { syncGroupUsers } = require('../routes/groups');
-      const scopedWhere = require('../utils/helpers').scopedWhere;
-      const decrypt = require('../utils/encryption').decrypt;
-
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID;
-      const syncReq = { appAccountId: accountId, headers: {}, body: {} };
-
-      const groups = await prisma.group.findMany({
-        where: scopedWhere(syncReq, {}),
-        select: { id: true }
-      });
-
-      if (groups.length === 0) {
-        return res.json({ message: 'No groups found to sync', syncedGroups: 0, failedGroups: 0, totalGroups: 0 });
-      }
-
-      let syncedGroups = 0;
-      let failedGroups = 0;
-
-      for (const group of groups) {
+    router.put("/backup-frequency", async (req, res) => {
         try {
-          const result = await syncGroupUsers(prisma, getAccountId, scopedWhere, decrypt, group.id, syncReq);
-          if (result?.error) {
-            failedGroups++;
-          } else {
-            syncedGroups++;
-          }
-        } catch (e) {
-          failedGroups++;
+            if (INSTANCE_TYPE === "public") {
+                return res
+                    .status(403)
+                    .json({ message: "Backups are not available in public mode" });
+            }
+            const { writeBackupFrequencyDays, scheduleBackups } = require("../utils/backup");
+            const days = Number(req.body?.days || 0);
+            if (!Number.isFinite(days) || days < 0) {
+                return res.status(400).json({ message: "Invalid days" });
+            }
+            writeBackupFrequencyDays(days);
+            scheduleBackups(days, prisma);
+            return res.json({ days, message: "Backup frequency updated" });
+        } catch {
+            return res.status(500).json({ message: "Failed to update backup frequency" });
         }
-      }
+    });
 
-      return res.json({
-        message: 'Sync completed',
-        syncedGroups,
-        failedGroups,
-        totalGroups: groups.length
-      });
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to start sync', error: publicMessage(e, 'Failed to start sync') })
+    // --- Off-site backup targets (utils/backupTargets.js) ---
+    // Private mode only, same as backups themselves: in public mode the
+    // operator backs up the Postgres instance, not per-account JSON.
+    const denyInPublic = (res) => res.status(403).json({ message: "Not available in public mode" });
+    const redactTargets = (s) => ({
+        ...s,
+        encryptPassphrase: s.encryptPassphrase ? "********" : "",
+        s3: { ...s.s3, secretAccessKey: s.s3.secretAccessKey ? "********" : "" },
+        webdav: { ...s.webdav, password: s.webdav.password ? "********" : "" },
+    });
+
+    router.get("/backup-targets", async (_req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { getSettings } = require("../utils/backupTargets");
+            return res.json(redactTargets(getSettings()));
+        } catch {
+            return res.status(500).json({ message: "Failed to read backup targets" });
+        }
+    });
+
+    router.put("/backup-targets", async (req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { getSettings, saveSettings } = require("../utils/backupTargets");
+            const body = req.body || {};
+            const current = getSettings();
+            const patch = {};
+            if (body.type && ["none", "s3", "webdav"].includes(body.type)) {
+                patch.type = body.type;
+            }
+            if (body.keepLocal !== undefined) {
+                const n = Math.floor(Number(body.keepLocal));
+                if (!Number.isFinite(n) || n < 0 || n > 1000) {
+                    return res
+                        .status(400)
+                        .json({ message: "keepLocal must be between 0 and 1000" });
+                }
+                patch.keepLocal = n;
+            }
+            // A masked secret coming back from the UI means "unchanged" - never
+            // overwrite a real stored key with the asterisks we sent out.
+            if (body.s3) {
+                patch.s3 = { ...current.s3, ...body.s3 };
+                if (body.s3.secretAccessKey === "********") {
+                    patch.s3.secretAccessKey = current.s3.secretAccessKey;
+                }
+            }
+            if (body.webdav) {
+                patch.webdav = { ...current.webdav, ...body.webdav };
+                if (body.webdav.password === "********") {
+                    patch.webdav.password = current.webdav.password;
+                }
+            }
+            if (body.encryptPassphrase !== undefined) {
+                // Same masked-secret contract as the credentials above; an explicit
+                // empty string turns encryption off.
+                patch.encryptPassphrase =
+                    body.encryptPassphrase === "********"
+                        ? current.encryptPassphrase
+                        : String(body.encryptPassphrase || "");
+            }
+            return res.json(redactTargets(saveSettings(patch)));
+        } catch {
+            return res.status(500).json({ message: "Failed to save backup targets" });
+        }
+    });
+
+    router.post("/backup-targets/test", async (_req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { getSettings, testTarget } = require("../utils/backupTargets");
+            // Tests what is SAVED, so the result reflects what backups will
+            // actually use rather than an unsaved draft.
+            const result = await testTarget(getSettings());
+            return res.json(result);
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "Test failed"), ok: false });
+        }
+    });
+
+    // --- Full-data backups (utils/dataBackup.js) ---
+    // Private/SQLite only, same boundary as db-maintenance: in public mode the
+    // Postgres database belongs to whoever hosts it.
+    router.get("/data-backup", async (_req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { getSettings, listSnapshots, getDbFilePath } = require("../utils/dataBackup");
+            return res.json({
+                ...getSettings(),
+                available: Boolean(getDbFilePath()),
+                // Drives the UI's "off-site copies need a passphrase" notice without
+                // ever handing the passphrase itself back out.
+                hasPassphrase: Boolean(
+                    String(
+                        require("../utils/backupTargets").getSettings().encryptPassphrase || ""
+                    ).trim()
+                ),
+                snapshots: listSnapshots(),
+            });
+        } catch {
+            return res.status(500).json({ message: "Failed to read data backup settings" });
+        }
+    });
+
+    router.put("/data-backup", async (req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { saveSettings } = require("../utils/dataBackup");
+            const body = req.body || {};
+            const patch = {};
+            for (const key of ["enabled", "offsite"]) {
+                if (key in body) {
+                    patch[key] = !!body[key];
+                }
+            }
+            if ("frequencyDays" in body) {
+                const n = Math.floor(Number(body.frequencyDays));
+                if (!Number.isFinite(n) || n < 1 || n > 30) {
+                    return res
+                        .status(400)
+                        .json({ message: "frequencyDays must be between 1 and 30" });
+                }
+                patch.frequencyDays = n;
+            }
+            if ("keepLocal" in body) {
+                const n = Math.floor(Number(body.keepLocal));
+                if (!Number.isFinite(n) || n < 1 || n > 100) {
+                    return res.status(400).json({ message: "keepLocal must be between 1 and 100" });
+                }
+                patch.keepLocal = n;
+            }
+            return res.json(saveSettings(patch));
+        } catch {
+            return res.status(500).json({ message: "Failed to save data backup settings" });
+        }
+    });
+
+    router.post("/data-backup/run", async (_req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { runDataBackupOnce } = require("../utils/dataBackup");
+            const result = await runDataBackupOnce(prisma);
+            if (!result) {
+                return res.status(400).json({ message: "Not applicable on this instance" });
+            }
+            return res.json(result);
+        } catch (e) {
+            return res.status(500).json({ message: publicMessage(e, "Snapshot failed") });
+        }
+    });
+
+    router.get("/data-backup/:filename/download", async (req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { resolveSnapshotPath } = require("../utils/dataBackup");
+            const full = resolveSnapshotPath(req.params.filename);
+            if (!full) {
+                return res.status(404).json({ message: "Snapshot not found" });
+            }
+            return res.download(full);
+        } catch {
+            return res.status(500).json({ message: "Download failed" });
+        }
+    });
+
+    router.delete("/data-backup/:filename", async (req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { resolveSnapshotPath } = require("../utils/dataBackup");
+            const full = resolveSnapshotPath(req.params.filename);
+            if (!full) {
+                return res.status(404).json({ message: "Snapshot not found" });
+            }
+            require("node:fs").unlinkSync(full);
+            return res.json({ success: true });
+        } catch (e) {
+            return res.status(500).json({ message: publicMessage(e, "Delete failed") });
+        }
+    });
+
+    // --- Database maintenance (utils/dbMaintenance.js) ---
+    router.get("/db-maintenance", async (_req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { getSettings, getDbFilePath } = require("../utils/dbMaintenance");
+            return res.json({ ...getSettings(), available: !!getDbFilePath() });
+        } catch {
+            return res.status(500).json({ message: "Failed to read maintenance settings" });
+        }
+    });
+
+    router.put("/db-maintenance", async (req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { saveSettings } = require("../utils/dbMaintenance");
+            const body = req.body || {};
+            const patch = {};
+            for (const key of [
+                "vacuumEnabled",
+                "integrityCheckEnabled",
+                "pruneLogsEnabled",
+                "pruneNotificationsEnabled",
+            ]) {
+                if (key in body) {
+                    patch[key] = !!body[key];
+                }
+            }
+            if ("pruneNotificationsDays" in body) {
+                const days = Number(body.pruneNotificationsDays);
+                if (!Number.isFinite(days) || days < 1 || days > 365) {
+                    return res
+                        .status(400)
+                        .json({ message: "pruneNotificationsDays must be between 1 and 365" });
+                }
+                patch.pruneNotificationsDays = Math.round(days);
+            }
+            return res.json(saveSettings(patch));
+        } catch {
+            return res.status(500).json({ message: "Failed to save maintenance settings" });
+        }
+    });
+
+    // Run one maintenance action on demand. Integrity check is read-only;
+    // vacuum refuses itself when disk space is short; prune only touches the
+    // two capped log tables (see dbMaintenance.js).
+    router.post("/db-maintenance/run", async (req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const {
+                runVacuum,
+                runIntegrityCheck,
+                pruneLogs,
+                pruneNotifications,
+            } = require("../utils/dbMaintenance");
+            const action = String(req.body?.action || "");
+            if (action === "integrity") {
+                return res.json(await runIntegrityCheck(prisma));
+            }
+            if (action === "vacuum") {
+                return res.json(await runVacuum(prisma));
+            }
+            if (action === "prune") {
+                return res.json(await pruneLogs(prisma));
+            }
+            if (action === "pruneNotifications") {
+                return res.json(await pruneNotifications(prisma));
+            }
+            return res.status(400).json({
+                message: "action must be integrity, vacuum, prune, or pruneNotifications",
+            });
+        } catch (e) {
+            return res.status(500).json({ message: publicMessage(e, "Maintenance action failed") });
+        }
+    });
+
+    // --- Applying an update (utils/selfUpdate.js) ---
+    router.get("/update-capability", async (_req, res) => {
+        try {
+            const { getUpdateCapability } = require("../utils/selfUpdate");
+            return res.json(await getUpdateCapability());
+        } catch (e) {
+            return res
+                .status(500)
+                .json({ message: publicMessage(e, "Failed to check update capability") });
+        }
+    });
+
+    router.post("/update-apply", async (_req, res) => {
+        if (INSTANCE_TYPE === "public") {
+            return denyInPublic(res);
+        }
+        try {
+            const { performSelfUpdate } = require("../utils/selfUpdate");
+            const result = await performSelfUpdate(prisma, { backupOpts: { INSTANCE_TYPE } });
+            return res.json(result);
+        } catch (e) {
+            return res
+                .status(e?.status || 500)
+                .json({ message: publicMessage(e, "Update failed") });
+        }
+    });
+
+    router.post("/backup-now", async (_req, res) => {
+        try {
+            if (INSTANCE_TYPE === "public") {
+                return res
+                    .status(403)
+                    .json({ message: "Backups are not available in public mode" });
+            }
+            const { performBackupOnce } = require("../utils/backup");
+            await performBackupOnce(prisma);
+            return res.json({ message: "Backup started" });
+        } catch {
+            return res.status(500).json({ message: "Failed to start backup" });
+        }
+    });
+
+    // Sync settings endpoints - available in all modes
+    const {
+        readSyncFrequencyMinutes,
+        writeSyncFrequencyMinutes,
+        scheduleSyncs,
+    } = require("../utils/syncScheduler");
+
+    // Per-account sync settings (AUTH mode)
+    router.get("/account-sync", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                const account = await ensureDefaultAccount();
+                let syncCfg = account?.sync;
+                if (syncCfg && typeof syncCfg === "string") {
+                    try {
+                        syncCfg = JSON.parse(syncCfg);
+                    } catch {
+                        syncCfg = null;
+                    }
+                }
+
+                const minutes = readSyncFrequencyMinutes();
+                const derivedFrequency =
+                    minutes === 1
+                        ? "1m"
+                        : minutes >= 1440
+                          ? `${Math.round(minutes / 1440)}d`
+                          : `${minutes}m`;
+
+                const enabled =
+                    syncCfg && typeof syncCfg === "object"
+                        ? syncCfg.enabled !== false
+                        : minutes > 0;
+                // The address devices reach this instance at, learned (utils/ownAddress.js).
+                const ownAddress = await require("../utils/ownAddress")
+                    .publicBase(prisma, account?.id || "default")
+                    .catch(() => "");
+
+                const response = {
+                    accountTimezone:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.accountTimezone === "string" &&
+                        syncCfg.accountTimezone.trim()
+                            ? syncCfg.accountTimezone.trim()
+                            : DEFAULT_TIMEZONE,
+                    // True when nobody has ever explicitly saved a timezone - lets the
+                    // client silently auto-fill its browser-detected zone once instead
+                    // of leaving it on the bare env-var/hardcoded fallback forever.
+                    accountTimezoneIsDefault: !(
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.accountTimezone === "string" &&
+                        syncCfg.accountTimezone.trim()
+                    ),
+                    animeSeasonalRow:
+                        syncCfg && typeof syncCfg === "object" && syncCfg.animeSeasonalRow === true,
+                    autoplayTrailerStartMuted:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.autoplayTrailerStartMuted === "boolean"
+                            ? syncCfg.autoplayTrailerStartMuted
+                            : true,
+                    autoUpdateEnabled:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        syncCfg.autoUpdateEnabled === true,
+                    autoUpdateHour:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        Number.isInteger(syncCfg.autoUpdateHour)
+                            ? syncCfg.autoUpdateHour
+                            : 4,
+                    // Opt-in, not opt-out (unlike the other SlickTrax toggles above) -
+                    // autoplaying a trailer the moment a title's modal opens is
+                    // disruptive enough that a first-time visitor shouldn't get it by
+                    // default; explicitly turning it on in Settings is the ask.
+                    enableAutoplayTrailer:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableAutoplayTrailer === "boolean"
+                            ? syncCfg.enableAutoplayTrailer
+                            : false,
+                    // Opt-in, not opt-out (like enableAutoplayTrailer above) - auto-
+                    // generating and persisting a new Catalog from a detected taste
+                    // cluster is a bigger, more visible change than a scrolling
+                    // recommendation row, so it needs an explicit "yes" in Settings.
+                    enableAutoThemedCatalogs:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableAutoThemedCatalogs === "boolean"
+                            ? syncCfg.enableAutoThemedCatalogs
+                            : false,
+                    enabled,
+                    enablePosterRatings:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enablePosterRatings === "boolean"
+                            ? syncCfg.enablePosterRatings
+                            : false,
+                    enableReactions:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableReactions === "boolean"
+                            ? syncCfg.enableReactions
+                            : true,
+                    enableRecommendations:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableRecommendations === "boolean"
+                            ? syncCfg.enableRecommendations
+                            : true,
+                    enableWatchedIndicators:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableWatchedIndicators === "boolean"
+                            ? syncCfg.enableWatchedIndicators
+                            : true,
+                    // SlickTrax features (v1.29-v1.30, named "Personal Features" pre-v1.37).
+                    // All default true so existing installs get the same behavior; a
+                    // user who explicitly turns any off (Settings → SlickTrax) hides
+                    // the corresponding UI.
+                    enableWatchlist:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableWatchlist === "boolean"
+                            ? syncCfg.enableWatchlist
+                            : true,
+                    enableWatchProviders:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableWatchProviders === "boolean"
+                            ? syncCfg.enableWatchProviders
+                            : true,
+                    enableWatchTogether:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.enableWatchTogether === "boolean"
+                            ? syncCfg.enableWatchTogether
+                            : true,
+                    frequency:
+                        syncCfg && typeof syncCfg === "object" && syncCfg.frequency
+                            ? String(syncCfg.frequency).trim()
+                            : derivedFrequency,
+                    // Was only in the OTHER branch's response below, so private-mode
+                    // instances (which take this path) always showed "Not checked yet"
+                    // on load even while the daily check was storing results the whole
+                    // time. The client-side hydration fix could not help - the field
+                    // it hydrated from simply never arrived on this branch.
+                    keyHealth:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        syncCfg.keyHealth &&
+                        typeof syncCfg.keyHealth === "object"
+                            ? syncCfg.keyHealth
+                            : {},
+                    keyPoolAutoRetire:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        syncCfg.keyPoolAutoRetire === true,
+                    keyPoolQuotaWeighting:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        syncCfg.keyPoolQuotaWeighting === true,
+                    lastRecoveryKitExportAt:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.lastRecoveryKitExportAt || null
+                            : null,
+                    lumiereDbUrl:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.lumiereDbUrl === "string"
+                            ? syncCfg.lumiereDbUrl
+                            : "",
+                    malClientId:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.malClientId === "string"
+                            ? syncCfg.malClientId
+                            : "",
+                    mdblistApiKey:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.mdblistApiKey === "string"
+                            ? syncCfg.mdblistApiKey
+                            : "",
+                    mdblistApiKeyBackup:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.mdblistApiKeyBackup === "string"
+                            ? syncCfg.mdblistApiKeyBackup
+                            : "",
+                    mdblistApiKeyPool: Array.isArray(syncCfg?.mdblistApiKeyPool)
+                        ? syncCfg.mdblistApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    mode:
+                        syncCfg && typeof syncCfg === "object" && syncCfg.mode === "advanced"
+                            ? "advanced"
+                            : "normal",
+                    notifyDigestEnabled:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyDigestEnabled === true
+                            : false,
+                    notifyDigestFrequency:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        syncCfg.notifyDigestFrequency === "weekly"
+                            ? "weekly"
+                            : "daily",
+                    notifyOnActivity:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnActivity === true
+                            : false,
+                    notifyOnAddonHealth:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnAddonHealth === true
+                            : false,
+                    // Default true, unlike every notify toggle above - an automation
+                    // notification only exists because the admin explicitly wrote a rule
+                    // whose action is "notify me," so defaulting it off would mean that
+                    // rule silently does nothing until Settings is opened once.
+                    notifyOnAutomation:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.notifyOnAutomation === "boolean"
+                            ? syncCfg.notifyOnAutomation
+                            : true,
+                    notifyOnBackup:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnBackup === true
+                            : false,
+                    notifyOnConnectionHealth:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnConnectionHealth !== false
+                            : true,
+                    notifyOnInvite:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnInvite === true
+                            : false,
+                    notifyOnMosaic:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnMosaic === true
+                            : false,
+                    notifyOnProxyHealth:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnProxyHealth === true
+                            : false,
+                    notifyOnRecoveryKitStale:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnRecoveryKitStale === true
+                            : false,
+                    notifyOnSync:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnSync === true
+                            : false,
+                    notifyOnUpdateAvailable:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnUpdateAvailable === true
+                            : false,
+                    notifyOnVault:
+                        syncCfg && typeof syncCfg === "object"
+                            ? syncCfg.notifyOnVault === true
+                            : false,
+                    nuvioAnonKey:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.nuvioAnonKey === "string"
+                            ? syncCfg.nuvioAnonKey
+                            : "",
+                    nuvioServerUrl:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.nuvioServerUrl === "string"
+                            ? syncCfg.nuvioServerUrl
+                            : "",
+                    omdbApiKey:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.omdbApiKey === "string"
+                            ? syncCfg.omdbApiKey
+                            : "",
+                    omdbApiKeyBackup:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.omdbApiKeyBackup === "string"
+                            ? syncCfg.omdbApiKeyBackup
+                            : "",
+                    omdbApiKeyPool: Array.isArray(syncCfg?.omdbApiKeyPool)
+                        ? syncCfg.omdbApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    ownAddress,
+                    publicBaseUrl:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.publicBaseUrl === "string"
+                            ? syncCfg.publicBaseUrl
+                            : "",
+                    quotaAutopilot:
+                        syncCfg && typeof syncCfg === "object" && syncCfg.quotaAutopilot === true,
+                    quotaAutopilotPercent: Number.isFinite(Number(syncCfg?.quotaAutopilotPercent))
+                        ? Number(syncCfg?.quotaAutopilotPercent)
+                        : 90,
+                    rpdbApiKey:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.rpdbApiKey === "string"
+                            ? syncCfg.rpdbApiKey
+                            : "",
+                    rpdbApiKeyBackup:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.rpdbApiKeyBackup === "string"
+                            ? syncCfg.rpdbApiKeyBackup
+                            : "",
+                    rpdbApiKeyPool: Array.isArray(syncCfg?.rpdbApiKeyPool)
+                        ? syncCfg.rpdbApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    safe:
+                        syncCfg && typeof syncCfg === "object" && typeof syncCfg.safe === "boolean"
+                            ? syncCfg.safe
+                            : true,
+                    simklClientId:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.simklClientId === "string"
+                            ? syncCfg.simklClientId
+                            : "",
+                    tmdbApiKey:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.tmdbApiKey === "string"
+                            ? syncCfg.tmdbApiKey
+                            : "",
+                    // Backup keys, used automatically when the daily health check has
+                    // found the primary failing - see resolveKeyFromSettings.
+                    tmdbApiKeyBackup:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.tmdbApiKeyBackup === "string"
+                            ? syncCfg.tmdbApiKeyBackup
+                            : "",
+                    tmdbApiKeyPool: Array.isArray(syncCfg?.tmdbApiKeyPool)
+                        ? syncCfg.tmdbApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    traktClientId:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.traktClientId === "string"
+                            ? syncCfg.traktClientId
+                            : "",
+                    useCustomFields:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.useCustomFields === "boolean"
+                            ? syncCfg.useCustomFields
+                            : syncCfg &&
+                                typeof syncCfg === "object" &&
+                                typeof syncCfg.useCustomNames === "boolean"
+                              ? syncCfg.useCustomNames
+                              : false,
+                    vaultCurrency:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.vaultCurrency === "string" &&
+                        syncCfg.vaultCurrency.trim()
+                            ? syncCfg.vaultCurrency.trim()
+                            : "USD",
+                    webhookUrl:
+                        syncCfg &&
+                        typeof syncCfg === "object" &&
+                        typeof syncCfg.webhookUrl === "string"
+                            ? syncCfg.webhookUrl
+                            : "",
+                };
+
+                return res.json(response);
+            }
+            const acc = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: req.appAccountId },
+            });
+            let syncCfg = acc?.sync || null;
+            if (syncCfg && typeof syncCfg === "string") {
+                try {
+                    syncCfg = JSON.parse(syncCfg);
+                } catch {
+                    syncCfg = null;
+                }
+            }
+            if (syncCfg && typeof syncCfg === "object") {
+                const safe = typeof syncCfg.safe === "boolean" ? syncCfg.safe : !syncCfg.unsafe;
+                const mode = syncCfg.mode === "advanced" ? "advanced" : "normal";
+                const frequency =
+                    typeof syncCfg.frequency === "string" && syncCfg.frequency.trim()
+                        ? syncCfg.frequency.trim()
+                        : "0";
+                const ownAddress = await require("../utils/ownAddress")
+                    .publicBase(prisma, req.appAccountId)
+                    .catch(() => "");
+                const resp = {
+                    accountTimezone:
+                        typeof syncCfg.accountTimezone === "string" &&
+                        syncCfg.accountTimezone.trim()
+                            ? syncCfg.accountTimezone.trim()
+                            : DEFAULT_TIMEZONE,
+                    accountTimezoneIsDefault: !(
+                        typeof syncCfg.accountTimezone === "string" &&
+                        syncCfg.accountTimezone.trim()
+                    ),
+                    animeSeasonalRow: syncCfg.animeSeasonalRow === true,
+                    autoplayTrailerStartMuted:
+                        typeof syncCfg.autoplayTrailerStartMuted === "boolean"
+                            ? syncCfg.autoplayTrailerStartMuted
+                            : true,
+                    autoUpdateEnabled: syncCfg.autoUpdateEnabled === true,
+                    autoUpdateHour: Number.isInteger(syncCfg.autoUpdateHour)
+                        ? syncCfg.autoUpdateHour
+                        : 4,
+                    enableAutoplayTrailer:
+                        typeof syncCfg.enableAutoplayTrailer === "boolean"
+                            ? syncCfg.enableAutoplayTrailer
+                            : false,
+                    enableAutoThemedCatalogs:
+                        typeof syncCfg.enableAutoThemedCatalogs === "boolean"
+                            ? syncCfg.enableAutoThemedCatalogs
+                            : false,
+                    enabled: syncCfg.enabled !== false,
+                    enablePosterRatings:
+                        typeof syncCfg.enablePosterRatings === "boolean"
+                            ? syncCfg.enablePosterRatings
+                            : false,
+                    enableReactions:
+                        typeof syncCfg.enableReactions === "boolean"
+                            ? syncCfg.enableReactions
+                            : true,
+                    enableRecommendations:
+                        typeof syncCfg.enableRecommendations === "boolean"
+                            ? syncCfg.enableRecommendations
+                            : true,
+                    enableWatchedIndicators:
+                        typeof syncCfg.enableWatchedIndicators === "boolean"
+                            ? syncCfg.enableWatchedIndicators
+                            : true,
+                    enableWatchlist:
+                        typeof syncCfg.enableWatchlist === "boolean"
+                            ? syncCfg.enableWatchlist
+                            : true,
+                    enableWatchProviders:
+                        typeof syncCfg.enableWatchProviders === "boolean"
+                            ? syncCfg.enableWatchProviders
+                            : true,
+                    enableWatchTogether:
+                        typeof syncCfg.enableWatchTogether === "boolean"
+                            ? syncCfg.enableWatchTogether
+                            : true,
+                    frequency,
+                    // Per-provider {ok, message, rateLimited, checkedAt} from the last
+                    // key health check (manual or scheduled) - see /check-keys below
+                    // and utils/metadataKeyHealth.js. Absent entirely until the first
+                    // check ever runs.
+                    keyHealth:
+                        syncCfg.keyHealth && typeof syncCfg.keyHealth === "object"
+                            ? syncCfg.keyHealth
+                            : {},
+                    keyPoolAutoRetire: syncCfg.keyPoolAutoRetire === true,
+                    keyPoolQuotaWeighting: syncCfg.keyPoolQuotaWeighting === true,
+                    lastRecoveryKitExportAt: syncCfg.lastRecoveryKitExportAt || null,
+                    lastRunAt: syncCfg.lastRunAt,
+                    lumiereDbUrl:
+                        typeof syncCfg.lumiereDbUrl === "string" ? syncCfg.lumiereDbUrl : "",
+                    malClientId: typeof syncCfg.malClientId === "string" ? syncCfg.malClientId : "",
+                    mdblistApiKey:
+                        typeof syncCfg.mdblistApiKey === "string" ? syncCfg.mdblistApiKey : "",
+                    mdblistApiKeyPool: Array.isArray(syncCfg?.mdblistApiKeyPool)
+                        ? syncCfg.mdblistApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    mode,
+                    notifyDigestEnabled: syncCfg.notifyDigestEnabled === true,
+                    notifyDigestFrequency:
+                        syncCfg.notifyDigestFrequency === "weekly" ? "weekly" : "daily",
+                    notifyOnActivity: syncCfg.notifyOnActivity === true,
+                    notifyOnAddonHealth: syncCfg.notifyOnAddonHealth === true,
+                    notifyOnAutomation:
+                        typeof syncCfg.notifyOnAutomation === "boolean"
+                            ? syncCfg.notifyOnAutomation
+                            : true,
+                    notifyOnBackup: syncCfg.notifyOnBackup === true,
+                    notifyOnConnectionHealth: syncCfg.notifyOnConnectionHealth !== false,
+                    notifyOnInvite: syncCfg.notifyOnInvite === true,
+                    notifyOnMosaic: syncCfg.notifyOnMosaic === true,
+                    notifyOnProxyHealth: syncCfg.notifyOnProxyHealth === true,
+                    notifyOnRecoveryKitStale: syncCfg.notifyOnRecoveryKitStale === true,
+                    notifyOnSync: syncCfg.notifyOnSync === true,
+                    notifyOnUpdateAvailable: syncCfg.notifyOnUpdateAvailable === true,
+                    notifyOnVault: syncCfg.notifyOnVault === true,
+                    nuvioAnonKey:
+                        typeof syncCfg.nuvioAnonKey === "string" ? syncCfg.nuvioAnonKey : "",
+                    nuvioServerUrl:
+                        typeof syncCfg.nuvioServerUrl === "string" ? syncCfg.nuvioServerUrl : "",
+                    omdbApiKey: typeof syncCfg.omdbApiKey === "string" ? syncCfg.omdbApiKey : "",
+                    omdbApiKeyPool: Array.isArray(syncCfg?.omdbApiKeyPool)
+                        ? syncCfg.omdbApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    ownAddress,
+                    publicBaseUrl:
+                        typeof syncCfg.publicBaseUrl === "string" ? syncCfg.publicBaseUrl : "",
+                    quotaAutopilot: syncCfg.quotaAutopilot === true,
+                    quotaAutopilotPercent: Number.isFinite(Number(syncCfg?.quotaAutopilotPercent))
+                        ? Number(syncCfg?.quotaAutopilotPercent)
+                        : 90,
+                    rpdbApiKey: typeof syncCfg.rpdbApiKey === "string" ? syncCfg.rpdbApiKey : "",
+                    rpdbApiKeyPool: Array.isArray(syncCfg?.rpdbApiKeyPool)
+                        ? syncCfg.rpdbApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    safe,
+                    simklClientId:
+                        typeof syncCfg.simklClientId === "string" ? syncCfg.simklClientId : "",
+                    tmdbApiKey: typeof syncCfg.tmdbApiKey === "string" ? syncCfg.tmdbApiKey : "",
+                    tmdbApiKeyPool: Array.isArray(syncCfg?.tmdbApiKeyPool)
+                        ? syncCfg.tmdbApiKeyPool.filter((k) => typeof k === "string")
+                        : [],
+                    traktClientId:
+                        typeof syncCfg.traktClientId === "string" ? syncCfg.traktClientId : "",
+                    useCustomFields:
+                        typeof syncCfg.useCustomFields === "boolean"
+                            ? syncCfg.useCustomFields
+                            : typeof syncCfg.useCustomNames === "boolean"
+                              ? syncCfg.useCustomNames
+                              : false,
+                    vaultCurrency:
+                        typeof syncCfg.vaultCurrency === "string" && syncCfg.vaultCurrency.trim()
+                            ? syncCfg.vaultCurrency.trim()
+                            : "USD",
+                    webhookUrl: syncCfg.webhookUrl || "",
+                };
+                return res.json(resp);
+            }
+            return res.json({
+                accountTimezone: DEFAULT_TIMEZONE,
+                accountTimezoneIsDefault: true,
+                autoplayTrailerStartMuted: true,
+                enableAutoplayTrailer: false,
+                enableAutoThemedCatalogs: false,
+                enabled: false,
+                enablePosterRatings: false,
+                enableReactions: true,
+                enableRecommendations: true,
+                enableWatchedIndicators: true,
+                enableWatchlist: true,
+                enableWatchProviders: true,
+                enableWatchTogether: true,
+                frequency: 0,
+                lastRecoveryKitExportAt: null,
+                mode: "normal",
+                notifyDigestEnabled: false,
+                notifyDigestFrequency: "daily",
+                notifyOnActivity: false,
+                notifyOnAddonHealth: false,
+                notifyOnAutomation: true,
+                notifyOnBackup: false,
+                notifyOnConnectionHealth: true,
+                notifyOnInvite: false,
+                notifyOnMosaic: false,
+                notifyOnProxyHealth: false,
+                notifyOnRecoveryKitStale: false,
+                notifyOnSync: false,
+                notifyOnUpdateAvailable: false,
+                notifyOnVault: false,
+                safe: true,
+                useCustomFields: false,
+                vaultCurrency: "USD",
+            });
+        } catch {
+            return res.status(500).json({ message: "Failed to read account sync settings" });
+        }
+    });
+
+    router.put("/account-sync", async (req, res) => {
+        try {
+            const {
+                enabled,
+                frequency,
+                mode,
+                unsafe,
+                safe,
+                webhookUrl,
+                useCustomFields,
+                useCustomNames,
+                notifyOnActivity,
+                notifyOnSync,
+                notifyOnInvite,
+                notifyOnVault,
+                notifyOnAddonHealth,
+                notifyOnBackup,
+                notifyOnProxyHealth,
+                notifyOnConnectionHealth,
+                notifyOnUpdateAvailable,
+                notifyOnRecoveryKitStale,
+                notifyOnMosaic,
+                notifyOnAutomation,
+                notifyDigestEnabled,
+                notifyDigestFrequency,
+                accountTimezone,
+                vaultCurrency,
+                enableWatchlist,
+                enableWatchedIndicators,
+                enableWatchTogether,
+                enableRecommendations,
+                enableAutoplayTrailer,
+                autoplayTrailerStartMuted,
+                enablePosterRatings,
+                enableReactions,
+                enableWatchProviders,
+                enableAutoThemedCatalogs,
+                tmdbApiKey,
+                mdblistApiKey,
+                rpdbApiKey,
+                omdbApiKey,
+                simklClientId,
+                traktClientId,
+                malClientId,
+                publicBaseUrl,
+                tmdbApiKeyBackup,
+                mdblistApiKeyBackup,
+                rpdbApiKeyBackup,
+                omdbApiKeyBackup,
+                nuvioServerUrl,
+                nuvioAnonKey,
+                lumiereDbUrl,
+            } = req.body || {};
+            // Support both useCustomFields (new) and useCustomNames (old) for backward compatibility
+            const useCustomFieldsValue =
+                useCustomFields === undefined ? useCustomNames : useCustomFields;
+            // The server sends the person's Nuvio sign-in to this address on every
+            // sync, so an address it may not reach is refused here rather than saved.
+            // Clearing it (an empty value) is always allowed.
+            if (typeof nuvioServerUrl === "string" && nuvioServerUrl.trim()) {
+                const problem =
+                    await require("../providers/supabase").backendAddressProblem(nuvioServerUrl);
+                if (problem) {
+                    return res.status(400).json({ message: problem });
+                }
+            }
+            if (INSTANCE_TYPE !== "public") {
+                await ensureDefaultAccount();
+                const safeMinutes = (() => {
+                    if (frequency === undefined || frequency === null) {
+                        return null;
+                    }
+                    if (typeof frequency === "number") {
+                        return frequency;
+                    }
+                    if (typeof frequency === "string") {
+                        const trimmed = frequency.trim().toLowerCase();
+                        if (trimmed.endsWith("d")) {
+                            const days = Number(trimmed.slice(0, -1));
+                            return Number.isFinite(days) && days > 0 ? days * 1440 : null;
+                        }
+                        if (trimmed.endsWith("h")) {
+                            const hours = Number(trimmed.slice(0, -1));
+                            return Number.isFinite(hours) && hours > 0 ? hours * 60 : null;
+                        }
+                        if (trimmed.endsWith("m")) {
+                            const mins = Number(trimmed.slice(0, -1));
+                            return Number.isFinite(mins) && mins >= 0 ? mins : null;
+                        }
+                        const raw = Number(trimmed);
+                        return Number.isFinite(raw) && raw >= 0 ? raw : null;
+                    }
+                    return null;
+                })();
+
+                if (safeMinutes !== null && safeMinutes < 0) {
+                    return res.status(400).json({ message: "Invalid frequency value" });
+                }
+
+                const nextMinutes =
+                    enabled === false ? 0 : (safeMinutes ?? readSyncFrequencyMinutes());
+                if (!Number.isFinite(nextMinutes) || nextMinutes < 0) {
+                    return res.status(400).json({ message: "Invalid minutes" });
+                }
+
+                writeSyncFrequencyMinutes(nextMinutes);
+
+                const current = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: DEFAULT_ACCOUNT_ID },
+                });
+                let syncCfg = current?.sync;
+                if (syncCfg && typeof syncCfg === "string") {
+                    try {
+                        syncCfg = JSON.parse(syncCfg);
+                    } catch {
+                        syncCfg = null;
+                    }
+                }
+                const baseCfg = syncCfg && typeof syncCfg === "object" ? syncCfg : {};
+                const nextCfg = {
+                    ...baseCfg,
+                    accountTimezone:
+                        typeof accountTimezone === "string" && accountTimezone.trim()
+                            ? accountTimezone.trim()
+                            : baseCfg.accountTimezone || DEFAULT_TIMEZONE,
+                    // Seasonal anime row in Discover (AniList). Off by default: a
+                    // household that doesn't watch anime should never see it.
+                    animeSeasonalRow:
+                        req.body?.animeSeasonalRow === undefined
+                            ? baseCfg.animeSeasonalRow === true
+                            : req.body.animeSeasonalRow === true,
+                    autoplayTrailerStartMuted:
+                        autoplayTrailerStartMuted === undefined
+                            ? typeof baseCfg.autoplayTrailerStartMuted === "boolean"
+                                ? baseCfg.autoplayTrailerStartMuted
+                                : true
+                            : !!autoplayTrailerStartMuted,
+                    autoUpdateEnabled:
+                        req.body?.autoUpdateEnabled === undefined
+                            ? baseCfg.autoUpdateEnabled === true
+                            : req.body.autoUpdateEnabled === true,
+                    autoUpdateHour: Number.isInteger(req.body?.autoUpdateHour)
+                        ? Math.min(23, Math.max(0, req.body.autoUpdateHour))
+                        : Number.isInteger(baseCfg.autoUpdateHour)
+                          ? baseCfg.autoUpdateHour
+                          : 4,
+                    enableAutoplayTrailer:
+                        enableAutoplayTrailer === undefined
+                            ? typeof baseCfg.enableAutoplayTrailer === "boolean"
+                                ? baseCfg.enableAutoplayTrailer
+                                : false
+                            : !!enableAutoplayTrailer,
+                    enableAutoThemedCatalogs:
+                        enableAutoThemedCatalogs === undefined
+                            ? typeof baseCfg.enableAutoThemedCatalogs === "boolean"
+                                ? baseCfg.enableAutoThemedCatalogs
+                                : false
+                            : !!enableAutoThemedCatalogs,
+                    enabled: enabled === undefined ? baseCfg.enabled !== false : !!enabled,
+                    enablePosterRatings:
+                        enablePosterRatings === undefined
+                            ? typeof baseCfg.enablePosterRatings === "boolean"
+                                ? baseCfg.enablePosterRatings
+                                : false
+                            : !!enablePosterRatings,
+                    enableReactions:
+                        enableReactions === undefined
+                            ? typeof baseCfg.enableReactions === "boolean"
+                                ? baseCfg.enableReactions
+                                : true
+                            : !!enableReactions,
+                    enableRecommendations:
+                        enableRecommendations === undefined
+                            ? typeof baseCfg.enableRecommendations === "boolean"
+                                ? baseCfg.enableRecommendations
+                                : true
+                            : !!enableRecommendations,
+                    enableWatchedIndicators:
+                        enableWatchedIndicators === undefined
+                            ? typeof baseCfg.enableWatchedIndicators === "boolean"
+                                ? baseCfg.enableWatchedIndicators
+                                : true
+                            : !!enableWatchedIndicators,
+                    enableWatchlist:
+                        enableWatchlist === undefined
+                            ? typeof baseCfg.enableWatchlist === "boolean"
+                                ? baseCfg.enableWatchlist
+                                : true
+                            : !!enableWatchlist,
+                    enableWatchProviders:
+                        enableWatchProviders === undefined
+                            ? typeof baseCfg.enableWatchProviders === "boolean"
+                                ? baseCfg.enableWatchProviders
+                                : true
+                            : !!enableWatchProviders,
+                    enableWatchTogether:
+                        enableWatchTogether === undefined
+                            ? typeof baseCfg.enableWatchTogether === "boolean"
+                                ? baseCfg.enableWatchTogether
+                                : true
+                            : !!enableWatchTogether,
+                    frequency:
+                        typeof frequency === "string" && frequency.trim()
+                            ? frequency.trim()
+                            : baseCfg.frequency || "0",
+                    keyHealth: (() => {
+                        const prevHealth =
+                            baseCfg.keyHealth && typeof baseCfg.keyHealth === "object"
+                                ? baseCfg.keyHealth
+                                : {};
+                        const next = { ...prevHealth };
+                        const touched = {
+                            mdblist: mdblistApiKey,
+                            omdb: omdbApiKey,
+                            rpdb: rpdbApiKey,
+                            tmdb: tmdbApiKey,
+                        };
+                        for (const [provider, incoming] of Object.entries(touched)) {
+                            if (
+                                incoming !== undefined &&
+                                (typeof incoming !== "string" || !incoming.trim())
+                            ) {
+                                delete next[provider];
+                            }
+                        }
+                        return next;
+                    })(),
+                    keyPoolAutoRetire:
+                        req.body?.keyPoolAutoRetire === undefined
+                            ? baseCfg.keyPoolAutoRetire === true
+                            : req.body.keyPoolAutoRetire === true,
+                    keyPoolQuotaWeighting:
+                        req.body?.keyPoolQuotaWeighting === undefined
+                            ? baseCfg.keyPoolQuotaWeighting === true
+                            : req.body.keyPoolQuotaWeighting === true,
+                    // The account's own LumiereDB (utils/lumiere.js), saved as just the
+                    // server's address whatever was pasted.
+                    lumiereDbUrl:
+                        lumiereDbUrl === undefined
+                            ? baseCfg.lumiereDbUrl || ""
+                            : normalizeLumiere(lumiereDbUrl),
+                    malClientId:
+                        malClientId === undefined
+                            ? baseCfg.malClientId || ""
+                            : typeof malClientId === "string"
+                              ? malClientId.trim()
+                              : "",
+                    // Optional MDBList API key for List import. Free from mdblist.com ->
+                    // Preferences -> API Access.
+                    mdblistApiKey:
+                        mdblistApiKey === undefined
+                            ? baseCfg.mdblistApiKey || ""
+                            : typeof mdblistApiKey === "string"
+                              ? mdblistApiKey.trim()
+                              : "",
+                    mdblistApiKeyBackup:
+                        mdblistApiKeyBackup === undefined
+                            ? baseCfg.mdblistApiKeyBackup || ""
+                            : typeof mdblistApiKeyBackup === "string"
+                              ? mdblistApiKeyBackup.trim()
+                              : "",
+                    // Key Pool extras - capped at 10, trimmed, blanks dropped.
+                    mdblistApiKeyPool: Array.isArray(req.body?.mdblistApiKeyPool)
+                        ? req.body.mdblistApiKeyPool
+                              .map((k) => (typeof k === "string" ? k.trim() : ""))
+                              .filter(Boolean)
+                              .slice(0, 10)
+                        : Array.isArray(baseCfg.mdblistApiKeyPool)
+                          ? baseCfg.mdblistApiKeyPool
+                          : [],
+                    mode:
+                        mode === "advanced"
+                            ? "advanced"
+                            : baseCfg.mode === "advanced"
+                              ? "advanced"
+                              : "normal",
+                    notifyDigestEnabled:
+                        notifyDigestEnabled === undefined
+                            ? baseCfg.notifyDigestEnabled === undefined
+                                ? false
+                                : baseCfg.notifyDigestEnabled
+                            : !!notifyDigestEnabled,
+                    notifyDigestFrequency:
+                        notifyDigestFrequency === "weekly"
+                            ? "weekly"
+                            : notifyDigestFrequency === "daily"
+                              ? "daily"
+                              : baseCfg.notifyDigestFrequency === "weekly"
+                                ? "weekly"
+                                : "daily",
+                    notifyOnActivity:
+                        notifyOnActivity === undefined
+                            ? baseCfg.notifyOnActivity === undefined
+                                ? false
+                                : baseCfg.notifyOnActivity
+                            : !!notifyOnActivity,
+                    notifyOnAddonHealth:
+                        notifyOnAddonHealth === undefined
+                            ? baseCfg.notifyOnAddonHealth === undefined
+                                ? false
+                                : baseCfg.notifyOnAddonHealth
+                            : !!notifyOnAddonHealth,
+                    notifyOnAutomation:
+                        notifyOnAutomation === undefined
+                            ? typeof baseCfg.notifyOnAutomation === "boolean"
+                                ? baseCfg.notifyOnAutomation
+                                : true
+                            : !!notifyOnAutomation,
+                    notifyOnBackup:
+                        notifyOnBackup === undefined
+                            ? baseCfg.notifyOnBackup === undefined
+                                ? false
+                                : baseCfg.notifyOnBackup
+                            : !!notifyOnBackup,
+                    notifyOnConnectionHealth:
+                        notifyOnConnectionHealth === undefined
+                            ? baseCfg.notifyOnConnectionHealth !== false
+                            : !!notifyOnConnectionHealth,
+                    notifyOnInvite:
+                        notifyOnInvite === undefined
+                            ? baseCfg.notifyOnInvite === undefined
+                                ? false
+                                : baseCfg.notifyOnInvite
+                            : !!notifyOnInvite,
+                    notifyOnMosaic:
+                        notifyOnMosaic === undefined
+                            ? baseCfg.notifyOnMosaic === undefined
+                                ? false
+                                : baseCfg.notifyOnMosaic
+                            : !!notifyOnMosaic,
+                    notifyOnProxyHealth:
+                        notifyOnProxyHealth === undefined
+                            ? baseCfg.notifyOnProxyHealth === undefined
+                                ? false
+                                : baseCfg.notifyOnProxyHealth
+                            : !!notifyOnProxyHealth,
+                    notifyOnRecoveryKitStale:
+                        notifyOnRecoveryKitStale === undefined
+                            ? baseCfg.notifyOnRecoveryKitStale === undefined
+                                ? false
+                                : baseCfg.notifyOnRecoveryKitStale
+                            : !!notifyOnRecoveryKitStale,
+                    notifyOnSync:
+                        notifyOnSync === undefined
+                            ? baseCfg.notifyOnSync === undefined
+                                ? false
+                                : baseCfg.notifyOnSync
+                            : !!notifyOnSync,
+                    notifyOnUpdateAvailable:
+                        notifyOnUpdateAvailable === undefined
+                            ? baseCfg.notifyOnUpdateAvailable === undefined
+                                ? false
+                                : baseCfg.notifyOnUpdateAvailable
+                            : !!notifyOnUpdateAvailable,
+                    notifyOnVault:
+                        notifyOnVault === undefined
+                            ? baseCfg.notifyOnVault === undefined
+                                ? false
+                                : baseCfg.notifyOnVault
+                            : !!notifyOnVault,
+                    nuvioAnonKey:
+                        nuvioAnonKey === undefined
+                            ? baseCfg.nuvioAnonKey || ""
+                            : typeof nuvioAnonKey === "string"
+                              ? nuvioAnonKey.trim()
+                              : "",
+                    nuvioServerUrl:
+                        nuvioServerUrl === undefined
+                            ? baseCfg.nuvioServerUrl || ""
+                            : typeof nuvioServerUrl === "string"
+                              ? nuvioServerUrl.trim().replace(/\/+$/, "")
+                              : "",
+                    // Optional OMDb key - free at omdbapi.com/apikey.aspx. Powers
+                    // Rotten Tomatoes/Metacritic ratings; per-account like the three
+                    // above it, so one account's key/quota isn't silently shared by
+                    // every other account on this instance.
+                    omdbApiKey:
+                        omdbApiKey === undefined
+                            ? baseCfg.omdbApiKey || ""
+                            : typeof omdbApiKey === "string"
+                              ? normalizeOmdbApiKey(omdbApiKey.trim())
+                              : "",
+                    omdbApiKeyBackup:
+                        omdbApiKeyBackup === undefined
+                            ? baseCfg.omdbApiKeyBackup || ""
+                            : typeof omdbApiKeyBackup === "string"
+                              ? omdbApiKeyBackup.trim()
+                              : "",
+                    // Key Pool extras - capped at 10, trimmed, blanks dropped.
+                    omdbApiKeyPool: Array.isArray(req.body?.omdbApiKeyPool)
+                        ? req.body.omdbApiKeyPool
+                              .map((k) => (typeof k === "string" ? k.trim() : ""))
+                              .filter(Boolean)
+                              .slice(0, 10)
+                        : Array.isArray(baseCfg.omdbApiKeyPool)
+                          ? baseCfg.omdbApiKeyPool
+                          : [],
+                    publicBaseUrl:
+                        publicBaseUrl === undefined
+                            ? baseCfg.publicBaseUrl || ""
+                            : typeof publicBaseUrl === "string"
+                              ? publicBaseUrl.trim().replace(/\/+$/, "")
+                              : "",
+                    // Quota autopilot: opt-in, off by default. Defers only BACKGROUND
+                    // metadata enrichment once the day's usage crosses the threshold,
+                    // so an evening never dies mid-browse with the allowance spent -
+                    // anything actively opened still fetches (see utils/omdb.js).
+                    quotaAutopilot:
+                        req.body?.quotaAutopilot === undefined
+                            ? baseCfg.quotaAutopilot === true
+                            : req.body.quotaAutopilot === true,
+                    quotaAutopilotPercent: Number.isFinite(Number(req.body?.quotaAutopilotPercent))
+                        ? Math.min(
+                              99,
+                              Math.max(50, Math.round(Number(req.body.quotaAutopilotPercent)))
+                          )
+                        : Number.isFinite(Number(baseCfg.quotaAutopilotPercent))
+                          ? Number(baseCfg.quotaAutopilotPercent)
+                          : 90,
+                    // Optional RPDB (RatingPosterDB) key - free tier works, upgrades
+                    // posters app-wide with rating-embedded art. Free at
+                    // ratingposterdb.com.
+                    rpdbApiKey:
+                        rpdbApiKey === undefined
+                            ? baseCfg.rpdbApiKey || ""
+                            : typeof rpdbApiKey === "string"
+                              ? rpdbApiKey.trim()
+                              : "",
+                    rpdbApiKeyBackup:
+                        rpdbApiKeyBackup === undefined
+                            ? baseCfg.rpdbApiKeyBackup || ""
+                            : typeof rpdbApiKeyBackup === "string"
+                              ? rpdbApiKeyBackup.trim()
+                              : "",
+                    // Key Pool extras - capped at 10, trimmed, blanks dropped.
+                    rpdbApiKeyPool: Array.isArray(req.body?.rpdbApiKeyPool)
+                        ? req.body.rpdbApiKeyPool
+                              .map((k) => (typeof k === "string" ? k.trim() : ""))
+                              .filter(Boolean)
+                              .slice(0, 10)
+                        : Array.isArray(baseCfg.rpdbApiKeyPool)
+                          ? baseCfg.rpdbApiKeyPool
+                          : [],
+                    safe:
+                        safe === undefined
+                            ? unsafe === undefined
+                                ? baseCfg.safe !== false
+                                : !unsafe
+                            : !!safe,
+                    simklClientId:
+                        simklClientId === undefined
+                            ? baseCfg.simklClientId || ""
+                            : typeof simklClientId === "string"
+                              ? simklClientId.trim()
+                              : "",
+                    // Optional TMDb API key for the cast/crew deep-dive. Trimmed; empty
+                    // string clears it (falls back to the TMDB_API_KEY env var, if any).
+                    tmdbApiKey:
+                        tmdbApiKey === undefined
+                            ? baseCfg.tmdbApiKey || ""
+                            : typeof tmdbApiKey === "string"
+                              ? tmdbApiKey.trim()
+                              : "",
+                    // Backup keys - same trim/blank-clears convention as the primaries.
+                    tmdbApiKeyBackup:
+                        tmdbApiKeyBackup === undefined
+                            ? baseCfg.tmdbApiKeyBackup || ""
+                            : typeof tmdbApiKeyBackup === "string"
+                              ? tmdbApiKeyBackup.trim()
+                              : "",
+                    // Drop this provider's stored health-check result the moment ITS
+                    // key is the one being blanked out in this save (not on every
+                    // save - `!== undefined` is only true for the single field this
+                    // particular request actually touched, see handleSaveSetting on
+                    // the client, which PUTs one field at a time). Otherwise a badge
+                    // saved from a key that's since been removed keeps showing
+                    // "Not working" against an empty field forever - confirmed live,
+                    // caught from a leftover test key never cleared this way.
+                    // Key Pool extras - capped at 10, trimmed, blanks dropped.
+                    tmdbApiKeyPool: Array.isArray(req.body?.tmdbApiKeyPool)
+                        ? req.body.tmdbApiKeyPool
+                              .map((k) => (typeof k === "string" ? k.trim() : ""))
+                              .filter(Boolean)
+                              .slice(0, 10)
+                        : Array.isArray(baseCfg.tmdbApiKeyPool)
+                          ? baseCfg.tmdbApiKeyPool
+                          : [],
+                    // Trakt Client ID - public LISTS only. Trakt's public list endpoints
+                    // need just a client id (no OAuth), which is why importing a list
+                    // works while a full account bridge does not: Trakt limits a free
+                    // account to ONE connected app, and burning that on SlickSync would
+                    // cost someone their existing Trakt app.
+                    traktClientId:
+                        traktClientId === undefined
+                            ? baseCfg.traktClientId || ""
+                            : typeof traktClientId === "string"
+                              ? traktClientId.trim()
+                              : "",
+                    useCustomFields:
+                        useCustomFieldsValue === undefined
+                            ? baseCfg.useCustomFields === undefined
+                                ? baseCfg.useCustomNames === undefined
+                                    ? false
+                                    : baseCfg.useCustomNames
+                                : baseCfg.useCustomFields
+                            : !!useCustomFieldsValue,
+                    vaultCurrency:
+                        typeof vaultCurrency === "string" && vaultCurrency.trim()
+                            ? vaultCurrency.trim().toUpperCase()
+                            : baseCfg.vaultCurrency || "USD",
+                    webhookUrl:
+                        webhookUrl === undefined ? baseCfg.webhookUrl || null : webhookUrl || null,
+                };
+
+                try {
+                    await prisma.appAccount.update({
+                        data: { sync: nextCfg },
+                        where: { id: DEFAULT_ACCOUNT_ID },
+                    });
+                } catch {
+                    await prisma.appAccount.update({
+                        data: { sync: JSON.stringify(nextCfg) },
+                        where: { id: DEFAULT_ACCOUNT_ID },
+                    });
+                }
+
+                const { reloadGroupAddons } = require("../routes/users");
+                const scopedWhere = require("../utils/helpers").scopedWhere;
+                const decryptLocal = require("../utils/encryption").decrypt;
+                const schedulerReq = { appAccountId: DEFAULT_ACCOUNT_ID };
+                scheduleSyncs(
+                    nextMinutes,
+                    prisma,
+                    getAccountId,
+                    scopedWhere,
+                    decryptLocal,
+                    reloadGroupAddons,
+                    schedulerReq,
+                    INSTANCE_TYPE
+                );
+                return res.json({ message: "Sync settings updated" });
+            }
+            // Load current config to preserve unspecified fields
+            const acc = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: req.appAccountId },
+            });
+            let current = acc?.sync || null;
+            if (current && typeof current === "string") {
+                try {
+                    current = JSON.parse(current);
+                } catch {
+                    current = null;
+                }
+            }
+            const base = current && typeof current === "object" ? current : {};
+
+            // Build partial update only for provided fields
+            const partial = {};
+            if (enabled !== undefined) {
+                partial.enabled = !!enabled;
+            }
+            if (frequency !== undefined) {
+                partial.frequency = String(frequency);
+            }
+            if (mode !== undefined) {
+                partial.mode = mode === "advanced" ? "advanced" : "normal";
+            }
+            if (safe !== undefined) {
+                partial.safe = !!safe;
+            } else if (unsafe !== undefined) {
+                partial.safe = !unsafe;
+            }
+            if (webhookUrl !== undefined) {
+                partial.webhookUrl = webhookUrl || null;
+            }
+            if (useCustomFieldsValue !== undefined) {
+                partial.useCustomFields = !!useCustomFieldsValue;
+            }
+            if (notifyOnActivity !== undefined) {
+                partial.notifyOnActivity = !!notifyOnActivity;
+            }
+            if (notifyOnSync !== undefined) {
+                partial.notifyOnSync = !!notifyOnSync;
+            }
+            if (notifyOnInvite !== undefined) {
+                partial.notifyOnInvite = !!notifyOnInvite;
+            }
+            if (notifyOnVault !== undefined) {
+                partial.notifyOnVault = !!notifyOnVault;
+            }
+            if (notifyOnAddonHealth !== undefined) {
+                partial.notifyOnAddonHealth = !!notifyOnAddonHealth;
+            }
+            if (notifyOnBackup !== undefined) {
+                partial.notifyOnBackup = !!notifyOnBackup;
+            }
+            if (notifyOnProxyHealth !== undefined) {
+                partial.notifyOnProxyHealth = !!notifyOnProxyHealth;
+            }
+            if (notifyOnConnectionHealth !== undefined) {
+                partial.notifyOnConnectionHealth = !!notifyOnConnectionHealth;
+            }
+            if (notifyOnUpdateAvailable !== undefined) {
+                partial.notifyOnUpdateAvailable = !!notifyOnUpdateAvailable;
+            }
+            if (notifyOnRecoveryKitStale !== undefined) {
+                partial.notifyOnRecoveryKitStale = !!notifyOnRecoveryKitStale;
+            }
+            if (notifyOnMosaic !== undefined) {
+                partial.notifyOnMosaic = !!notifyOnMosaic;
+            }
+            if (notifyOnAutomation !== undefined) {
+                partial.notifyOnAutomation = !!notifyOnAutomation;
+            }
+            if (notifyDigestEnabled !== undefined) {
+                partial.notifyDigestEnabled = !!notifyDigestEnabled;
+            }
+            if (notifyDigestFrequency !== undefined) {
+                partial.notifyDigestFrequency =
+                    notifyDigestFrequency === "weekly" ? "weekly" : "daily";
+            }
+            if (typeof accountTimezone === "string" && accountTimezone.trim()) {
+                partial.accountTimezone = accountTimezone.trim();
+            }
+            if (typeof vaultCurrency === "string" && vaultCurrency.trim()) {
+                partial.vaultCurrency = vaultCurrency.trim().toUpperCase();
+            }
+            if (enableWatchlist !== undefined) {
+                partial.enableWatchlist = !!enableWatchlist;
+            }
+            if (enableWatchedIndicators !== undefined) {
+                partial.enableWatchedIndicators = !!enableWatchedIndicators;
+            }
+            if (enableWatchTogether !== undefined) {
+                partial.enableWatchTogether = !!enableWatchTogether;
+            }
+            if (enableRecommendations !== undefined) {
+                partial.enableRecommendations = !!enableRecommendations;
+            }
+            if (enableAutoplayTrailer !== undefined) {
+                partial.enableAutoplayTrailer = !!enableAutoplayTrailer;
+            }
+            if (autoplayTrailerStartMuted !== undefined) {
+                partial.autoplayTrailerStartMuted = !!autoplayTrailerStartMuted;
+            }
+            if (enablePosterRatings !== undefined) {
+                partial.enablePosterRatings = !!enablePosterRatings;
+            }
+            if (enableReactions !== undefined) {
+                partial.enableReactions = !!enableReactions;
+            }
+            if (enableWatchProviders !== undefined) {
+                partial.enableWatchProviders = !!enableWatchProviders;
+            }
+            if (enableAutoThemedCatalogs !== undefined) {
+                partial.enableAutoThemedCatalogs = !!enableAutoThemedCatalogs;
+            }
+            if (tmdbApiKey !== undefined) {
+                partial.tmdbApiKey = typeof tmdbApiKey === "string" ? tmdbApiKey.trim() : "";
+            }
+            if (mdblistApiKey !== undefined) {
+                partial.mdblistApiKey =
+                    typeof mdblistApiKey === "string" ? mdblistApiKey.trim() : "";
+            }
+            if (rpdbApiKey !== undefined) {
+                partial.rpdbApiKey = typeof rpdbApiKey === "string" ? rpdbApiKey.trim() : "";
+            }
+            if (omdbApiKey !== undefined) {
+                partial.omdbApiKey =
+                    typeof omdbApiKey === "string" ? normalizeOmdbApiKey(omdbApiKey.trim()) : "";
+            }
+            if (simklClientId !== undefined) {
+                partial.simklClientId =
+                    typeof simklClientId === "string" ? simklClientId.trim() : "";
+            }
+            if (traktClientId !== undefined) {
+                partial.traktClientId =
+                    typeof traktClientId === "string" ? traktClientId.trim() : "";
+            }
+            if (malClientId !== undefined) {
+                partial.malClientId = typeof malClientId === "string" ? malClientId.trim() : "";
+            }
+            if (publicBaseUrl !== undefined) {
+                partial.publicBaseUrl =
+                    typeof publicBaseUrl === "string"
+                        ? publicBaseUrl.trim().replace(/\/+$/, "")
+                        : "";
+            }
+            // Trailing slash stripped on save so it can't produce `//rest/v1/...`
+            // downstream regardless of how it was typed.
+            if (nuvioServerUrl !== undefined) {
+                partial.nuvioServerUrl =
+                    typeof nuvioServerUrl === "string"
+                        ? nuvioServerUrl.trim().replace(/\/+$/, "")
+                        : "";
+            }
+            if (nuvioAnonKey !== undefined) {
+                partial.nuvioAnonKey = typeof nuvioAnonKey === "string" ? nuvioAnonKey.trim() : "";
+            }
+            if (lumiereDbUrl !== undefined) {
+                partial.lumiereDbUrl = normalizeLumiere(lumiereDbUrl);
+            }
+
+            const nextCfg = { ...base, ...partial };
+
+            // Persist JSON (Postgres) or stringified (SQLite)
+            try {
+                await prisma.appAccount.update({
+                    data: { sync: nextCfg },
+                    where: { id: req.appAccountId },
+                });
+            } catch {
+                await prisma.appAccount.update({
+                    data: { sync: JSON.stringify(nextCfg) },
+                    where: { id: req.appAccountId },
+                });
+            }
+            // Reschedule heap with new config (scheduler will re-seed on next scheduleSyncs call)
+            const { reloadGroupAddons } = require("../routes/users");
+            const scopedWhere = require("../utils/helpers").scopedWhere;
+            const decryptLocal = require("../utils/encryption").decrypt;
+            scheduleSyncs(
+                0,
+                prisma,
+                getAccountId,
+                scopedWhere,
+                decryptLocal,
+                reloadGroupAddons,
+                req,
+                INSTANCE_TYPE
+            ); // clear
+            scheduleSyncs(
+                1,
+                prisma,
+                getAccountId,
+                scopedWhere,
+                decryptLocal,
+                reloadGroupAddons,
+                req,
+                INSTANCE_TYPE
+            ); // re-seed every account; the frequency is read per account in public mode
+            return res.json({ message: "Account sync settings updated" });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to update account sync settings"),
+                message: "Failed to update account sync settings",
+            });
+        }
+    });
+
+    // Theme preferences (account-scoped, so a theme choice made on one device
+    // shows up on every other device signed into the same account). Stored on
+    // AppAccount.sync.themePref — no schema migration needed. The shape is
+    // deliberately loose (just JSON) so client-side additions (new fonts, extra
+    // color overrides) don't require a server update.
+    // How viewing is judged on this account - see utils/watchSettings.js.
+    router.get("/watch-tracking", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            const { getWatchSettings, DEFAULTS, LIMITS } = require("../utils/watchSettings");
+            return res.json({
+                ...(await getWatchSettings(prisma, accountId)),
+                defaults: DEFAULTS,
+                limits: LIMITS,
+            });
+        } catch {
+            return res.status(500).json({ message: "Failed to read watch tracking settings" });
+        }
+    });
+
+    router.put("/watch-tracking", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            if (INSTANCE_TYPE !== "public") {
+                await ensureDefaultAccount();
+            }
+            const {
+                normalize,
+                clearWatchSettings,
+                getWatchSettings,
+                DEFAULTS,
+                LIMITS,
+            } = require("../utils/watchSettings");
+            const acc = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+            let syncCfg = acc?.sync;
+            if (typeof syncCfg === "string") {
+                try {
+                    syncCfg = JSON.parse(syncCfg);
+                } catch {
+                    syncCfg = null;
+                }
+            }
+            if (!syncCfg || typeof syncCfg !== "object") {
+                syncCfg = {};
+            }
+            const watchTracking = normalize({
+                ...(syncCfg.watchTracking || {}),
+                ...(req.body || {}),
+            });
+            const nextCfg = { ...syncCfg, watchTracking };
+            try {
+                await prisma.appAccount.update({
+                    data: { sync: nextCfg },
+                    where: { id: accountId },
+                });
+            } catch {
+                await prisma.appAccount.update({
+                    data: { sync: JSON.stringify(nextCfg) },
+                    where: { id: accountId },
+                });
+            }
+            clearWatchSettings(accountId);
+            try {
+                require("../utils/continueWatching").invalidateContinueWatching(accountId);
+            } catch {
+                /* optional */
+            }
+            return res.json({
+                ...(await getWatchSettings(prisma, accountId)),
+                defaults: DEFAULTS,
+                limits: LIMITS,
+            });
+        } catch {
+            return res.status(500).json({ message: "Failed to save watch tracking settings" });
+        }
+    });
+
+    router.get("/theme-pref", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            if (INSTANCE_TYPE !== "public") {
+                await ensureDefaultAccount();
+            }
+            const acc = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+            let syncCfg = acc?.sync;
+            if (typeof syncCfg === "string") {
+                try {
+                    syncCfg = JSON.parse(syncCfg);
+                } catch {
+                    syncCfg = null;
+                }
+            }
+            const themePref =
+                syncCfg &&
+                typeof syncCfg === "object" &&
+                syncCfg.themePref &&
+                typeof syncCfg.themePref === "object"
+                    ? syncCfg.themePref
+                    : null;
+            return res.json({ themePref });
+        } catch {
+            return res.status(500).json({ message: "Failed to read theme preferences" });
+        }
+    });
+
+    router.put("/theme-pref", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            if (INSTANCE_TYPE !== "public") {
+                await ensureDefaultAccount();
+            }
+            const { themePref } = req.body || {};
+            if (themePref !== null && (typeof themePref !== "object" || Array.isArray(themePref))) {
+                return res.status(400).json({ message: "themePref must be an object or null" });
+            }
+            const acc = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+            let syncCfg = acc?.sync;
+            if (typeof syncCfg === "string") {
+                try {
+                    syncCfg = JSON.parse(syncCfg);
+                } catch {
+                    syncCfg = null;
+                }
+            }
+            if (!syncCfg || typeof syncCfg !== "object") {
+                syncCfg = {};
+            }
+            const nextCfg = { ...syncCfg, themePref: themePref || undefined };
+            try {
+                await prisma.appAccount.update({
+                    data: { sync: nextCfg },
+                    where: { id: accountId },
+                });
+            } catch {
+                await prisma.appAccount.update({
+                    data: { sync: JSON.stringify(nextCfg) },
+                    where: { id: accountId },
+                });
+            }
+            return res.json({ themePref });
+        } catch {
+            return res.status(500).json({ message: "Failed to save theme preferences" });
+        }
+    });
+
+    // POST /account-sync/discover-nuvio - point at a self-hosted Nuvio backend
+    // and let it configure itself from /.well-known/nuvio, rather than making
+    // the operator copy an anon key out of `./nuvio credentials` by hand.
+    //
+    // Returns the anon key it found so the UI can show what it's about to save
+    // - this is a publishable client key by design (it ships inside the Nuvio
+    // apps themselves), not a service-role secret, so surfacing it back to the
+    // admin who just typed the URL doesn't expose anything they don't have.
+    router.post("/account-sync/discover-nuvio", async (req, res) => {
+        try {
+            const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+            if (!url) {
+                return res.status(400).json({ error: "Enter the backend URL first", ok: false });
+            }
+            const { discoverNuvioBackend } = require("../providers/supabase");
+            const result = await discoverNuvioBackend(url);
+            // An address this server is not allowed to reach is a bad request, not
+            // a backend that failed to answer. `message` is what the page shows.
+            if (result?.refused) {
+                return res.status(400).json({ ...result, message: result.error });
+            }
+            return res.json(result);
+        } catch (error) {
+            console.error("Error discovering Nuvio backend:", error);
+            return res.status(500).json({ error: "Discovery failed", ok: false });
+        }
+    });
+
+    router.post("/account-sync/test-webhook", async (req, res) => {
+        try {
+            const providedUrl =
+                typeof req.body?.webhookUrl === "string" ? req.body.webhookUrl.trim() : "";
+            let targetUrl = providedUrl;
+
+            const readAccountWebhook = async (accountId) => {
+                const acc = await prisma.appAccount.findUnique({
+                    select: { sync: true },
+                    where: { id: accountId },
+                });
+                if (!acc) {
+                    return null;
+                }
+                let syncCfg = acc.sync;
+                if (typeof syncCfg === "string") {
+                    try {
+                        syncCfg = JSON.parse(syncCfg);
+                    } catch {
+                        syncCfg = null;
+                    }
+                }
+                if (syncCfg && typeof syncCfg === "object" && syncCfg.webhookUrl) {
+                    return String(syncCfg.webhookUrl);
+                }
+                return null;
+            };
+
+            if (!targetUrl) {
+                if (INSTANCE_TYPE === "public") {
+                    if (!req.appAccountId) {
+                        return res.status(401).json({ message: "Unauthorized" });
+                    }
+                    targetUrl = await readAccountWebhook(req.appAccountId);
+                } else {
+                    await ensureDefaultAccount();
+                    targetUrl = await readAccountWebhook(DEFAULT_ACCOUNT_ID);
+                }
+            }
+
+            if (!targetUrl) {
+                return res.status(400).json({ message: "No webhook URL configured" });
+            }
+
+            await postDiscord(targetUrl, "🔬 SlickSync test webhook message");
+            return res.json({ message: "Test message sent" });
+        } catch (e) {
+            console.error("Failed to send webhook test:", e);
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to send test message"),
+                message: "Failed to send test message",
+            });
+        }
+    });
+
+    // Manual sync trigger
+    router.post("/sync-now", async (req, res) => {
+        try {
+            const { syncGroupUsers } = require("../routes/groups");
+            const scopedWhere = require("../utils/helpers").scopedWhere;
+            const decryptLocal = require("../utils/encryption").decrypt;
+
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            const syncReq = { appAccountId: accountId, body: {}, headers: {} };
+
+            const groups = await prisma.group.findMany({
+                select: { id: true },
+                where: scopedWhere(syncReq, {}),
+            });
+
+            if (groups.length === 0) {
+                return res.json({
+                    failedGroups: 0,
+                    message: "No groups found to sync",
+                    syncedGroups: 0,
+                    totalGroups: 0,
+                });
+            }
+
+            let syncedGroups = 0;
+            let failedGroups = 0;
+
+            for (const group of groups) {
+                try {
+                    const result = await syncGroupUsers(
+                        prisma,
+                        getAccountId,
+                        scopedWhere,
+                        decryptLocal,
+                        group.id,
+                        syncReq
+                    );
+                    if (result?.error) {
+                        failedGroups++;
+                    } else {
+                        syncedGroups++;
+                    }
+                } catch {
+                    failedGroups++;
+                }
+            }
+
+            return res.json({
+                failedGroups,
+                message: "Sync completed",
+                syncedGroups,
+                totalGroups: groups.length,
+            });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to start sync"),
+                message: "Failed to start sync",
+            });
+        }
+    });
+
+    // API Key management (generate/revoke)
+    router.get("/account-api", async (req, res) => {
+        try {
+            const acc = await prisma.appAccount.findUnique({
+                select: { apiKeyHash: true },
+                where: { id: req.appAccountId },
+            });
+            if (!acc?.apiKeyHash) {
+                return res.json({ apiKey: null, hasKey: false });
+            }
+            // Decrypt using account-specific key (accountId + server key)
+            try {
+                const { getServerKey, aesGcmDecrypt } = require("../utils/encryption");
+                const serverKey = getServerKey();
+                const accountKey = require("node:crypto")
+                    .createHash("sha256")
+                    .update(Buffer.concat([Buffer.from(req.appAccountId || ""), serverKey]))
+                    .digest();
+                const decrypted = aesGcmDecrypt(accountKey, acc.apiKeyHash);
+                return res.json({ apiKey: decrypted, hasKey: true });
+            } catch {
+                // If decryption fails, key might be in old format - treat as no key
+                return res.json({ apiKey: null, hasKey: false });
+            }
+        } catch {
+            return res.status(500).json({ message: "Failed to read API key status" });
+        }
+    });
+
+    router.post("/account-api-key", async (req, res) => {
+        try {
+            if (!req.appAccountId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            const { generateApiKey } = require("../utils/apiKey");
+            const { getServerKey, aesGcmEncrypt } = require("../utils/encryption");
+            const key = generateApiKey();
+            // Encrypt using account-specific key (accountId + server key)
+            const serverKey = getServerKey();
+            const accountKey = require("node:crypto")
+                .createHash("sha256")
+                .update(Buffer.concat([Buffer.from(req.appAccountId || ""), serverKey]))
+                .digest();
+            const encrypted = aesGcmEncrypt(accountKey, key);
+            await prisma.appAccount.update({
+                data: { apiKeyHash: encrypted },
+                where: { id: req.appAccountId },
+            });
+            // Return the full key ONCE
+            return res.json({ apiKey: key });
+        } catch (e) {
+            console.error("Error generating API key:", e);
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to generate API key"),
+                message: "Failed to generate API key",
+            });
+        }
+    });
+
+    router.delete("/account-api-key", async (req, res) => {
+        try {
+            await prisma.appAccount.update({
+                data: { apiKeyHash: null },
+                where: { id: req.appAccountId },
+            });
+            return res.json({ message: "API key revoked" });
+        } catch {
+            return res.status(500).json({ message: "Failed to revoke API key" });
+        }
+    });
+
+    // AI Services (natural-language Catalog building - server/utils/nlCatalog.js).
+    // Storage is still a Vault entry underneath (category 'ai') - see
+    // nlCatalog.js's resolveAiCredentials comment for why that stays a real,
+    // rotatable Vault credential rather than a lightweight settings key like
+    // TMDb/MDBList/OMDb above. This is just a focused, Settings-native form
+    // for it: most people configuring one AI key don't need Vault's full
+    // generic entry form (name/provider/testType/cost/expiry/etc.) to get
+    // there, and having it live only in Vault with no explanation of what it
+    // powers was exactly the "does putting a key in Vault even do anything?"
+    // confusion this exists to fix. The entry is still fully visible/editable
+    // from Vault itself for anyone who wants that (rotation history, cost
+    // tracking, expiry reminders) - this doesn't replace Vault, just adds a
+    // clearer front door to the same underlying entry.
+    async function findAiVaultEntry(accountId) {
+        return prisma.vaultEntry.findFirst({
+            orderBy: [{ position: "asc" }, { updatedAt: "desc" }],
+            where: { accountId, category: "ai", isActive: true },
+        });
     }
-  })
 
-  // API Key management (generate/revoke)
-  router.get('/account-api', async (req, res) => {
-    try {
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { apiKeyHash: true } })
-      if (!acc?.apiKeyHash) {
-        return res.json({ hasKey: false, apiKey: null })
-      }
-      // Decrypt using account-specific key (accountId + server key)
-      try {
-        const { getServerKey, aesGcmDecrypt } = require('../utils/encryption')
-        const serverKey = getServerKey()
-        const accountKey = require('crypto').createHash('sha256').update(Buffer.concat([Buffer.from(req.appAccountId || ''), serverKey])).digest()
-        const decrypted = aesGcmDecrypt(accountKey, acc.apiKeyHash)
-        return res.json({ hasKey: true, apiKey: decrypted })
-      } catch (e) {
-        // If decryption fails, key might be in old format - treat as no key
-        return res.json({ hasKey: false, apiKey: null })
-      }
-    } catch {
-      return res.status(500).json({ message: 'Failed to read API key status' })
+    // GET /account-ai-services - status only, secret never returned (same
+    // pattern as /account-api above). lastCheckStatus/Message come from the
+    // real verification PUT performs on every save (see below) - "configured"
+    // alone used to be all this reported, which meant a garbage key showed
+    // exactly the same as a working one until someone actually tried the
+    // feature and it silently fell back to the keyword parser.
+    router.get("/account-ai-services", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const entry = await findAiVaultEntry(accountId);
+            if (!entry) {
+                return res.json({ configured: false });
+            }
+            let config = {};
+            try {
+                config = entry.testConfig ? JSON.parse(entry.testConfig) : {};
+            } catch {
+                config = {};
+            }
+            return res.json({
+                baseUrl: config.baseUrl || null,
+                configured: true,
+                lastCheckMessage: entry.lastCheckMessage || null,
+                lastCheckStatus: entry.lastCheckStatus || null,
+                model: config.model || null,
+            });
+        } catch (e) {
+            console.error("Error fetching AI services status:", e);
+            return res.status(500).json({ message: "Failed to fetch AI services status" });
+        }
+    });
+
+    // POST /account-ai-services/reveal - the real stored key, for the eye
+    // icon on Settings' AI Services field. Same CSRF-gated-POST-not-GET
+    // reasoning as vault.js's own /:id/reveal (not cacheable, never in
+    // referer headers) - this is the exact same underlying VaultEntry
+    // secret, just reached through the AI Services front door instead of
+    // needing the raw Vault entry id.
+    router.post("/account-ai-services/reveal", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const entry = await findAiVaultEntry(accountId);
+            if (!entry) {
+                return res.status(404).json({ message: "AI Services not configured" });
+            }
+            const decryptLocal = require("../utils/encryption").decrypt;
+            let secret;
+            try {
+                secret = decryptLocal(entry.encryptedSecret, req);
+            } catch {
+                return res.status(500).json({ message: "Failed to decrypt secret" });
+            }
+            res.json({ secret });
+        } catch (e) {
+            console.error("Error revealing AI services key:", e);
+            res.status(500).json({ message: "Failed to reveal AI services key" });
+        }
+    });
+
+    // POST /account-ai-services/list-models - live model list from the
+    // provider's own GET /models (the OpenAI-compatible endpoint every
+    // provider in this app's suggestion list implements), instead of a
+    // hardcoded guess. Hardcoded model names go stale fast (confirmed real
+    // case: gemini-2.0-flash, gpt-4o-mini, and llama-3.3-70b-versatile were
+    // ALL retired/deprecated by their providers since this feature's
+    // suggestions were written) - a live call is the only version of this
+    // that doesn't need updating every time a provider reshuffles its lineup.
+    // Takes { apiKey, baseUrl } from the form directly (not necessarily
+    // saved yet) so models can be browsed before committing; apiKey blank
+    // falls back to the already-saved key, same "leave blank to keep
+    // current" convention as the save endpoint itself.
+    router.post("/account-ai-services/list-models", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const { apiKey, baseUrl } = req.body || {};
+            let effectiveKey = typeof apiKey === "string" ? apiKey.trim() : "";
+            if (!effectiveKey) {
+                const entry = await findAiVaultEntry(accountId);
+                if (entry) {
+                    effectiveKey = decrypt(entry.encryptedSecret, req);
+                }
+            }
+            if (!effectiveKey) {
+                return res.status(400).json({ message: "No API key to list models with" });
+            }
+
+            const effectiveBaseUrl =
+                typeof baseUrl === "string" && baseUrl.trim()
+                    ? baseUrl.trim().replace(/\/+$/, "")
+                    : "https://api.openai.com/v1";
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+            let response;
+            try {
+                // Same address check as the chat calls and the Vault key check; a
+                // refusal comes back as a plain message through the catch below.
+                const { fetchAiModels } = require("../utils/vaultCheckers");
+                response = await fetchAiModels(effectiveBaseUrl, effectiveKey, controller.signal);
+            } finally {
+                clearTimeout(timeoutId);
+            }
+            if (!response.ok) {
+                return res
+                    .status(400)
+                    .json({ message: `Provider returned ${response.status} listing models` });
+            }
+            const data = await response.json().catch(() => null);
+            // OpenAI-compatible shape: { data: [{ id: "..." }, ...] }. Some
+            // providers (confirmed: Google's compat layer) instead return a bare
+            // array - handled either way rather than assuming one shape.
+            const rawList = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+            const models = rawList
+                .map((m) => (typeof m === "string" ? m : m?.id))
+                .filter((id) => typeof id === "string" && id.trim())
+                .sort();
+            return res.json({ models });
+        } catch (e) {
+            console.error("Error listing AI models:", e);
+            return res.status(400).json({ message: publicMessage(e, "Failed to list models") });
+        }
+    });
+
+    // Runs the real request the feature itself sends (nlCatalog.js's callAi,
+    // with a throwaway description) and writes the verdict onto the entry's
+    // existing lastCheckStatus/lastCheckMessage fields (VaultEntry already has
+    // these for every other category's checker - AI was just the one category
+    // that never actually used them, testType: 'manual' from the start).
+    async function verifyAndRecordAiServices(accountId, entry) {
+        const { resolveAiCredentials, callAi } = require("../utils/nlCatalog");
+        try {
+            const creds = await resolveAiCredentials(prisma, accountId, decrypt);
+            if (!creds) {
+                throw new Error("No credentials to verify");
+            }
+            await callAi("test", creds);
+            await prisma.vaultEntry.update({
+                data: { lastCheckedAt: new Date(), lastCheckMessage: null, lastCheckStatus: "ok" },
+                where: { id: entry.id },
+            });
+            return { lastCheckMessage: null, lastCheckStatus: "ok" };
+        } catch (err) {
+            const message = err?.message || "Verification failed";
+            await prisma.vaultEntry
+                .update({
+                    data: {
+                        lastCheckedAt: new Date(),
+                        lastCheckMessage: message,
+                        lastCheckStatus: "error",
+                    },
+                    where: { id: entry.id },
+                })
+                .catch(() => undefined); // best-effort - a failed status write must not turn a reported verification failure into a 500
+            return { lastCheckMessage: message, lastCheckStatus: "error" };
+        }
     }
-  })
 
-  router.post('/account-api-key', async (req, res) => {
-    try {
-      if (!req.appAccountId) {
-        return res.status(401).json({ message: 'Unauthorized' })
-      }
-      const { generateApiKey } = require('../utils/apiKey')
-      const { getServerKey, aesGcmEncrypt } = require('../utils/encryption')
-      const key = generateApiKey()
-      // Encrypt using account-specific key (accountId + server key)
-      const serverKey = getServerKey()
-      const accountKey = require('crypto').createHash('sha256').update(Buffer.concat([Buffer.from(req.appAccountId || ''), serverKey])).digest()
-      const encrypted = aesGcmEncrypt(accountKey, key)
-      await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { apiKeyHash: encrypted } })
-      // Return the full key ONCE
-      return res.json({ apiKey: key })
-    } catch (e) {
-      console.error('Error generating API key:', e)
-      return res.status(500).json({ message: 'Failed to generate API key', error: publicMessage(e, 'Failed to generate API key') })
-    }
-  })
+    // PUT /account-ai-services - create the entry on first save, update it
+    // (in place) on every save after. apiKey is optional on update (blank =
+    // keep the existing key, same convention as Vault's own PUT /:id) but
+    // required to create one in the first place. Verifies with a real request
+    // before responding, so "configured: true" always means "this was proven
+    // to work just now," not just "something got saved."
+    router.put("/account-ai-services", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const { apiKey, baseUrl, model } = req.body || {};
+            const trimmedKey = typeof apiKey === "string" ? apiKey.trim() : "";
+            const testConfig =
+                baseUrl || model
+                    ? JSON.stringify({
+                          baseUrl: (baseUrl || "").trim() || undefined,
+                          model: (model || "").trim() || undefined,
+                      })
+                    : null;
 
-  router.delete('/account-api-key', async (req, res) => {
-    try {
-      await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { apiKeyHash: null } })
-      return res.json({ message: 'API key revoked' })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to revoke API key' })
-    }
-  })
+            const existing = await findAiVaultEntry(accountId);
+            if (existing) {
+                const data = { testConfig, testType: "openai_compatible" };
+                if (trimmedKey) {
+                    data.encryptedSecret = encrypt(trimmedKey, req);
+                }
+                const updated = await prisma.vaultEntry.update({
+                    data,
+                    where: { id: existing.id },
+                });
+                const verdict = await verifyAndRecordAiServices(accountId, updated);
+                return res.json({ configured: true, ...verdict });
+            }
 
-  // AI Services (natural-language Catalog building - server/utils/nlCatalog.js).
-  // Storage is still a Vault entry underneath (category 'ai') - see
-  // nlCatalog.js's resolveAiCredentials comment for why that stays a real,
-  // rotatable Vault credential rather than a lightweight settings key like
-  // TMDb/MDBList/OMDb above. This is just a focused, Settings-native form
-  // for it: most people configuring one AI key don't need Vault's full
-  // generic entry form (name/provider/testType/cost/expiry/etc.) to get
-  // there, and having it live only in Vault with no explanation of what it
-  // powers was exactly the "does putting a key in Vault even do anything?"
-  // confusion this exists to fix. The entry is still fully visible/editable
-  // from Vault itself for anyone who wants that (rotation history, cost
-  // tracking, expiry reminders) - this doesn't replace Vault, just adds a
-  // clearer front door to the same underlying entry.
-  async function findAiVaultEntry(accountId) {
-    return prisma.vaultEntry.findFirst({
-      where: { accountId, category: 'ai', isActive: true },
-      orderBy: [{ position: 'asc' }, { updatedAt: 'desc' }],
-    })
-  }
+            if (!trimmedKey) {
+                return res.status(400).json({ message: "API key is required" });
+            }
+            const maxPositionEntry = await prisma.vaultEntry.findFirst({
+                orderBy: { position: "desc" },
+                select: { position: true },
+                where: { accountId, category: "ai" },
+            });
+            const created = await prisma.vaultEntry.create({
+                data: {
+                    accountId,
+                    category: "ai",
+                    encryptedSecret: encrypt(trimmedKey, req),
+                    name: "AI Services",
+                    position: (maxPositionEntry?.position ?? -1) + 1,
+                    secretLabel: "API Key",
+                    testConfig,
+                    testType: "openai_compatible",
+                },
+            });
+            const verdict = await verifyAndRecordAiServices(accountId, created);
+            return res.status(201).json({ configured: true, ...verdict });
+        } catch (e) {
+            console.error("Error saving AI services config:", e);
+            return res.status(500).json({ message: "Failed to save AI services config" });
+        }
+    });
 
-  // GET /account-ai-services - status only, secret never returned (same
-  // pattern as /account-api above). lastCheckStatus/Message come from the
-  // real verification PUT performs on every save (see below) - "configured"
-  // alone used to be all this reported, which meant a garbage key showed
-  // exactly the same as a working one until someone actually tried the
-  // feature and it silently fell back to the keyword parser.
-  router.get('/account-ai-services', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const entry = await findAiVaultEntry(accountId)
-      if (!entry) return res.json({ configured: false })
-      let config = {}
-      try { config = entry.testConfig ? JSON.parse(entry.testConfig) : {} } catch { config = {} }
-      return res.json({
-        configured: true,
-        baseUrl: config.baseUrl || null,
-        model: config.model || null,
-        lastCheckStatus: entry.lastCheckStatus || null,
-        lastCheckMessage: entry.lastCheckMessage || null,
-      })
-    } catch (e) {
-      console.error('Error fetching AI services status:', e)
-      return res.status(500).json({ message: 'Failed to fetch AI services status' })
-    }
-  })
+    // DELETE /account-ai-services - removes the underlying Vault entry entirely.
+    router.delete("/account-ai-services", async (req, res) => {
+        try {
+            const accountId = getAccountId(req) || "default";
+            const existing = await findAiVaultEntry(accountId);
+            if (existing) {
+                await prisma.vaultEntry.delete({ where: { id: existing.id } });
+            }
+            return res.json({ configured: false });
+        } catch (e) {
+            console.error("Error removing AI services config:", e);
+            return res.status(500).json({ message: "Failed to remove AI services config" });
+        }
+    });
 
-  // POST /account-ai-services/reveal - the real stored key, for the eye
-  // icon on Settings' AI Services field. Same CSRF-gated-POST-not-GET
-  // reasoning as vault.js's own /:id/reveal (not cacheable, never in
-  // referer headers) - this is the exact same underlying VaultEntry
-  // secret, just reached through the AI Services front door instead of
-  // needing the raw Vault entry id.
-  router.post('/account-ai-services/reveal', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const entry = await findAiVaultEntry(accountId)
-      if (!entry) return res.status(404).json({ message: 'AI Services not configured' })
-      const decrypt = require('../utils/encryption').decrypt
-      let secret
-      try { secret = decrypt(entry.encryptedSecret, req) } catch { return res.status(500).json({ message: 'Failed to decrypt secret' }) }
-      res.json({ secret })
-    } catch (e) {
-      console.error('Error revealing AI services key:', e)
-      res.status(500).json({ message: 'Failed to reveal AI services key' })
-    }
-  })
+    // 2FA (TOTP) - opt-in per account. See server/utils/twoFactor.js for the
+    // pending-challenge design that keeps the login-time verification step
+    // from ever looking like a real session token.
+    const twoFactor = require("../utils/twoFactor");
 
-  // POST /account-ai-services/list-models - live model list from the
-  // provider's own GET /models (the OpenAI-compatible endpoint every
-  // provider in this app's suggestion list implements), instead of a
-  // hardcoded guess. Hardcoded model names go stale fast (confirmed real
-  // case: gemini-2.0-flash, gpt-4o-mini, and llama-3.3-70b-versatile were
-  // ALL retired/deprecated by their providers since this feature's
-  // suggestions were written) - a live call is the only version of this
-  // that doesn't need updating every time a provider reshuffles its lineup.
-  // Takes { apiKey, baseUrl } from the form directly (not necessarily
-  // saved yet) so models can be browsed before committing; apiKey blank
-  // falls back to the already-saved key, same "leave blank to keep
-  // current" convention as the save endpoint itself.
-  router.post('/account-ai-services/list-models', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const { apiKey, baseUrl } = req.body || {}
-      let effectiveKey = typeof apiKey === 'string' ? apiKey.trim() : ''
-      if (!effectiveKey) {
-        const entry = await findAiVaultEntry(accountId)
-        if (entry) effectiveKey = decrypt(entry.encryptedSecret, req)
-      }
-      if (!effectiveKey) return res.status(400).json({ message: 'No API key to list models with' })
+    // GET /account-2fa - current status only, never the secret itself.
+    router.get("/account-2fa", async (req, res) => {
+        try {
+            const acc = await prisma.appAccount.findUnique({
+                select: { twoFactorEnabled: true },
+                where: { id: req.appAccountId },
+            });
+            return res.json({ enabled: !!acc?.twoFactorEnabled });
+        } catch {
+            return res.status(500).json({ message: "Failed to read 2FA status" });
+        }
+    });
 
-      const effectiveBaseUrl = (typeof baseUrl === 'string' && baseUrl.trim()) ? baseUrl.trim().replace(/\/+$/, '') : 'https://api.openai.com/v1'
+    // POST /account-2fa/setup - generates a new secret + QR, does NOT persist
+    // or enable anything yet. The client must round-trip the secret back to
+    // /account-2fa/enable along with a real code from it, proving the user
+    // actually scanned/saved it, before it's turned on.
+    router.post("/account-2fa/setup", async (req, res) => {
+        try {
+            const acc = await prisma.appAccount.findUnique({
+                select: { email: true, twoFactorEnabled: true, uuid: true },
+                where: { id: req.appAccountId },
+            });
+            if (acc?.twoFactorEnabled) {
+                return res.status(400).json({
+                    message: "2FA is already enabled - disable it first to set up a new device",
+                });
+            }
+            const secret = twoFactor.generateSecret();
+            const label = acc?.email || acc?.uuid || req.appAccountId;
+            const url = twoFactor.otpauthUrl(secret, label);
+            const qrCodeDataUrl = await twoFactor.qrCodeDataUrl(url);
+            return res.json({ otpauthUrl: url, qrCodeDataUrl, secret });
+        } catch (e) {
+            console.error("Error starting 2FA setup:", e);
+            return res.status(500).json({ message: "Failed to start 2FA setup" });
+        }
+    });
 
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 8000)
-      let response
-      try {
-        // Same address check as the chat calls and the Vault key check; a
-        // refusal comes back as a plain message through the catch below.
-        const { fetchAiModels } = require('../utils/vaultCheckers')
-        response = await fetchAiModels(effectiveBaseUrl, effectiveKey, controller.signal)
-      } finally {
-        clearTimeout(timeoutId)
-      }
-      if (!response.ok) {
-        return res.status(400).json({ message: `Provider returned ${response.status} listing models` })
-      }
-      const data = await response.json().catch(() => null)
-      // OpenAI-compatible shape: { data: [{ id: "..." }, ...] }. Some
-      // providers (confirmed: Google's compat layer) instead return a bare
-      // array - handled either way rather than assuming one shape.
-      const rawList = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
-      const models = rawList
-        .map((m) => (typeof m === 'string' ? m : m?.id))
-        .filter((id) => typeof id === 'string' && id.trim())
-        .sort()
-      return res.json({ models })
-    } catch (e) {
-      console.error('Error listing AI models:', e)
-      return res.status(400).json({ message: publicMessage(e, 'Failed to list models') })
-    }
-  })
+    // POST /account-2fa/enable { secret, code } - verifies the code against
+    // the secret the client got from /setup, then persists (encrypted) and
+    // turns 2FA on. Returns the backup codes in plaintext ONCE.
+    router.post("/account-2fa/enable", async (req, res) => {
+        try {
+            const { secret, code } = req.body || {};
+            if (!(secret && code)) {
+                return res.status(400).json({ message: "secret and code are required" });
+            }
+            if (!twoFactor.verifyTotp(secret, code)) {
+                return res.status(400).json({
+                    message: "Incorrect code - check your authenticator app and try again",
+                });
+            }
 
-  // Runs the real request the feature itself sends (nlCatalog.js's callAi,
-  // with a throwaway description) and writes the verdict onto the entry's
-  // existing lastCheckStatus/lastCheckMessage fields (VaultEntry already has
-  // these for every other category's checker - AI was just the one category
-  // that never actually used them, testType: 'manual' from the start).
-  async function verifyAndRecordAiServices(accountId, entry) {
-    const { resolveAiCredentials, callAi } = require('../utils/nlCatalog')
-    try {
-      const creds = await resolveAiCredentials(prisma, accountId, decrypt)
-      if (!creds) throw new Error('No credentials to verify')
-      await callAi('test', creds)
-      await prisma.vaultEntry.update({
-        where: { id: entry.id },
-        data: { lastCheckedAt: new Date(), lastCheckStatus: 'ok', lastCheckMessage: null },
-      })
-      return { lastCheckStatus: 'ok', lastCheckMessage: null }
-    } catch (err) {
-      const message = err?.message || 'Verification failed'
-      await prisma.vaultEntry.update({
-        where: { id: entry.id },
-        data: { lastCheckedAt: new Date(), lastCheckStatus: 'error', lastCheckMessage: message },
-      }).catch(() => {}) // best-effort - a failed status write must not turn a reported verification failure into a 500
-      return { lastCheckStatus: 'error', lastCheckMessage: message }
-    }
-  }
+            const backupCodes = twoFactor.generateBackupCodes();
+            const hashed = await twoFactor.hashBackupCodes(backupCodes);
+            await prisma.appAccount.update({
+                data: {
+                    twoFactorBackupCodes: JSON.stringify(hashed),
+                    twoFactorEnabled: true,
+                    twoFactorSecret: twoFactor.encryptSecret(req.appAccountId, secret),
+                },
+                where: { id: req.appAccountId },
+            });
+            return res.json({ backupCodes, enabled: true });
+        } catch (e) {
+            console.error("Error enabling 2FA:", e);
+            return res.status(500).json({ message: "Failed to enable 2FA" });
+        }
+    });
 
-  // PUT /account-ai-services - create the entry on first save, update it
-  // (in place) on every save after. apiKey is optional on update (blank =
-  // keep the existing key, same convention as Vault's own PUT /:id) but
-  // required to create one in the first place. Verifies with a real request
-  // before responding, so "configured: true" always means "this was proven
-  // to work just now," not just "something got saved."
-  router.put('/account-ai-services', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const { apiKey, baseUrl, model } = req.body || {}
-      const trimmedKey = typeof apiKey === 'string' ? apiKey.trim() : ''
-      const testConfig = (baseUrl || model)
-        ? JSON.stringify({ baseUrl: (baseUrl || '').trim() || undefined, model: (model || '').trim() || undefined })
-        : null
+    // POST /account-2fa/disable { code } - requires a valid TOTP or backup
+    // code, not just an active session, so a hijacked session alone can't
+    // turn off the second factor.
+    router.post("/account-2fa/disable", async (req, res) => {
+        try {
+            const { code } = req.body || {};
+            const acc = await prisma.appAccount.findUnique({
+                select: {
+                    twoFactorBackupCodes: true,
+                    twoFactorEnabled: true,
+                    twoFactorSecret: true,
+                },
+                where: { id: req.appAccountId },
+            });
+            if (!acc?.twoFactorEnabled) {
+                return res.status(400).json({ message: "2FA is not enabled" });
+            }
+            if (!code) {
+                return res.status(400).json({ message: "code is required" });
+            }
 
-      const existing = await findAiVaultEntry(accountId)
-      if (existing) {
-        const data = { testConfig, testType: 'openai_compatible' }
-        if (trimmedKey) data.encryptedSecret = encrypt(trimmedKey, req)
-        const updated = await prisma.vaultEntry.update({ where: { id: existing.id }, data })
-        const verdict = await verifyAndRecordAiServices(accountId, updated)
-        return res.json({ configured: true, ...verdict })
-      }
+            const secret = twoFactor.decryptSecret(req.appAccountId, acc.twoFactorSecret);
+            const validTotp = twoFactor.verifyTotp(secret, code);
+            let validBackup = false;
+            if (!validTotp && acc.twoFactorBackupCodes) {
+                const hashed = JSON.parse(acc.twoFactorBackupCodes);
+                validBackup = !!(await twoFactor.consumeBackupCode(hashed, code));
+            }
+            if (!(validTotp || validBackup)) {
+                return res.status(400).json({ message: "Incorrect code" });
+            }
 
-      if (!trimmedKey) {
-        return res.status(400).json({ message: 'API key is required' })
-      }
-      const maxPositionEntry = await prisma.vaultEntry.findFirst({
-        where: { accountId, category: 'ai' },
-        orderBy: { position: 'desc' },
-        select: { position: true },
-      })
-      const created = await prisma.vaultEntry.create({
-        data: {
-          accountId,
-          name: 'AI Services',
-          category: 'ai',
-          secretLabel: 'API Key',
-          encryptedSecret: encrypt(trimmedKey, req),
-          testType: 'openai_compatible',
-          testConfig,
-          position: (maxPositionEntry?.position ?? -1) + 1,
-        },
-      })
-      const verdict = await verifyAndRecordAiServices(accountId, created)
-      return res.status(201).json({ configured: true, ...verdict })
-    } catch (e) {
-      console.error('Error saving AI services config:', e)
-      return res.status(500).json({ message: 'Failed to save AI services config' })
-    }
-  })
+            await prisma.appAccount.update({
+                data: {
+                    twoFactorBackupCodes: null,
+                    twoFactorEnabled: false,
+                    twoFactorSecret: null,
+                },
+                where: { id: req.appAccountId },
+            });
+            return res.json({ enabled: false });
+        } catch (e) {
+            console.error("Error disabling 2FA:", e);
+            return res.status(500).json({ message: "Failed to disable 2FA" });
+        }
+    });
 
-  // DELETE /account-ai-services - removes the underlying Vault entry entirely.
-  router.delete('/account-ai-services', async (req, res) => {
-    try {
-      const accountId = getAccountId(req) || 'default'
-      const existing = await findAiVaultEntry(accountId)
-      if (existing) await prisma.vaultEntry.delete({ where: { id: existing.id } })
-      return res.json({ configured: false })
-    } catch (e) {
-      console.error('Error removing AI services config:', e)
-      return res.status(500).json({ message: 'Failed to remove AI services config' })
-    }
-  })
+    // POST /account-2fa/backup-codes { code } - same 2FA-gated pattern as
+    // disable above; invalidates every existing backup code (including
+    // unused ones) so an old leaked list stops working the moment new ones
+    // are generated.
+    router.post("/account-2fa/backup-codes", async (req, res) => {
+        try {
+            const { code } = req.body || {};
+            const acc = await prisma.appAccount.findUnique({
+                select: { twoFactorEnabled: true, twoFactorSecret: true },
+                where: { id: req.appAccountId },
+            });
+            if (!acc?.twoFactorEnabled) {
+                return res.status(400).json({ message: "2FA is not enabled" });
+            }
+            if (!code) {
+                return res.status(400).json({ message: "code is required" });
+            }
 
-  // 2FA (TOTP) - opt-in per account. See server/utils/twoFactor.js for the
-  // pending-challenge design that keeps the login-time verification step
-  // from ever looking like a real session token.
-  const twoFactor = require('../utils/twoFactor')
+            const secret = twoFactor.decryptSecret(req.appAccountId, acc.twoFactorSecret);
+            if (!twoFactor.verifyTotp(secret, code)) {
+                return res.status(400).json({ message: "Incorrect code" });
+            }
 
-  // GET /account-2fa - current status only, never the secret itself.
-  router.get('/account-2fa', async (req, res) => {
-    try {
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { twoFactorEnabled: true } })
-      return res.json({ enabled: !!acc?.twoFactorEnabled })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to read 2FA status' })
-    }
-  })
+            const backupCodes = twoFactor.generateBackupCodes();
+            const hashed = await twoFactor.hashBackupCodes(backupCodes);
+            await prisma.appAccount.update({
+                data: { twoFactorBackupCodes: JSON.stringify(hashed) },
+                where: { id: req.appAccountId },
+            });
+            return res.json({ backupCodes });
+        } catch (e) {
+            console.error("Error regenerating 2FA backup codes:", e);
+            return res.status(500).json({ message: "Failed to regenerate backup codes" });
+        }
+    });
 
-  // POST /account-2fa/setup - generates a new secret + QR, does NOT persist
-  // or enable anything yet. The client must round-trip the secret back to
-  // /account-2fa/enable along with a real code from it, proving the user
-  // actually scanned/saved it, before it's turned on.
-  router.post('/account-2fa/setup', async (req, res) => {
-    try {
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { email: true, uuid: true, twoFactorEnabled: true } })
-      if (acc?.twoFactorEnabled) return res.status(400).json({ message: '2FA is already enabled - disable it first to set up a new device' })
-      const secret = twoFactor.generateSecret()
-      const label = acc?.email || acc?.uuid || req.appAccountId
-      const url = twoFactor.otpauthUrl(secret, label)
-      const qrCodeDataUrl = await twoFactor.qrCodeDataUrl(url)
-      return res.json({ secret, otpauthUrl: url, qrCodeDataUrl })
-    } catch (e) {
-      console.error('Error starting 2FA setup:', e)
-      return res.status(500).json({ message: 'Failed to start 2FA setup' })
-    }
-  })
+    // Repair addons metadata (fill missing stremioAddonId and iconUrl from manifest)
+    // Scopes to current account when AUTH is enabled
+    router.post("/repair-addons", async (req, res) => {
+        try {
+            const whereScope =
+                INSTANCE_TYPE === "public" && req.appAccountId
+                    ? { accountId: req.appAccountId }
+                    : {};
+            const addons = await prisma.addon.findMany({ where: whereScope });
+            const { repairAddonsList } = require("../utils/repair");
+            const result = await repairAddonsList(
+                {
+                    encrypt: require("../utils/encryption").encrypt,
+                    filterManifestByCatalogs: require("../utils/stremio").filterManifestByCatalogs,
+                    filterManifestByResources:
+                        require("../utils/stremio").filterManifestByResources,
+                    getAccountDek,
+                    getDecryptedManifestUrl,
+                    INSTANCE_TYPE,
+                    manifestHash: require("../utils/stremio").manifestHash,
+                    prisma,
+                },
+                req,
+                addons
+            );
 
-  // POST /account-2fa/enable { secret, code } - verifies the code against
-  // the secret the client got from /setup, then persists (encrypted) and
-  // turns 2FA on. Returns the backup codes in plaintext ONCE.
-  router.post('/account-2fa/enable', async (req, res) => {
-    try {
-      const { secret, code } = req.body || {}
-      if (!secret || !code) return res.status(400).json({ message: 'secret and code are required' })
-      if (!twoFactor.verifyTotp(secret, code)) return res.status(400).json({ message: 'Incorrect code - check your authenticator app and try again' })
+            return res.json({ message: "Repair completed", ...result });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to repair addons"),
+                message: "Failed to repair addons",
+            });
+        }
+    });
 
-      const backupCodes = twoFactor.generateBackupCodes()
-      const hashed = await twoFactor.hashBackupCodes(backupCodes)
-      await prisma.appAccount.update({
-        where: { id: req.appAccountId },
-        data: {
-          twoFactorEnabled: true,
-          twoFactorSecret: twoFactor.encryptSecret(req.appAccountId, secret),
-          twoFactorBackupCodes: JSON.stringify(hashed),
-        },
-      })
-      return res.json({ enabled: true, backupCodes })
-    } catch (e) {
-      console.error('Error enabling 2FA:', e)
-      return res.status(500).json({ message: 'Failed to enable 2FA' })
-    }
-  })
+    // Addon health check settings endpoints
+    const {
+        getHealthCheckIntervalMinutes,
+        triggerManualHealthCheck,
+    } = require("../utils/addonHealthCheck");
 
-  // POST /account-2fa/disable { code } - requires a valid TOTP or backup
-  // code, not just an active session, so a hijacked session alone can't
-  // turn off the second factor.
-  router.post('/account-2fa/disable', async (req, res) => {
-    try {
-      const { code } = req.body || {}
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { twoFactorEnabled: true, twoFactorSecret: true, twoFactorBackupCodes: true } })
-      if (!acc?.twoFactorEnabled) return res.status(400).json({ message: '2FA is not enabled' })
-      if (!code) return res.status(400).json({ message: 'code is required' })
+    // Get health check interval setting
+    router.get("/addon-health-check", async (_req, res) => {
+        try {
+            const intervalMinutes = getHealthCheckIntervalMinutes();
+            return res.json({
+                enabled: intervalMinutes >= 1,
+                intervalMinutes,
+            });
+        } catch {
+            return res.status(500).json({ message: "Failed to read health check settings" });
+        }
+    });
 
-      const secret = twoFactor.decryptSecret(req.appAccountId, acc.twoFactorSecret)
-      const validTotp = twoFactor.verifyTotp(secret, code)
-      let validBackup = false
-      if (!validTotp && acc.twoFactorBackupCodes) {
-        const hashed = JSON.parse(acc.twoFactorBackupCodes)
-        validBackup = !!(await twoFactor.consumeBackupCode(hashed, code))
-      }
-      if (!validTotp && !validBackup) return res.status(400).json({ message: 'Incorrect code' })
+    // Update health check interval (requires restart to take effect)
+    router.put("/addon-health-check", async (req, res) => {
+        try {
+            const { intervalMinutes } = req.body || {};
 
-      await prisma.appAccount.update({
-        where: { id: req.appAccountId },
-        data: { twoFactorEnabled: false, twoFactorSecret: null, twoFactorBackupCodes: null },
-      })
-      return res.json({ enabled: false })
-    } catch (e) {
-      console.error('Error disabling 2FA:', e)
-      return res.status(500).json({ message: 'Failed to disable 2FA' })
-    }
-  })
+            if (intervalMinutes === undefined) {
+                return res.status(400).json({ message: "intervalMinutes is required" });
+            }
 
-  // POST /account-2fa/backup-codes { code } - same 2FA-gated pattern as
-  // disable above; invalidates every existing backup code (including
-  // unused ones) so an old leaked list stops working the moment new ones
-  // are generated.
-  router.post('/account-2fa/backup-codes', async (req, res) => {
-    try {
-      const { code } = req.body || {}
-      const acc = await prisma.appAccount.findUnique({ where: { id: req.appAccountId }, select: { twoFactorEnabled: true, twoFactorSecret: true } })
-      if (!acc?.twoFactorEnabled) return res.status(400).json({ message: '2FA is not enabled' })
-      if (!code) return res.status(400).json({ message: 'code is required' })
+            const parsed = Number.parseInt(intervalMinutes, 10);
+            if (Number.isNaN(parsed) || parsed < 0) {
+                return res.status(400).json({ message: "Invalid intervalMinutes value" });
+            }
 
-      const secret = twoFactor.decryptSecret(req.appAccountId, acc.twoFactorSecret)
-      if (!twoFactor.verifyTotp(secret, code)) return res.status(400).json({ message: 'Incorrect code' })
+            // Store in environment variable for now
+            // In production, this would ideally be stored in the database
+            process.env.ADDON_HEALTH_CHECK_INTERVAL_MINUTES = String(parsed);
 
-      const backupCodes = twoFactor.generateBackupCodes()
-      const hashed = await twoFactor.hashBackupCodes(backupCodes)
-      await prisma.appAccount.update({ where: { id: req.appAccountId }, data: { twoFactorBackupCodes: JSON.stringify(hashed) } })
-      return res.json({ backupCodes })
-    } catch (e) {
-      console.error('Error regenerating 2FA backup codes:', e)
-      return res.status(500).json({ message: 'Failed to regenerate backup codes' })
-    }
-  })
+            return res.json({
+                enabled: parsed >= 1,
+                intervalMinutes: parsed,
+                message: "Health check interval updated. Restart server to apply changes.",
+            });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to update health check settings"),
+                message: "Failed to update health check settings",
+            });
+        }
+    });
 
-  // Repair addons metadata (fill missing stremioAddonId and iconUrl from manifest)
-  // Scopes to current account when AUTH is enabled
-  router.post('/repair-addons', async (req, res) => {
-    try {
-      const whereScope = INSTANCE_TYPE === 'public' && req.appAccountId ? { accountId: req.appAccountId } : {}
-      const addons = await prisma.addon.findMany({ where: whereScope })
-      const { repairAddonsList } = require('../utils/repair')
-      const result = await repairAddonsList({
-        prisma,
-        INSTANCE_TYPE,
-        getAccountDek,
-        getDecryptedManifestUrl,
-        filterManifestByResources: require('../utils/stremio').filterManifestByResources,
-        filterManifestByCatalogs: require('../utils/stremio').filterManifestByCatalogs,
-        manifestHash: require('../utils/stremio').manifestHash,
-        encrypt: require('../utils/encryption').encrypt
-      }, req, addons)
+    // Trigger manual health check
+    router.post("/addon-health-check/now", async (req, res) => {
+        try {
+            // Run in background
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            triggerManualHealthCheck(prisma, accountId).catch((e) =>
+                console.warn("[AddonHealthCheck] Manual check failed:", e?.message)
+            );
 
-      return res.json({ message: 'Repair completed', ...result })
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to repair addons', error: publicMessage(e, 'Failed to repair addons') })
-    }
-  })
+            return res.json({ message: "Health check started" });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to start health check"),
+                message: "Failed to start health check",
+            });
+        }
+    });
 
-  // Addon health check settings endpoints
-  const { 
-    getHealthCheckIntervalMinutes,
-    triggerManualHealthCheck 
-  } = require('../utils/addonHealthCheck');
+    // GET /settings/setup-status - what an instance has and hasn't been set up
+    // with yet, in one call.
+    //
+    // Every fact here was already discoverable, but only by opening five
+    // different pages and knowing what to look for - which is precisely what a
+    // new operator can't do. Aggregated server-side rather than assembled from
+    // five client requests so the checklist renders in one round-trip and can't
+    // half-populate.
+    //
+    // Deliberately reports FACTS, not a score or a nag: each item says what is
+    // or isn't configured and where to go. Nothing here is required for
+    // SlickSync to work, and the UI treats it as a checklist you can dismiss.
+    router.get("/setup-status", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
 
-  // Get health check interval setting
-  router.get('/addon-health-check', async (req, res) => {
-    try {
-      const intervalMinutes = getHealthCheckIntervalMinutes();
-      return res.json({ 
-        enabled: intervalMinutes >= 1,
-        intervalMinutes 
-      });
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to read health check settings' });
-    }
-  });
+            const account = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+            let cfg = account?.sync;
+            if (typeof cfg === "string") {
+                try {
+                    cfg = JSON.parse(cfg);
+                } catch {
+                    cfg = null;
+                }
+            }
+            if (!cfg || typeof cfg !== "object") {
+                cfg = {};
+            }
 
-  // Update health check interval (requires restart to take effect)
-  router.put('/addon-health-check', async (req, res) => {
-    try {
-      const { intervalMinutes } = req.body || {};
-      
-      if (intervalMinutes === undefined) {
-        return res.status(400).json({ message: 'intervalMinutes is required' });
-      }
-      
-      const parsed = parseInt(intervalMinutes, 10);
-      if (isNaN(parsed) || parsed < 0) {
-        return res.status(400).json({ message: 'Invalid intervalMinutes value' });
-      }
-      
-      // Store in environment variable for now
-      // In production, this would ideally be stored in the database
-      process.env.ADDON_HEALTH_CHECK_INTERVAL_MINUTES = String(parsed);
-      
-      return res.json({ 
-        message: 'Health check interval updated. Restart server to apply changes.',
-        intervalMinutes: parsed,
-        enabled: parsed >= 1
-      });
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to update health check settings', error: publicMessage(e, 'Failed to update health check settings') });
-    }
-  });
+            const [userCount, addonCount, vaultCount, pushCount] = await Promise.all([
+                prisma.user.count({ where: { accountId } }),
+                prisma.addon.count({ where: { accountId } }),
+                prisma.vaultEntry.count({ where: { accountId } }).catch(() => 0),
+                prisma.pushSubscription.count({ where: { accountId } }).catch(() => 0),
+            ]);
 
-  // Trigger manual health check
-  router.post('/addon-health-check/now', async (req, res) => {
-    try {
-      // Run in background
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID;
-      triggerManualHealthCheck(prisma, accountId).catch((e) => console.warn('[AddonHealthCheck] Manual check failed:', e?.message));
-      
-      return res.json({ message: 'Health check started' });
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to start health check', error: publicMessage(e, 'Failed to start health check') });
-    }
-  });
+            let backupTargetConfigured = false;
+            try {
+                const { getSettings } = require("../utils/backupTargets");
+                const t = getSettings();
+                backupTargetConfigured = !!(t?.type && t.type !== "none");
+            } catch {
+                /* targets file absent - simply not configured */
+            }
 
-  // GET /settings/setup-status - what an instance has and hasn't been set up
-  // with yet, in one call.
-  //
-  // Every fact here was already discoverable, but only by opening five
-  // different pages and knowing what to look for - which is precisely what a
-  // new operator can't do. Aggregated server-side rather than assembled from
-  // five client requests so the checklist renders in one round-trip and can't
-  // half-populate.
-  //
-  // Deliberately reports FACTS, not a score or a nag: each item says what is
-  // or isn't configured and where to go. Nothing here is required for
-  // SlickSync to work, and the UI treats it as a checklist you can dismiss.
-  router.get('/setup-status', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
+            // Any notification type being on counts: the point is "will this
+            // instance ever tell you anything", not which specific types.
+            const anyNotifications = [
+                "notifyOnActivity",
+                "notifyOnSync",
+                "notifyOnInvite",
+                "notifyOnVault",
+                "notifyOnAddonHealth",
+                "notifyOnBackup",
+                "notifyOnProxyHealth",
+                "notifyOnUpdateAvailable",
+                "notifyOnMosaic",
+            ].some((k) => cfg[k] === true);
 
-      const account = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-      let cfg = account?.sync
-      if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-      if (!cfg || typeof cfg !== 'object') cfg = {}
+            const automationCount = await prisma.automationRule
+                .count({ where: { accountId } })
+                .catch(() => 0);
 
-      const [userCount, addonCount, vaultCount, pushCount] = await Promise.all([
-        prisma.user.count({ where: { accountId } }),
-        prisma.addon.count({ where: { accountId } }),
-        prisma.vaultEntry.count({ where: { accountId } }).catch(() => 0),
-        prisma.pushSubscription.count({ where: { accountId } }).catch(() => 0),
-      ])
+            return res.json({
+                addons: { count: addonCount, done: addonCount > 0 },
+                automation: { count: automationCount, done: automationCount > 0 },
+                notifications: { done: anyNotifications || pushCount > 0, pushDevices: pushCount },
+                offsiteBackup: { done: backupTargetConfigured },
+                recoveryKit: {
+                    done: !!cfg.lastRecoveryKitExportAt,
+                    lastExportAt: cfg.lastRecoveryKitExportAt || null,
+                },
+                // accountTimezoneIsDefault is computed on read elsewhere, not stored -
+                // derived the same way here rather than looking for a field that
+                // never exists in the raw config.
+                timezone: {
+                    done: !!(typeof cfg.accountTimezone === "string" && cfg.accountTimezone.trim()),
+                },
+                users: { count: userCount, done: userCount > 0 },
+                vault: { count: vaultCount, done: vaultCount > 0 },
+            });
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "Failed to read setup status") });
+        }
+    });
 
-      let backupTargetConfigured = false
-      try {
-        const { getSettings } = require('../utils/backupTargets')
-        const t = getSettings()
-        backupTargetConfigured = !!(t && t.type && t.type !== 'none')
-      } catch { /* targets file absent - simply not configured */ }
+    // Trash - recently deleted catalogs and addons, restorable for 30 days.
+    // See utils/trash.js for why this is an archive table rather than
+    // deletedAt columns.
+    router.get("/trash", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { listTrash } = require("../utils/trash");
+            return res.json(await listTrash(prisma, accountId));
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "Failed to read trash") });
+        }
+    });
 
-      // Any notification type being on counts: the point is "will this
-      // instance ever tell you anything", not which specific types.
-      const anyNotifications = [
-        'notifyOnActivity', 'notifyOnSync', 'notifyOnInvite', 'notifyOnVault',
-        'notifyOnAddonHealth', 'notifyOnBackup', 'notifyOnProxyHealth',
-        'notifyOnUpdateAvailable', 'notifyOnMosaic',
-      ].some((k) => cfg[k] === true)
+    router.post("/trash/:id/restore", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { restoreTrashItem } = require("../utils/trash");
+            return res.json(await restoreTrashItem(prisma, accountId, req.params.id));
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "Restore failed") });
+        }
+    });
 
-      const automationCount = await prisma.automationRule.count({ where: { accountId } }).catch(() => 0)
+    // Permanent - this is the one delete with no undo behind it, which is the
+    // point of it being a separate, explicit action.
+    router.delete("/trash/:id", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { purgeTrashItem } = require("../utils/trash");
+            await purgeTrashItem(prisma, accountId, req.params.id);
+            return res.json({ success: true });
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "Failed to empty that item") });
+        }
+    });
 
-      return res.json({
-        users: { done: userCount > 0, count: userCount },
-        addons: { done: addonCount > 0, count: addonCount },
-        notifications: { done: anyNotifications || pushCount > 0, pushDevices: pushCount },
-        vault: { done: vaultCount > 0, count: vaultCount },
-        offsiteBackup: { done: backupTargetConfigured },
-        recoveryKit: { done: !!cfg.lastRecoveryKitExportAt, lastExportAt: cfg.lastRecoveryKitExportAt || null },
-        automation: { done: automationCount > 0, count: automationCount },
-        // accountTimezoneIsDefault is computed on read elsewhere, not stored -
-        // derived the same way here rather than looking for a field that
-        // never exists in the raw config.
-        timezone: { done: !!(typeof cfg.accountTimezone === 'string' && cfg.accountTimezone.trim()) },
-      })
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'Failed to read setup status') })
-    }
-  })
+    // GET /settings/history-scan - read-only check for watch-history records
+    // that are provably wrong (see utils/historyDoctor.js). Never writes.
+    router.get("/history-scan", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { scanHistory } = require("../utils/historyDoctor");
+            return res.json(await scanHistory(prisma, accountId));
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "History scan failed") });
+        }
+    });
 
-  // Trash - recently deleted catalogs and addons, restorable for 30 days.
-  // See utils/trash.js for why this is an archive table rather than
-  // deletedAt columns.
-  router.get('/trash', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { listTrash } = require('../utils/trash')
-      return res.json(await listTrash(prisma, accountId))
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'Failed to read trash') })
-    }
-  })
+    // POST /settings/history-repair - deletes what a FRESH scan identifies.
+    // Re-scans server-side rather than accepting row ids from the client, so a
+    // stale page cannot ask this to delete rows that are no longer findings.
+    router.post("/history-repair", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            const { repairHistory } = require("../utils/historyDoctor");
+            const kinds = Array.isArray(req.body?.kinds) ? req.body.kinds : null;
+            return res.json(await repairHistory(prisma, accountId, kinds));
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "History repair failed") });
+        }
+    });
 
-  router.post('/trash/:id/restore', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { restoreTrashItem } = require('../utils/trash')
-      return res.json(await restoreTrashItem(prisma, accountId, req.params.id))
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'Restore failed') })
-    }
-  })
+    // GET /settings/lumiere-status - whether this account's LumiereDB is up:
+    // ready, still building its index, can't be reached, or not LumiereDB.
+    router.get("/lumiere-status", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            if (!accountId) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            if (INSTANCE_TYPE === "public") {
+                return res.json({
+                    address: "",
+                    message: "LumiereDB is for self-hosted instances",
+                    state: "off",
+                });
+            }
+            const { lumiereAddress, lumiereStatus } = require("../utils/lumiere");
+            const base = await lumiereAddress(prisma, accountId);
+            const status = await lumiereStatus(base, { fresh: req.query.fresh === "1" });
+            // Never echo a user name and password someone put in the address.
+            let shown = "";
+            try {
+                if (base) {
+                    const u = new URL(base);
+                    u.username = "";
+                    u.password = "";
+                    shown = u.toString().replace(/\/+$/, "");
+                }
+            } catch {
+                // Keep the original address when it cannot be normalized.
+            }
+            return res.json({ ...status, address: shown });
+        } catch (e) {
+            return res.status(500).json({ error: publicMessage(e, "Could not check LumiereDB") });
+        }
+    });
 
-  // Permanent - this is the one delete with no undo behind it, which is the
-  // point of it being a separate, explicit action.
-  router.delete('/trash/:id', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { purgeTrashItem } = require('../utils/trash')
-      await purgeTrashItem(prisma, accountId, req.params.id)
-      return res.json({ success: true })
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'Failed to empty that item') })
-    }
-  })
+    // POST /settings/check-keys - on-demand validity check for the four
+    // metadata-provider keys (TMDb/OMDb/MDBList/RPDB), same idea as Vault's
+    // "Test" button on a credential entry. Checks whichever of the four
+    // actually have a key configured for this account (own Settings value,
+    // falling back to the instance's env var - the same resolution every
+    // other use of these keys already follows) and persists the results into
+    // the account's own sync JSON so GET /account-sync can show them without
+    // re-checking on every page load. Also runs automatically once a day -
+    // see utils/metadataKeyHealth.js's scheduler wiring in index.js - this
+    // route exists for "check right now" rather than waiting for that.
+    router.post("/check-keys", async (req, res) => {
+        try {
+            const accountId = INSTANCE_TYPE === "public" ? req.appAccountId : DEFAULT_ACCOUNT_ID;
+            const { checkAndPersistAccountKeys } = require("../utils/metadataKeyHealth");
+            // Optional body {provider} narrows to one key - the save-time check
+            // for a single edited field. Notifications stay off for those: a key
+            // someone is mid-way through correcting should not fire "key broken"
+            // alerts on each attempt; the full check and the daily sweep notify.
+            const only = ["tmdb", "omdb", "mdblist", "rpdb"].includes(req.body?.provider)
+                ? req.body.provider
+                : null;
+            const keyHealth = await checkAndPersistAccountKeys(prisma, accountId, {
+                notify: !only,
+                only,
+            });
+            return res.json({ keyHealth });
+        } catch (e) {
+            return res.status(500).json({
+                error: publicMessage(e, "Failed to check keys"),
+                message: "Failed to check keys",
+            });
+        }
+    });
 
-  // GET /settings/history-scan - read-only check for watch-history records
-  // that are provably wrong (see utils/historyDoctor.js). Never writes.
-  router.get('/history-scan', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { scanHistory } = require('../utils/historyDoctor')
-      return res.json(await scanHistory(prisma, accountId))
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'History scan failed') })
-    }
-  })
+    // POST /settings/delete-account - self-service, irreversible. Public
+    // multi-tenant mode only: private mode's "account" is the whole shared
+    // instance, not a personal one a user should be able to wipe from a
+    // settings toggle. Always deletes req.appAccountId (the caller's own,
+    // resolved by the auth middleware from their session) - never an id from
+    // the request body, so there is no way to target another account.
+    router.post("/delete-account", async (req, res) => {
+        try {
+            if (INSTANCE_TYPE !== "public") {
+                return res.status(403).json({
+                    message:
+                        "Self-service account deletion is only available in public (multi-tenant) mode.",
+                });
+            }
+            if (!req.appAccountId) {
+                return res.status(401).json({ message: "Not signed in" });
+            }
+            const { deleteAccountCascade } = require("../utils/accountDeletion");
+            await deleteAccountCascade(prisma, req.appAccountId);
+            return res.json({ deleted: true });
+        } catch (e) {
+            if (e.notFound) {
+                return res.status(404).json({ message: "Account not found" });
+            }
+            console.error("[Settings] Failed to delete account:", e?.message);
+            return res.status(500).json({ message: "Failed to delete account" });
+        }
+    });
 
-  // POST /settings/history-repair - deletes what a FRESH scan identifies.
-  // Re-scans server-side rather than accepting row ids from the client, so a
-  // stale page cannot ask this to delete rows that are no longer findings.
-  router.post('/history-repair', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      const { repairHistory } = require('../utils/historyDoctor')
-      const kinds = Array.isArray(req.body?.kinds) ? req.body.kinds : null
-      return res.json(await repairHistory(prisma, accountId, kinds))
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'History repair failed') })
-    }
-  })
-
-  // GET /settings/lumiere-status - whether this account's LumiereDB is up:
-  // ready, still building its index, can't be reached, or not LumiereDB.
-  router.get('/lumiere-status', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID
-      if (!accountId) return res.status(401).json({ error: 'Unauthorized' })
-      if (INSTANCE_TYPE === 'public') return res.json({ state: 'off', message: 'LumiereDB is for self-hosted instances', address: '' })
-      const { lumiereAddress, lumiereStatus } = require('../utils/lumiere')
-      const base = await lumiereAddress(prisma, accountId)
-      const status = await lumiereStatus(base, { fresh: req.query.fresh === '1' })
-      // Never echo a user name and password someone put in the address.
-      let shown = ''
-      try { if (base) { const u = new URL(base); u.username = ''; u.password = ''; shown = u.toString().replace(/\/+$/, '') } } catch {}
-      return res.json({ ...status, address: shown })
-    } catch (e) {
-      return res.status(500).json({ error: publicMessage(e, 'Could not check LumiereDB') })
-    }
-  })
-
-  // POST /settings/check-keys - on-demand validity check for the four
-  // metadata-provider keys (TMDb/OMDb/MDBList/RPDB), same idea as Vault's
-  // "Test" button on a credential entry. Checks whichever of the four
-  // actually have a key configured for this account (own Settings value,
-  // falling back to the instance's env var - the same resolution every
-  // other use of these keys already follows) and persists the results into
-  // the account's own sync JSON so GET /account-sync can show them without
-  // re-checking on every page load. Also runs automatically once a day -
-  // see utils/metadataKeyHealth.js's scheduler wiring in index.js - this
-  // route exists for "check right now" rather than waiting for that.
-  router.post('/check-keys', async (req, res) => {
-    try {
-      const accountId = INSTANCE_TYPE === 'public' ? req.appAccountId : DEFAULT_ACCOUNT_ID;
-      const { checkAndPersistAccountKeys } = require('../utils/metadataKeyHealth');
-      // Optional body {provider} narrows to one key - the save-time check
-      // for a single edited field. Notifications stay off for those: a key
-      // someone is mid-way through correcting should not fire "key broken"
-      // alerts on each attempt; the full check and the daily sweep notify.
-      const only = ['tmdb', 'omdb', 'mdblist', 'rpdb'].includes(req.body?.provider) ? req.body.provider : null;
-      const keyHealth = await checkAndPersistAccountKeys(prisma, accountId, { notify: !only, only });
-      return res.json({ keyHealth });
-    } catch (e) {
-      return res.status(500).json({ message: 'Failed to check keys', error: publicMessage(e, 'Failed to check keys') });
-    }
-  });
-
-  // POST /settings/delete-account - self-service, irreversible. Public
-  // multi-tenant mode only: private mode's "account" is the whole shared
-  // instance, not a personal one a user should be able to wipe from a
-  // settings toggle. Always deletes req.appAccountId (the caller's own,
-  // resolved by the auth middleware from their session) - never an id from
-  // the request body, so there is no way to target another account.
-  router.post('/delete-account', async (req, res) => {
-    try {
-      if (INSTANCE_TYPE !== 'public') {
-        return res.status(403).json({ message: 'Self-service account deletion is only available in public (multi-tenant) mode.' });
-      }
-      if (!req.appAccountId) {
-        return res.status(401).json({ message: 'Not signed in' });
-      }
-      const { deleteAccountCascade } = require('../utils/accountDeletion');
-      await deleteAccountCascade(prisma, req.appAccountId);
-      return res.json({ deleted: true });
-    } catch (e) {
-      if (e.notFound) return res.status(404).json({ message: 'Account not found' });
-      console.error('[Settings] Failed to delete account:', e?.message);
-      return res.status(500).json({ message: 'Failed to delete account' });
-    }
-  });
-
-  return router;
+    return router;
 };

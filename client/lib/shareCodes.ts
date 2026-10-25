@@ -19,127 +19,205 @@
 //          the server re-validates everything on import)
 
 export interface CatalogSharePayload {
-  name: string;
-  description?: string;
-  items: Array<{ id: string; type: 'movie' | 'series'; name: string; poster?: string | null; year?: number | string | null }>;
+    description?: string;
+    items: Array<{
+        id: string;
+        type: "movie" | "series";
+        name: string;
+        poster?: string | null;
+        year?: number | string | null;
+    }>;
+    name: string;
 }
 
 export interface NuvioCollectionsSharePayload {
-  // Deliberately loose: the Collections page owns this array's real shape
-  // (its import path re-validates and re-ids everything anyway), and
-  // pinning a full type here would just drift from it.
-  collections: Array<{ title: string; folders: unknown[] } & Record<string, unknown>>;
+    // Deliberately loose: the Collections page owns this array's real shape
+    // (its import path re-validates and re-ids everything anyway), and
+    // pinning a full type here would just drift from it.
+    collections: Array<{ title: string; folders: unknown[] } & Record<string, unknown>>;
 }
 
 export interface AddonTemplateSharePayload {
-  name: string;
-  description?: string;
-  addons: Array<{ name: string; manifestUrl: string | null; stremioAddonId?: string | null; version?: string | null }>;
+    addons: Array<{
+        name: string;
+        manifestUrl: string | null;
+        stremioAddonId?: string | null;
+        version?: string | null;
+    }>;
+    description?: string;
+    name: string;
 }
 
 export interface AioCollectionsSharePayload {
-  v: 1;
-  // Loose on purpose, like the Nuvio one: the server owns the real shape
-  // and checks every field when the code is imported.
-  collections: Array<{ name: string; catalogs: string[] } & Record<string, unknown>>;
-  catalogs: Array<{ ref: string; name: string; items: unknown[] } & Record<string, unknown>>;
+    catalogs: Array<{ ref: string; name: string; items: unknown[] } & Record<string, unknown>>;
+    // Loose on purpose, like the Nuvio one: the server owns the real shape
+    // and checks every field when the code is imported.
+    collections: Array<{ name: string; catalogs: string[] } & Record<string, unknown>>;
+    v: 1;
 }
 
 export type DecodedShareCode =
-  | { kind: 'catalog'; payload: CatalogSharePayload }
-  | { kind: 'nuvioCollections'; payload: NuvioCollectionsSharePayload }
-  | { kind: 'addonTemplate'; payload: AddonTemplateSharePayload }
-  | { kind: 'aioCollections'; payload: AioCollectionsSharePayload };
+    | { kind: "catalog"; payload: CatalogSharePayload }
+    | { kind: "nuvioCollections"; payload: NuvioCollectionsSharePayload }
+    | { kind: "addonTemplate"; payload: AddonTemplateSharePayload }
+    | { kind: "aioCollections"; payload: AioCollectionsSharePayload };
 
-const PREFIX: Record<DecodedShareCode['kind'], string> = {
-  catalog: 'SSC1:',
-  nuvioCollections: 'SSN1:',
-  addonTemplate: 'SSA1:',
-  aioCollections: 'SSJ1:',
+const PREFIX: Record<DecodedShareCode["kind"], string> = {
+    addonTemplate: "SSA1:",
+    aioCollections: "SSJ1:",
+    catalog: "SSC1:",
+    nuvioCollections: "SSN1:",
 };
 
 function encode(prefix: string, payload: unknown): string {
-  return prefix + btoa(encodeURIComponent(JSON.stringify(payload)));
+    return prefix + btoa(encodeURIComponent(JSON.stringify(payload)));
 }
 
 export function encodeCatalogShareCode(payload: CatalogSharePayload): string {
-  return encode(PREFIX.catalog, payload);
+    return encode(PREFIX.catalog, payload);
 }
 export function encodeNuvioCollectionsShareCode(payload: NuvioCollectionsSharePayload): string {
-  return encode(PREFIX.nuvioCollections, payload);
+    return encode(PREFIX.nuvioCollections, payload);
 }
 export function encodeAddonTemplateShareCode(payload: AddonTemplateSharePayload): string {
-  return encode(PREFIX.addonTemplate, payload);
+    return encode(PREFIX.addonTemplate, payload);
 }
 export function encodeAioCollectionsShareCode(payload: AioCollectionsSharePayload): string {
-  return encode(PREFIX.aioCollections, payload);
+    return encode(PREFIX.aioCollections, payload);
 }
 
 /** True when a pasted string LOOKS like any share code - cheap check for
  * input fields that accept both URLs and codes. */
 export function looksLikeShareCode(text: string): boolean {
-  const t = text.trim();
-  return Object.values(PREFIX).some((p) => t.startsWith(p));
+    const t = text.trim();
+    return Object.values(PREFIX).some((p) => t.startsWith(p));
 }
 
 export function decodeShareCode(code: string): DecodedShareCode | null {
-  const trimmed = code.trim();
-  const kind = (Object.keys(PREFIX) as Array<DecodedShareCode['kind']>).find((k) => trimmed.startsWith(PREFIX[k]));
-  if (!kind) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decodeURIComponent(atob(trimmed.slice(PREFIX[kind].length))));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const p = parsed as Record<string, unknown>;
+    const trimmed = code.trim();
+    const kind = (Object.keys(PREFIX) as DecodedShareCode["kind"][]).find((k) =>
+        trimmed.startsWith(PREFIX[k])
+    );
+    if (!kind) {
+        return null;
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(decodeURIComponent(atob(trimmed.slice(PREFIX[kind].length))));
+    } catch {
+        return null;
+    }
+    if (!parsed || typeof parsed !== "object") {
+        return null;
+    }
+    const p = parsed as Record<string, unknown>;
 
-  if (kind === 'catalog') {
-    if (typeof p.name !== 'string' || !p.name.trim() || !Array.isArray(p.items)) return null;
-    const items = (p.items as unknown[]).filter((it): it is CatalogSharePayload['items'][number] => {
-      if (!it || typeof it !== 'object') return false;
-      const o = it as Record<string, unknown>;
-      return typeof o.id === 'string' && typeof o.name === 'string' && (o.type === 'movie' || o.type === 'series');
-    });
-    if (items.length === 0) return null;
-    return { kind, payload: { name: p.name.trim(), description: typeof p.description === 'string' ? p.description : undefined, items } };
-  }
+    if (kind === "catalog") {
+        if (typeof p.name !== "string" || !p.name.trim() || !Array.isArray(p.items)) {
+            return null;
+        }
+        const items = (p.items as unknown[]).filter(
+            (it): it is CatalogSharePayload["items"][number] => {
+                if (!it || typeof it !== "object") {
+                    return false;
+                }
+                const o = it as Record<string, unknown>;
+                return (
+                    typeof o.id === "string" &&
+                    typeof o.name === "string" &&
+                    (o.type === "movie" || o.type === "series")
+                );
+            }
+        );
+        if (items.length === 0) {
+            return null;
+        }
+        return {
+            kind,
+            payload: {
+                description: typeof p.description === "string" ? p.description : undefined,
+                items,
+                name: p.name.trim(),
+            },
+        };
+    }
 
-  if (kind === 'nuvioCollections') {
-    if (!Array.isArray(p.collections)) return null;
-    const collections = (p.collections as unknown[]).filter((c): c is NuvioCollectionsSharePayload['collections'][number] => {
-      if (!c || typeof c !== 'object') return false;
-      const o = c as Record<string, unknown>;
-      return typeof o.title === 'string' && Array.isArray(o.folders);
-    });
-    if (collections.length === 0) return null;
-    return { kind, payload: { collections } };
-  }
+    if (kind === "nuvioCollections") {
+        if (!Array.isArray(p.collections)) {
+            return null;
+        }
+        const collections = (p.collections as unknown[]).filter(
+            (c): c is NuvioCollectionsSharePayload["collections"][number] => {
+                if (!c || typeof c !== "object") {
+                    return false;
+                }
+                const o = c as Record<string, unknown>;
+                return typeof o.title === "string" && Array.isArray(o.folders);
+            }
+        );
+        if (collections.length === 0) {
+            return null;
+        }
+        return { kind, payload: { collections } };
+    }
 
-  if (kind === 'aioCollections') {
-    if (p.v !== 1 || !Array.isArray(p.collections) || !Array.isArray(p.catalogs)) return null;
-    const collections = (p.collections as unknown[]).filter((c): c is AioCollectionsSharePayload['collections'][number] => {
-      if (!c || typeof c !== 'object') return false;
-      const o = c as Record<string, unknown>;
-      return typeof o.name === 'string' && Array.isArray(o.catalogs);
-    });
-    const catalogs = (p.catalogs as unknown[]).filter((c): c is AioCollectionsSharePayload['catalogs'][number] => {
-      if (!c || typeof c !== 'object') return false;
-      const o = c as Record<string, unknown>;
-      return typeof o.ref === 'string' && typeof o.name === 'string' && Array.isArray(o.items);
-    });
-    if (collections.length === 0 || catalogs.length === 0) return null;
-    return { kind, payload: { v: 1, collections, catalogs } };
-  }
+    if (kind === "aioCollections") {
+        if (p.v !== 1 || !Array.isArray(p.collections) || !Array.isArray(p.catalogs)) {
+            return null;
+        }
+        const collections = (p.collections as unknown[]).filter(
+            (c): c is AioCollectionsSharePayload["collections"][number] => {
+                if (!c || typeof c !== "object") {
+                    return false;
+                }
+                const o = c as Record<string, unknown>;
+                return typeof o.name === "string" && Array.isArray(o.catalogs);
+            }
+        );
+        const catalogs = (p.catalogs as unknown[]).filter(
+            (c): c is AioCollectionsSharePayload["catalogs"][number] => {
+                if (!c || typeof c !== "object") {
+                    return false;
+                }
+                const o = c as Record<string, unknown>;
+                return (
+                    typeof o.ref === "string" &&
+                    typeof o.name === "string" &&
+                    Array.isArray(o.items)
+                );
+            }
+        );
+        if (collections.length === 0 || catalogs.length === 0) {
+            return null;
+        }
+        return { kind, payload: { catalogs, collections, v: 1 } };
+    }
 
-  // addonTemplate
-  if (typeof p.name !== 'string' || !p.name.trim() || !Array.isArray(p.addons)) return null;
-  const addons = (p.addons as unknown[]).filter((a): a is AddonTemplateSharePayload['addons'][number] => {
-    if (!a || typeof a !== 'object') return false;
-    const o = a as Record<string, unknown>;
-    return typeof o.name === 'string' && (typeof o.manifestUrl === 'string' || o.manifestUrl === null);
-  });
-  if (addons.length === 0) return null;
-  return { kind, payload: { name: p.name.trim(), description: typeof p.description === 'string' ? p.description : undefined, addons } };
+    // addonTemplate
+    if (typeof p.name !== "string" || !p.name.trim() || !Array.isArray(p.addons)) {
+        return null;
+    }
+    const addons = (p.addons as unknown[]).filter(
+        (a): a is AddonTemplateSharePayload["addons"][number] => {
+            if (!a || typeof a !== "object") {
+                return false;
+            }
+            const o = a as Record<string, unknown>;
+            return (
+                typeof o.name === "string" &&
+                (typeof o.manifestUrl === "string" || o.manifestUrl === null)
+            );
+        }
+    );
+    if (addons.length === 0) {
+        return null;
+    }
+    return {
+        kind,
+        payload: {
+            addons,
+            description: typeof p.description === "string" ? p.description : undefined,
+            name: p.name.trim(),
+        },
+    };
 }

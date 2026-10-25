@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import { api } from '@/lib/api';
+import { useEffect, useRef } from "react";
+import { api } from "@/lib/api";
 
 // Instant navigation, page side. Applies the api client's last-known
 // response for an endpoint (api.peekGet - see lastKnown's comment in
@@ -23,15 +23,17 @@ import { api } from '@/lib/api';
 // - `apply` is captured once on mount (ref), so callers can pass an inline
 //   closure over their setters without needing useCallback.
 export function useLastKnown<T>(endpoint: string, apply: (value: T) => void) {
-  const applyRef = useRef(apply);
-  applyRef.current = apply;
+    const applyRef = useRef(apply);
+    applyRef.current = apply;
 
-  useEffect(() => {
-    const id = setTimeout(() => {
-      const cached = api.peekGet<T>(endpoint);
-      if (cached !== undefined) applyRef.current(cached);
-    }, 0);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- endpoint is a per-page constant; re-peeking on change is not a real case
-  }, []);
+    useEffect(() => {
+        const id = setTimeout(() => {
+            const cached = api.peekGet<T>(endpoint);
+            if (cached !== undefined) {
+                applyRef.current(cached);
+            }
+        }, 0);
+        return () => clearTimeout(id);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- endpoint is a per-page constant; re-peeking on change is not a real case
+    }, []);
 }

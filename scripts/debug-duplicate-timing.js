@@ -7,39 +7,41 @@
 //
 // Usage: docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/debug-duplicate-timing.js <itemId> <YYYY-MM-DD>
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 async function main() {
-  const [, , itemId, dateStr] = process.argv
-  if (!itemId || !dateStr) {
-    console.error('Usage: node scripts/debug-duplicate-timing.js <itemId> <YYYY-MM-DD>')
-    process.exit(1)
-  }
-
-  const prisma = new PrismaClient()
-  try {
-    const rows = await prisma.watchActivity.findMany({
-      where: { itemId, date: new Date(dateStr) },
-      orderBy: { createdAt: 'asc' },
-    })
-
-    console.log(`${rows.length} rows for itemId=${itemId} date=${dateStr}\n`)
-
-    let prev = null
-    for (const row of rows) {
-      const gapSec = prev ? Math.round((row.createdAt.getTime() - prev.getTime()) / 1000) : null
-      console.log(
-        `${row.createdAt.toISOString()}  watchTimeSeconds=${row.watchTimeSeconds}` +
-        (gapSec !== null ? `  (+${gapSec}s since previous)` : '')
-      )
-      prev = row.createdAt
+    const [, , itemId, dateStr] = process.argv;
+    if (!(itemId && dateStr)) {
+        console.error("Usage: node scripts/debug-duplicate-timing.js <itemId> <YYYY-MM-DD>");
+        process.exit(1);
     }
-  } finally {
-    await prisma.$disconnect()
-  }
+
+    const prisma = new PrismaClient();
+    try {
+        const rows = await prisma.watchActivity.findMany({
+            orderBy: { createdAt: "asc" },
+            where: { date: new Date(dateStr), itemId },
+        });
+
+        console.log(`${rows.length} rows for itemId=${itemId} date=${dateStr}\n`);
+
+        let prev = null;
+        for (const row of rows) {
+            const gapSec = prev
+                ? Math.round((row.createdAt.getTime() - prev.getTime()) / 1000)
+                : null;
+            console.log(
+                `${row.createdAt.toISOString()}  watchTimeSeconds=${row.watchTimeSeconds}` +
+                    (gapSec === null ? "" : `  (+${gapSec}s since previous)`)
+            );
+            prev = row.createdAt;
+        }
+    } finally {
+        await prisma.$disconnect();
+    }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

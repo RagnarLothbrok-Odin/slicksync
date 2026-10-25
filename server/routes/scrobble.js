@@ -1,4 +1,4 @@
-const express = require('express')
+const express = require("express");
 
 // Trakt-compatible scrobble API - lets third-party players that already
 // know how to scrobble to Trakt (Infuse, Kodi's Trakt plugin, various VLC/
@@ -22,102 +22,138 @@ const express = require('express')
 // here: a scrobble stop is one discrete, explicit "I just finished this"
 // event, not something to infer.
 module.exports = ({ prisma }) => {
-  const router = express.Router()
+    const router = express.Router();
 
-  const { createUserApiKeyMiddleware } = require('../middleware/userApiKey')
-  router.use(createUserApiKeyMiddleware(prisma))
-  // Scrobbling has no session-based fallback the way admin UI routes do -
-  // the middleware above only sets req.appUserId on a valid key and
-  // otherwise silently continues, so a missing/invalid key must be
-  // rejected explicitly here rather than falling through to an
-  // account-wide, no-specific-user write.
-  router.use((req, res, next) => {
-    if (!req.appUserId) return res.status(401).json({ error: 'invalid_grant', error_description: 'Missing or invalid API key' })
-    next()
-  })
+    const { createUserApiKeyMiddleware } = require("../middleware/userApiKey");
+    router.use(createUserApiKeyMiddleware(prisma));
+    // Scrobbling has no session-based fallback the way admin UI routes do -
+    // the middleware above only sets req.appUserId on a valid key and
+    // otherwise silently continues, so a missing/invalid key must be
+    // rejected explicitly here rather than falling through to an
+    // account-wide, no-specific-user write.
+    router.use((req, res, next) => {
+        if (!req.appUserId) {
+            return res
+                .status(401)
+                .json({ error: "invalid_grant", error_description: "Missing or invalid API key" });
+        }
+        next();
+    });
 
-  // Resolves the { movie: {...} } | { show: {...}, episode: {...} } body
-  // shape into { itemId, itemType, season, episode, title } - itemId is
-  // always the IMDb id (the one identifier every provider in this codebase
-  // already keys on), even though Trakt's real API accepts tmdb/trakt/slug
-  // ids too - imdb is required here, since that's the only id scheme the
-  // rest of SlickSync's watch-tracking tables use.
-  function resolveScrobbleTarget(body) {
-    if (body?.movie?.ids?.imdb) {
-      return { itemId: body.movie.ids.imdb, itemType: 'movie', title: body.movie.title || null, season: null, episode: null }
+    // Resolves the { movie: {...} } | { show: {...}, episode: {...} } body
+    // shape into { itemId, itemType, season, episode, title } - itemId is
+    // always the IMDb id (the one identifier every provider in this codebase
+    // already keys on), even though Trakt's real API accepts tmdb/trakt/slug
+    // ids too - imdb is required here, since that's the only id scheme the
+    // rest of SlickSync's watch-tracking tables use.
+    function resolveScrobbleTarget(body) {
+        if (body?.movie?.ids?.imdb) {
+            return {
+                episode: null,
+                itemId: body.movie.ids.imdb,
+                itemType: "movie",
+                season: null,
+                title: body.movie.title || null,
+            };
+        }
+        if (body?.show?.ids?.imdb && body?.episode) {
+            const season = Number(body.episode.season);
+            const episode = Number(body.episode.number);
+            if (!(Number.isFinite(season) && Number.isFinite(episode))) {
+                return null;
+            }
+            return {
+                episode,
+                itemId: body.show.ids.imdb,
+                itemType: "series",
+                season,
+                title: body.show.title || null,
+            };
+        }
+        return null;
     }
-    if (body?.show?.ids?.imdb && body?.episode) {
-      const season = Number(body.episode.season)
-      const episode = Number(body.episode.number)
-      if (!Number.isFinite(season) || !Number.isFinite(episode)) return null
-      return { itemId: body.show.ids.imdb, itemType: 'series', title: body.show.title || null, season, episode }
+
+    async function handleEphemeral(req, res) {
+        const target = resolveScrobbleTarget(req.body);
+        if (!(target && /^tt\d+$/.test(target.itemId))) {
+            return res.status(400).json({
+                error: "invalid_request",
+                error_description:
+                    "movie.ids.imdb or show.ids.imdb + episode.season/number is required",
+            });
+        }
+        const progress = Number(req.body?.progress);
+        res.json({
+            action: req.path.replace("/", ""),
+            progress: Number.isFinite(progress) ? progress : 0,
+            [target.itemType]: target.itemType === "movie" ? req.body.movie : req.body.show,
+        });
     }
-    return null
-  }
 
-  async function handleEphemeral(req, res) {
-    const target = resolveScrobbleTarget(req.body)
-    if (!target || !/^tt\d+$/.test(target.itemId)) {
-      return res.status(400).json({ error: 'invalid_request', error_description: 'movie.ids.imdb or show.ids.imdb + episode.season/number is required' })
-    }
-    const progress = Number(req.body?.progress)
-    res.json({
-      action: req.path.replace('/', ''),
-      progress: Number.isFinite(progress) ? progress : 0,
-      [target.itemType]: target.itemType === 'movie' ? req.body.movie : req.body.show,
-    })
-  }
+    router.post("/start", handleEphemeral);
+    router.post("/pause", handleEphemeral);
 
-  router.post('/start', handleEphemeral)
-  router.post('/pause', handleEphemeral)
+    const WATCHED_THRESHOLD_PERCENT = 80;
 
-  const WATCHED_THRESHOLD_PERCENT = 80
+    router.post("/stop", async (req, res) => {
+        try {
+            const target = resolveScrobbleTarget(req.body);
+            if (!(target && /^tt\d+$/.test(target.itemId))) {
+                return res.status(400).json({
+                    error: "invalid_request",
+                    error_description:
+                        "movie.ids.imdb or show.ids.imdb + episode.season/number is required",
+                });
+            }
+            const progress = Number(req.body?.progress);
+            const accountId = req.appAccountId || "default";
+            const userId = req.appUserId;
+            const watched = Number.isFinite(progress) && progress >= WATCHED_THRESHOLD_PERCENT;
 
-  router.post('/stop', async (req, res) => {
-    try {
-      const target = resolveScrobbleTarget(req.body)
-      if (!target || !/^tt\d+$/.test(target.itemId)) {
-        return res.status(400).json({ error: 'invalid_request', error_description: 'movie.ids.imdb or show.ids.imdb + episode.season/number is required' })
-      }
-      const progress = Number(req.body?.progress)
-      const accountId = req.appAccountId || 'default'
-      const userId = req.appUserId
-      const watched = Number.isFinite(progress) && progress >= WATCHED_THRESHOLD_PERCENT
+            if (!watched) {
+                return res.json({
+                    action: "stop",
+                    progress: Number.isFinite(progress) ? progress : 0,
+                    [target.itemType]: target.itemType === "movie" ? req.body.movie : req.body.show,
+                });
+            }
 
-      if (!watched) {
-        return res.json({ action: 'stop', progress: Number.isFinite(progress) ? progress : 0, [target.itemType]: target.itemType === 'movie' ? req.body.movie : req.body.show })
-      }
+            // Shared with the Watch State exchange (utils/watchState.js), so the two
+            // ways an outside player reports a finished title record it the same way.
+            const { recordDiscreteWatch } = require("../utils/discreteWatch");
+            const result = await recordDiscreteWatch(prisma, {
+                accountId,
+                completed: true,
+                episode: target.episode,
+                itemId: target.itemId,
+                itemType: target.itemType,
+                moveForward: true,
+                profileLabel: "Scrobbled",
+                season: target.season,
+                title: target.title,
+                userId,
+                watchedAt: new Date(),
+            });
+            if (!result.ok) {
+                return res.status(422).json({
+                    error: "unprocessable",
+                    error_description: "Could not resolve a title for this IMDb id",
+                });
+            }
 
-      // Shared with the Watch State exchange (utils/watchState.js), so the two
-      // ways an outside player reports a finished title record it the same way.
-      const { recordDiscreteWatch } = require('../utils/discreteWatch')
-      const result = await recordDiscreteWatch(prisma, {
-        accountId,
-        userId,
-        itemId: target.itemId,
-        itemType: target.itemType,
-        season: target.season,
-        episode: target.episode,
-        title: target.title,
-        completed: true,
-        watchedAt: new Date(),
-        moveForward: true,
-        profileLabel: 'Scrobbled',
-      })
-      if (!result.ok) {
-        return res.status(422).json({ error: 'unprocessable', error_description: 'Could not resolve a title for this IMDb id' })
-      }
+            res.status(201).json({
+                action: "stop",
+                progress,
+                [target.itemType]: target.itemType === "movie" ? req.body.movie : req.body.show,
+            });
+        } catch (error) {
+            console.error("Error handling scrobble stop:", error);
+            res.status(500).json({
+                error: "server_error",
+                error_description: "Failed to record scrobble",
+            });
+        }
+    });
 
-      res.status(201).json({
-        action: 'stop',
-        progress,
-        [target.itemType]: target.itemType === 'movie' ? req.body.movie : req.body.show,
-      })
-    } catch (error) {
-      console.error('Error handling scrobble stop:', error)
-      res.status(500).json({ error: 'server_error', error_description: 'Failed to record scrobble' })
-    }
-  })
-
-  return router
-}
+    return router;
+};

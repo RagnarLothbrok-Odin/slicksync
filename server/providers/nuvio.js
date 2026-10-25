@@ -3,9 +3,16 @@
  * Translates between Supabase addon rows and the universal addon shape.
  */
 
-const { supabaseGet, supabasePost, supabaseDelete, supabaseRpc, isCircuitOpen, isTransientFailure } = require('./supabase')
-const { refreshNuvioToken, isTokenExpired } = require('./nuvioAuth')
-const { mapLimit } = require('../utils/mapLimit')
+const {
+    supabaseGet,
+    supabasePost,
+    supabaseDelete,
+    supabaseRpc,
+    isCircuitOpen,
+    isTransientFailure,
+} = require("./supabase");
+const { refreshNuvioToken, isTokenExpired } = require("./nuvioAuth");
+const { mapLimit } = require("../utils/mapLimit");
 
 // Module-level (not per-provider-instance) token cache and in-flight-refresh
 // tracking, keyed by Nuvio userId. createProvider() is called fresh on
@@ -27,8 +34,8 @@ const { mapLimit } = require('../utils/mapLimit')
 // token, the second one fails because the first already consumed and
 // rotated it. Tracking one shared in-flight promise per userId means
 // concurrent callers await the same refresh instead of racing each other.
-const tokenCache = new Map()      // userId -> { accessToken, refreshToken }
-const refreshPromises = new Map() // userId -> Promise<string> (in-flight refresh)
+const tokenCache = new Map(); // userId -> { accessToken, refreshToken }
+const refreshPromises = new Map(); // userId -> Promise<string> (in-flight refresh)
 
 // One write at a time per person and profile. A list is replaced by deleting
 // it and inserting the new one, so two writes for the same list that overlap
@@ -38,13 +45,20 @@ const refreshPromises = new Map() // userId -> Promise<string> (in-flight refres
 // not rare. In-process on purpose: one server process serves a household, so
 // a database lock would add nothing. A write that fails does not hold up the
 // next one.
-const writeQueues = new Map() // `${userId}:${profileId}` -> tail of the queue
+const writeQueues = new Map(); // `${userId}:${profileId}` -> tail of the queue
 function inWriteQueue(key, task) {
-  const run = (writeQueues.get(key) || Promise.resolve()).then(task)
-  const tail = run.then(() => {}, () => {})
-  writeQueues.set(key, tail)
-  tail.then(() => { if (writeQueues.get(key) === tail) writeQueues.delete(key) })
-  return run
+    const run = (writeQueues.get(key) || Promise.resolve()).then(task);
+    const tail = run.then(
+        () => undefined,
+        () => undefined
+    );
+    writeQueues.set(key, tail);
+    tail.then(() => {
+        if (writeQueues.get(key) === tail) {
+            writeQueues.delete(key);
+        }
+    });
+    return run;
 }
 
 // While the backend is being held back (see the breaker in supabase.js), a
@@ -54,10 +68,12 @@ function inWriteQueue(key, task) {
 // deleted, setAddons carries on whatever the breaker says (see there), because
 // stopping at that point is what would leave the list empty.
 function refuseWhileBackendIsDown(serverConfig) {
-  if (!isCircuitOpen(serverConfig)) return
-  const err = new Error('Nuvio backend unavailable - too many recent failures')
-  err.status = 503
-  throw err
+    if (!isCircuitOpen(serverConfig)) {
+        return;
+    }
+    const err = new Error("Nuvio backend unavailable - too many recent failures");
+    err.status = 503;
+    throw err;
 }
 
 // After the old list has been deleted, the only thing between a person and an
@@ -68,23 +84,27 @@ function refuseWhileBackendIsDown(serverConfig) {
 // stretched to a Retry-After the backend asked for, up to maxWaitMs. A mutable
 // object so a test can shorten them.
 const WRITE_RETRY = {
-  insertMs: [1500, 4000],
-  restoreMs: [1500, 4000, 10000],
-  maxWaitMs: 15000
-}
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    insertMs: [1500, 4000],
+    maxWaitMs: 15_000,
+    restoreMs: [1500, 4000, 10_000],
+};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Runs `attempt`, and again after each wait in `waitsMs` for as long as it
 // fails in a way that is worth another try. Throws the last failure.
 async function retryWhileTransient(attempt, waitsMs) {
-  for (let i = 0; ; i++) {
-    try {
-      return await attempt()
-    } catch (e) {
-      if (i >= waitsMs.length || !isTransientFailure(e)) throw e
-      await sleep(Math.min(Math.max(waitsMs[i], e?.retryAfterMs || 0), WRITE_RETRY.maxWaitMs))
+    for (let i = 0; ; i++) {
+        try {
+            return await attempt();
+        } catch (e) {
+            if (i >= waitsMs.length || !isTransientFailure(e)) {
+                throw e;
+            }
+            await sleep(
+                Math.min(Math.max(waitsMs[i], e?.retryAfterMs || 0), WRITE_RETRY.maxWaitMs)
+            );
+        }
     }
-  }
 }
 
 // A write that may have reached the backend without its answer coming back:
@@ -92,9 +112,11 @@ async function retryWhileTransient(attempt, waitsMs) {
 // conflict or any other 4xx was answered, and the breaker's own refusal never
 // left this server.
 function isUnansweredWrite(err) {
-  if (err?.code === 'BACKEND_REFUSED' || err?.code === 'CIRCUIT_OPEN') return false
-  const status = err?.status
-  return status === undefined || status === null || status >= 500
+    if (err?.code === "BACKEND_REFUSED" || err?.code === "CIRCUIT_OPEN") {
+        return false;
+    }
+    const status = err?.status;
+    return status === undefined || status === null || status >= 500;
 }
 
 // What the caller's failure message says when the new list was not saved and
@@ -102,12 +124,14 @@ function isUnansweredWrite(err) {
 // as the reason the sync failed, so it says what state the list is in and what
 // to do about it.
 function listNotRestoredError(insertErr) {
-  const err = new Error('Their addon list could not be written back after the change failed and may be empty. Run a sync to fill it again.')
-  err.status = insertErr?.status
-  err.retryAfterMs = insertErr?.retryAfterMs
-  err.code = 'ADDON_LIST_NOT_RESTORED'
-  err.cause = insertErr
-  return err
+    const err = new Error(
+        "Their addon list could not be written back after the change failed and may be empty. Run a sync to fill it again."
+    );
+    err.status = insertErr?.status;
+    err.retryAfterMs = insertErr?.retryAfterMs;
+    err.code = "ADDON_LIST_NOT_RESTORED";
+    err.cause = insertErr;
+    return err;
 }
 
 // The same address twice is never a wanted list, and some Nuvio backends
@@ -119,26 +143,32 @@ function listNotRestoredError(insertErr) {
 // address is compared as it is: a config token or key in the path or query is
 // case-sensitive, and two addons that differ only there are two addons.
 function addonKey(raw) {
-  const trimmed = String(raw || '').trim()
-  if (!trimmed) return ''
-  try {
-    const u = new URL(trimmed)
-    return `${u.protocol.toLowerCase()}//${u.username}:${u.password}@${u.host.toLowerCase()}${u.pathname}${u.search}${u.hash}`
-  } catch {
-    return trimmed
-  }
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) {
+        return "";
+    }
+    try {
+        const u = new URL(trimmed);
+        return `${u.protocol.toLowerCase()}//${u.username}:${u.password}@${u.host.toLowerCase()}${u.pathname}${u.search}${u.hash}`;
+    } catch {
+        return trimmed;
+    }
 }
 
 function dedupeAddonsByUrl(addons) {
-  const seen = new Set()
-  const out = []
-  for (const addon of addons) {
-    const key = addonKey(addon?.transportUrl)
-    if (key && seen.has(key)) continue
-    if (key) seen.add(key)
-    out.push(addon)
-  }
-  return out
+    const seen = new Set();
+    const out = [];
+    for (const addon of addons) {
+        const key = addonKey(addon?.transportUrl);
+        if (key && seen.has(key)) {
+            continue;
+        }
+        if (key) {
+            seen.add(key);
+        }
+        out.push(addon);
+    }
+    return out;
 }
 
 // Titles Nuvio sent no name or poster for are looked up on Cinemeta. What a
@@ -149,43 +179,63 @@ function dedupeAddonsByUrl(addons) {
 // answer for - a name that is missing is not recorded as watched, so a blip
 // must not hold it back for long.
 const META = {
-  ttlMs: 24 * 60 * 60 * 1000,      // found
-  missTtlMs: 60 * 60 * 1000,       // answered "no such title"
-  failTtlMs: 5 * 60 * 1000,        // no answer at all (timeout, network, 5xx)
-  max: 5000,
-  concurrency: 6,
-  timeoutMs: 8000,
-  // Past this, the titles still to ask for wait for the next poll rather than
-  // holding this one up; names missing go first so they are what gets done.
-  budgetMs: 20000
-}
-const metaCache = new Map() // `${metaType}:${id}` -> { meta: { name, poster } | null, expires }
+    // Past this, the titles still to ask for wait for the next poll rather than
+    // holding this one up; names missing go first so they are what gets done.
+    budgetMs: 20_000,
+    concurrency: 6,
+    failTtlMs: 5 * 60 * 1000, // no answer at all (timeout, network, 5xx)
+    max: 5000,
+    missTtlMs: 60 * 60 * 1000, // answered "no such title"
+    timeoutMs: 8000,
+    ttlMs: 24 * 60 * 60 * 1000, // found
+};
+const metaCache = new Map(); // `${metaType}:${id}` -> { meta: { name, poster } | null, expires }
 
 function cachedMeta(key) {
-  const hit = metaCache.get(key)
-  if (!hit) return undefined
-  if (hit.expires <= Date.now()) { metaCache.delete(key); return undefined }
-  return hit
+    const hit = metaCache.get(key);
+    if (!hit) {
+        return;
+    }
+    if (hit.expires <= Date.now()) {
+        metaCache.delete(key);
+        return;
+    }
+    return hit;
 }
 
 function rememberMeta(key, meta, ttlMs) {
-  metaCache.delete(key)
-  if (metaCache.size >= META.max) metaCache.delete(metaCache.keys().next().value)
-  metaCache.set(key, { meta, expires: Date.now() + ttlMs })
+    metaCache.delete(key);
+    if (metaCache.size >= META.max) {
+        metaCache.delete(metaCache.keys().next().value);
+    }
+    metaCache.set(key, { expires: Date.now() + ttlMs, meta });
 }
 
 // Never throws: a title that cannot be looked up keeps whatever name it had.
 async function lookUpTitle(key, metaType, id) {
-  try {
-    const res = await fetch(`https://v3-cinemeta.strem.io/meta/${metaType}/${id}.json`, { signal: AbortSignal.timeout(META.timeoutMs) })
-    if (res.status === 404) return rememberMeta(key, null, META.missTtlMs)
-    if (!res.ok) return rememberMeta(key, null, META.failTtlMs)
-    const data = await res.json()
-    if (data?.meta) rememberMeta(key, { name: data.meta.name || '', poster: data.meta.poster || null }, META.ttlMs)
-    else rememberMeta(key, null, META.missTtlMs)
-  } catch {
-    rememberMeta(key, null, META.failTtlMs)
-  }
+    try {
+        const res = await fetch(`https://v3-cinemeta.strem.io/meta/${metaType}/${id}.json`, {
+            signal: AbortSignal.timeout(META.timeoutMs),
+        });
+        if (res.status === 404) {
+            return rememberMeta(key, null, META.missTtlMs);
+        }
+        if (!res.ok) {
+            return rememberMeta(key, null, META.failTtlMs);
+        }
+        const data = await res.json();
+        if (data?.meta) {
+            rememberMeta(
+                key,
+                { name: data.meta.name || "", poster: data.meta.poster || null },
+                META.ttlMs
+            );
+        } else {
+            rememberMeta(key, null, META.missTtlMs);
+        }
+    } catch {
+        rememberMeta(key, null, META.failTtlMs);
+    }
 }
 
 // profileId is Nuvio's own profile_index (1 for the primary profile), NOT the
@@ -194,729 +244,1066 @@ async function lookUpTitle(key, metaType, id) {
 // `uses_primary_addons` on what getProfiles() returns. Everything addon-shaped
 // below is scoped to one profile, so a SlickSync user that points at profile 2
 // reads and writes profile 2's list and never touches the primary's.
-function createNuvioProvider({ refreshToken: initialRefreshToken, userId, profileId, resolveProfileId, resolveLibraryProfiles, onTokenRefresh, resolveServerConfig }) {
-  // Resolved the same way the server config is, and for the same reason: the
-  // profile lives on the User row, and the dozens of places that build a
-  // provider select only the columns they happen to need. Requiring every one
-  // of them to remember a new column would mean a caller that forgot it wrote
-  // one profile's addons into another's list. A caller that already has the
-  // value passes it and nothing is read; anyone else gets it looked up once,
-  // on the first addon call, and cached for the life of the provider.
-  let cachedProfileId = Number.isInteger(Number(profileId)) && Number(profileId) > 0 ? Number(profileId) : null
-  async function getAddonProfileId() {
-    if (cachedProfileId !== null) return cachedProfileId
-    if (typeof resolveProfileId === 'function') {
-      try {
-        const resolved = Number(await resolveProfileId())
-        if (Number.isInteger(resolved) && resolved > 0) {
-          cachedProfileId = resolved
-          return cachedProfileId
+function createNuvioProvider({
+    refreshToken: initialRefreshToken,
+    userId,
+    profileId,
+    resolveProfileId,
+    resolveLibraryProfiles,
+    onTokenRefresh,
+    resolveServerConfig,
+}) {
+    // Resolved the same way the server config is, and for the same reason: the
+    // profile lives on the User row, and the dozens of places that build a
+    // provider select only the columns they happen to need. Requiring every one
+    // of them to remember a new column would mean a caller that forgot it wrote
+    // one profile's addons into another's list. A caller that already has the
+    // value passes it and nothing is read; anyone else gets it looked up once,
+    // on the first addon call, and cached for the life of the provider.
+    let cachedProfileId =
+        Number.isInteger(Number(profileId)) && Number(profileId) > 0 ? Number(profileId) : null;
+    async function getAddonProfileId() {
+        if (cachedProfileId !== null) {
+            return cachedProfileId;
         }
-      } catch (e) {
-        console.warn(`[NuvioProvider] Could not resolve the profile for user ${userId}, using the primary:`, e?.message)
-      }
-    }
-    cachedProfileId = 1
-    return cachedProfileId
-  }
-  // Which Nuvio backend this account talks to. Resolved lazily rather than
-  // at construction because createProvider() is synchronous everywhere it's
-  // called, and reading the account's setting needs a DB round-trip. Cached
-  // per provider instance so a sync pass doesn't re-query per request.
-  let serverConfigPromise = null
-  function getServerConfig() {
-    if (!resolveServerConfig) return Promise.resolve(undefined)
-    if (!serverConfigPromise) {
-      serverConfigPromise = Promise.resolve()
-        .then(() => resolveServerConfig())
-        .catch(() => undefined)
-    }
-    return serverConfigPromise
-  }
-
-  async function ensureAuth() {
-    const cached = tokenCache.get(userId)
-    if (cached?.unsaved && !cached.saving && onTokenRefresh) {
-      cached.saving = true
-      Promise.resolve(onTokenRefresh(cached.refreshToken))
-        .then(() => { cached.unsaved = false })
-        .catch(() => {})
-        .finally(() => { cached.saving = false })
-    }
-    if (cached?.accessToken && !isTokenExpired(cached.accessToken)) {
-      return cached.accessToken
-    }
-
-    const existing = refreshPromises.get(userId)
-    if (existing) return existing
-
-    const promise = (async () => {
-      try {
-        const currentRefreshToken = tokenCache.get(userId)?.refreshToken || initialRefreshToken
-        const result = await refreshNuvioToken(currentRefreshToken, await getServerConfig())
-        const newAccessToken = result.access_token
-        const newRefreshToken = result.refresh_token || currentRefreshToken
-
-        tokenCache.set(userId, { accessToken: newAccessToken, refreshToken: newRefreshToken })
-
-        // The old refresh token is spent the moment Nuvio answers, so the new
-        // one has to reach the database. A failed save is retried, and is not
-        // reported as an expired sign-in - the sign-in works, and the token
-        // kept in memory is saved on the next use.
-        if (result.refresh_token && onTokenRefresh) {
-          await onTokenRefresh(newRefreshToken)
-            .catch(() => onTokenRefresh(newRefreshToken))
-            .catch((saveError) => {
-              tokenCache.set(userId, { accessToken: newAccessToken, refreshToken: newRefreshToken, unsaved: true })
-              console.warn(`[NuvioProvider] Could not save the new sign-in token for user ${userId}, will retry:`, saveError?.message)
-            })
-        }
-        return newAccessToken
-      } catch (e) {
-        console.warn(`[NuvioProvider] Auth expired for user ${userId}, token refresh failed:`, e?.message)
-        // A backend address that is refused is not an expired sign-in, and
-        // reconnecting cannot help; the person is told what is actually wrong.
-        if (e?.code === 'BACKEND_REFUSED') throw e
-        const err = new Error('Provider authentication expired')
-        err.code = 'PROVIDER_AUTH_EXPIRED'
-        err.cause = e
-        throw err
-      } finally {
-        refreshPromises.delete(userId)
-      }
-    })()
-
-    refreshPromises.set(userId, promise)
-    return promise
-  }
-
-  return {
-    type: 'nuvio',
-
-    // --- Addon Transport ---
-
-    async getAddons() {
-      const accessToken = await ensureAuth()
-      const addonProfileId = await getAddonProfileId()
-      const rows = await supabaseGet('addons', {
-        user_id: `eq.${userId}`,
-        profile_id: `eq.${addonProfileId}`,
-        order: 'sort_order.asc,created_at.asc',
-        select: '*'
-      }, accessToken, await getServerConfig())
-
-      // Transform to universal shape (minimal manifest — sync uses urlOnly mode)
-      const addons = rows.map(row => ({
-        transportUrl: row.url,
-        transportName: '',
-        manifest: {
-          id: row.url,
-          name: row.name || '',
-          types: [],
-          catalogs: [],
-          resources: []
-        }
-      }))
-      return { addons }
-    },
-
-    async setAddons(addons) {
-      // Checked before anything is touched: a list that is not a list used to
-      // fail only after the old one had been deleted.
-      if (!Array.isArray(addons)) throw new TypeError('setAddons needs a list of addons')
-      const addonProfileId = await getAddonProfileId()
-      return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
-        const serverConfig = await getServerConfig()
-        refuseWhileBackendIsDown(serverConfig)
-        const accessToken = await ensureAuth()
-        const wanted = dedupeAddonsByUrl(addons)
-
-        // The whole list in one call, the way Nuvio's own apps write it
-        // (sync_push_addons, AddonRepository.pushToServer in NuvioMobile):
-        // the backend swaps it over in one step, so the list is never empty
-        // in between and a failure leaves the old list whole. p_addons is
-        // the raw array - a JSON string would be stored double-encoded (see
-        // setCollections). A backend without that call - an older
-        // self-hosted one answers 404 - gets the delete-and-insert below.
-        try {
-          await supabaseRpc('sync_push_addons', {
-            p_profile_id: addonProfileId,
-            p_addons: wanted.map((addon, i) => ({
-              url: addon.transportUrl,
-              name: addon.manifest?.name || addon.transportName || addon.name || '',
-              enabled: true,
-              sort_order: i,
-            })),
-          }, accessToken, serverConfig)
-          return
-        } catch (pushErr) {
-          if (pushErr?.status !== 404) throw pushErr
-        }
-
-        // Snapshot current addons before delete for rollback on failure
-        const snapshot = await supabaseGet('addons', {
-          user_id: `eq.${userId}`,
-          profile_id: `eq.${addonProfileId}`,
-          select: '*'
-        }, accessToken, serverConfig)
-
-        // What the list holds right now, read without regard to the breaker
-        // because it is what decides what to do after a write whose answer was
-        // lost. Null when it could not be read.
-        const readListBack = async () => {
-          try {
-            return await supabaseGet('addons', {
-              user_id: `eq.${userId}`,
-              profile_id: `eq.${addonProfileId}`,
-              select: '*'
-            }, await ensureAuth(), serverConfig, { bypassBreaker: true })
-          } catch {
-            return null
-          }
-        }
-
-        // Delete all current addons, then insert desired set. A backend that
-        // is held back by now refuses the delete itself, before it is sent.
-        try {
-          await supabaseDelete('addons', {
-            user_id: `eq.${userId}`,
-            profile_id: `eq.${addonProfileId}`
-          }, accessToken, serverConfig)
-        } catch (deleteErr) {
-          // A delete that went through but whose answer was lost leaves the
-          // list empty: carry on as if it had been answered. Anything still
-          // there means nothing was deleted, and the failure stands.
-          if (!isUnansweredWrite(deleteErr)) throw deleteErr
-          const now = await readListBack()
-          if (!Array.isArray(now) || now.length > 0) throw deleteErr
-        }
-
-        // From here the list is only whole again once something has been
-        // inserted, so these writes are not held back by the breaker and are
-        // sent again while the backend is only busy (see WRITE_RETRY). The
-        // token is asked for each time, as the waits can outlast it. `sent`
-        // notes whether any try went unanswered, as that one may have landed.
-        const insertRows = (rows, waitsMs, sent) => retryWhileTransient(
-          async () => {
+        if (typeof resolveProfileId === "function") {
             try {
-              return await supabasePost('addons', rows, await ensureAuth(), serverConfig, { bypassBreaker: true })
-            } catch (e) {
-              if (isUnansweredWrite(e)) sent.unanswered = true
-              throw e
-            }
-          },
-          waitsMs
-        )
-        const restoreRows = snapshot && snapshot.length > 0
-          ? snapshot.map(({ id, created_at, updated_at, ...rest }) => rest)
-          : null
-
-        if (wanted.length > 0) {
-          const rows = wanted.map((addon, i) => ({
-            user_id: userId,
-            profile_id: addonProfileId,
-            url: addon.transportUrl,
-            name: addon.manifest?.name || addon.transportName || addon.name || '',
-            enabled: true,
-            sort_order: i
-          }))
-          const sent = { unanswered: false }
-          try {
-            await insertRows(rows, WRITE_RETRY.insertMs, sent)
-          } catch (insertErr) {
-            // A try that went unanswered may have landed, and a retry after it
-            // meets a conflict. Look at what the list holds before putting
-            // anything back: if it is the new list the write is done.
-            if (sent.unanswered) {
-              const now = await readListBack()
-              if (Array.isArray(now) && now.length > 0) {
-                const have = new Set(now.map((row) => addonKey(row?.url)))
-                const want = new Set(rows.map((row) => addonKey(row.url)))
-                if (have.size === want.size && [...want].every((key) => have.has(key))) return
-              }
-            }
-            // Attempt to restore previous addons
-            console.error('setAddons: insert failed after delete, attempting rollback:', insertErr?.message)
-            if (restoreRows) {
-              const restoreSent = { unanswered: false }
-              try {
-                await insertRows(restoreRows, WRITE_RETRY.restoreMs, restoreSent)
-              } catch (rollbackErr) {
-                console.error(`setAddons: rollback also failed, user ${userId} profile ${addonProfileId} has no addon list (${restoreRows.length} addons to put back):`, rollbackErr?.message)
-                // A conflict means rows of that list are there already (an
-                // insert that did land but whose answer was lost), so the list
-                // is not empty and the original failure is the true one. The
-                // same goes for any list found there after an unanswered try.
-                let listThere = rollbackErr?.status === 409
-                if (!listThere && restoreSent.unanswered) {
-                  const now = await readListBack()
-                  listThere = Array.isArray(now) && now.length > 0
+                const resolved = Number(await resolveProfileId());
+                if (Number.isInteger(resolved) && resolved > 0) {
+                    cachedProfileId = resolved;
+                    return cachedProfileId;
                 }
-                if (!listThere) throw listNotRestoredError(insertErr)
-              }
+            } catch (e) {
+                console.warn(
+                    `[NuvioProvider] Could not resolve the profile for user ${userId}, using the primary:`,
+                    e?.message
+                );
             }
-            throw insertErr
-          }
         }
-      })
-    },
+        cachedProfileId = 1;
+        return cachedProfileId;
+    }
+    // Which Nuvio backend this account talks to. Resolved lazily rather than
+    // at construction because createProvider() is synchronous everywhere it's
+    // called, and reading the account's setting needs a DB round-trip. Cached
+    // per provider instance so a sync pass doesn't re-query per request.
+    let serverConfigPromise = null;
+    function getServerConfig() {
+        if (!resolveServerConfig) {
+            return Promise.resolve(undefined);
+        }
+        if (!serverConfigPromise) {
+            serverConfigPromise = Promise.resolve()
+                .then(() => resolveServerConfig())
+                .catch(() => undefined);
+        }
+        return serverConfigPromise;
+    }
 
-    async addAddon(url, manifest) {
-      const addonProfileId = await getAddonProfileId()
-      return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
-        const accessToken = await ensureAuth()
-        // Get current max sort_order
-        const current = await supabaseGet('addons', {
-          user_id: `eq.${userId}`,
-          profile_id: `eq.${addonProfileId}`,
-          select: 'sort_order',
-          order: 'sort_order.desc',
-          limit: '1'
-        }, accessToken, await getServerConfig())
-        const nextOrder = (current[0]?.sort_order ?? -1) + 1
+    async function ensureAuth() {
+        const cached = tokenCache.get(userId);
+        if (cached?.unsaved && !cached.saving && onTokenRefresh) {
+            cached.saving = true;
+            Promise.resolve(onTokenRefresh(cached.refreshToken))
+                .then(() => {
+                    cached.unsaved = false;
+                })
+                .catch(() => undefined)
+                .finally(() => {
+                    cached.saving = false;
+                });
+        }
+        if (cached?.accessToken && !isTokenExpired(cached.accessToken)) {
+            return cached.accessToken;
+        }
 
-        await supabasePost('addons', [{
-          user_id: userId,
-          profile_id: addonProfileId,
-          url,
-          name: manifest?.name || '',
-          enabled: true,
-          sort_order: nextOrder
-        }], accessToken, await getServerConfig())
-      })
-    },
+        const existing = refreshPromises.get(userId);
+        if (existing) {
+            return existing;
+        }
 
-    async clearAddons() {
-      const addonProfileId = await getAddonProfileId()
-      return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
-        const serverConfig = await getServerConfig()
-        refuseWhileBackendIsDown(serverConfig)
-        const accessToken = await ensureAuth()
-        await supabaseDelete('addons', {
-          user_id: `eq.${userId}`,
-          profile_id: `eq.${addonProfileId}`
-        }, accessToken, serverConfig)
-      })
-    },
+        const promise = (async () => {
+            try {
+                const currentRefreshToken =
+                    tokenCache.get(userId)?.refreshToken || initialRefreshToken;
+                const result = await refreshNuvioToken(
+                    currentRefreshToken,
+                    await getServerConfig()
+                );
+                const newAccessToken = result.access_token;
+                const newRefreshToken = result.refresh_token || currentRefreshToken;
 
-    // --- Content ---
+                tokenCache.set(userId, {
+                    accessToken: newAccessToken,
+                    refreshToken: newRefreshToken,
+                });
 
-    async getLibrary() {
-      const accessToken = await ensureAuth()
-
-      // Nuvio accounts can have multiple profiles (like Netflix profiles) -
-      // sync_pull_profiles lists them. Watch activity can land on any one of
-      // them, so a hardcoded profile 1 silently misses everything watched
-      // under profile 2, 3, etc. Pull every profile and merge. Falls back to
-      // profile 1 alone if the profile list itself can't be fetched, so a
-      // single-profile account (or a transient failure) still works.
-      let profileIds = [1]
-      const profileNames = new Map() // profile_index -> display name
-      try {
-        const profiles = await supabaseRpc('sync_pull_profiles', {}, accessToken, await getServerConfig())
-        if (Array.isArray(profiles) && profiles.length > 0) {
-          const ids = []
-          for (const p of profiles) {
-            const idx = p.profile_index ?? p.profileIndex
-            if (Number.isFinite(idx)) {
-              ids.push(idx)
-              if (p.name) profileNames.set(idx, p.name)
+                // The old refresh token is spent the moment Nuvio answers, so the new
+                // one has to reach the database. A failed save is retried, and is not
+                // reported as an expired sign-in - the sign-in works, and the token
+                // kept in memory is saved on the next use.
+                if (result.refresh_token && onTokenRefresh) {
+                    await onTokenRefresh(newRefreshToken)
+                        .catch(() => onTokenRefresh(newRefreshToken))
+                        .catch((saveError) => {
+                            tokenCache.set(userId, {
+                                accessToken: newAccessToken,
+                                refreshToken: newRefreshToken,
+                                unsaved: true,
+                            });
+                            console.warn(
+                                `[NuvioProvider] Could not save the new sign-in token for user ${userId}, will retry:`,
+                                saveError?.message
+                            );
+                        });
+                }
+                return newAccessToken;
+            } catch (e) {
+                console.warn(
+                    `[NuvioProvider] Auth expired for user ${userId}, token refresh failed:`,
+                    e?.message
+                );
+                // A backend address that is refused is not an expired sign-in, and
+                // reconnecting cannot help; the person is told what is actually wrong.
+                if (e?.code === "BACKEND_REFUSED") {
+                    throw e;
+                }
+                const err = new Error("Provider authentication expired");
+                err.code = "PROVIDER_AUTH_EXPIRED";
+                err.cause = e;
+                throw err;
+            } finally {
+                refreshPromises.delete(userId);
             }
-          }
-          if (ids.length > 0) profileIds = ids
-        }
-      } catch (e) {
-        console.warn('[NuvioProvider] Failed to list profiles, falling back to profile 1 only:', e?.message)
-      }
+        })();
 
-      // Only the profiles this person's viewing is made of. Several people
-      // here can share one Nuvio login, one per profile, and reading every
-      // profile for each of them put everyone's viewing on everyone. Which
-      // profile counts for whom lives in utils/nuvioProfiles.js.
-      if (typeof resolveLibraryProfiles === 'function') {
-        try {
-          const owned = await resolveLibraryProfiles(profileIds)
-          if (Array.isArray(owned)) profileIds = owned
-        } catch (e) {
-          console.warn('[NuvioProvider] Could not work out which profiles count, reading all of them:', e?.message)
-        }
-        if (profileIds.length === 0) return []
-      }
+        refreshPromises.set(userId, promise);
+        return promise;
+    }
 
-      // Combine library + watch progress to build libraryItem shape, per profile
-      const perProfile = await Promise.all(profileIds.map(async (profileId) => {
-        const [libraryResult, progressResult, watchedResult] = await Promise.allSettled([
-          supabaseRpc('sync_pull_library', { p_profile_id: profileId }, accessToken, await getServerConfig()),
-          supabaseRpc('sync_pull_watch_progress', { p_profile_id: profileId }, accessToken, await getServerConfig()),
-          supabaseRpc('sync_pull_watched_items', { p_profile_id: profileId }, accessToken, await getServerConfig())
-        ])
-        return {
-          profileId,
-          profileName: profileNames.get(profileId) || null,
-          library: libraryResult.status === 'fulfilled' ? libraryResult.value : [],
-          progress: progressResult.status === 'fulfilled' ? progressResult.value : [],
-          watched: watchedResult.status === 'fulfilled' ? watchedResult.value : [],
-          libraryFailed: libraryResult.status === 'rejected',
-          progressFailed: progressResult.status === 'rejected'
-        }
-      }))
+    return {
+        async addAddon(url, manifest) {
+            const addonProfileId = await getAddonProfileId();
+            return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
+                const accessToken = await ensureAuth();
+                // Get current max sort_order
+                const current = await supabaseGet(
+                    "addons",
+                    {
+                        limit: "1",
+                        order: "sort_order.desc",
+                        profile_id: `eq.${addonProfileId}`,
+                        select: "sort_order",
+                        user_id: `eq.${userId}`,
+                    },
+                    accessToken,
+                    await getServerConfig()
+                );
+                const nextOrder = (current[0]?.sort_order ?? -1) + 1;
 
-      if (perProfile.every(r => r.libraryFailed && r.progressFailed)) {
-        throw new Error('Failed to fetch library: both RPCs failed for every profile')
-      }
+                await supabasePost(
+                    "addons",
+                    [
+                        {
+                            enabled: true,
+                            name: manifest?.name || "",
+                            profile_id: addonProfileId,
+                            sort_order: nextOrder,
+                            url,
+                            user_id: userId,
+                        },
+                    ],
+                    accessToken,
+                    await getServerConfig()
+                );
+            });
+        },
+        async addLibraryItem() {
+            return null;
+        },
 
-      // Build title lookup from watched items across all profiles (which have titles)
-      const titleMap = new Map()
-      for (const { watched } of perProfile) {
-        if (Array.isArray(watched)) {
-          for (const w of watched) {
-            if (w.content_id && w.title) titleMap.set(w.content_id, w.title)
-          }
-        }
-      }
+        async approveDeviceLogin(code) {
+            const accessToken = await ensureAuth();
+            const rows = await supabaseRpc(
+                "approve_device_login_session",
+                { p_user_code: code },
+                accessToken,
+                await getServerConfig()
+            );
+            return (Array.isArray(rows) ? rows[0] : rows) || null;
+        },
 
-      // Transform watch progress to universal libraryItem shape, merged across
-      // profiles. If the same content was watched under more than one profile,
-      // keep whichever entry is most recent.
-      const itemsById = new Map()
-      for (const { progress, profileName } of perProfile) {
-        for (const p of (Array.isArray(progress) ? progress : [])) {
-          const mtime = new Date(p.last_watched).getTime()
-          const existing = itemsById.get(p.content_id)
-          if (existing && existing._mtime >= mtime) continue
-          itemsById.set(p.content_id, {
-            _id: p.content_id,
-            name: p.title || p.name || titleMap.get(p.content_id) || '',
-            type: p.content_type,
-            poster: null,
-            state: {
-              video_id: p.video_id,
-              season: p.season,
-              episode: p.episode,
-              timeOffset: p.position,
-              duration: p.duration,
-              timeWatched: 0,
-              overallTimeWatched: p.position || 0,
-              lastWatched: new Date(p.last_watched).toISOString(),
-              nuvioProfile: profileName
-            },
-            _mtime: mtime,
-            _ctime: mtime,
-            removed: false
-          })
-        }
-      }
-      const items = Array.from(itemsById.values())
-
-      // Merge in any library-only items (bookmarked but no progress), from any profile
-      for (const { library, profileName } of perProfile) {
-        if (!Array.isArray(library)) continue
-        for (const item of library) {
-          if (!itemsById.has(item.content_id)) {
-            const placeholder = {
-              _id: item.content_id,
-              name: item.title || titleMap.get(item.content_id) || '',
-              type: item.content_type,
-              poster: null,
-              state: { nuvioProfile: profileName },
-              _mtime: Date.now(),
-              _ctime: Date.now(),
-              removed: false
+        async clearAddons() {
+            const addonProfileId = await getAddonProfileId();
+            return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
+                const serverConfig = await getServerConfig();
+                refuseWhileBackendIsDown(serverConfig);
+                const accessToken = await ensureAuth();
+                await supabaseDelete(
+                    "addons",
+                    {
+                        profile_id: `eq.${addonProfileId}`,
+                        user_id: `eq.${userId}`,
+                    },
+                    accessToken,
+                    serverConfig
+                );
+            });
+        },
+        async deleteLibraryItems(profileIdLocal, keys) {
+            if (!keys?.length) {
+                return;
             }
-            itemsById.set(item.content_id, placeholder)
-            items.push(placeholder)
-          }
-        }
-      }
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_delete_library_items",
+                { p_keys: keys, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+        async deleteWatchedItems(profileIdLocal, keys) {
+            if (!keys?.length) {
+                return;
+            }
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_delete_watched_items",
+                { p_keys: keys, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+        async deleteWatchProgress(profileIdLocal, progressKeys) {
+            if (!progressKeys?.length) {
+                return;
+            }
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_delete_watch_progress",
+                {
+                    p_keys: progressKeys,
+                    p_origin_client_id: "slicksync",
+                    p_profile_id: profileIdLocal,
+                },
+                accessToken,
+                await getServerConfig()
+            );
+        },
 
-      // Enrich items with metadata (titles + posters) from Cinemeta. What was
-      // found on an earlier poll is reused; only titles not known yet are
-      // asked for, a few at a time, within a time budget (see META). A title
-      // that cannot be looked up keeps the name it had, and never fails the
-      // library read.
-      const keyOf = (item) => `${item.type === 'series' ? 'series' : 'movie'}:${item._id}`
-      const toAsk = new Map() // key -> { key, metaType, id, needsName }
-      for (const item of items) {
-        if (!item._id || (item.name && item.poster)) continue
-        const key = keyOf(item)
-        const queued = toAsk.get(key)
-        if (queued) queued.needsName = queued.needsName || !item.name
-        else toAsk.set(key, { key, metaType: item.type === 'series' ? 'series' : 'movie', id: item._id, needsName: !item.name })
-      }
-      const unknown = [...toAsk.values()]
-        .filter((t) => cachedMeta(t.key) === undefined)
-        .sort((a, b) => Number(b.needsName) - Number(a.needsName))
-      if (unknown.length > 0) {
-        const stopAsking = Date.now() + META.budgetMs
-        await mapLimit(unknown, META.concurrency, async (t) => {
-          if (Date.now() >= stopAsking) return
-          await lookUpTitle(t.key, t.metaType, t.id)
-        })
-      }
+        // --- Addon Transport ---
 
-      for (const item of items) {
-        if (!item._id) continue
-        const meta = cachedMeta(keyOf(item))?.meta
-        if (meta) {
-          if (!item.name) item.name = meta.name || ''
-          if (!item.poster) item.poster = meta.poster || null
-        }
-      }
+        async getAddons() {
+            const accessToken = await ensureAuth();
+            const addonProfileId = await getAddonProfileId();
+            const rows = await supabaseGet(
+                "addons",
+                {
+                    order: "sort_order.asc,created_at.asc",
+                    profile_id: `eq.${addonProfileId}`,
+                    select: "*",
+                    user_id: `eq.${userId}`,
+                },
+                accessToken,
+                await getServerConfig()
+            );
 
-      return items
-    },
+            // Transform to universal shape (minimal manifest — sync uses urlOnly mode)
+            const addons = rows.map((row) => ({
+                manifest: {
+                    catalogs: [],
+                    id: row.url,
+                    name: row.name || "",
+                    resources: [],
+                    types: [],
+                },
+                transportName: "",
+                transportUrl: row.url,
+            }));
+            return { addons };
+        },
 
-    // --- Profiles / Collections (admin-only, Nuvio Collections manager) ---
+        // profileId here is Nuvio's own profile_index (an integer, e.g. 1) -
+        // NOT the profile row's id (a UUID). Easy to mix up since getProfiles()
+        // returns both on the same row.
+        async getCollections(profileIdLocal) {
+            const accessToken = await ensureAuth();
+            const rows = await supabaseRpc(
+                "sync_pull_collections",
+                { p_profile_id: profileIdLocal },
+                accessToken,
+                await getServerConfig()
+            );
+            const raw = rows?.[0]?.collections_json;
+            if (!raw) {
+                return [];
+            }
+            // Confirmed against the real API (via two independent third-party
+            // tools built against it): collections_json comes back either
+            // already-parsed or still a JSON string depending on how the RPC's
+            // return type gets decoded - handle both rather than assume one.
+            if (typeof raw === "string") {
+                try {
+                    return JSON.parse(raw);
+                } catch {
+                    return [];
+                }
+            }
+            return Array.isArray(raw) ? raw : [];
+        },
 
-    // Nuvio accounts can have multiple profiles (see getLibrary()'s own
-    // comment above) - this was previously only ever used internally for
-    // the library merge fan-out. Exposed as its own method now that an
-    // admin-facing profile picker needs the raw list.
-    async getProfiles() {
-      const accessToken = await ensureAuth()
-      const rows = await supabaseRpc('sync_pull_profiles', {}, accessToken, await getServerConfig())
-      return Array.isArray(rows) ? rows : []
-    },
+        // Community Covers - nuvio.tv's own public gallery of user-submitted
+        // cover art (GIFs/JPG/PNG) for Collections/folders/rows, the same place
+        // the account owner found their own GIF covers before SlickSync had
+        // this feature. Same Supabase-issued access token as every other
+        // authenticated call here, just against nuvio.tv's own Next API route
+        // instead of Supabase's REST/RPC endpoints directly - confirmed via a
+        // real authenticated browser session (the endpoint 401s without this
+        // exact Bearer token; param names/values - sort, orientation, format -
+        // confirmed by watching the real UI's own network requests, not
+        // guessed).
+        async getCommunityCovers({
+            sort = "recent",
+            orientation = "all",
+            format = "all",
+            page = 1,
+            limit = 24,
+            search = "",
+        } = {}) {
+            const accessToken = await ensureAuth();
+            const params = new URLSearchParams({
+                limit: String(limit),
+                orientation,
+                page: String(page),
+                sort,
+            });
+            if (format && format !== "all") {
+                params.set("format", format);
+            }
+            // Real server-side search - confirmed live against nuvio.tv/api/covers
+            // (nuvio.tv's own search box in the UI doesn't fire an observable
+            // request, but the API itself supports it; ?search= filters
+            // pagination.total correctly and returns 0 results for garbage terms).
+            if (search?.trim()) {
+                params.set("search", search.trim());
+            }
+            const res = await fetch(`https://nuvio.tv/api/covers?${params}`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (!res.ok) {
+                throw new Error(`Nuvio covers request failed (${res.status})`);
+            }
+            return res.json();
+        },
 
-    // Each profile's picture: the avatar it picked from Nuvio's catalogue (a
-    // public file on the backend), else null - callers fall back to the
-    // profile's colour (avatar_color_hex).
-    async getProfileAvatars() {
-      const accessToken = await ensureAuth()
-      const config = await getServerConfig()
-      const [profiles, catalog] = await Promise.all([
-        supabaseRpc('sync_pull_profiles', {}, accessToken, config),
-        supabaseRpc('get_avatar_catalog', {}, accessToken, config).catch(() => []),
-      ])
-      const base = require('./supabase').backendUrl(config)
-      const paths = new Map((Array.isArray(catalog) ? catalog : []).map((a) => [a.id, a.storage_path]))
-      const out = new Map()
-      for (const p of Array.isArray(profiles) ? profiles : []) {
-        const idx = Number(p.profile_index ?? p.profileIndex)
-        if (!Number.isInteger(idx)) continue
-        const path = p.avatar_id ? paths.get(p.avatar_id) : null
-        out.set(idx, { url: path ? `${base}/storage/v1/object/public/avatars/${String(path).split('/').map(encodeURIComponent).join('/')}` : null, color: p.avatar_color_hex || null })
-      }
-      return out
-    },
+        // A Nuvio TV or computer that isn't signed in shows a 6-character code.
+        // A signed-in account looks the code up (which device is asking) and
+        // approves it; the device is then signed in to this account and picks
+        // its own profile. Both answer { success, message, device_name,
+        // device_type } - an unknown or expired code is success: false, not an
+        // error, and Nuvio counts failed tries against the account.
+        async getDeviceLogin(code) {
+            const accessToken = await ensureAuth();
+            const rows = await supabaseRpc(
+                "get_device_login_session",
+                { p_user_code: code },
+                accessToken,
+                await getServerConfig()
+            );
+            return (Array.isArray(rows) ? rows[0] : rows) || null;
+        },
 
-    // A Nuvio TV or computer that isn't signed in shows a 6-character code.
-    // A signed-in account looks the code up (which device is asking) and
-    // approves it; the device is then signed in to this account and picks
-    // its own profile. Both answer { success, message, device_name,
-    // device_type } - an unknown or expired code is success: false, not an
-    // error, and Nuvio counts failed tries against the account.
-    async getDeviceLogin(code) {
-      const accessToken = await ensureAuth()
-      const rows = await supabaseRpc('get_device_login_session', { p_user_code: code }, accessToken, await getServerConfig())
-      return (Array.isArray(rows) ? rows[0] : rows) || null
-    },
+        // Home catalog settings - the synced per-profile blob that controls
+        // home ROW ORDER and per-row title overrides (see
+        // utils/nuvioHomePlacement.js for the full shape, learned from the
+        // desktop client's own HomeCatalogSettingsSyncService). Platform is
+        // 'mobile' / 'desktop' / the 'home_catalog_shared' fallback bucket.
+        async getHomeCatalogSettings(profileIdLocal, platform) {
+            const accessToken = await ensureAuth();
+            const rows = await supabaseRpc(
+                "sync_pull_home_catalog_settings",
+                {
+                    p_platform: platform,
+                    p_profile_id: profileIdLocal,
+                },
+                accessToken,
+                await getServerConfig()
+            );
+            return Array.isArray(rows) ? rows : [];
+        },
 
-    async approveDeviceLogin(code) {
-      const accessToken = await ensureAuth()
-      const rows = await supabaseRpc('approve_device_login_session', { p_user_code: code }, accessToken, await getServerConfig())
-      return (Array.isArray(rows) ? rows[0] : rows) || null
-    },
+        // --- Content ---
 
-    // One profile's watch state as Nuvio keeps it, unmerged: finished titles
-    // and episodes (watched_items, with the date), resume points
-    // (watch_progress) and the library. Read a page at a time - the backend
-    // may cap one answer below what a long history holds.
-    async getWatchState(profileId) {
-      const accessToken = await ensureAuth()
-      const config = await getServerConfig()
-      const PAGE = 1000
-      const watched = []
-      for (let page = 1; page <= 200; page++) {
-        const rows = await supabaseRpc('sync_pull_watched_items', { p_profile_id: profileId, p_page: page, p_page_size: PAGE }, accessToken, config)
-        const list = Array.isArray(rows) ? rows : []
-        watched.push(...list)
-        if (list.length < PAGE) break
-      }
-      const progress = await supabaseRpc('sync_pull_watch_progress', { p_profile_id: profileId }, accessToken, config)
-      const library = []
-      for (let offset = 0; offset < 100000; offset += 500) {
-        const rows = await supabaseRpc('sync_pull_library', { p_profile_id: profileId, p_limit: 500, p_offset: offset }, accessToken, config)
-        const list = Array.isArray(rows) ? rows : []
-        library.push(...list)
-        if (list.length < 500) break
-      }
-      return { watched, progress: Array.isArray(progress) ? progress : [], library }
-    },
+        async getLibrary() {
+            const accessToken = await ensureAuth();
 
-    // Writes for Copy watch history and Keep in step. Each is an upsert (or a
-    // delete by key) on one profile, tagged with SlickSync as the origin so
-    // Nuvio's apps pick the change up as coming from elsewhere.
-    async pushWatchedItems(profileId, items) {
-      if (!items?.length) return
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_push_watched_items', { p_items: items, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
-    },
-    async deleteWatchedItems(profileId, keys) {
-      if (!keys?.length) return
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_delete_watched_items', { p_keys: keys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
-    },
-    async pushWatchProgress(profileId, entries) {
-      if (!entries?.length) return
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_push_watch_progress', { p_entries: entries, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
-    },
-    async deleteWatchProgress(profileId, progressKeys) {
-      if (!progressKeys?.length) return
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_delete_watch_progress', { p_keys: progressKeys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
-    },
-    async pushLibraryItems(profileId, items) {
-      if (!items?.length) return
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_push_library_items', { p_items: items, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
-    },
-    async deleteLibraryItems(profileId, keys) {
-      if (!keys?.length) return
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_delete_library_items', { p_keys: keys, p_profile_id: profileId, p_origin_client_id: 'slicksync' }, accessToken, await getServerConfig())
-    },
+            // Nuvio accounts can have multiple profiles (like Netflix profiles) -
+            // sync_pull_profiles lists them. Watch activity can land on any one of
+            // them, so a hardcoded profile 1 silently misses everything watched
+            // under profile 2, 3, etc. Pull every profile and merge. Falls back to
+            // profile 1 alone if the profile list itself can't be fetched, so a
+            // single-profile account (or a transient failure) still works.
+            let profileIds = [1];
+            const profileNames = new Map(); // profile_index -> display name
+            try {
+                const profiles = await supabaseRpc(
+                    "sync_pull_profiles",
+                    {},
+                    accessToken,
+                    await getServerConfig()
+                );
+                if (Array.isArray(profiles) && profiles.length > 0) {
+                    const ids = [];
+                    for (const p of profiles) {
+                        const idx = p.profile_index ?? p.profileIndex;
+                        if (Number.isFinite(idx)) {
+                            ids.push(idx);
+                            if (p.name) {
+                                profileNames.set(idx, p.name);
+                            }
+                        }
+                    }
+                    if (ids.length > 0) {
+                        profileIds = ids;
+                    }
+                }
+            } catch (e) {
+                console.warn(
+                    "[NuvioProvider] Failed to list profiles, falling back to profile 1 only:",
+                    e?.message
+                );
+            }
 
-    // A profile's media servers (Jellyfin / Emby) - the list Nuvio's apps
-    // sign in to. One list per profile, replaced whole on every write, so a
-    // caller always pulls first and keeps what isn't theirs.
-    async getMediaServers(profileId) {
-      const accessToken = await ensureAuth()
-      const rows = await supabaseRpc('sync_pull_media_servers', { p_profile_id: profileId }, accessToken, await getServerConfig())
-      let raw = (Array.isArray(rows) ? rows[0] : rows)?.servers_json
-      if (typeof raw === 'string') {
-        try { raw = JSON.parse(raw) } catch { raw = [] }
-      }
-      return Array.isArray(raw) ? raw : []
-    },
+            // Only the profiles this person's viewing is made of. Several people
+            // here can share one Nuvio login, one per profile, and reading every
+            // profile for each of them put everyone's viewing on everyone. Which
+            // profile counts for whom lives in utils/nuvioProfiles.js.
+            if (typeof resolveLibraryProfiles === "function") {
+                try {
+                    const owned = await resolveLibraryProfiles(profileIds);
+                    if (Array.isArray(owned)) {
+                        profileIds = owned;
+                    }
+                } catch (e) {
+                    console.warn(
+                        "[NuvioProvider] Could not work out which profiles count, reading all of them:",
+                        e?.message
+                    );
+                }
+                if (profileIds.length === 0) {
+                    return [];
+                }
+            }
 
-    // p_servers is the raw array, not a JSON string (the same double-encoding
-    // trap as sync_push_collections).
-    async setMediaServers(profileId, servers) {
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_push_media_servers', {
-        p_profile_id: profileId,
-        p_servers: servers,
-        p_origin_client_id: 'slicksync',
-      }, accessToken, await getServerConfig())
-    },
+            // Combine library + watch progress to build libraryItem shape, per profile
+            const perProfile = await Promise.all(
+                profileIds.map(async (profileIdLocal) => {
+                    const [libraryResult, progressResult, watchedResult] = await Promise.allSettled(
+                        [
+                            supabaseRpc(
+                                "sync_pull_library",
+                                { p_profile_id: profileIdLocal },
+                                accessToken,
+                                await getServerConfig()
+                            ),
+                            supabaseRpc(
+                                "sync_pull_watch_progress",
+                                { p_profile_id: profileIdLocal },
+                                accessToken,
+                                await getServerConfig()
+                            ),
+                            supabaseRpc(
+                                "sync_pull_watched_items",
+                                { p_profile_id: profileIdLocal },
+                                accessToken,
+                                await getServerConfig()
+                            ),
+                        ]
+                    );
+                    return {
+                        library: libraryResult.status === "fulfilled" ? libraryResult.value : [],
+                        libraryFailed: libraryResult.status === "rejected",
+                        profileId: profileIdLocal,
+                        profileName: profileNames.get(profileIdLocal) || null,
+                        progress: progressResult.status === "fulfilled" ? progressResult.value : [],
+                        progressFailed: progressResult.status === "rejected",
+                        watched: watchedResult.status === "fulfilled" ? watchedResult.value : [],
+                    };
+                })
+            );
 
-    // profileId here is Nuvio's own profile_index (an integer, e.g. 1) -
-    // NOT the profile row's id (a UUID). Easy to mix up since getProfiles()
-    // returns both on the same row.
-    async getCollections(profileId) {
-      const accessToken = await ensureAuth()
-      const rows = await supabaseRpc('sync_pull_collections', { p_profile_id: profileId }, accessToken, await getServerConfig())
-      const raw = rows?.[0]?.collections_json
-      if (!raw) return []
-      // Confirmed against the real API (via two independent third-party
-      // tools built against it): collections_json comes back either
-      // already-parsed or still a JSON string depending on how the RPC's
-      // return type gets decoded - handle both rather than assume one.
-      if (typeof raw === 'string') {
-        try { return JSON.parse(raw) } catch { return [] }
-      }
-      return Array.isArray(raw) ? raw : []
-    },
+            if (perProfile.every((r) => r.libraryFailed && r.progressFailed)) {
+                throw new Error("Failed to fetch library: both RPCs failed for every profile");
+            }
 
-    // Home catalog settings - the synced per-profile blob that controls
-    // home ROW ORDER and per-row title overrides (see
-    // utils/nuvioHomePlacement.js for the full shape, learned from the
-    // desktop client's own HomeCatalogSettingsSyncService). Platform is
-    // 'mobile' / 'desktop' / the 'home_catalog_shared' fallback bucket.
-    async getHomeCatalogSettings(profileId, platform) {
-      const accessToken = await ensureAuth()
-      const rows = await supabaseRpc('sync_pull_home_catalog_settings', {
-        p_profile_id: profileId,
-        p_platform: platform,
-      }, accessToken, await getServerConfig())
-      return Array.isArray(rows) ? rows : []
-    },
+            // Build title lookup from watched items across all profiles (which have titles)
+            const titleMap = new Map();
+            for (const { watched } of perProfile) {
+                if (Array.isArray(watched)) {
+                    for (const w of watched) {
+                        if (w.content_id && w.title) {
+                            titleMap.set(w.content_id, w.title);
+                        }
+                    }
+                }
+            }
 
-    // p_settings_json must be the raw object, NOT a JSON string - same
-    // double-encoding trap sync_push_collections already taught us (see
-    // setCollections below).
-    async pushHomeCatalogSettings(profileId, platform, settings) {
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_push_home_catalog_settings', {
-        p_profile_id: profileId,
-        p_platform: platform,
-        p_settings_json: settings,
-      }, accessToken, await getServerConfig())
-    },
+            // Transform watch progress to universal libraryItem shape, merged across
+            // profiles. If the same content was watched under more than one profile,
+            // keep whichever entry is most recent.
+            const itemsById = new Map();
+            for (const { progress, profileName } of perProfile) {
+                for (const p of Array.isArray(progress) ? progress : []) {
+                    const mtime = new Date(p.last_watched).getTime();
+                    const existing = itemsById.get(p.content_id);
+                    if (existing && existing._mtime >= mtime) {
+                        continue;
+                    }
+                    itemsById.set(p.content_id, {
+                        _ctime: mtime,
+                        _id: p.content_id,
+                        _mtime: mtime,
+                        name: p.title || p.name || titleMap.get(p.content_id) || "",
+                        poster: null,
+                        removed: false,
+                        state: {
+                            duration: p.duration,
+                            episode: p.episode,
+                            lastWatched: new Date(p.last_watched).toISOString(),
+                            nuvioProfile: profileName,
+                            overallTimeWatched: p.position || 0,
+                            season: p.season,
+                            timeOffset: p.position,
+                            timeWatched: 0,
+                            video_id: p.video_id,
+                        },
+                        type: p.content_type,
+                    });
+                }
+            }
+            const items = Array.from(itemsById.values());
 
-    // Full replace, matching sync_push_collections' own semantics - there is
-    // no partial-update RPC, so callers must always push the complete array.
-    //
-    // p_collections_json must be the raw array, NOT a JSON string. Confirmed
-    // live (2026-08-06) via a raw fetch intercept on sync_pull_collections:
-    // stringifying it here meant supabaseRpc's own JSON.stringify(body) on
-    // the outer request double-encoded it, so collections_json was stored
-    // (and always came back) as a JSON *string* containing escaped JSON
-    // text, not a real array - typeof came back "string", not "object".
-    // Nuvio's real desktop client (composeApp/.../CollectionModels.kt,
-    // SupabaseCollectionBlob.collectionsJson: JsonElement) expects a native
-    // JSON array there; getting a string instead makes its strict
-    // kotlinx.serialization decode of the whole payload throw, which its
-    // own sync code silently swallows (logs and discards) - so literally
-    // nothing written by this app ever appeared on-device, regardless of
-    // which fields were set on any individual folder. This masked itself
-    // completely from every read this app ever did of its own writes,
-    // since getCollections() already defensively re-parses a string return
-    // back into an array - see that function's own comment.
-    async setCollections(profileId, collections) {
-      const accessToken = await ensureAuth()
-      await supabaseRpc('sync_push_collections', {
-        p_profile_id: profileId,
-        p_collections_json: collections
-      }, accessToken, await getServerConfig())
-    },
+            // Merge in any library-only items (bookmarked but no progress), from any profile
+            for (const { library, profileName } of perProfile) {
+                if (!Array.isArray(library)) {
+                    continue;
+                }
+                for (const item of library) {
+                    if (!itemsById.has(item.content_id)) {
+                        const placeholder = {
+                            _ctime: Date.now(),
+                            _id: item.content_id,
+                            _mtime: Date.now(),
+                            name: item.title || titleMap.get(item.content_id) || "",
+                            poster: null,
+                            removed: false,
+                            state: { nuvioProfile: profileName },
+                            type: item.content_type,
+                        };
+                        itemsById.set(item.content_id, placeholder);
+                        items.push(placeholder);
+                    }
+                }
+            }
 
-    // Community Covers - nuvio.tv's own public gallery of user-submitted
-    // cover art (GIFs/JPG/PNG) for Collections/folders/rows, the same place
-    // the account owner found their own GIF covers before SlickSync had
-    // this feature. Same Supabase-issued access token as every other
-    // authenticated call here, just against nuvio.tv's own Next API route
-    // instead of Supabase's REST/RPC endpoints directly - confirmed via a
-    // real authenticated browser session (the endpoint 401s without this
-    // exact Bearer token; param names/values - sort, orientation, format -
-    // confirmed by watching the real UI's own network requests, not
-    // guessed).
-    async getCommunityCovers({ sort = 'recent', orientation = 'all', format = 'all', page = 1, limit = 24, search = '' } = {}) {
-      const accessToken = await ensureAuth()
-      const params = new URLSearchParams({ sort, orientation, page: String(page), limit: String(limit) })
-      if (format && format !== 'all') params.set('format', format)
-      // Real server-side search - confirmed live against nuvio.tv/api/covers
-      // (nuvio.tv's own search box in the UI doesn't fire an observable
-      // request, but the API itself supports it; ?search= filters
-      // pagination.total correctly and returns 0 results for garbage terms).
-      if (search && search.trim()) params.set('search', search.trim())
-      const res = await fetch(`https://nuvio.tv/api/covers?${params}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      if (!res.ok) throw new Error(`Nuvio covers request failed (${res.status})`)
-      return res.json()
-    },
+            // Enrich items with metadata (titles + posters) from Cinemeta. What was
+            // found on an earlier poll is reused; only titles not known yet are
+            // asked for, a few at a time, within a time budget (see META). A title
+            // that cannot be looked up keeps the name it had, and never fails the
+            // library read.
+            const keyOf = (item) => `${item.type === "series" ? "series" : "movie"}:${item._id}`;
+            const toAsk = new Map(); // key -> { key, metaType, id, needsName }
+            for (const item of items) {
+                if (!item._id || (item.name && item.poster)) {
+                    continue;
+                }
+                const key = keyOf(item);
+                const queued = toAsk.get(key);
+                if (queued) {
+                    queued.needsName = queued.needsName || !item.name;
+                } else {
+                    toAsk.set(key, {
+                        id: item._id,
+                        key,
+                        metaType: item.type === "series" ? "series" : "movie",
+                        needsName: !item.name,
+                    });
+                }
+            }
+            const unknown = [...toAsk.values()]
+                .filter((t) => cachedMeta(t.key) === undefined)
+                .sort((a, b) => Number(b.needsName) - Number(a.needsName));
+            if (unknown.length > 0) {
+                const stopAsking = Date.now() + META.budgetMs;
+                await mapLimit(unknown, META.concurrency, async (t) => {
+                    if (Date.now() >= stopAsking) {
+                        return;
+                    }
+                    await lookUpTitle(t.key, t.metaType, t.id);
+                });
+            }
 
-    // Library writes — no-op; returns null to signal "not supported". Callers guard via providerType.
-    // Capability flag: Nuvio library is read-only in this implementation
-    supportsLibraryWrite: false,
-    async addLibraryItem() { return null },
-    async removeLibraryItem() { return null },
+            for (const item of items) {
+                if (!item._id) {
+                    continue;
+                }
+                const meta = cachedMeta(keyOf(item))?.meta;
+                if (meta) {
+                    if (!item.name) {
+                        item.name = meta.name || "";
+                    }
+                    if (!item.poster) {
+                        item.poster = meta.poster || null;
+                    }
+                }
+            }
 
-    // Likes — no Nuvio equivalent
-    async getLikeStatus() { return null },
-    async setLikeStatus() { return null }
-  }
+            return items;
+        },
+
+        // Likes — no Nuvio equivalent
+        async getLikeStatus() {
+            return null;
+        },
+
+        // A profile's media servers (Jellyfin / Emby) - the list Nuvio's apps
+        // sign in to. One list per profile, replaced whole on every write, so a
+        // caller always pulls first and keeps what isn't theirs.
+        async getMediaServers(profileIdLocal) {
+            const accessToken = await ensureAuth();
+            const rows = await supabaseRpc(
+                "sync_pull_media_servers",
+                { p_profile_id: profileIdLocal },
+                accessToken,
+                await getServerConfig()
+            );
+            let raw = (Array.isArray(rows) ? rows[0] : rows)?.servers_json;
+            if (typeof raw === "string") {
+                try {
+                    raw = JSON.parse(raw);
+                } catch {
+                    raw = [];
+                }
+            }
+            return Array.isArray(raw) ? raw : [];
+        },
+
+        // Each profile's picture: the avatar it picked from Nuvio's catalogue (a
+        // public file on the backend), else null - callers fall back to the
+        // profile's colour (avatar_color_hex).
+        async getProfileAvatars() {
+            const accessToken = await ensureAuth();
+            const config = await getServerConfig();
+            const [profiles, catalog] = await Promise.all([
+                supabaseRpc("sync_pull_profiles", {}, accessToken, config),
+                supabaseRpc("get_avatar_catalog", {}, accessToken, config).catch(() => []),
+            ]);
+            const base = require("./supabase").backendUrl(config);
+            const paths = new Map(
+                (Array.isArray(catalog) ? catalog : []).map((a) => [a.id, a.storage_path])
+            );
+            const out = new Map();
+            for (const p of Array.isArray(profiles) ? profiles : []) {
+                const idx = Number(p.profile_index ?? p.profileIndex);
+                if (!Number.isInteger(idx)) {
+                    continue;
+                }
+                const path = p.avatar_id ? paths.get(p.avatar_id) : null;
+                out.set(idx, {
+                    color: p.avatar_color_hex || null,
+                    url: path
+                        ? `${base}/storage/v1/object/public/avatars/${String(path).split("/").map(encodeURIComponent).join("/")}`
+                        : null,
+                });
+            }
+            return out;
+        },
+
+        // --- Profiles / Collections (admin-only, Nuvio Collections manager) ---
+
+        // Nuvio accounts can have multiple profiles (see getLibrary()'s own
+        // comment above) - this was previously only ever used internally for
+        // the library merge fan-out. Exposed as its own method now that an
+        // admin-facing profile picker needs the raw list.
+        async getProfiles() {
+            const accessToken = await ensureAuth();
+            const rows = await supabaseRpc(
+                "sync_pull_profiles",
+                {},
+                accessToken,
+                await getServerConfig()
+            );
+            return Array.isArray(rows) ? rows : [];
+        },
+
+        // One profile's watch state as Nuvio keeps it, unmerged: finished titles
+        // and episodes (watched_items, with the date), resume points
+        // (watch_progress) and the library. Read a page at a time - the backend
+        // may cap one answer below what a long history holds.
+        async getWatchState(profileIdLocal) {
+            const accessToken = await ensureAuth();
+            const config = await getServerConfig();
+            const PAGE = 1000;
+            const watched = [];
+            for (let page = 1; page <= 200; page++) {
+                const rows = await supabaseRpc(
+                    "sync_pull_watched_items",
+                    { p_page: page, p_page_size: PAGE, p_profile_id: profileIdLocal },
+                    accessToken,
+                    config
+                );
+                const list = Array.isArray(rows) ? rows : [];
+                watched.push(...list);
+                if (list.length < PAGE) {
+                    break;
+                }
+            }
+            const progress = await supabaseRpc(
+                "sync_pull_watch_progress",
+                { p_profile_id: profileIdLocal },
+                accessToken,
+                config
+            );
+            const library = [];
+            for (let offset = 0; offset < 100_000; offset += 500) {
+                const rows = await supabaseRpc(
+                    "sync_pull_library",
+                    { p_limit: 500, p_offset: offset, p_profile_id: profileIdLocal },
+                    accessToken,
+                    config
+                );
+                const list = Array.isArray(rows) ? rows : [];
+                library.push(...list);
+                if (list.length < 500) {
+                    break;
+                }
+            }
+            return { library, progress: Array.isArray(progress) ? progress : [], watched };
+        },
+
+        // p_settings_json must be the raw object, NOT a JSON string - same
+        // double-encoding trap sync_push_collections already taught us (see
+        // setCollections below).
+        async pushHomeCatalogSettings(profileIdLocal, platform, settings) {
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_push_home_catalog_settings",
+                {
+                    p_platform: platform,
+                    p_profile_id: profileIdLocal,
+                    p_settings_json: settings,
+                },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+        async pushLibraryItems(profileIdLocal, items) {
+            if (!items?.length) {
+                return;
+            }
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_push_library_items",
+                { p_items: items, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+
+        // Writes for Copy watch history and Keep in step. Each is an upsert (or a
+        // delete by key) on one profile, tagged with SlickSync as the origin so
+        // Nuvio's apps pick the change up as coming from elsewhere.
+        async pushWatchedItems(profileIdLocal, items) {
+            if (!items?.length) {
+                return;
+            }
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_push_watched_items",
+                { p_items: items, p_origin_client_id: "slicksync", p_profile_id: profileIdLocal },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+        async pushWatchProgress(profileIdLocal, entries) {
+            if (!entries?.length) {
+                return;
+            }
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_push_watch_progress",
+                {
+                    p_entries: entries,
+                    p_origin_client_id: "slicksync",
+                    p_profile_id: profileIdLocal,
+                },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+        async removeLibraryItem() {
+            return null;
+        },
+
+        async setAddons(addons) {
+            // Checked before anything is touched: a list that is not a list used to
+            // fail only after the old one had been deleted.
+            if (!Array.isArray(addons)) {
+                throw new TypeError("setAddons needs a list of addons");
+            }
+            const addonProfileId = await getAddonProfileId();
+            return inWriteQueue(`${userId}:${addonProfileId}`, async () => {
+                const serverConfig = await getServerConfig();
+                refuseWhileBackendIsDown(serverConfig);
+                const accessToken = await ensureAuth();
+                const wanted = dedupeAddonsByUrl(addons);
+
+                // The whole list in one call, the way Nuvio's own apps write it
+                // (sync_push_addons, AddonRepository.pushToServer in NuvioMobile):
+                // the backend swaps it over in one step, so the list is never empty
+                // in between and a failure leaves the old list whole. p_addons is
+                // the raw array - a JSON string would be stored double-encoded (see
+                // setCollections). A backend without that call - an older
+                // self-hosted one answers 404 - gets the delete-and-insert below.
+                try {
+                    await supabaseRpc(
+                        "sync_push_addons",
+                        {
+                            p_addons: wanted.map((addon, i) => ({
+                                enabled: true,
+                                name:
+                                    addon.manifest?.name || addon.transportName || addon.name || "",
+                                sort_order: i,
+                                url: addon.transportUrl,
+                            })),
+                            p_profile_id: addonProfileId,
+                        },
+                        accessToken,
+                        serverConfig
+                    );
+                    return;
+                } catch (pushErr) {
+                    if (pushErr?.status !== 404) {
+                        throw pushErr;
+                    }
+                }
+
+                // Snapshot current addons before delete for rollback on failure
+                const snapshot = await supabaseGet(
+                    "addons",
+                    {
+                        profile_id: `eq.${addonProfileId}`,
+                        select: "*",
+                        user_id: `eq.${userId}`,
+                    },
+                    accessToken,
+                    serverConfig
+                );
+
+                // What the list holds right now, read without regard to the breaker
+                // because it is what decides what to do after a write whose answer was
+                // lost. Null when it could not be read.
+                const readListBack = async () => {
+                    try {
+                        return await supabaseGet(
+                            "addons",
+                            {
+                                profile_id: `eq.${addonProfileId}`,
+                                select: "*",
+                                user_id: `eq.${userId}`,
+                            },
+                            await ensureAuth(),
+                            serverConfig,
+                            { bypassBreaker: true }
+                        );
+                    } catch {
+                        return null;
+                    }
+                };
+
+                // Delete all current addons, then insert desired set. A backend that
+                // is held back by now refuses the delete itself, before it is sent.
+                try {
+                    await supabaseDelete(
+                        "addons",
+                        {
+                            profile_id: `eq.${addonProfileId}`,
+                            user_id: `eq.${userId}`,
+                        },
+                        accessToken,
+                        serverConfig
+                    );
+                } catch (deleteErr) {
+                    // A delete that went through but whose answer was lost leaves the
+                    // list empty: carry on as if it had been answered. Anything still
+                    // there means nothing was deleted, and the failure stands.
+                    if (!isUnansweredWrite(deleteErr)) {
+                        throw deleteErr;
+                    }
+                    const now = await readListBack();
+                    if (!Array.isArray(now) || now.length > 0) {
+                        throw deleteErr;
+                    }
+                }
+
+                // From here the list is only whole again once something has been
+                // inserted, so these writes are not held back by the breaker and are
+                // sent again while the backend is only busy (see WRITE_RETRY). The
+                // token is asked for each time, as the waits can outlast it. `sent`
+                // notes whether any try went unanswered, as that one may have landed.
+                const insertRows = (rows, waitsMs, sent) =>
+                    retryWhileTransient(async () => {
+                        try {
+                            return await supabasePost(
+                                "addons",
+                                rows,
+                                await ensureAuth(),
+                                serverConfig,
+                                { bypassBreaker: true }
+                            );
+                        } catch (e) {
+                            if (isUnansweredWrite(e)) {
+                                sent.unanswered = true;
+                            }
+                            throw e;
+                        }
+                    }, waitsMs);
+                const restoreRows =
+                    snapshot && snapshot.length > 0
+                        ? snapshot.map(({ id, created_at, updated_at, ...rest }) => rest)
+                        : null;
+
+                if (wanted.length > 0) {
+                    const rows = wanted.map((addon, i) => ({
+                        enabled: true,
+                        name: addon.manifest?.name || addon.transportName || addon.name || "",
+                        profile_id: addonProfileId,
+                        sort_order: i,
+                        url: addon.transportUrl,
+                        user_id: userId,
+                    }));
+                    const sent = { unanswered: false };
+                    try {
+                        await insertRows(rows, WRITE_RETRY.insertMs, sent);
+                    } catch (insertErr) {
+                        // A try that went unanswered may have landed, and a retry after it
+                        // meets a conflict. Look at what the list holds before putting
+                        // anything back: if it is the new list the write is done.
+                        if (sent.unanswered) {
+                            const now = await readListBack();
+                            if (Array.isArray(now) && now.length > 0) {
+                                const have = new Set(now.map((row) => addonKey(row?.url)));
+                                const want = new Set(rows.map((row) => addonKey(row.url)));
+                                if (
+                                    have.size === want.size &&
+                                    [...want].every((key) => have.has(key))
+                                ) {
+                                    return;
+                                }
+                            }
+                        }
+                        // Attempt to restore previous addons
+                        console.error(
+                            "setAddons: insert failed after delete, attempting rollback:",
+                            insertErr?.message
+                        );
+                        if (restoreRows) {
+                            const restoreSent = { unanswered: false };
+                            try {
+                                await insertRows(restoreRows, WRITE_RETRY.restoreMs, restoreSent);
+                            } catch (rollbackErr) {
+                                console.error(
+                                    `setAddons: rollback also failed, user ${userId} profile ${addonProfileId} has no addon list (${restoreRows.length} addons to put back):`,
+                                    rollbackErr?.message
+                                );
+                                // A conflict means rows of that list are there already (an
+                                // insert that did land but whose answer was lost), so the list
+                                // is not empty and the original failure is the true one. The
+                                // same goes for any list found there after an unanswered try.
+                                let listThere = rollbackErr?.status === 409;
+                                if (!listThere && restoreSent.unanswered) {
+                                    const now = await readListBack();
+                                    listThere = Array.isArray(now) && now.length > 0;
+                                }
+                                if (!listThere) {
+                                    throw listNotRestoredError(insertErr);
+                                }
+                            }
+                        }
+                        throw insertErr;
+                    }
+                }
+            });
+        },
+
+        // Full replace, matching sync_push_collections' own semantics - there is
+        // no partial-update RPC, so callers must always push the complete array.
+        //
+        // p_collections_json must be the raw array, NOT a JSON string. Confirmed
+        // live (2026-08-06) via a raw fetch intercept on sync_pull_collections:
+        // stringifying it here meant supabaseRpc's own JSON.stringify(body) on
+        // the outer request double-encoded it, so collections_json was stored
+        // (and always came back) as a JSON *string* containing escaped JSON
+        // text, not a real array - typeof came back "string", not "object".
+        // Nuvio's real desktop client (composeApp/.../CollectionModels.kt,
+        // SupabaseCollectionBlob.collectionsJson: JsonElement) expects a native
+        // JSON array there; getting a string instead makes its strict
+        // kotlinx.serialization decode of the whole payload throw, which its
+        // own sync code silently swallows (logs and discards) - so literally
+        // nothing written by this app ever appeared on-device, regardless of
+        // which fields were set on any individual folder. This masked itself
+        // completely from every read this app ever did of its own writes,
+        // since getCollections() already defensively re-parses a string return
+        // back into an array - see that function's own comment.
+        async setCollections(profileIdLocal, collections) {
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_push_collections",
+                {
+                    p_collections_json: collections,
+                    p_profile_id: profileIdLocal,
+                },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+        async setLikeStatus() {
+            return null;
+        },
+
+        // p_servers is the raw array, not a JSON string (the same double-encoding
+        // trap as sync_push_collections).
+        async setMediaServers(profileIdLocal, servers) {
+            const accessToken = await ensureAuth();
+            await supabaseRpc(
+                "sync_push_media_servers",
+                {
+                    p_origin_client_id: "slicksync",
+                    p_profile_id: profileIdLocal,
+                    p_servers: servers,
+                },
+                accessToken,
+                await getServerConfig()
+            );
+        },
+
+        // Library writes — no-op; returns null to signal "not supported". Callers guard via providerType.
+        // Capability flag: Nuvio library is read-only in this implementation
+        supportsLibraryWrite: false,
+        type: "nuvio",
+    };
 }
 
 module.exports = {
-  createNuvioProvider,
-  _test: {
-    META,
-    WRITE_RETRY,
-    clearMetaCache() { metaCache.clear() },
-    metaCacheSize() { return metaCache.size },
-  }
-}
+    _test: {
+        clearMetaCache() {
+            metaCache.clear();
+        },
+        META,
+        metaCacheSize() {
+            return metaCache.size;
+        },
+        WRITE_RETRY,
+    },
+    createNuvioProvider,
+};

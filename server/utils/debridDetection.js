@@ -1,7 +1,7 @@
 // Best-effort correlation: was a watch about to be written to
 // MovieWatchHistory/EpisodeWatchHistory actually observed by the AIOStreams
 // proxy, and if so, which debrid service resolved the stream? This is
-// deliberately narrow in scope - CLAUDE.md's "the proxy must never write
+// deliberately narrow in scope - docs/runtime-behavior.md's "the proxy must never write
 // watch history or durations" rule is about presence/duration data leaking
 // into History; this never touches durationSeconds or watchedAt, only adds
 // an informational label, and only when BOTH a confident title+user+time
@@ -10,30 +10,31 @@
 // unrecognized title, or an unrecognized URL shape) means no label -
 // never a guess.
 
-const { resolveUserForActiveConnection } = require('./proxyStreamMonitor')
+const { resolveUserForActiveConnection } = require("./proxyStreamMonitor");
 
 // 3 hours - same window metricsBuilder.js's mergeCrossPipelineDuplicates
 // uses to correlate these same two pipelines for the Activity feed. The
 // proxy's stream-open/close timestamps and the native pipeline's own
 // watchedAt checkpoint can legitimately be that far apart.
-const CORRELATION_WINDOW_MS = 3 * 60 * 60 * 1000
+const CORRELATION_WINDOW_MS = 3 * 60 * 60 * 1000;
 
 // Display names for recognized services. Keys are the values stored in
 // MovieWatchHistory/EpisodeWatchHistory.debridService.
 const DEBRID_LABELS = {
-  torbox: 'TorBox',
-}
+    torbox: "TorBox",
+};
 
 // Same title or not - the shared rule (titleMatch.js). This used to accept a
 // proxy name that merely STARTED with the wanted title, so a play of "The
 // Godfather Part II" counted as proof that "The Godfather" was watched and
 // could put the wrong debrid label on it.
-const { sameTitle } = require('./titleMatch')
+const { sameTitle } = require("./titleMatch");
 
 /** Whether a proxy row is for `title`, by its parsed name or its matched title's own name. */
 function rowIsFor(candidate, title, series = false) {
-  return [candidate.displayName || candidate.filename, candidate.metadataName]
-    .some((name) => name && sameTitle(name, title, { series }))
+    return [candidate.displayName || candidate.filename, candidate.metadataName].some(
+        (name) => name && sameTitle(name, title, { series })
+    );
 }
 
 // Only confirmed URL shapes are recognized - verified against real
@@ -43,14 +44,20 @@ function rowIsFor(candidate, title, series = false) {
 // same way - a wrong guess here shows up as a factual-looking label on
 // someone's watch history.
 function detectDebridService(url) {
-  if (!url) return null
-  // Torrentio-style: https://<host>/resolve/torbox/<hash>/...
-  if (/\/resolve\/torbox\//i.test(url)) return 'torbox'
-  // StremThru-style: https://<host>/stremio/torz/<b64>/_/strem/<id>/tb/<hash>/...
-  // "tb" is StremThru's own short code for TorBox, appearing as a plain
-  // path segment right after the video/item ID.
-  if (/\/strem\/[^/]+\/tb\//i.test(url)) return 'torbox'
-  return null
+    if (!url) {
+        return null;
+    }
+    // Torrentio-style: https://<host>/resolve/torbox/<hash>/...
+    if (/\/resolve\/torbox\//i.test(url)) {
+        return "torbox";
+    }
+    // StremThru-style: https://<host>/stremio/torz/<b64>/_/strem/<id>/tb/<hash>/...
+    // "tb" is StremThru's own short code for TorBox, appearing as a plain
+    // path segment right after the video/item ID.
+    if (/\/strem\/[^/]+\/tb\//i.test(url)) {
+        return "torbox";
+    }
+    return null;
 }
 
 // Looks for a ProxyStreamSession that plausibly corresponds to the watch
@@ -63,35 +70,54 @@ function detectDebridService(url) {
 // ProxyStreamSession.metadataItemId comes from a fuzzy Cinemeta title
 // search (see proxyStreamMonitor.js's attemptPosterLookup), not a verified
 // match to the native pipeline's own item ID, so it isn't trustworthy here.
-async function findDebridServiceForWatch(prisma, { accountId, userId, title, watchedAt, users, type }) {
-  if (!title || !watchedAt || !Array.isArray(users) || users.length === 0) return null
-  try {
-    const windowStart = new Date(watchedAt.getTime() - CORRELATION_WINDOW_MS)
-    const windowEnd = new Date(watchedAt.getTime() + CORRELATION_WINDOW_MS)
-    const candidates = await prisma.proxyStreamSession.findMany({
-      where: {
-        accountId,
-        lastSeenAt: { gte: windowStart },
-        startTime: { lte: windowEnd },
-      },
-      select: { aiostreamsUser: true, url: true, displayName: true, filename: true, metadataName: true },
-    })
-    if (candidates.length === 0) return null
-
-    for (const candidate of candidates) {
-      if (!rowIsFor(candidate, title, type === 'series')) continue
-
-      const resolvedUser = resolveUserForActiveConnection(users, candidate.aiostreamsUser)
-      if (!resolvedUser || resolvedUser.id !== userId) continue
-
-      const service = detectDebridService(candidate.url)
-      if (service) return service
+async function findDebridServiceForWatch(
+    prisma,
+    { accountId, userId, title, watchedAt, users, type }
+) {
+    if (!(title && watchedAt && Array.isArray(users)) || users.length === 0) {
+        return null;
     }
-    return null
-  } catch (error) {
-    console.warn('[DebridDetection] Correlation lookup failed:', error.message)
-    return null
-  }
+    try {
+        const windowStart = new Date(watchedAt.getTime() - CORRELATION_WINDOW_MS);
+        const windowEnd = new Date(watchedAt.getTime() + CORRELATION_WINDOW_MS);
+        const candidates = await prisma.proxyStreamSession.findMany({
+            select: {
+                aiostreamsUser: true,
+                displayName: true,
+                filename: true,
+                metadataName: true,
+                url: true,
+            },
+            where: {
+                accountId,
+                lastSeenAt: { gte: windowStart },
+                startTime: { lte: windowEnd },
+            },
+        });
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        for (const candidate of candidates) {
+            if (!rowIsFor(candidate, title, type === "series")) {
+                continue;
+            }
+
+            const resolvedUser = resolveUserForActiveConnection(users, candidate.aiostreamsUser);
+            if (!resolvedUser || resolvedUser.id !== userId) {
+                continue;
+            }
+
+            const service = detectDebridService(candidate.url);
+            if (service) {
+                return service;
+            }
+        }
+        return null;
+    } catch (error) {
+        console.warn("[DebridDetection] Correlation lookup failed:", error.message);
+        return null;
+    }
 }
 
 // Same title+user correlation as findDebridServiceForWatch, but answers a
@@ -103,41 +129,66 @@ async function findDebridServiceForWatch(prisma, { accountId, userId, title, wat
 // never became a MovieWatchHistory row despite the proxy having confirmed a
 // real, non-trivial connection existed (a >90s connection rules out the
 // preview/hover-autoplay case isActuallyWatched's threshold exists to guard
-// against - see this repo's CLAUDE.md on the two-pipeline split for why the
+// against - see docs/runtime-behavior.md on the two-pipeline split for why the
 // proxy is authoritative for "did playback happen" but never for duration;
 // this only answers the former, the actual recorded duration still comes
 // from native's own position data exactly as before).
-const MIN_CONFIRMED_CONNECTION_MS = 90 * 1000
+const MIN_CONFIRMED_CONNECTION_MS = 90 * 1000;
 
-async function hasConfirmedProxyPlayback(prisma, { accountId, userId, title, watchedAt, users, type }) {
-  if (!title || !watchedAt || !Array.isArray(users) || users.length === 0) return false
-  try {
-    const windowStart = new Date(watchedAt.getTime() - CORRELATION_WINDOW_MS)
-    const windowEnd = new Date(watchedAt.getTime() + CORRELATION_WINDOW_MS)
-    const candidates = await prisma.proxyStreamSession.findMany({
-      where: {
-        accountId,
-        lastSeenAt: { gte: windowStart },
-        startTime: { lte: windowEnd },
-      },
-      select: { aiostreamsUser: true, displayName: true, filename: true, metadataName: true, startTime: true, lastSeenAt: true },
-    })
-    if (candidates.length === 0) return false
-
-    for (const candidate of candidates) {
-      if (!rowIsFor(candidate, title, type === 'series')) continue
-
-      const resolvedUser = resolveUserForActiveConnection(users, candidate.aiostreamsUser)
-      if (!resolvedUser || resolvedUser.id !== userId) continue
-
-      const connectionMs = candidate.lastSeenAt.getTime() - candidate.startTime.getTime()
-      if (connectionMs >= MIN_CONFIRMED_CONNECTION_MS) return true
+async function hasConfirmedProxyPlayback(
+    prisma,
+    { accountId, userId, title, watchedAt, users, type }
+) {
+    if (!(title && watchedAt && Array.isArray(users)) || users.length === 0) {
+        return false;
     }
-    return false
-  } catch (error) {
-    console.warn('[DebridDetection] Confirmed-playback lookup failed:', error.message)
-    return false
-  }
+    try {
+        const windowStart = new Date(watchedAt.getTime() - CORRELATION_WINDOW_MS);
+        const windowEnd = new Date(watchedAt.getTime() + CORRELATION_WINDOW_MS);
+        const candidates = await prisma.proxyStreamSession.findMany({
+            select: {
+                aiostreamsUser: true,
+                displayName: true,
+                filename: true,
+                lastSeenAt: true,
+                metadataName: true,
+                startTime: true,
+            },
+            where: {
+                accountId,
+                lastSeenAt: { gte: windowStart },
+                startTime: { lte: windowEnd },
+            },
+        });
+        if (candidates.length === 0) {
+            return false;
+        }
+
+        for (const candidate of candidates) {
+            if (!rowIsFor(candidate, title, type === "series")) {
+                continue;
+            }
+
+            const resolvedUser = resolveUserForActiveConnection(users, candidate.aiostreamsUser);
+            if (!resolvedUser || resolvedUser.id !== userId) {
+                continue;
+            }
+
+            const connectionMs = candidate.lastSeenAt.getTime() - candidate.startTime.getTime();
+            if (connectionMs >= MIN_CONFIRMED_CONNECTION_MS) {
+                return true;
+            }
+        }
+        return false;
+    } catch (error) {
+        console.warn("[DebridDetection] Confirmed-playback lookup failed:", error.message);
+        return false;
+    }
 }
 
-module.exports = { detectDebridService, findDebridServiceForWatch, hasConfirmedProxyPlayback, DEBRID_LABELS }
+module.exports = {
+    DEBRID_LABELS,
+    detectDebridService,
+    findDebridServiceForWatch,
+    hasConfirmedProxyPlayback,
+};

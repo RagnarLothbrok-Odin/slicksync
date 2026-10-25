@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - Tasks',
+    title: "SlickSync - Tasks",
 };
 
-export default function TasksLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function TasksLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

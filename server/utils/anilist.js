@@ -18,31 +18,41 @@
 // wrapped in a short timeout and a cache, and every failure returns null so
 // anime metadata can only ever ADD to what Cinemeta already provides.
 
-const ANILIST_URL = 'https://graphql.anilist.co'
-const TIMEOUT_MS = 6000
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000 // titles change slowly; airing data is the volatile part and still refreshes twice a day
-const cache = new Map()
-const MAX_CACHE = 400
+const ANILIST_URL = "https://graphql.anilist.co";
+const TIMEOUT_MS = 6000;
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // titles change slowly; airing data is the volatile part and still refreshes twice a day
+const cache = new Map();
+const MAX_CACHE = 400;
 // Formats that can be a "season" of a running show. ONA is included because
 // streaming-first series are routinely typed that way; movies, OVAs and
 // specials are not seasons and must never be counted as ones.
-const LINE_FORMATS = ['TV', 'TV_SHORT', 'ONA']
+const LINE_FORMATS = ["TV", "TV_SHORT", "ONA"];
 
 function cacheGet(key) {
-  const hit = cache.get(key)
-  if (!hit) return undefined
-  if (Date.now() - hit.at > CACHE_TTL_MS) { cache.delete(key); return undefined }
-  return hit.value
+    const hit = cache.get(key);
+    if (!hit) {
+        return;
+    }
+    if (Date.now() - hit.at > CACHE_TTL_MS) {
+        cache.delete(key);
+        return;
+    }
+    return hit.value;
 }
 
 function cacheSet(key, value) {
-  cache.set(key, { value, at: Date.now() })
-  if (cache.size > MAX_CACHE) {
-    // Oldest-first eviction; Map preserves insertion order.
-    const drop = cache.size - MAX_CACHE
-    let i = 0
-    for (const k of cache.keys()) { if (i++ >= drop) break; cache.delete(k) }
-  }
+    cache.set(key, { at: Date.now(), value });
+    if (cache.size > MAX_CACHE) {
+        // Oldest-first eviction; Map preserves insertion order.
+        const drop = cache.size - MAX_CACHE;
+        let i = 0;
+        for (const k of cache.keys()) {
+            if (i++ >= drop) {
+                break;
+            }
+            cache.delete(k);
+        }
+    }
 }
 
 // Why the service is not answering, when it is not answering. Every call
@@ -53,10 +63,14 @@ function cacheSet(key, value) {
 // disabled due to severe stability issues", HTTP 403 to everyone), which is
 // exactly the case worth telling someone about rather than showing them an
 // empty shelf.
-let lastFailure = null
+let lastFailure = null;
 
 function noteFailure(status, message) {
-  lastFailure = { status: status || 0, message: message || 'AniList could not be reached', at: Date.now() }
+    lastFailure = {
+        at: Date.now(),
+        message: message || "AniList could not be reached",
+        status: status || 0,
+    };
 }
 
 /**
@@ -64,53 +78,61 @@ function noteFailure(status, message) {
  * alongside an empty result - a successful call clears it.
  */
 function getServiceStatus() {
-  if (!lastFailure) return { available: true, reason: null }
-  // Stale failures are not worth reporting: the next successful call clears
-  // this, so anything older than a few minutes is probably long fixed.
-  if (Date.now() - lastFailure.at > 5 * 60 * 1000) return { available: true, reason: null }
-  const disabled = lastFailure.status === 403 && /disabled/i.test(lastFailure.message)
-  return {
-    available: false,
-    reason: disabled
-      ? 'AniList has temporarily disabled their public API, so anime data is unavailable until they re-enable it. Nothing on this instance is broken.'
-      : `AniList is not responding right now (${lastFailure.status || 'network error'}). Anime data will come back on its own.`,
-  }
+    if (!lastFailure) {
+        return { available: true, reason: null };
+    }
+    // Stale failures are not worth reporting: the next successful call clears
+    // this, so anything older than a few minutes is probably long fixed.
+    if (Date.now() - lastFailure.at > 5 * 60 * 1000) {
+        return { available: true, reason: null };
+    }
+    const disabled = lastFailure.status === 403 && /disabled/i.test(lastFailure.message);
+    return {
+        available: false,
+        reason: disabled
+            ? "AniList has temporarily disabled their public API, so anime data is unavailable until they re-enable it. Nothing on this instance is broken."
+            : `AniList is not responding right now (${lastFailure.status || "network error"}). Anime data will come back on its own.`,
+    };
 }
 
 async function query(gql, variables) {
-  const key = `${gql}:${JSON.stringify(variables)}`
-  const cached = cacheGet(key)
-  if (cached !== undefined) return cached
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-    const res = await fetch(ANILIST_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ query: gql, variables }),
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
-    if (!res.ok) {
-      // Read the body for AniList's own explanation - they put a plain
-      // sentence in errors[0].message, which beats any wording invented here.
-      let message = ''
-      try {
-        const body = await res.json()
-        message = body?.errors?.[0]?.message || ''
-      } catch { /* body is not JSON - the status alone will do */ }
-      noteFailure(res.status, message)
-      return null
+    const key = `${gql}:${JSON.stringify(variables)}`;
+    const cached = cacheGet(key);
+    if (cached !== undefined) {
+        return cached;
     }
-    const json = await res.json()
-    const data = json?.data ?? null
-    lastFailure = null
-    cacheSet(key, data)
-    return data
-  } catch (e) {
-    noteFailure(0, e?.message || '')
-    return null
-  }
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+        const res = await fetch(ANILIST_URL, {
+            body: JSON.stringify({ query: gql, variables }),
+            headers: { accept: "application/json", "content-type": "application/json" },
+            method: "POST",
+            signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+            // Read the body for AniList's own explanation - they put a plain
+            // sentence in errors[0].message, which beats any wording invented here.
+            let message = "";
+            try {
+                const body = await res.json();
+                message = body?.errors?.[0]?.message || "";
+            } catch {
+                /* body is not JSON - the status alone will do */
+            }
+            noteFailure(res.status, message);
+            return null;
+        }
+        const json = await res.json();
+        const data = json?.data ?? null;
+        lastFailure = null;
+        cacheSet(key, data);
+        return data;
+    } catch (e) {
+        noteFailure(0, e?.message || "");
+        return null;
+    }
 }
 
 const MEDIA_FIELDS = `
@@ -128,29 +150,36 @@ const MEDIA_FIELDS = `
   siteUrl
   nextAiringEpisode { episode airingAt timeUntilAiring }
   relations { edges { relationType node { id title { romaji english } format seasonYear episodes } } }
-`
+`;
 
 /** Finds an anime by title (and optional year), best match first. */
 async function searchAnime(title, year) {
-  if (!title) return null
-  const data = await query(
-    `query ($search: String, $year: Int) {
+    if (!title) {
+        return null;
+    }
+    const data = await query(
+        `query ($search: String, $year: Int) {
       Page(perPage: 5) {
         media(search: $search, type: ANIME, seasonYear: $year, sort: SEARCH_MATCH) { ${MEDIA_FIELDS} }
       }
     }`,
-    { search: String(title).slice(0, 100), year: Number.isInteger(year) ? year : undefined }
-  )
-  const list = data?.Page?.media
-  return Array.isArray(list) && list.length > 0 ? list[0] : null
+        { search: String(title).slice(0, 100), year: Number.isInteger(year) ? year : undefined }
+    );
+    const list = data?.Page?.media;
+    return Array.isArray(list) && list.length > 0 ? list[0] : null;
 }
 
 /** One anime by AniList id. */
 async function getAnimeById(anilistId) {
-  const id = Number(anilistId)
-  if (!Number.isInteger(id)) return null
-  const data = await query(`query ($id: Int) { Media(id: $id, type: ANIME) { ${MEDIA_FIELDS} } }`, { id })
-  return data?.Media || null
+    const id = Number(anilistId);
+    if (!Number.isInteger(id)) {
+        return null;
+    }
+    const data = await query(
+        `query ($id: Int) { Media(id: $id, type: ANIME) { ${MEDIA_FIELDS} } }`,
+        { id }
+    );
+    return data?.Media || null;
 }
 
 /**
@@ -158,18 +187,23 @@ async function getAnimeById(anilistId) {
  * `sort: POPULARITY_DESC` matches what every seasonal chart shows.
  */
 async function getSeasonalAnime({ season, seasonYear, perPage = 40 } = {}) {
-  const now = new Date()
-  const month = now.getUTCMonth() + 1
-  const currentSeason = month <= 3 ? 'WINTER' : month <= 6 ? 'SPRING' : month <= 9 ? 'SUMMER' : 'FALL'
-  const data = await query(
-    `query ($season: MediaSeason, $seasonYear: Int, $perPage: Int) {
+    const now = new Date();
+    const month = now.getUTCMonth() + 1;
+    const currentSeason =
+        month <= 3 ? "WINTER" : month <= 6 ? "SPRING" : month <= 9 ? "SUMMER" : "FALL";
+    const data = await query(
+        `query ($season: MediaSeason, $seasonYear: Int, $perPage: Int) {
       Page(perPage: $perPage) {
         media(season: $season, seasonYear: $seasonYear, type: ANIME, sort: POPULARITY_DESC, isAdult: false) { ${MEDIA_FIELDS} }
       }
     }`,
-    { season: season || currentSeason, seasonYear: seasonYear || now.getUTCFullYear(), perPage: Math.min(50, perPage) }
-  )
-  return Array.isArray(data?.Page?.media) ? data.Page.media : []
+        {
+            perPage: Math.min(50, perPage),
+            season: season || currentSeason,
+            seasonYear: seasonYear || now.getUTCFullYear(),
+        }
+    );
+    return Array.isArray(data?.Page?.media) ? data.Page.media : [];
 }
 
 /**
@@ -180,83 +214,105 @@ async function getSeasonalAnime({ season, seasonYear, perPage = 40 } = {}) {
  * answer, and a wrong "next" is worse than none.
  */
 async function getWatchOrder(anilistId) {
-  const root = await getAnimeById(anilistId)
-  if (!root) return null
-  const nodesOf = (media, types) => (media?.relations?.edges || [])
-    .filter((e) => types.includes(e?.relationType))
-    .map((e) => e.node)
-    .filter(Boolean)
+    const root = await getAnimeById(anilistId);
+    if (!root) {
+        return null;
+    }
+    const nodesOf = (media, types) =>
+        (media?.relations?.edges || [])
+            .filter((e) => types.includes(e?.relationType))
+            .map((e) => e.node)
+            .filter(Boolean);
 
-  // Only broadcast formats can carry a season number. Movies, OVAs and
-  // specials are franchise entries, not seasons, and counting them as ones
-  // is how an absolute episode number lands on the wrong season.
-  const isLine = (n) => LINE_FORMATS.includes(n?.format)
+    // Only broadcast formats can carry a season number. Movies, OVAs and
+    // specials are franchise entries, not seasons, and counting them as ones
+    // is how an absolute episode number lands on the wrong season.
+    const isLine = (n) => LINE_FORMATS.includes(n?.format);
 
-  // Walk the chain to BOTH ends rather than one hop each way. A title
-  // search lands on whichever entry matched - often not the first - and one
-  // hop from there produces a chain that starts mid-franchise, which makes
-  // every season number counted off it wrong. Measured before this: the
-  // 30th episode of Attack on Titan resolved to S3E3, where S2E5 is right.
-  // Each hop is a cached AniList lookup and the walk is bounded, so a
-  // franchise with a relation loop cannot spin here.
-  const MAX_HOPS = 12
-  const before = []
-  let cursor = root
-  for (let i = 0; i < MAX_HOPS; i++) {
-    const prev = nodesOf(cursor, ['PREQUEL']).filter(isLine)[0]
-    if (!prev?.id || before.some((m) => m.id === prev.id) || prev.id === root.id) break
-    const full = await getAnimeById(prev.id)
-    if (!full) break
-    before.unshift(full)
-    cursor = full
-  }
-  const after = []
-  cursor = root
-  for (let i = 0; i < MAX_HOPS; i++) {
-    const next = nodesOf(cursor, ['SEQUEL']).filter(isLine)[0]
-    if (!next?.id || after.some((m) => m.id === next.id) || next.id === root.id) break
-    const full = await getAnimeById(next.id)
-    if (!full) break
-    after.push(full)
-    cursor = full
-  }
+    // Walk the chain to BOTH ends rather than one hop each way. A title
+    // search lands on whichever entry matched - often not the first - and one
+    // hop from there produces a chain that starts mid-franchise, which makes
+    // every season number counted off it wrong. Measured before this: the
+    // 30th episode of Attack on Titan resolved to S3E3, where S2E5 is right.
+    // Each hop is a cached AniList lookup and the walk is bounded, so a
+    // franchise with a relation loop cannot spin here.
+    const MAX_HOPS = 12;
+    const before = [];
+    let cursor = root;
+    for (let i = 0; i < MAX_HOPS; i++) {
+        const prev = nodesOf(cursor, ["PREQUEL"]).find(isLine);
+        if (!prev?.id || before.some((m) => m.id === prev.id) || prev.id === root.id) {
+            break;
+        }
+        const full = await getAnimeById(prev.id);
+        if (!full) {
+            break;
+        }
+        before.unshift(full);
+        cursor = full;
+    }
+    const after = [];
+    cursor = root;
+    for (let i = 0; i < MAX_HOPS; i++) {
+        const next = nodesOf(cursor, ["SEQUEL"]).find(isLine);
+        if (!next?.id || after.some((m) => m.id === next.id) || next.id === root.id) {
+            break;
+        }
+        const full = await getAnimeById(next.id);
+        if (!full) {
+            break;
+        }
+        after.push(full);
+        cursor = full;
+    }
 
-  const mainLine = [...before, root, ...after]
-  // Whether the line genuinely starts at the beginning of the franchise.
-  // Anything counting seasons off this chain has to know: an incomplete
-  // line still reads fine as a watch order, but its POSITIONS are not
-  // season numbers.
-  const head = mainLine[0]
-  const complete = nodesOf(head, ['PREQUEL']).filter(isLine).length === 0
+    const mainLine = [...before, root, ...after];
+    // Whether the line genuinely starts at the beginning of the franchise.
+    // Anything counting seasons off this chain has to know: an incomplete
+    // line still reads fine as a watch order, but its POSITIONS are not
+    // season numbers.
+    const head = mainLine[0];
+    const complete = nodesOf(head, ["PREQUEL"]).filter(isLine).length === 0;
 
-  return {
-    current: root,
-    mainLine,
-    complete,
-    sideStories: nodesOf(root, ['SIDE_STORY', 'ALTERNATIVE', 'SPIN_OFF'])
-      .sort((a, b) => (a?.seasonYear || 0) - (b?.seasonYear || 0)),
-    movies: nodesOf(root, ['SUMMARY', 'PARENT']).filter((n) => n?.format === 'MOVIE'),
-  }
+    return {
+        complete,
+        current: root,
+        mainLine,
+        movies: nodesOf(root, ["SUMMARY", "PARENT"]).filter((n) => n?.format === "MOVIE"),
+        sideStories: nodesOf(root, ["SIDE_STORY", "ALTERNATIVE", "SPIN_OFF"]).sort(
+            (a, b) => (a?.seasonYear || 0) - (b?.seasonYear || 0)
+        ),
+    };
 }
 
 /** Human-readable countdown to the next episode, or null when not airing. */
 function nextEpisodeCountdown(media) {
-  const next = media?.nextAiringEpisode
-  if (!next || !Number.isFinite(next.timeUntilAiring)) return null
-  const secs = next.timeUntilAiring
-  if (secs <= 0) return null
-  const days = Math.floor(secs / 86400)
-  const hours = Math.floor((secs % 86400) / 3600)
-  const mins = Math.floor((secs % 3600) / 60)
-  const parts = []
-  if (days) parts.push(`${days}d`)
-  if (hours) parts.push(`${hours}h`)
-  if (!days && mins) parts.push(`${mins}m`)
-  return {
-    episode: next.episode,
-    airingAt: new Date(next.airingAt * 1000).toISOString(),
-    label: parts.length ? parts.join(' ') : 'soon',
-  }
+    const next = media?.nextAiringEpisode;
+    if (!(next && Number.isFinite(next.timeUntilAiring))) {
+        return null;
+    }
+    const secs = next.timeUntilAiring;
+    if (secs <= 0) {
+        return null;
+    }
+    const days = Math.floor(secs / 86_400);
+    const hours = Math.floor((secs % 86_400) / 3600);
+    const mins = Math.floor((secs % 3600) / 60);
+    const parts = [];
+    if (days) {
+        parts.push(`${days}d`);
+    }
+    if (hours) {
+        parts.push(`${hours}h`);
+    }
+    if (!days && mins) {
+        parts.push(`${mins}m`);
+    }
+    return {
+        airingAt: new Date(next.airingAt * 1000).toISOString(),
+        episode: next.episode,
+        label: parts.length ? parts.join(" ") : "soon",
+    };
 }
 
 /**
@@ -269,35 +325,47 @@ function nextEpisodeCountdown(media) {
  * someone's progress on the wrong episode, which is worse than no answer.
  */
 async function resolveAbsoluteEpisode(anilistId, absoluteEpisode) {
-  const abs = Number(absoluteEpisode)
-  if (!Number.isInteger(abs) || abs < 1) return null
-  const order = await getWatchOrder(anilistId)
-  if (!order || order.mainLine.length === 0) return null
-  // Counting seasons off a chain that does not start at the beginning
-  // produces a confidently wrong answer - the failure this whole function
-  // exists to prevent. No chain, no answer.
-  if (!order.complete) return null
-
-  let remaining = abs
-  let seasonNumber = 0
-  for (const entry of order.mainLine) {
-    seasonNumber += 1
-    const count = Number(entry?.episodes)
-    if (!Number.isFinite(count) || count <= 0) return null // unknown length - cannot place it honestly
-    if (remaining <= count) {
-      return { season: seasonNumber, episode: remaining, seasonTitle: entry?.title?.english || entry?.title?.romaji || null }
+    const abs = Number(absoluteEpisode);
+    if (!Number.isInteger(abs) || abs < 1) {
+        return null;
     }
-    remaining -= count
-  }
-  return null
+    const order = await getWatchOrder(anilistId);
+    if (!order || order.mainLine.length === 0) {
+        return null;
+    }
+    // Counting seasons off a chain that does not start at the beginning
+    // produces a confidently wrong answer - the failure this whole function
+    // exists to prevent. No chain, no answer.
+    if (!order.complete) {
+        return null;
+    }
+
+    let remaining = abs;
+    let seasonNumber = 0;
+    for (const entry of order.mainLine) {
+        seasonNumber += 1;
+        const count = Number(entry?.episodes);
+        if (!Number.isFinite(count) || count <= 0) {
+            return null; // unknown length - cannot place it honestly
+        }
+        if (remaining <= count) {
+            return {
+                episode: remaining,
+                season: seasonNumber,
+                seasonTitle: entry?.title?.english || entry?.title?.romaji || null,
+            };
+        }
+        remaining -= count;
+    }
+    return null;
 }
 
 module.exports = {
-  getServiceStatus,
-  searchAnime,
-  getAnimeById,
-  getSeasonalAnime,
-  getWatchOrder,
-  nextEpisodeCountdown,
-  resolveAbsoluteEpisode,
-}
+    getAnimeById,
+    getSeasonalAnime,
+    getServiceStatus,
+    getWatchOrder,
+    nextEpisodeCountdown,
+    resolveAbsoluteEpisode,
+    searchAnime,
+};

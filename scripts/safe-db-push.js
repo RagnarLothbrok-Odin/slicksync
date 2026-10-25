@@ -26,37 +26,37 @@
 //
 //   node scripts/safe-db-push.js
 
-const { execSync } = require('child_process')
-const { PrismaClient } = require('@prisma/client')
+const { execSync } = require("node:child_process");
+const { PrismaClient } = require("@prisma/client");
 
-const schemaPath = process.env.PRISMA_SCHEMA_PATH || '/app/prisma/schema.postgres.prisma'
-const databaseUrl = process.env.DATABASE_URL
+const schemaPath = process.env.PRISMA_SCHEMA_PATH || "/app/prisma/schema.postgres.prisma";
+const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  console.error('❌ DATABASE_URL not set - cannot check schema drift')
-  process.exit(1)
+    console.error("❌ DATABASE_URL not set - cannot check schema drift");
+    process.exit(1);
 }
 
-let diffScript
+let diffScript;
 try {
-  diffScript = execSync(
-    `bunx prisma migrate diff --from-url "${databaseUrl}" --to-schema-datamodel "${schemaPath}" --script`,
-    { encoding: 'utf8' }
-  )
+    diffScript = execSync(
+        `bunx prisma migrate diff --from-url "${databaseUrl}" --to-schema-datamodel "${schemaPath}" --script`,
+        { encoding: "utf8" }
+    );
 } catch (err) {
-  console.error('❌ Failed to compute schema diff:', err.message)
-  process.exit(1)
+    console.error("❌ Failed to compute schema diff:", err.message);
+    process.exit(1);
 }
 
-if (!diffScript || !diffScript.trim()) {
-  console.log('✅ Database schema already up to date - nothing to apply.')
-  process.exit(0)
+if (!diffScript?.trim()) {
+    console.log("✅ Database schema already up to date - nothing to apply.");
+    process.exit(0);
 }
 
 // Destructive if it drops something or narrows a column's type. Anything
 // else (ADD COLUMN, CREATE TABLE, CREATE INDEX, ADD CONSTRAINT, etc.) is
 // treated as safe to auto-apply.
-const DESTRUCTIVE_CLAUSE_PATTERN = /^DROP\s+(COLUMN|TABLE)\b|^ALTER\s+COLUMN\b[\s\S]*?\bTYPE\b/i
+const DESTRUCTIVE_CLAUSE_PATTERN = /^DROP\s+(COLUMN|TABLE)\b|^ALTER\s+COLUMN\b[\s\S]*?\bTYPE\b/i;
 
 // Columns taken out of the schema on purpose whose data nothing reads any
 // more, approved for dropping by name. Without this, a retired column sits in
@@ -64,113 +64,136 @@ const DESTRUCTIVE_CLAUSE_PATTERN = /^DROP\s+(COLUMN|TABLE)\b|^ALTER\s+COLUMN\b[\
 // NOT applied" warning for it, which trains everyone to ignore that warning
 // for the day it matters. Anything not listed here still waits for a human.
 //   users.traxInPlayerActions - SlickTrax in-player actions, removed in 1ec467a.
-const RETIRED_COLUMNS = new Set(['"users"."traxInPlayerActions"'])
+const RETIRED_COLUMNS = new Set(['"users"."traxInPlayerActions"']);
 
 function isRetiredColumnDrop(tableName, clause) {
-  const m = clause.match(/^DROP\s+COLUMN\s+("(?:[^"]|"")+")\s*$/i)
-  return !!m && RETIRED_COLUMNS.has(`${tableName}.${m[1]}`)
+    const m = clause.match(/^DROP\s+COLUMN\s+("(?:[^"]|"")+")\s*$/i);
+    return !!m && RETIRED_COLUMNS.has(`${tableName}.${m[1]}`);
 }
 
 // Splits a clause list on top-level commas only - a naive split would break
 // on the comma inside e.g. `DECIMAL(10,2)` or `TIMESTAMP(3)` defaults.
 function splitTopLevel(str) {
-  const parts = []
-  let depth = 0
-  let current = ''
-  for (const ch of str) {
-    if (ch === '(') depth++
-    if (ch === ')') depth--
-    if (ch === ',' && depth === 0) {
-      parts.push(current.trim())
-      current = ''
-    } else {
-      current += ch
+    const parts = [];
+    let depth = 0;
+    let current = "";
+    for (const ch of str) {
+        if (ch === "(") {
+            depth++;
+        }
+        if (ch === ")") {
+            depth--;
+        }
+        if (ch === "," && depth === 0) {
+            parts.push(current.trim());
+            current = "";
+        } else {
+            current += ch;
+        }
     }
-  }
-  if (current.trim()) parts.push(current.trim())
-  return parts
+    if (current.trim()) {
+        parts.push(current.trim());
+    }
+    return parts;
 }
 
 // Prisma's generated migration scripts are one statement per `-- AlterTable`
 // / `-- CreateIndex` block, terminated by `;`. Splitting on `;` followed by
 // a newline is enough for these (always simple, single-purpose statements).
 const rawStatements = diffScript
-  .split(/;\s*\n/)
-  .map((s) => s.trim())
-  .filter(Boolean)
+    .split(/;\s*\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-const safe = []
-const unsafe = []
+const safe = [];
+const unsafe = [];
 
 for (const raw of rawStatements) {
-  // Strip leading `-- comment` lines to get the actual SQL.
-  const sql = raw
-    .split('\n')
-    .filter((line) => !line.trim().startsWith('--'))
-    .join('\n')
-    .trim()
-  if (!sql) continue
-
-  // A single ALTER TABLE can bundle multiple clauses (e.g. one DROP COLUMN
-  // alongside several unrelated ADD COLUMNs on the same table) - Prisma
-  // does this whenever a batch of feature work touches the same table more
-  // than once. Splitting per-clause means the safe ADD COLUMNs still apply
-  // automatically even when bundled with an unrelated drop, instead of the
-  // whole statement being refused as a unit (the exact gap that let today's
-  // incident happen even for columns that WERE syntactically "just an add").
-  const alterMatch = sql.match(/^ALTER\s+TABLE\s+("(?:[^"]|"")+")\s+([\s\S]+)$/i)
-  if (alterMatch) {
-    const [, tableName, clauseList] = alterMatch
-    const clauses = splitTopLevel(clauseList)
-    const safeClauses = clauses.filter((c) => !DESTRUCTIVE_CLAUSE_PATTERN.test(c) || isRetiredColumnDrop(tableName, c))
-    const unsafeClauses = clauses.filter((c) => DESTRUCTIVE_CLAUSE_PATTERN.test(c) && !isRetiredColumnDrop(tableName, c))
-    if (safeClauses.length > 0) {
-      safe.push(`ALTER TABLE ${tableName} ${safeClauses.join(', ')};`)
+    // Strip leading `-- comment` lines to get the actual SQL.
+    const sql = raw
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("--"))
+        .join("\n")
+        .trim();
+    if (!sql) {
+        continue;
     }
-    if (unsafeClauses.length > 0) {
-      unsafe.push(`ALTER TABLE ${tableName} ${unsafeClauses.join(', ')};`)
-    }
-    continue
-  }
 
-  // Any other statement type (CREATE TABLE, CREATE INDEX, DROP TABLE, ...)
-  // is classified as a whole - these aren't bundled multi-clause the way
-  // ALTER TABLE is.
-  if (DESTRUCTIVE_CLAUSE_PATTERN.test(sql)) unsafe.push(sql.endsWith(';') ? sql : `${sql};`)
-  else safe.push(sql.endsWith(';') ? sql : `${sql};`)
+    // A single ALTER TABLE can bundle multiple clauses (e.g. one DROP COLUMN
+    // alongside several unrelated ADD COLUMNs on the same table) - Prisma
+    // does this whenever a batch of feature work touches the same table more
+    // than once. Splitting per-clause means the safe ADD COLUMNs still apply
+    // automatically even when bundled with an unrelated drop, instead of the
+    // whole statement being refused as a unit (the exact gap that let today's
+    // incident happen even for columns that WERE syntactically "just an add").
+    const alterMatch = sql.match(/^ALTER\s+TABLE\s+("(?:[^"]|"")+")\s+([\s\S]+)$/i);
+    if (alterMatch) {
+        const [, tableName, clauseList] = alterMatch;
+        const clauses = splitTopLevel(clauseList);
+        const safeClauses = clauses.filter(
+            (c) => !DESTRUCTIVE_CLAUSE_PATTERN.test(c) || isRetiredColumnDrop(tableName, c)
+        );
+        const unsafeClauses = clauses.filter(
+            (c) => DESTRUCTIVE_CLAUSE_PATTERN.test(c) && !isRetiredColumnDrop(tableName, c)
+        );
+        if (safeClauses.length > 0) {
+            safe.push(`ALTER TABLE ${tableName} ${safeClauses.join(", ")};`);
+        }
+        if (unsafeClauses.length > 0) {
+            unsafe.push(`ALTER TABLE ${tableName} ${unsafeClauses.join(", ")};`);
+        }
+        continue;
+    }
+
+    // Any other statement type (CREATE TABLE, CREATE INDEX, DROP TABLE, ...)
+    // is classified as a whole - these aren't bundled multi-clause the way
+    // ALTER TABLE is.
+    if (DESTRUCTIVE_CLAUSE_PATTERN.test(sql)) {
+        unsafe.push(sql.endsWith(";") ? sql : `${sql};`);
+    } else {
+        safe.push(sql.endsWith(";") ? sql : `${sql};`);
+    }
 }
 
 async function main() {
-  const prisma = new PrismaClient()
-  try {
-    if (safe.length > 0) {
-      console.log(`📐 Applying ${safe.length} safe schema statement(s) automatically (additive, or dropping a retired column)...`)
-      for (const stmt of safe) {
-        await prisma.$executeRawUnsafe(stmt.endsWith(';') ? stmt : `${stmt};`)
-        console.log('  ✓', stmt.split('\n')[0])
-      }
+    const prisma = new PrismaClient();
+    try {
+        if (safe.length > 0) {
+            console.log(
+                `📐 Applying ${safe.length} safe schema statement(s) automatically (additive, or dropping a retired column)...`
+            );
+            for (const stmt of safe) {
+                await prisma.$executeRawUnsafe(stmt.endsWith(";") ? stmt : `${stmt};`);
+                console.log("  ✓", stmt.split("\n")[0]);
+            }
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-  } finally {
-    await prisma.$disconnect()
-  }
 
-  if (unsafe.length > 0) {
-    console.error('')
-    console.error('🛑 Schema drift includes destructive changes that were NOT applied automatically:')
-    for (const stmt of unsafe) {
-      console.error('  -', stmt.replace(/\s+/g, ' '))
+    if (unsafe.length > 0) {
+        console.error("");
+        console.error(
+            "🛑 Schema drift includes destructive changes that were NOT applied automatically:"
+        );
+        for (const stmt of unsafe) {
+            console.error("  -", stmt.replace(/\s+/g, " "));
+        }
+        console.error("");
+        console.error(
+            "These may involve real data - review and apply by hand (or update the Prisma schema"
+        );
+        console.error("to match the live database instead), then re-run this script to confirm.");
+        console.error(
+            "Any code path depending on the changes above may be broken until this is resolved."
+        );
+        process.exit(1);
     }
-    console.error('')
-    console.error('These may involve real data - review and apply by hand (or update the Prisma schema')
-    console.error('to match the live database instead), then re-run this script to confirm.')
-    console.error('Any code path depending on the changes above may be broken until this is resolved.')
-    process.exit(1)
-  }
 
-  console.log('✅ All pending schema changes were additive and applied automatically.')
+    console.log("✅ All pending schema changes were additive and applied automatically.");
 }
 
 main().catch((err) => {
-  console.error('❌ Failed to apply safe schema changes:', err)
-  process.exit(1)
-})
+    console.error("❌ Failed to apply safe schema changes:", err);
+    process.exit(1);
+});

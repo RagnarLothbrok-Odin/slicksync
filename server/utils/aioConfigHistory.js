@@ -17,178 +17,297 @@
 // limits first (GET /api/v1/status), and AIOStreams' own refusal (an addon
 // limit it doesn't publish) is passed on in plain words.
 
-const { safeFetch, instancePolicy } = require('./safeUrl')
-const { summarize, describeChanges, readConfig, writeConfig, rebaseline, noteOutsideChanges, instanceBase } = require('./aiostreamsConfig')
+const { safeFetch, instancePolicy } = require("./safeUrl");
+const {
+    summarize,
+    describeChanges,
+    readConfig,
+    writeConfig,
+    rebaseline,
+    noteOutsideChanges,
+    instanceBase,
+} = require("./aiostreamsConfig");
 
-const KEEP_PER_CONFIG = 20
+const KEEP_PER_CONFIG = 20;
 // Read-only or recomputed by AIOStreams - always the configuration's current values.
-const CURRENT_KEYS = ['uuid', 'encryptedPassword', 'ip', 'trusted', 'healthResults', 'showChanges']
+const CURRENT_KEYS = ["uuid", "encryptedPassword", "ip", "trusted", "healthResults", "showChanges"];
 
 function fail(message, status = 400) {
-  return Object.assign(new Error(message), { status })
+    return Object.assign(new Error(message), { status });
 }
 
 function configKeyOf(person) {
-  return `${instanceBase(person.jellyfinServerUrl)}|${person.aioConfigId}`
+    return `${instanceBase(person.jellyfinServerUrl)}|${person.aioConfigId}`;
 }
 
 /** Keep this version unless it is the newest one already. */
 async function remember(prisma, person, config, reason) {
-  try {
-    const { encrypt } = require('./encryption')
-    const accountId = person.accountId || 'default'
-    const configKey = configKeyOf(person)
-    const summary = summarize(config)
-    const latest = await prisma.aioConfigSnapshot.findFirst({ where: { accountId, configKey }, orderBy: { createdAt: 'desc' }, select: { hash: true } })
-    if (latest?.hash === summary.hash) return false
-    await prisma.aioConfigSnapshot.create({
-      data: {
-        accountId,
-        configKey,
-        userId: person.id,
-        hash: summary.hash,
-        summary: JSON.stringify(summary),
-        config: encrypt(JSON.stringify(config), { appAccountId: accountId }),
-        reason,
-      },
-    })
-    const old = await prisma.aioConfigSnapshot.findMany({ where: { accountId, configKey }, orderBy: { createdAt: 'desc' }, skip: KEEP_PER_CONFIG, select: { id: true } })
-    if (old.length) await prisma.aioConfigSnapshot.deleteMany({ where: { id: { in: old.map((o) => o.id) } } })
-    return true
-  } catch (e) {
-    console.warn('[AioConfigHistory] could not keep this version:', e?.message)
-    return false
-  }
+    try {
+        const { encrypt } = require("./encryption");
+        const accountId = person.accountId || "default";
+        const configKey = configKeyOf(person);
+        const summary = summarize(config);
+        const latest = await prisma.aioConfigSnapshot.findFirst({
+            orderBy: { createdAt: "desc" },
+            select: { hash: true },
+            where: { accountId, configKey },
+        });
+        if (latest?.hash === summary.hash) {
+            return false;
+        }
+        await prisma.aioConfigSnapshot.create({
+            data: {
+                accountId,
+                config: encrypt(JSON.stringify(config), { appAccountId: accountId }),
+                configKey,
+                hash: summary.hash,
+                reason,
+                summary: JSON.stringify(summary),
+                userId: person.id,
+            },
+        });
+        const old = await prisma.aioConfigSnapshot.findMany({
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+            skip: KEEP_PER_CONFIG,
+            where: { accountId, configKey },
+        });
+        if (old.length) {
+            await prisma.aioConfigSnapshot.deleteMany({
+                where: { id: { in: old.map((o) => o.id) } },
+            });
+        }
+        return true;
+    } catch (e) {
+        console.warn("[AioConfigHistory] could not keep this version:", e?.message);
+        return false;
+    }
 }
 
 /** The versions, newest first, each with what changed from the one before. */
 async function historyFor(prisma, accountId, userId) {
-  const person = await prisma.user.findFirst({ where: { id: userId, accountId }, select: { id: true, jellyfinServerUrl: true, aioConfigId: true, aioConfigPassword: true, jellyfinServerKind: true } })
-  if (!person) throw fail('User not found', 404)
-  if (person.jellyfinServerKind !== 'aiostreams' || !person.aioConfigId || !person.aioConfigPassword) return { available: false, versions: [] }
-  const rows = await prisma.aioConfigSnapshot.findMany({
-    where: { accountId, configKey: configKeyOf(person) },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true, summary: true, reason: true, createdAt: true },
-  })
-  const parsed = rows.map((r) => ({ ...r, summary: JSON.parse(r.summary || '{}') }))
-  return {
-    available: true,
-    versions: parsed.map((r, i) => {
-      const before = parsed[i + 1]
-      return {
-        id: r.id,
-        at: r.createdAt,
-        reason: r.reason,
-        current: i === 0,
-        changes: before ? describeChanges(before.summary, r.summary) : [],
-        addons: r.summary.addons?.length || 0,
-        services: r.summary.services?.length || 0,
-        users: r.summary.users?.length || 0,
-      }
-    }),
-  }
+    const person = await prisma.user.findFirst({
+        select: {
+            aioConfigId: true,
+            aioConfigPassword: true,
+            id: true,
+            jellyfinServerKind: true,
+            jellyfinServerUrl: true,
+        },
+        where: { accountId, id: userId },
+    });
+    if (!person) {
+        throw fail("User not found", 404);
+    }
+    if (
+        person.jellyfinServerKind !== "aiostreams" ||
+        !person.aioConfigId ||
+        !person.aioConfigPassword
+    ) {
+        return { available: false, versions: [] };
+    }
+    const rows = await prisma.aioConfigSnapshot.findMany({
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true, id: true, reason: true, summary: true },
+        where: { accountId, configKey: configKeyOf(person) },
+    });
+    const parsed = rows.map((r) => ({ ...r, summary: JSON.parse(r.summary || "{}") }));
+    return {
+        available: true,
+        versions: parsed.map((r, i) => {
+            const before = parsed[i + 1];
+            return {
+                addons: r.summary.addons?.length || 0,
+                at: r.createdAt,
+                changes: before ? describeChanges(before.summary, r.summary) : [],
+                current: i === 0,
+                id: r.id,
+                reason: r.reason,
+                services: r.summary.services?.length || 0,
+                users: r.summary.users?.length || 0,
+            };
+        }),
+    };
 }
 
 async function limitsOf(base) {
-  try {
-    const res = await safeFetch(`${base}/api/v1/status`, { signal: AbortSignal.timeout(15000) }, instancePolicy())
-    const s = (await res.json())?.data?.settings || {}
-    return { variants: Number(s.variants?.max) || 0, personas: Number(s.jellyfin?.maxPersonas) || 0 }
-  } catch {
-    return { variants: 0, personas: 0 }
-  }
+    try {
+        const res = await safeFetch(
+            `${base}/api/v1/status`,
+            { signal: AbortSignal.timeout(15_000) },
+            instancePolicy()
+        );
+        const s = (await res.json())?.data?.settings || {};
+        return {
+            personas: Number(s.jellyfin?.maxPersonas) || 0,
+            variants: Number(s.variants?.max) || 0,
+        };
+    } catch {
+        return { personas: 0, variants: 0 };
+    }
 }
 
 /** What restoring `old` over `current` would save. */
-function merge(old, current, { keepServices = true, keepPersonas = true, keepApiKeys = true } = {}) {
-  const next = JSON.parse(JSON.stringify(old))
-  for (const k of CURRENT_KEYS) {
-    if (current[k] === undefined) delete next[k]
-    else next[k] = current[k]
-  }
-  if (keepServices) next.services = current.services
-  if (keepPersonas || keepApiKeys) {
-    next.jellyfin = { ...(next.jellyfin || {}) }
-    const cur = current.jellyfin || {}
-    if (keepPersonas) {
-      for (const k of ['personas', 'primary']) {
-        if (cur[k] === undefined) delete next.jellyfin[k]
-        else next.jellyfin[k] = cur[k]
-      }
+function merge(
+    old,
+    current,
+    { keepServices = true, keepPersonas = true, keepApiKeys = true } = {}
+) {
+    const next = JSON.parse(JSON.stringify(old));
+    for (const k of CURRENT_KEYS) {
+        if (current[k] === undefined) {
+            delete next[k];
+        } else {
+            next[k] = current[k];
+        }
     }
-    if (keepApiKeys) {
-      if (cur.apiKeys === undefined) delete next.jellyfin.apiKeys
-      else next.jellyfin.apiKeys = cur.apiKeys
+    if (keepServices) {
+        next.services = current.services;
     }
-  }
-  keepOwnVariants(next, current)
-  return next
+    if (keepPersonas || keepApiKeys) {
+        next.jellyfin = { ...(next.jellyfin || {}) };
+        const cur = current.jellyfin || {};
+        if (keepPersonas) {
+            for (const k of ["personas", "primary"]) {
+                if (cur[k] === undefined) {
+                    delete next.jellyfin[k];
+                } else {
+                    next.jellyfin[k] = cur[k];
+                }
+            }
+        }
+        if (keepApiKeys) {
+            if (cur.apiKeys === undefined) {
+                delete next.jellyfin.apiKeys;
+            } else {
+                next.jellyfin.apiKeys = cur.apiKeys;
+            }
+        }
+    }
+    keepOwnVariants(next, current);
+    return next;
 }
 
 // SlickSync's own variants - a daily-limit pause (aioPause.js), a profile's
 // collections (aioProfileVariants.js) - stay as they are now. Putting back an
 // old version must not lift a pause that is on, or bring back one that ended.
-const OWN_VARIANT = /^slicksync-/
+const OWN_VARIANT = /^slicksync-/;
 function keepOwnVariants(next, current) {
-  const ownNow = (Array.isArray(current.variants) ? current.variants : []).filter((v) => OWN_VARIANT.test(String(v?.id || '')))
-  const theirs = (Array.isArray(next.variants) ? next.variants : []).filter((v) => !OWN_VARIANT.test(String(v?.id || '')))
-  const all = [...theirs, ...ownNow]
-  if (all.length) next.variants = all
-  else delete next.variants
-  // Each user's references to them, too, when the old version's users were kept.
-  const refsNow = new Map()
-  const cur = current.jellyfin || {}
-  if (cur.primary) refsNow.set('primary', cur.primary.variants)
-  for (const p of Array.isArray(cur.personas) ? cur.personas : []) refsNow.set(`p:${p.id}`, p.variants)
-  const fix = (user, key) => {
-    if (!user || typeof user !== 'object') return
-    const own = (Array.isArray(refsNow.get(key)) ? refsNow.get(key) : []).filter((id) => OWN_VARIANT.test(id))
-    const refs = [...(Array.isArray(user.variants) ? user.variants : []).filter((id) => !OWN_VARIANT.test(id)), ...own]
-    if (refs.length) user.variants = refs
-    else delete user.variants
-  }
-  if (next.jellyfin && typeof next.jellyfin === 'object') {
-    fix(next.jellyfin.primary, 'primary')
-    for (const p of Array.isArray(next.jellyfin.personas) ? next.jellyfin.personas : []) fix(p, `p:${p.id}`)
-  }
+    const ownNow = (Array.isArray(current.variants) ? current.variants : []).filter((v) =>
+        OWN_VARIANT.test(String(v?.id || ""))
+    );
+    const theirs = (Array.isArray(next.variants) ? next.variants : []).filter(
+        (v) => !OWN_VARIANT.test(String(v?.id || ""))
+    );
+    const all = [...theirs, ...ownNow];
+    if (all.length) {
+        next.variants = all;
+    } else {
+        delete next.variants;
+    }
+    // Each user's references to them, too, when the old version's users were kept.
+    const refsNow = new Map();
+    const cur = current.jellyfin || {};
+    if (cur.primary) {
+        refsNow.set("primary", cur.primary.variants);
+    }
+    for (const p of Array.isArray(cur.personas) ? cur.personas : []) {
+        refsNow.set(`p:${p.id}`, p.variants);
+    }
+    const fix = (user, key) => {
+        if (!user || typeof user !== "object") {
+            return;
+        }
+        const own = (Array.isArray(refsNow.get(key)) ? refsNow.get(key) : []).filter((id) =>
+            OWN_VARIANT.test(id)
+        );
+        const refs = [
+            ...(Array.isArray(user.variants) ? user.variants : []).filter(
+                (id) => !OWN_VARIANT.test(id)
+            ),
+            ...own,
+        ];
+        if (refs.length) {
+            user.variants = refs;
+        } else {
+            delete user.variants;
+        }
+    };
+    if (next.jellyfin && typeof next.jellyfin === "object") {
+        fix(next.jellyfin.primary, "primary");
+        for (const p of Array.isArray(next.jellyfin.personas) ? next.jellyfin.personas : []) {
+            fix(p, `p:${p.id}`);
+        }
+    }
 }
 
 async function restore(prisma, decrypt, accountId, userId, snapshotId, options = {}) {
-  const person = await prisma.user.findFirst({ where: { id: userId, accountId } })
-  if (!person) throw fail('User not found', 404)
-  if (person.jellyfinServerKind !== 'aiostreams' || !person.aioConfigId || !person.aioConfigPassword) {
-    throw fail(`SlickSync needs ${person.username}'s AIOStreams configuration password for this - reconnect them with it.`, 409)
-  }
-  const snapshot = await prisma.aioConfigSnapshot.findFirst({ where: { id: snapshotId, accountId, configKey: configKeyOf(person) } })
-  if (!snapshot) throw fail('That version is no longer kept', 404)
+    const person = await prisma.user.findFirst({ where: { accountId, id: userId } });
+    if (!person) {
+        throw fail("User not found", 404);
+    }
+    if (
+        person.jellyfinServerKind !== "aiostreams" ||
+        !person.aioConfigId ||
+        !person.aioConfigPassword
+    ) {
+        throw fail(
+            `SlickSync needs ${person.username}'s AIOStreams configuration password for this - reconnect them with it.`,
+            409
+        );
+    }
+    const snapshot = await prisma.aioConfigSnapshot.findFirst({
+        where: { accountId, configKey: configKeyOf(person), id: snapshotId },
+    });
+    if (!snapshot) {
+        throw fail("That version is no longer kept", 404);
+    }
 
-  const access = { serverUrl: person.jellyfinServerUrl, account: person.aioConfigId, password: decrypt(person.aioConfigPassword, { appAccountId: accountId }) }
-  const current = await readConfig(access)
-  const old = JSON.parse(decrypt(snapshot.config, { appAccountId: accountId }))
-  const next = merge(old, current, options)
+    const access = {
+        account: person.aioConfigId,
+        password: decrypt(person.aioConfigPassword, { appAccountId: accountId }),
+        serverUrl: person.jellyfinServerUrl,
+    };
+    const current = await readConfig(access);
+    const old = JSON.parse(decrypt(snapshot.config, { appAccountId: accountId }));
+    const next = merge(old, current, options);
 
-  const limits = await limitsOf(instanceBase(person.jellyfinServerUrl))
-  const variants = Array.isArray(next.variants) ? next.variants.length : 0
-  if (limits.variants && variants > limits.variants) throw fail(`That version has ${variants} variants, and this AIOStreams allows ${limits.variants} now.`, 409)
-  const personas = Array.isArray(next.jellyfin?.personas) ? next.jellyfin.personas.length : 0
-  if (limits.personas && personas > limits.personas) throw fail(`That version has ${personas} household users, and this AIOStreams allows ${limits.personas} now.`, 409)
+    const limits = await limitsOf(instanceBase(person.jellyfinServerUrl));
+    const variants = Array.isArray(next.variants) ? next.variants.length : 0;
+    if (limits.variants && variants > limits.variants) {
+        throw fail(
+            `That version has ${variants} variants, and this AIOStreams allows ${limits.variants} now.`,
+            409
+        );
+    }
+    const personas = Array.isArray(next.jellyfin?.personas) ? next.jellyfin.personas.length : 0;
+    if (limits.personas && personas > limits.personas) {
+        throw fail(
+            `That version has ${personas} household users, and this AIOStreams allows ${limits.personas} now.`,
+            409
+        );
+    }
 
-  // Anything changed since the last look is reported, and kept, first.
-  try {
-    await noteOutsideChanges(prisma, person, current)
-  } catch (e) {
-    console.warn('[AioConfigHistory] could not compare with the last look:', e?.message)
-  }
-  try {
-    await writeConfig(access, next)
-  } catch (e) {
-    const m = /maximum allowed is (\d+)/i.exec(String(e?.message || ''))
-    if (m) throw fail(`That version has more addons than this AIOStreams allows now (${m[1]}). Remove some there first.`, 409)
-    throw fail(e?.message || 'AIOStreams refused it', 409)
-  }
-  await rebaseline(prisma, person, await readConfig(access), 'restore')
-  return { restored: true }
+    // Anything changed since the last look is reported, and kept, first.
+    try {
+        await noteOutsideChanges(prisma, person, current);
+    } catch (e) {
+        console.warn("[AioConfigHistory] could not compare with the last look:", e?.message);
+    }
+    try {
+        await writeConfig(access, next);
+    } catch (e) {
+        const m = /maximum allowed is (\d+)/i.exec(String(e?.message || ""));
+        if (m) {
+            throw fail(
+                `That version has more addons than this AIOStreams allows now (${m[1]}). Remove some there first.`,
+                409
+            );
+        }
+        throw fail(e?.message || "AIOStreams refused it", 409);
+    }
+    await rebaseline(prisma, person, await readConfig(access), "restore");
+    return { restored: true };
 }
 
-module.exports = { remember, historyFor, restore, merge, configKeyOf, KEEP_PER_CONFIG }
+module.exports = { configKeyOf, historyFor, KEEP_PER_CONFIG, merge, remember, restore };

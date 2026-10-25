@@ -1,4 +1,4 @@
-import type { AutomationCondition, AutomationActionConfig } from '@/lib/api';
+import type { AutomationActionConfig, AutomationCondition } from "@/lib/api";
 
 // One-click starting points for automation rules.
 //
@@ -19,173 +19,282 @@ import type { AutomationCondition, AutomationActionConfig } from '@/lib/api';
 // triggerType would leave the editor's trigger dropdown unset.
 
 export interface AutomationRecipe {
-  id: string;
-  title: string;
-  /** Plain-language description of what the finished rule does. */
-  description: string;
-  name: string;
-  triggerType: string;
-  conditions?: AutomationCondition[];
-  actions?: AutomationActionConfig[];
-  /** Shown when the recipe needs something filled in before it can be saved. */
-  needs?: string;
+    actions?: AutomationActionConfig[];
+    conditions?: AutomationCondition[];
+    /** Plain-language description of what the finished rule does. */
+    description: string;
+    id: string;
+    name: string;
+    /** Shown when the recipe needs something filled in before it can be saved. */
+    needs?: string;
+    title: string;
+    triggerType: string;
 }
 
 export const AUTOMATION_RECIPES: AutomationRecipe[] = [
-  {
-    id: 'addon-down-notify',
-    title: 'Tell me when an addon goes down',
-    description: 'Sends a notification the moment any addon stops responding, so you find out before someone reports that streams stopped working.',
-    name: 'Addon went offline',
-    triggerType: 'addon.offline',
-    actions: [{ type: 'notify', config: { title: 'Addon offline', message: 'An addon stopped responding.' } }],
-  },
-  {
-    id: 'addon-back-notify',
-    title: 'Tell me when an addon recovers',
-    description: 'The other half of the pair - confirms an addon is working again without you having to go and check.',
-    name: 'Addon back online',
-    triggerType: 'addon.online',
-    actions: [{ type: 'notify', config: { title: 'Addon back online', message: 'An addon is responding again.' } }],
-  },
-  {
-    id: 'key-failed-notify',
-    title: 'Tell me when an API key stops working',
-    description: 'TMDb, OMDb, MDBList and RPDB keys fail silently - posters and ratings just quietly stop appearing. This turns that into an actual alert.',
-    name: 'Metadata key failed',
-    triggerType: 'metadata_key.failed',
-    actions: [{ type: 'notify', config: { title: 'API key not working', message: 'A metadata provider key stopped working.' } }],
-  },
-  {
-    id: 'backup-failed-notify',
-    title: 'Tell me when an off-site backup fails',
-    description: 'The local backup still gets written, but the copy going to S3/WebDAV did not arrive. Worth knowing immediately rather than the day you need it.',
-    name: 'Off-site backup failed',
-    triggerType: 'backup.failed',
-    actions: [{ type: 'notify', config: { title: 'Off-site backup failed', message: 'The backup was written locally but did not reach the remote target.' } }],
-  },
-  {
-    id: 'vault-expiring-notify',
-    title: 'Tell me before a subscription expires',
-    description: 'Fires on the lead time set for each Vault entry, so a debrid subscription never lapses without warning.',
-    name: 'Vault entry expiring',
-    triggerType: 'vault.expiring',
-    actions: [{ type: 'notify', config: { title: 'Subscription expiring soon', message: 'A Vault entry is approaching its renewal date.' } }],
-  },
-  {
-    id: 'new-user-sync',
-    title: 'Sync every new user automatically',
-    description: 'When someone new is added, push their addons straight away so they are ready to watch without a manual sync.',
-    name: 'Sync new users',
-    triggerType: 'user.created',
-    actions: [{ type: 'user.sync', config: {} }],
-  },
-  {
-    id: 'update-available-notify',
-    title: 'Tell me when a SlickSync update is out',
-    description: 'Fires once per new release when this instance is behind the latest published version.',
-    name: 'Update available',
-    triggerType: 'update.available',
-    actions: [{ type: 'notify', config: { title: 'SlickSync update available', message: 'A newer release has been published.' } }],
-  },
-  {
-    id: 'addon-down-webhook',
-    title: 'Post to a webhook when an addon goes down',
-    description: 'Same trigger as the first recipe, but sends it to Discord or any other webhook instead of the in-app bell.',
-    name: 'Addon offline webhook',
-    triggerType: 'addon.offline',
-    actions: [{ type: 'webhook', config: { url: '' } }],
-    needs: 'Add your webhook URL before saving.',
-  },
-  {
-    id: 'key-failed-no-backup',
-    title: 'Alert me only when a failed key has no spare',
-    description: 'The louder half of the pair. Fires when a metadata key stops working and no backup key is set for it, so posters and ratings really have stopped. A key that fails with a backup behind it is handled by the quieter recipe below.',
-    name: 'Metadata key failed with no backup',
-    triggerType: 'metadata_key.failed',
-    conditions: [{ field: 'hasBackup', op: 'is_false' }],
-    actions: [{ type: 'notify', config: { title: 'API key down, no backup', message: 'A metadata provider key stopped working and has no backup key configured.' } }],
-  },
-  {
-    id: 'key-failover-promote',
-    title: 'If a backup key takes over, make it the new primary',
-    description: 'Completes the failover instead of running on a detour forever: the backup becomes the primary, the dead key is kept as the new backup, and any addon still carrying the old key is rewritten and re-synced. And it round-trips by itself - when the failed original passes a later check (a daily limit resetting, say), the pair swaps back automatically. One notification each way.',
-    name: 'Promote the backup key when it takes over',
-    triggerType: 'metadata_key.failover_activated',
-    actions: [
-      { type: 'keys.promote_backup', config: {} },
-      { type: 'notify', config: { title: 'Backup key promoted', message: 'The backup {{providerLabel}} key is now the primary. The failed key was kept as the backup - replace it when you can.' } },
-    ],
-  },
-  {
-    id: 'vault-failover-promote',
-    title: 'If a backup credential takes over, make it the new primary',
-    description: 'The Vault version: when a stored credential fails and its backup steps in, swap them for good. Everything referencing the credential keeps working, addons embedding the old key are rewritten, and the dead key stays on file as the backup.',
-    name: 'Promote the backup credential when it takes over',
-    triggerType: 'vault.failover_activated',
-    actions: [
-      { type: 'keys.promote_backup', config: {} },
-      { type: 'notify', config: { title: 'Backup credential promoted', message: '{{backupName}} is now the primary for {{entryName}}. The failed key was kept as the backup - replace it when you can.' } },
-    ],
-  },
-  {
-    id: 'key-failover-notify',
-    title: 'Tell me when a backup key takes over',
-    description: 'Nothing is broken for anyone using the app - the spare picked up the slack. Worth knowing anyway, because you are now running on your last key for that provider.',
-    name: 'Backup metadata key took over',
-    triggerType: 'metadata_key.failover_activated',
-    actions: [{ type: 'notify', config: { title: 'Running on the backup key', message: 'A metadata key failed and its backup is now being used. Replace the primary when you can.' } }],
-  },
-  {
-    id: 'vault-failover-notify',
-    title: 'Tell me when a backup credential takes over',
-    description: 'The Vault version of the same thing - a stored credential failed its check and its configured backup is now in use.',
-    name: 'Backup credential took over',
-    triggerType: 'vault.failover_activated',
-    actions: [{ type: 'notify', config: { title: 'Running on the backup credential', message: 'A Vault credential failed its check and its backup is now being used.' } }],
-  },
-  {
-    id: 'vault-failed-no-backup',
-    title: 'Alert me when a credential fails with nothing to fall back on',
-    description: 'Fires when a Vault credential stops working and no backup is set for it. Pair it with the recipe above to keep the urgent alerts separate from the informational ones.',
-    name: 'Credential failed with no backup',
-    triggerType: 'vault.check_failed',
-    conditions: [{ field: 'hasBackup', op: 'is_false' }],
-    actions: [{ type: 'notify', config: { title: 'Credential down, no backup', message: 'A Vault credential stopped working and has no backup configured.' } }],
-  },
-  {
-    id: 'key-quota-failover-webhook',
-    title: 'Post to a webhook when a key runs low',
-    description: 'Sends quota warnings to Discord or anywhere else, so whoever tops the key up sees it without needing an admin login. Fires before the key runs out, not after.',
-    name: 'Key quota low webhook',
-    triggerType: 'metadata_key.quota_low',
-    actions: [{ type: 'webhook', config: { url: '' } }],
-    needs: 'Add your webhook URL before saving.',
-  },
-  {
-    id: 'watch-finished-webhook',
-    title: 'Send every finished title to a webhook',
-    description: 'Fires once when something is genuinely finished (the real playback-position test, not just stopped) and posts it wherever you point it. Scrobble-out to anything that accepts HTTP - a dashboard, a Discord thread, your own script.',
-    name: 'Finished title webhook',
-    triggerType: 'watch.finished',
-    actions: [{ type: 'webhook', config: { url: '' } }],
-    needs: 'Add your webhook URL before saving.',
-  },
-  {
-    id: 'inactive-deactivate',
-    title: 'Switch off people who stopped watching',
-    description: 'When someone hasn\'t watched anything for the number of days you set, they\'re switched off - the same as the toggle on their card, so switching them back on is one click. Nothing is deleted, and anyone given an access end date is left alone.',
-    name: 'Switch off inactive people',
-    triggerType: 'user.inactive',
-    actions: [{ type: 'user.deactivate', config: {} }],
-    needs: 'Set how many days without watching before saving.',
-  },
-  {
-    id: 'nightly-extra-backup',
-    title: 'Run an extra backup at an hour you choose',
-    description: 'The nightly backup already runs on its own schedule; this adds another at whatever hour you set - useful before a nightly maintenance window, or just for belt-and-braces.',
-    name: 'Extra scheduled backup',
-    triggerType: 'time.daily',
-    actions: [{ type: 'backup.run', config: {} }],
-  },
+    {
+        actions: [
+            {
+                config: { message: "An addon stopped responding.", title: "Addon offline" },
+                type: "notify",
+            },
+        ],
+        description:
+            "Sends a notification the moment any addon stops responding, so you find out before someone reports that streams stopped working.",
+        id: "addon-down-notify",
+        name: "Addon went offline",
+        title: "Tell me when an addon goes down",
+        triggerType: "addon.offline",
+    },
+    {
+        actions: [
+            {
+                config: { message: "An addon is responding again.", title: "Addon back online" },
+                type: "notify",
+            },
+        ],
+        description:
+            "The other half of the pair - confirms an addon is working again without you having to go and check.",
+        id: "addon-back-notify",
+        name: "Addon back online",
+        title: "Tell me when an addon recovers",
+        triggerType: "addon.online",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message: "A metadata provider key stopped working.",
+                    title: "API key not working",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "TMDb, OMDb, MDBList and RPDB keys fail silently - posters and ratings just quietly stop appearing. This turns that into an actual alert.",
+        id: "key-failed-notify",
+        name: "Metadata key failed",
+        title: "Tell me when an API key stops working",
+        triggerType: "metadata_key.failed",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message: "The backup was written locally but did not reach the remote target.",
+                    title: "Off-site backup failed",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "The local backup still gets written, but the copy going to S3/WebDAV did not arrive. Worth knowing immediately rather than the day you need it.",
+        id: "backup-failed-notify",
+        name: "Off-site backup failed",
+        title: "Tell me when an off-site backup fails",
+        triggerType: "backup.failed",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message: "A Vault entry is approaching its renewal date.",
+                    title: "Subscription expiring soon",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "Fires on the lead time set for each Vault entry, so a debrid subscription never lapses without warning.",
+        id: "vault-expiring-notify",
+        name: "Vault entry expiring",
+        title: "Tell me before a subscription expires",
+        triggerType: "vault.expiring",
+    },
+    {
+        actions: [{ config: {}, type: "user.sync" }],
+        description:
+            "When someone new is added, push their addons straight away so they are ready to watch without a manual sync.",
+        id: "new-user-sync",
+        name: "Sync new users",
+        title: "Sync every new user automatically",
+        triggerType: "user.created",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message: "A newer release has been published.",
+                    title: "SlickSync update available",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "Fires once per new release when this instance is behind the latest published version.",
+        id: "update-available-notify",
+        name: "Update available",
+        title: "Tell me when a SlickSync update is out",
+        triggerType: "update.available",
+    },
+    {
+        actions: [{ config: { url: "" }, type: "webhook" }],
+        description:
+            "Same trigger as the first recipe, but sends it to Discord or any other webhook instead of the in-app bell.",
+        id: "addon-down-webhook",
+        name: "Addon offline webhook",
+        needs: "Add your webhook URL before saving.",
+        title: "Post to a webhook when an addon goes down",
+        triggerType: "addon.offline",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message:
+                        "A metadata provider key stopped working and has no backup key configured.",
+                    title: "API key down, no backup",
+                },
+                type: "notify",
+            },
+        ],
+        conditions: [{ field: "hasBackup", op: "is_false" }],
+        description:
+            "The louder half of the pair. Fires when a metadata key stops working and no backup key is set for it, so posters and ratings really have stopped. A key that fails with a backup behind it is handled by the quieter recipe below.",
+        id: "key-failed-no-backup",
+        name: "Metadata key failed with no backup",
+        title: "Alert me only when a failed key has no spare",
+        triggerType: "metadata_key.failed",
+    },
+    {
+        actions: [
+            { config: {}, type: "keys.promote_backup" },
+            {
+                config: {
+                    message:
+                        "The backup {{providerLabel}} key is now the primary. The failed key was kept as the backup - replace it when you can.",
+                    title: "Backup key promoted",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "Completes the failover instead of running on a detour forever: the backup becomes the primary, the dead key is kept as the new backup, and any addon still carrying the old key is rewritten and re-synced. And it round-trips by itself - when the failed original passes a later check (a daily limit resetting, say), the pair swaps back automatically. One notification each way.",
+        id: "key-failover-promote",
+        name: "Promote the backup key when it takes over",
+        title: "If a backup key takes over, make it the new primary",
+        triggerType: "metadata_key.failover_activated",
+    },
+    {
+        actions: [
+            { config: {}, type: "keys.promote_backup" },
+            {
+                config: {
+                    message:
+                        "{{backupName}} is now the primary for {{entryName}}. The failed key was kept as the backup - replace it when you can.",
+                    title: "Backup credential promoted",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "The Vault version: when a stored credential fails and its backup steps in, swap them for good. Everything referencing the credential keeps working, addons embedding the old key are rewritten, and the dead key stays on file as the backup.",
+        id: "vault-failover-promote",
+        name: "Promote the backup credential when it takes over",
+        title: "If a backup credential takes over, make it the new primary",
+        triggerType: "vault.failover_activated",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message:
+                        "A metadata key failed and its backup is now being used. Replace the primary when you can.",
+                    title: "Running on the backup key",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "Nothing is broken for anyone using the app - the spare picked up the slack. Worth knowing anyway, because you are now running on your last key for that provider.",
+        id: "key-failover-notify",
+        name: "Backup metadata key took over",
+        title: "Tell me when a backup key takes over",
+        triggerType: "metadata_key.failover_activated",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message:
+                        "A Vault credential failed its check and its backup is now being used.",
+                    title: "Running on the backup credential",
+                },
+                type: "notify",
+            },
+        ],
+        description:
+            "The Vault version of the same thing - a stored credential failed its check and its configured backup is now in use.",
+        id: "vault-failover-notify",
+        name: "Backup credential took over",
+        title: "Tell me when a backup credential takes over",
+        triggerType: "vault.failover_activated",
+    },
+    {
+        actions: [
+            {
+                config: {
+                    message: "A Vault credential stopped working and has no backup configured.",
+                    title: "Credential down, no backup",
+                },
+                type: "notify",
+            },
+        ],
+        conditions: [{ field: "hasBackup", op: "is_false" }],
+        description:
+            "Fires when a Vault credential stops working and no backup is set for it. Pair it with the recipe above to keep the urgent alerts separate from the informational ones.",
+        id: "vault-failed-no-backup",
+        name: "Credential failed with no backup",
+        title: "Alert me when a credential fails with nothing to fall back on",
+        triggerType: "vault.check_failed",
+    },
+    {
+        actions: [{ config: { url: "" }, type: "webhook" }],
+        description:
+            "Sends quota warnings to Discord or anywhere else, so whoever tops the key up sees it without needing an admin login. Fires before the key runs out, not after.",
+        id: "key-quota-failover-webhook",
+        name: "Key quota low webhook",
+        needs: "Add your webhook URL before saving.",
+        title: "Post to a webhook when a key runs low",
+        triggerType: "metadata_key.quota_low",
+    },
+    {
+        actions: [{ config: { url: "" }, type: "webhook" }],
+        description:
+            "Fires once when something is genuinely finished (the real playback-position test, not just stopped) and posts it wherever you point it. Scrobble-out to anything that accepts HTTP - a dashboard, a Discord thread, your own script.",
+        id: "watch-finished-webhook",
+        name: "Finished title webhook",
+        needs: "Add your webhook URL before saving.",
+        title: "Send every finished title to a webhook",
+        triggerType: "watch.finished",
+    },
+    {
+        actions: [{ config: {}, type: "user.deactivate" }],
+        description:
+            "When someone hasn't watched anything for the number of days you set, they're switched off - the same as the toggle on their card, so switching them back on is one click. Nothing is deleted, and anyone given an access end date is left alone.",
+        id: "inactive-deactivate",
+        name: "Switch off inactive people",
+        needs: "Set how many days without watching before saving.",
+        title: "Switch off people who stopped watching",
+        triggerType: "user.inactive",
+    },
+    {
+        actions: [{ config: {}, type: "backup.run" }],
+        description:
+            "The nightly backup already runs on its own schedule; this adds another at whatever hour you set - useful before a nightly maintenance window, or just for belt-and-braces.",
+        id: "nightly-extra-backup",
+        name: "Extra scheduled backup",
+        title: "Run an extra backup at an hour you choose",
+        triggerType: "time.daily",
+    },
 ];

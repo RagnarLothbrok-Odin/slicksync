@@ -1,609 +1,737 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { api, Invitation, Group, InviteRequest } from '@/lib/api';
-import { copyToClipboard } from '@/lib/clipboard';
-import { Header, Breadcrumbs } from '@/components/layout/Header';
-import { NebulaPageHeading } from '@/components/layout/NebulaTopbar';
-import { useLayoutMode } from '@/lib/layout-mode';
-import { Button, Card, Badge, ConfirmModal, Modal, UserAvatar } from '@/components/ui';
-import { EditInvitationForm } from '@/components/invitations/EditInvitationForm';
-import { displayEmail } from '@/lib/providers';
-import { PageSection, StaggerContainer, StaggerItem } from '@/components/layout/PageContainer';
-import { toast } from '@/components/ui/Toast';
 import {
-  EnvelopeIcon,
-  ClipboardIcon,
-  CheckIcon,
-  XMarkIcon,
-  ClockIcon,
-  UsersIcon,
-  TrashIcon,
-  ArrowPathIcon,
-  PencilIcon,
-  ArrowUturnLeftIcon,
-  ArrowTopRightOnSquareIcon,
-  LinkIcon,
-  ChartPieIcon,
-  ArrowLeftIcon,
-  ExclamationTriangleIcon,
-} from '@heroicons/react/24/outline';
-import { format } from 'date-fns';
+    ArrowLeftIcon,
+    ArrowTopRightOnSquareIcon,
+    ArrowUturnLeftIcon,
+    ChartPieIcon,
+    CheckIcon,
+    ClipboardIcon,
+    ClockIcon,
+    EnvelopeIcon,
+    ExclamationTriangleIcon,
+    LinkIcon,
+    PencilIcon,
+    TrashIcon,
+    UsersIcon,
+    XMarkIcon,
+} from "@heroicons/react/24/outline";
+import { format } from "date-fns";
+import { motion } from "framer-motion";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { EditInvitationForm } from "@/components/invitations/EditInvitationForm";
+import { Breadcrumbs, Header } from "@/components/layout/Header";
+import { NebulaPageHeading } from "@/components/layout/NebulaTopbar";
+import { PageSection, StaggerContainer, StaggerItem } from "@/components/layout/PageContainer";
+import { Badge, Button, Card, ConfirmModal, Modal, UserAvatar } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
+import { api, type Group, type Invitation, type InviteRequest } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
+import { useLayoutMode } from "@/lib/layout-mode";
+import { displayEmail } from "@/lib/providers";
 
 interface InvitationWithRequests extends Invitation {
-  requests?: InviteRequest[];
+    requests?: InviteRequest[];
 }
 
 export default function InvitationDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const invitationId = params.id as string;
+    const params = useParams();
+    const router = useRouter();
+    const invitationId = params.id as string;
 
-  const [invitation, setInvitation] = useState<InvitationWithRequests | null>(null);
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteUserConfirm, setDeleteUserConfirm] = useState<{
-    open: boolean;
-    request: InviteRequest | null;
-  }>({ open: false, request: null });
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const { layoutMode } = useLayoutMode();
-  const isNebula = layoutMode === 'nebula';
+    const [invitation, setInvitation] = useState<InvitationWithRequests | null>(null);
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [deleteUserConfirm, setDeleteUserConfirm] = useState<{
+        open: boolean;
+        request: InviteRequest | null;
+    }>({ open: false, request: null });
+    const [copiedLink, setCopiedLink] = useState(false);
+    const [editOpen, setEditOpen] = useState(false);
+    const { layoutMode } = useLayoutMode();
+    const isNebula = layoutMode === "nebula";
 
-  // Fetch invitation data
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const [invitationsData, groupsData] = await Promise.all([
-          api.getInvitations(),
-          api.getGroups(),
-        ]);
+    // Fetch invitation data
+    useEffect(() => {
+        const fetchData = async () => {
+            setIsLoading(true);
+            setError(null);
+            try {
+                const [invitationsData, groupsData] = await Promise.all([
+                    api.getInvitations(),
+                    api.getGroups(),
+                ]);
 
-        const foundInvitation = invitationsData.find((inv: any) => inv.id === invitationId);
-        if (!foundInvitation) {
-          throw new Error('Invitation not found');
-        }
+                const foundInvitation = invitationsData.find((inv) => inv.id === invitationId);
+                if (!foundInvitation) {
+                    throw new Error("Invitation not found");
+                }
 
-        // Fetch requests for this invitation
-        let requests: InviteRequest[] = [];
-        if (foundInvitation.requests && Array.isArray(foundInvitation.requests)) {
-          requests = foundInvitation.requests;
-        } else {
-          try {
-            const invRequests = await api.getInvitationRequests(invitationId);
-            if (Array.isArray(invRequests)) {
-              requests = invRequests;
+                // Fetch requests for this invitation
+                let requests: InviteRequest[] = [];
+                if (foundInvitation.requests && Array.isArray(foundInvitation.requests)) {
+                    requests = foundInvitation.requests;
+                } else {
+                    try {
+                        const invRequests = await api.getInvitationRequests(invitationId);
+                        if (Array.isArray(invRequests)) {
+                            requests = invRequests;
+                        }
+                    } catch {
+                        // Skip if requests can't be fetched
+                    }
+                }
+
+                setInvitation({ ...foundInvitation, requests });
+                setGroups(groupsData);
+            } catch (err) {
+                setError(err as Error);
+                toast.error("Failed to load invitation");
+            } finally {
+                setIsLoading(false);
             }
-          } catch {
-            // Skip if requests can't be fetched
-          }
-        }
+        };
 
-        setInvitation({ ...foundInvitation, requests });
-        setGroups(groupsData);
-      } catch (err) {
-        setError(err as Error);
-        toast.error('Failed to load invitation');
-      } finally {
-        setIsLoading(false);
-      }
+        if (invitationId) {
+            fetchData();
+        }
+    }, [invitationId]);
+
+    useEffect(() => {
+        if (invitation) {
+            document.title = `SlickSync - Invitation ${invitation.code || invitation.inviteCode || ""}`;
+        }
+    }, [invitation]);
+
+    const handleCopyLink = () => {
+        const origin = typeof window === "undefined" ? "" : window.location.origin;
+        copyToClipboard(`${origin}/invite/${invitation?.code || invitation?.inviteCode}`);
+        setCopiedLink(true);
+        toast.success("Invite link copied to clipboard");
+        setTimeout(() => setCopiedLink(false), 2000);
     };
 
-    if (invitationId) {
-      fetchData();
-    }
-  }, [invitationId]);
+    const handleDelete = async () => {
+        setIsDeleting(true);
+        try {
+            await api.deleteInvitation(invitationId);
+            toast.success("Invitation deleted successfully");
+            router.push("/invitations");
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to delete invitation"));
+            setIsDeleting(false);
+        }
+    };
 
-  useEffect(() => {
-    if (invitation) {
-      document.title = `SlickSync - Invitation ${invitation.code || invitation.inviteCode || ''}`;
-    }
-  }, [invitation]);
+    const handleAcceptRequest = async (requestId: string) => {
+        try {
+            await api.acceptInviteRequest(requestId);
+            toast.success("Request accepted");
+            // Refresh data
+            window.location.reload();
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to accept request"));
+        }
+    };
 
-  const handleCopyLink = () => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    copyToClipboard(`${origin}/invite/${invitation?.code || invitation?.inviteCode}`);
-    setCopiedLink(true);
-    toast.success('Invite link copied to clipboard');
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
+    const handleRejectRequest = async (requestId: string) => {
+        try {
+            await api.rejectInviteRequest(requestId);
+            toast.success("Request rejected");
+            window.location.reload();
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to reject request"));
+        }
+    };
 
-  const handleDelete = async () => {
-    setIsDeleting(true);
-    try {
-      await api.deleteInvitation(invitationId);
-      toast.success('Invitation deleted successfully');
-      router.push('/invitations');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to delete invitation');
-      setIsDeleting(false);
-    }
-  };
+    const handleDeleteUser = async (requestId: string) => {
+        try {
+            await api.rejectInviteRequest(requestId);
+            toast.success("User removed");
+            window.location.reload();
+        } catch (err) {
+            toast.error(readErrorMessage(err, "Failed to remove user"));
+        }
+    };
 
-  const handleAcceptRequest = async (requestId: string) => {
-    try {
-      await api.acceptInviteRequest(requestId);
-      toast.success('Request accepted');
-      // Refresh data
-      window.location.reload();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to accept request');
-    }
-  };
+    const usagePercentage = useMemo(() => {
+        if (!invitation?.maxUses) {
+            return 0;
+        }
+        const uses = invitation.currentUses || invitation.uses || 0;
+        return (uses / invitation.maxUses) * 100;
+    }, [invitation]);
 
-  const handleRejectRequest = async (requestId: string) => {
-    try {
-      await api.rejectInviteRequest(requestId);
-      toast.success('Request rejected');
-      window.location.reload();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to reject request');
-    }
-  };
+    const isExpired = invitation?.expiresAt && new Date(invitation.expiresAt) < new Date();
+    const isFull =
+        invitation?.maxUses &&
+        (invitation.currentUses || invitation.uses || 0) >= invitation.maxUses;
+    const _isActive = !(isExpired || isFull);
 
-  const handleDeleteUser = async (requestId: string) => {
-    try {
-      await api.rejectInviteRequest(requestId);
-      toast.success('User removed');
-      window.location.reload();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to remove user');
-    }
-  };
-
-  const usagePercentage = useMemo(() => {
-    if (!invitation?.maxUses) return 0;
-    const uses = invitation.currentUses || invitation.uses || 0;
-    return (uses / invitation.maxUses) * 100;
-  }, [invitation]);
-
-  const isExpired = invitation?.expiresAt && new Date(invitation.expiresAt) < new Date();
-  const isFull = invitation?.maxUses && (invitation.currentUses || invitation.uses || 0) >= invitation.maxUses;
-  const isActive = !isExpired && !isFull;
-
-  if (isLoading) {
-    return (
-      <>
-        {!isNebula && <Header title={<Breadcrumbs items={[{ label: 'Invitations', href: '/invitations' }, { label: 'Loading...' }]} />} />}
-        <div className="p-8">
-          <div className="flex items-center justify-center py-20">
-            <div className="flex items-center gap-3 text-muted">
-              <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              <span>Loading invitation...</span>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  if (error || !invitation) {
-    return (
-      <>
-        {!isNebula && <Header title={<Breadcrumbs items={[{ label: 'Invitations', href: '/invitations' }, { label: 'Error' }]} />} />}
-        <div className="p-8">
-          <Card padding="lg" className="text-center py-16">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center bg-error-muted">
-              <XMarkIcon className="w-8 h-8 text-error" />
-            </div>
-            <h3 className="text-lg font-medium mb-2 text-default">Invitation Not Found</h3>
-            <p className="text-muted mb-4">{error?.message || 'The invitation you are looking for does not exist.'}</p>
-            <Button variant="primary" onClick={() => router.push('/invitations')}>
-              Back to Invitations
-            </Button>
-          </Card>
-        </div>
-      </>
-    );
-  }
-
-  const code = invitation.code || invitation.inviteCode || '';
-  const group = groups.find(g => g.name === invitation.groupName);
-
-  const detailActions = (
-    <div className="flex items-center gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        leftIcon={<PencilIcon className="w-4 h-4" />}
-        onClick={() => setEditOpen(true)}
-      >
-        Edit
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        leftIcon={<TrashIcon className="w-4 h-4" />}
-        onClick={() => setDeleteConfirmOpen(true)}
-      >
-        Delete
-      </Button>
-    </div>
-  );
-
-  return (
-    <>
-      {!isNebula && (
-        <Header
-          title={
-            <Breadcrumbs
-              items={[
-                { label: 'Invitations', href: '/invitations' },
-                { label: code },
-              ]}
-              className="text-xl font-semibold"
-            />
-          }
-          actions={detailActions}
-        />
-      )}
-
-      <div className={isNebula ? 'px-4 md:px-6 pb-8 pt-6' : 'p-8'}>
-      <div className={isNebula ? 'mx-auto' : ''} style={isNebula ? { maxWidth: 'var(--interface-content-width)' } : undefined}>
-        {isNebula && (
-          <NebulaPageHeading
-            title={invitation.name || code}
-            subtitle="Invitations"
-            leading={
-              <Button variant="ghost" size="sm" leftIcon={<ArrowLeftIcon className="w-4 h-4" />} onClick={() => router.push('/invitations')}>
-                Back
-              </Button>
-            }
-            actions={detailActions}
-          />
-        )}
-        {/* Hero Section - Invitation Info */}
-        <PageSection className="mb-8">
-          <Card padding="lg">
-            <div className="flex items-start gap-6">
-              {/* Envelope Icon */}
-              <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 bg-primary-muted text-primary">
-                <EnvelopeIcon className="w-8 h-8" />
-              </div>
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                {/* A long code is one unbroken word: let it wrap, and the badge drop under it, on a narrow screen. */}
-                <div className="flex flex-wrap items-center gap-3 mb-2">
-                  <h1 className="min-w-0 break-all text-2xl font-bold font-display text-default">{code}</h1>
-                  {isExpired ? (
-                    <Badge variant="error">Expired</Badge>
-                  ) : isFull ? (
-                    <Badge variant="error">Full</Badge>
-                  ) : (
-                    <Badge variant="success">Active</Badge>
-                  )}
-                </div>
-
-                {invitation.groupName && !group ? (
-                  <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-warning">
-                    <span className="inline-flex items-start gap-1.5">
-                      <ExclamationTriangleIcon className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{invitation.groupName} was deleted, so people who join won&apos;t be put in a group.</span>
-                    </span>
-                    <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>Pick a group</Button>
-                  </div>
-                ) : (
-                  <p className="text-muted mb-4">
-                    {invitation.groupName || 'No group assigned'}
-                  </p>
+    if (isLoading) {
+        return (
+            <>
+                {!isNebula && (
+                    <Header
+                        title={
+                            <Breadcrumbs
+                                items={[
+                                    { href: "/invitations", label: "Invitations" },
+                                    { label: "Loading..." },
+                                ]}
+                            />
+                        }
+                    />
                 )}
-
-                {/* Stats Row */}
-                <div className="flex flex-wrap items-center gap-6 text-sm">
-                  <div className="flex items-center gap-2">
-                    <UsersIcon className="w-4 h-4 text-muted" />
-                    <span className="text-default font-medium">{invitation.currentUses || invitation.uses || 0}</span>
-                    <span className="text-muted">/</span>
-                    <span className="text-muted">{invitation.maxUses || '∞'} uses</span>
-                  </div>
-
-                  {invitation.expiresAt && (
-                    <div className="flex items-center gap-2">
-                      <ClockIcon className="w-4 h-4 text-muted" />
-                      <span className={isExpired ? 'text-error' : 'text-muted'}>
-                        {isExpired ? 'Expired ' : 'Expires '}
-                        {format(new Date(invitation.expiresAt), 'MMM d, yyyy')}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    <ClockIcon className="w-4 h-4 text-muted" />
-                    <span className="text-muted">
-                      Created {format(new Date(invitation.createdAt), 'MMM d, yyyy')}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </PageSection>
-
-        {/* Invite Link Section */}
-        <PageSection delay={0.1} className="mb-8">
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/20">
-                  <LinkIcon className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold font-display text-default">Invite Link</h3>
-                  <p className="text-sm text-muted">Share this link to invite users</p>
-                </div>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={copiedLink ? <CheckIcon className="w-4 h-4" /> : <ClipboardIcon className="w-4 h-4" />}
-                onClick={handleCopyLink}
-              >
-                {copiedLink ? 'Copied!' : 'Copy Link'}
-              </Button>
-            </div>
-            <div className="flex items-center gap-3 p-4 rounded-xl bg-surface-hover border border-default">
-              <LinkIcon className="w-5 h-5 text-muted shrink-0" />
-              <code className="flex-1 text-sm font-mono text-default truncate">
-                {typeof window !== 'undefined' ? window.location.origin : ''}/invite/{code}
-              </code>
-            </div>
-          </Card>
-        </PageSection>
-
-        {/* Usage Progress Section */}
-        {invitation.maxUses != null && invitation.maxUses > 0 && (
-          <PageSection delay={0.15} className="mb-8">
-            <Card padding="lg">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-secondary/20">
-                    <ChartPieIcon className="w-5 h-5 text-secondary" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-semibold font-display text-default">Usage</h3>
-                    <p className="text-sm text-muted">
-                      {invitation.currentUses || invitation.uses || 0} of {invitation.maxUses} uses
-                    </p>
-                  </div>
-                </div>
-                <span 
-                  className={`text-sm font-bold tabular-nums ${usagePercentage >= 80 ? 'text-error' : usagePercentage >= 50 ? 'text-warning' : 'text-primary'}`}
-                >
-                  {Math.round(usagePercentage)}%
-                </span>
-              </div>
-              
-              <div className="relative h-8 rounded-lg overflow-hidden bg-surface-hover shadow-inner mb-3">
-                <div className="absolute inset-0 rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)] pointer-events-none z-10" />
-                
-                {/* Background track with unused count */}
-                <div className="absolute inset-0 flex items-center justify-end pr-3">
-                  <span className="text-xs font-bold text-default tabular-nums">
-                    {(invitation.maxUses || 0) - (invitation.currentUses || invitation.uses || 0)}
-                  </span>
-                </div>
-                
-                <motion.div 
-                  className={`h-full rounded-lg relative flex items-center justify-center ${usagePercentage >= 80 ? 'usage-bar-hot' : 'usage-bar-ok'}`}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${Math.min(usagePercentage, 100)}%` }}
-                  transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  {/* Used count in center of used portion (only show if > 0) */}
-                  {(invitation.currentUses || invitation.uses || 0) > 0 && (
-                    <span className="text-xs font-bold text-white tabular-nums drop-shadow-md">
-                      {invitation.currentUses || invitation.uses || 0}
-                    </span>
-                  )}
-                  <div className="absolute inset-0 overflow-hidden rounded-lg">
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent w-full h-full animate-shimmer" />
-                  </div>
-                </motion.div>
-              </div>
-            </Card>
-          </PageSection>
-        )}
-
-        {/* Invited Users Section */}
-        <PageSection delay={0.2}>
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold font-display text-default">
-                <span className="text-muted font-normal mr-2">{invitation.requests?.length || 0}</span>
-                Invited Users
-              </h3>
-            </div>
-
-            {invitation.requests && invitation.requests.length > 0 ? (
-              <StaggerContainer className="space-y-3">
-                {invitation.requests.map((request, index) => (
-                  <StaggerItem key={request.id}>
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover border border-default overflow-hidden"
-                    >
-                      <UserAvatar 
-                        userId={request.id} 
-                        name={request.username || displayEmail(request.email)} 
-                        email={request.email}
-                        size="md" 
-                      />
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-default">
-                            {request.username || displayEmail(request.email)}
-                          </span>
-                          <Badge 
-                            variant={
-                              request.status === 'accepted' || request.status === 'joined'
-                                ? 'success'
-                                : request.status === 'rejected'
-                                  ? 'error'
-                                  : request.status === 'pending'
-                                    ? 'warning'
-                                    : 'muted'
-                            }
-                            size="sm"
-                          >
-                            {request.status}
-                          </Badge>
+                <div className="p-8">
+                    <div className="flex items-center justify-center py-20">
+                        <div className="flex items-center gap-3 text-muted">
+                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            <span>Loading invitation...</span>
                         </div>
-                        <p className="text-xs text-muted mt-0.5">
-                          {request.email && request.username !== request.email && (
-                            <>{displayEmail(request.email)} • </>
-                          )}
-                          Requested {format(new Date(request.createdAt), 'MMM d, yyyy')}
-                          {request.respondedAt && (
-                            <> • Responded {format(new Date(request.respondedAt), 'MMM d, yyyy')}</>
-                          )}
+                    </div>
+                </div>
+            </>
+        );
+    }
+
+    if (error || !invitation) {
+        return (
+            <>
+                {!isNebula && (
+                    <Header
+                        title={
+                            <Breadcrumbs
+                                items={[
+                                    { href: "/invitations", label: "Invitations" },
+                                    { label: "Error" },
+                                ]}
+                            />
+                        }
+                    />
+                )}
+                <div className="p-8">
+                    <Card className="py-16 text-center" padding="lg">
+                        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-error-muted">
+                            <XMarkIcon className="h-8 w-8 text-error" />
+                        </div>
+                        <h3 className="mb-2 font-medium text-default text-lg">
+                            Invitation Not Found
+                        </h3>
+                        <p className="mb-4 text-muted">
+                            {error?.message || "The invitation you are looking for does not exist."}
                         </p>
+                        <Button onClick={() => router.push("/invitations")} variant="primary">
+                            Back to Invitations
+                        </Button>
+                    </Card>
+                </div>
+            </>
+        );
+    }
 
-                        {/* OAuth Code Display */}
-                        {request.oauthCode && request.status === 'accepted' && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <code className="text-xs font-mono px-2 py-1 rounded bg-surface text-default">
-                              {request.oauthCode}
-                            </code>
-                            {request.oauthLink && (
-                              <a
-                                href={request.oauthLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-primary hover:text-primary-hover flex items-center gap-1"
-                              >
-                                Open Link
-                                <ArrowTopRightOnSquareIcon className="w-3 h-3" />
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </div>
+    const code = invitation.code || invitation.inviteCode || "";
+    const group = groups.find((g) => g.name === invitation.groupName);
 
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-1">
-                        {request.status === 'pending' && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleAcceptRequest(request.id)}
-                              leftIcon={<CheckIcon className="w-4 h-4" />}
-                            >
-                              Accept
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRejectRequest(request.id)}
-                              leftIcon={<XMarkIcon className="w-4 h-4" />}
-                            >
-                              Reject
-                            </Button>
-                          </>
-                        )}
-                        {request.status === 'rejected' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleAcceptRequest(request.id)}
-                            leftIcon={<ArrowUturnLeftIcon className="w-4 h-4" />}
-                          >
-                            Undo
-                          </Button>
-                        )}
-                        {(request.status === 'accepted' || request.status === 'joined') && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDeleteUserConfirm({ open: true, request })}
-                            leftIcon={<TrashIcon className="w-4 h-4 text-error" />}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </div>
-                    </motion.div>
-                  </StaggerItem>
-                ))}
-              </StaggerContainer>
-            ) : (
-              <div className="text-center py-12">
-                <UsersIcon className="w-12 h-12 mx-auto text-muted mb-3" />
-                <p className="text-muted">No users have been invited yet</p>
-              </div>
+    const detailActions = (
+        <div className="flex items-center gap-2">
+            <Button
+                leftIcon={<PencilIcon className="h-4 w-4" />}
+                onClick={() => setEditOpen(true)}
+                size="sm"
+                variant="ghost"
+            >
+                Edit
+            </Button>
+            <Button
+                leftIcon={<TrashIcon className="h-4 w-4" />}
+                onClick={() => setDeleteConfirmOpen(true)}
+                size="sm"
+                variant="ghost"
+            >
+                Delete
+            </Button>
+        </div>
+    );
+
+    return (
+        <>
+            {!isNebula && (
+                <Header
+                    actions={detailActions}
+                    title={
+                        <Breadcrumbs
+                            className="font-semibold text-xl"
+                            items={[
+                                { href: "/invitations", label: "Invitations" },
+                                { label: code },
+                            ]}
+                        />
+                    }
+                />
             )}
-          </Card>
-        </PageSection>
-      </div>
-      </div>
 
-      <Modal
-        isOpen={editOpen}
-        onClose={() => setEditOpen(false)}
-        title="Edit Invitation"
-        description={`Update settings for invitation ${code}`}
-        size="md"
-      >
-        {editOpen && (
-          <EditInvitationForm
-            invitation={{
-              id: invitation.id,
-              name: invitation.name,
-              code,
-              groupId: invitation.groupId || group?.id,
-              groupName: invitation.groupName,
-              maxUses: typeof invitation.maxUses === 'number' ? invitation.maxUses : undefined,
-              uses: invitation.currentUses || invitation.uses || 0,
-              membershipDuration: invitation.membershipDuration ?? invitation.membershipDurationDays ?? undefined,
-              syncOnJoin: invitation.syncOnJoin === true,
-              jellyfinServerKey: (invitation as { jellyfinServerKey?: string | null }).jellyfinServerKey || null,
-            }}
-            groups={groups}
-            onClose={() => setEditOpen(false)}
-          />
-        )}
-      </Modal>
+            <div className={isNebula ? "px-4 pt-6 pb-8 md:px-6" : "p-8"}>
+                <div
+                    className={isNebula ? "mx-auto" : ""}
+                    style={isNebula ? { maxWidth: "var(--interface-content-width)" } : undefined}
+                >
+                    {isNebula && (
+                        <NebulaPageHeading
+                            actions={detailActions}
+                            leading={
+                                <Button
+                                    leftIcon={<ArrowLeftIcon className="h-4 w-4" />}
+                                    onClick={() => router.push("/invitations")}
+                                    size="sm"
+                                    variant="ghost"
+                                >
+                                    Back
+                                </Button>
+                            }
+                            subtitle="Invitations"
+                            title={invitation.name || code}
+                        />
+                    )}
+                    {/* Hero Section - Invitation Info */}
+                    <PageSection className="mb-8">
+                        <Card padding="lg">
+                            <div className="flex items-start gap-6">
+                                {/* Envelope Icon */}
+                                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary-muted text-primary">
+                                    <EnvelopeIcon className="h-8 w-8" />
+                                </div>
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmModal
-        isOpen={deleteConfirmOpen}
-        onClose={() => setDeleteConfirmOpen(false)}
-        onConfirm={handleDelete}
-        title="Delete Invitation"
-        description={`Are you sure you want to delete invitation "${code}"? This will invalidate the invite code and remove all associated users.`}
-        confirmText={isDeleting ? 'Deleting...' : 'Delete Invitation'}
-        variant="danger"
-        isLoading={isDeleting}
-      />
+                                {/* Info */}
+                                <div className="min-w-0 flex-1">
+                                    {/* A long code is one unbroken word: let it wrap, and the badge drop under it, on a narrow screen. */}
+                                    <div className="mb-2 flex flex-wrap items-center gap-3">
+                                        <h1 className="min-w-0 break-all font-bold font-display text-2xl text-default">
+                                            {code}
+                                        </h1>
+                                        {isExpired ? (
+                                            <Badge variant="error">Expired</Badge>
+                                        ) : isFull ? (
+                                            <Badge variant="error">Full</Badge>
+                                        ) : (
+                                            <Badge variant="success">Active</Badge>
+                                        )}
+                                    </div>
 
-      {/* Remove User Confirmation Modal */}
-      <ConfirmModal
-        isOpen={deleteUserConfirm.open}
-        onClose={() => setDeleteUserConfirm({ open: false, request: null })}
-        onConfirm={() => {
-          if (deleteUserConfirm.request) {
-            handleDeleteUser(deleteUserConfirm.request.id);
-          }
-          setDeleteUserConfirm({ open: false, request: null });
-        }}
-        title="Remove User"
-        description={`Are you sure you want to remove ${deleteUserConfirm.request?.username || displayEmail(deleteUserConfirm.request?.email)} from this invitation?`}
-        confirmText="Remove User"
-        variant="danger"
-      />
-    </>
-  );
+                                    {invitation.groupName && !group ? (
+                                        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-warning">
+                                            <span className="inline-flex items-start gap-1.5">
+                                                <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                                                <span>
+                                                    {invitation.groupName} was deleted, so people
+                                                    who join won&apos;t be put in a group.
+                                                </span>
+                                            </span>
+                                            <Button
+                                                onClick={() => setEditOpen(true)}
+                                                size="sm"
+                                                variant="secondary"
+                                            >
+                                                Pick a group
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <p className="mb-4 text-muted">
+                                            {invitation.groupName || "No group assigned"}
+                                        </p>
+                                    )}
+
+                                    {/* Stats Row */}
+                                    <div className="flex flex-wrap items-center gap-6 text-sm">
+                                        <div className="flex items-center gap-2">
+                                            <UsersIcon className="h-4 w-4 text-muted" />
+                                            <span className="font-medium text-default">
+                                                {invitation.currentUses || invitation.uses || 0}
+                                            </span>
+                                            <span className="text-muted">/</span>
+                                            <span className="text-muted">
+                                                {invitation.maxUses || "∞"} uses
+                                            </span>
+                                        </div>
+
+                                        {invitation.expiresAt && (
+                                            <div className="flex items-center gap-2">
+                                                <ClockIcon className="h-4 w-4 text-muted" />
+                                                <span
+                                                    className={
+                                                        isExpired ? "text-error" : "text-muted"
+                                                    }
+                                                >
+                                                    {isExpired ? "Expired " : "Expires "}
+                                                    {format(
+                                                        new Date(invitation.expiresAt),
+                                                        "MMM d, yyyy"
+                                                    )}
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        <div className="flex items-center gap-2">
+                                            <ClockIcon className="h-4 w-4 text-muted" />
+                                            <span className="text-muted">
+                                                Created{" "}
+                                                {format(
+                                                    new Date(invitation.createdAt),
+                                                    "MMM d, yyyy"
+                                                )}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </Card>
+                    </PageSection>
+
+                    {/* Invite Link Section */}
+                    <PageSection className="mb-8" delay={0.1}>
+                        <Card padding="lg">
+                            <div className="mb-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/20">
+                                        <LinkIcon className="h-5 w-5 text-primary" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-display font-semibold text-base text-default">
+                                            Invite Link
+                                        </h3>
+                                        <p className="text-muted text-sm">
+                                            Share this link to invite users
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button
+                                    leftIcon={
+                                        copiedLink ? (
+                                            <CheckIcon className="h-4 w-4" />
+                                        ) : (
+                                            <ClipboardIcon className="h-4 w-4" />
+                                        )
+                                    }
+                                    onClick={handleCopyLink}
+                                    size="sm"
+                                    variant="secondary"
+                                >
+                                    {copiedLink ? "Copied!" : "Copy Link"}
+                                </Button>
+                            </div>
+                            <div className="flex items-center gap-3 rounded-xl border border-default bg-surface-hover p-4">
+                                <LinkIcon className="h-5 w-5 shrink-0 text-muted" />
+                                <code className="flex-1 truncate font-mono text-default text-sm">
+                                    {typeof window === "undefined" ? "" : window.location.origin}
+                                    /invite/{code}
+                                </code>
+                            </div>
+                        </Card>
+                    </PageSection>
+
+                    {/* Usage Progress Section */}
+                    {invitation.maxUses != null && invitation.maxUses > 0 && (
+                        <PageSection className="mb-8" delay={0.15}>
+                            <Card padding="lg">
+                                <div className="mb-4 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary/20">
+                                            <ChartPieIcon className="h-5 w-5 text-secondary" />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-display font-semibold text-base text-default">
+                                                Usage
+                                            </h3>
+                                            <p className="text-muted text-sm">
+                                                {invitation.currentUses || invitation.uses || 0} of{" "}
+                                                {invitation.maxUses} uses
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <span
+                                        className={`font-bold text-sm tabular-nums ${usagePercentage >= 80 ? "text-error" : usagePercentage >= 50 ? "text-warning" : "text-primary"}`}
+                                    >
+                                        {Math.round(usagePercentage)}%
+                                    </span>
+                                </div>
+
+                                <div className="relative mb-3 h-8 overflow-hidden rounded-lg bg-surface-hover shadow-inner">
+                                    <div className="pointer-events-none absolute inset-0 z-10 rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)]" />
+
+                                    {/* Background track with unused count */}
+                                    <div className="absolute inset-0 flex items-center justify-end pr-3">
+                                        <span className="font-bold text-default text-xs tabular-nums">
+                                            {(invitation.maxUses || 0) -
+                                                (invitation.currentUses || invitation.uses || 0)}
+                                        </span>
+                                    </div>
+
+                                    <motion.div
+                                        animate={{ width: `${Math.min(usagePercentage, 100)}%` }}
+                                        className={`relative flex h-full items-center justify-center rounded-lg ${usagePercentage >= 80 ? "usage-bar-hot" : "usage-bar-ok"}`}
+                                        initial={{ width: 0 }}
+                                        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                                    >
+                                        {/* Used count in center of used portion (only show if > 0) */}
+                                        {(invitation.currentUses || invitation.uses || 0) > 0 && (
+                                            <span className="font-bold text-white text-xs tabular-nums drop-shadow-md">
+                                                {invitation.currentUses || invitation.uses || 0}
+                                            </span>
+                                        )}
+                                        <div className="absolute inset-0 overflow-hidden rounded-lg">
+                                            <div className="absolute inset-0 h-full w-full animate-shimmer bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+                                        </div>
+                                    </motion.div>
+                                </div>
+                            </Card>
+                        </PageSection>
+                    )}
+
+                    {/* Invited Users Section */}
+                    <PageSection delay={0.2}>
+                        <Card padding="lg">
+                            <div className="mb-6 flex items-center justify-between">
+                                <h3 className="font-display font-semibold text-default text-lg">
+                                    <span className="mr-2 font-normal text-muted">
+                                        {invitation.requests?.length || 0}
+                                    </span>
+                                    Invited Users
+                                </h3>
+                            </div>
+
+                            {invitation.requests && invitation.requests.length > 0 ? (
+                                <StaggerContainer className="space-y-3">
+                                    {invitation.requests.map((request, index) => (
+                                        <StaggerItem key={request.id}>
+                                            <motion.div
+                                                animate={{ opacity: 1, y: 0 }}
+                                                className="flex items-center gap-4 overflow-hidden rounded-xl border border-default bg-surface-hover p-4"
+                                                initial={{ opacity: 0, y: 10 }}
+                                                transition={{ delay: index * 0.05 }}
+                                            >
+                                                <UserAvatar
+                                                    email={request.email}
+                                                    name={
+                                                        request.username ||
+                                                        displayEmail(request.email)
+                                                    }
+                                                    size="md"
+                                                    userId={request.id}
+                                                />
+
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-medium text-default">
+                                                            {request.username ||
+                                                                displayEmail(request.email)}
+                                                        </span>
+                                                        <Badge
+                                                            size="sm"
+                                                            variant={
+                                                                request.status === "accepted" ||
+                                                                request.status === "joined"
+                                                                    ? "success"
+                                                                    : request.status === "rejected"
+                                                                      ? "error"
+                                                                      : request.status === "pending"
+                                                                        ? "warning"
+                                                                        : "muted"
+                                                            }
+                                                        >
+                                                            {request.status}
+                                                        </Badge>
+                                                    </div>
+                                                    <p className="mt-0.5 text-muted text-xs">
+                                                        {request.email &&
+                                                            request.username !== request.email && (
+                                                                <>
+                                                                    {displayEmail(request.email)} •{" "}
+                                                                </>
+                                                            )}
+                                                        Requested{" "}
+                                                        {format(
+                                                            new Date(request.createdAt),
+                                                            "MMM d, yyyy"
+                                                        )}
+                                                        {request.respondedAt && (
+                                                            <>
+                                                                {" "}
+                                                                • Responded{" "}
+                                                                {format(
+                                                                    new Date(request.respondedAt),
+                                                                    "MMM d, yyyy"
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </p>
+
+                                                    {/* OAuth Code Display */}
+                                                    {request.oauthCode &&
+                                                        request.status === "accepted" && (
+                                                            <div className="mt-2 flex items-center gap-2">
+                                                                <code className="rounded bg-surface px-2 py-1 font-mono text-default text-xs">
+                                                                    {request.oauthCode}
+                                                                </code>
+                                                                {request.oauthLink && (
+                                                                    <a
+                                                                        className="flex items-center gap-1 text-primary text-xs hover:text-primary-hover"
+                                                                        href={request.oauthLink}
+                                                                        rel="noopener noreferrer"
+                                                                        target="_blank"
+                                                                    >
+                                                                        Open Link
+                                                                        <ArrowTopRightOnSquareIcon className="h-3 w-3" />
+                                                                    </a>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                </div>
+
+                                                {/* Action Buttons */}
+                                                <div className="flex items-center gap-1">
+                                                    {request.status === "pending" && (
+                                                        <>
+                                                            <Button
+                                                                leftIcon={
+                                                                    <CheckIcon className="h-4 w-4" />
+                                                                }
+                                                                onClick={() =>
+                                                                    handleAcceptRequest(request.id)
+                                                                }
+                                                                size="sm"
+                                                                variant="ghost"
+                                                            >
+                                                                Accept
+                                                            </Button>
+                                                            <Button
+                                                                leftIcon={
+                                                                    <XMarkIcon className="h-4 w-4" />
+                                                                }
+                                                                onClick={() =>
+                                                                    handleRejectRequest(request.id)
+                                                                }
+                                                                size="sm"
+                                                                variant="ghost"
+                                                            >
+                                                                Reject
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                    {request.status === "rejected" && (
+                                                        <Button
+                                                            leftIcon={
+                                                                <ArrowUturnLeftIcon className="h-4 w-4" />
+                                                            }
+                                                            onClick={() =>
+                                                                handleAcceptRequest(request.id)
+                                                            }
+                                                            size="sm"
+                                                            variant="ghost"
+                                                        >
+                                                            Undo
+                                                        </Button>
+                                                    )}
+                                                    {(request.status === "accepted" ||
+                                                        request.status === "joined") && (
+                                                        <Button
+                                                            leftIcon={
+                                                                <TrashIcon className="h-4 w-4 text-error" />
+                                                            }
+                                                            onClick={() =>
+                                                                setDeleteUserConfirm({
+                                                                    open: true,
+                                                                    request,
+                                                                })
+                                                            }
+                                                            size="sm"
+                                                            variant="ghost"
+                                                        >
+                                                            Remove
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        </StaggerItem>
+                                    ))}
+                                </StaggerContainer>
+                            ) : (
+                                <div className="py-12 text-center">
+                                    <UsersIcon className="mx-auto mb-3 h-12 w-12 text-muted" />
+                                    <p className="text-muted">No users have been invited yet</p>
+                                </div>
+                            )}
+                        </Card>
+                    </PageSection>
+                </div>
+            </div>
+
+            <Modal
+                description={`Update settings for invitation ${code}`}
+                isOpen={editOpen}
+                onClose={() => setEditOpen(false)}
+                size="md"
+                title="Edit Invitation"
+            >
+                {editOpen && (
+                    <EditInvitationForm
+                        groups={groups}
+                        invitation={{
+                            code,
+                            groupId: invitation.groupId || group?.id,
+                            groupName: invitation.groupName,
+                            id: invitation.id,
+                            jellyfinServerKey:
+                                (invitation as { jellyfinServerKey?: string | null })
+                                    .jellyfinServerKey || null,
+                            maxUses:
+                                typeof invitation.maxUses === "number"
+                                    ? invitation.maxUses
+                                    : undefined,
+                            membershipDuration:
+                                invitation.membershipDuration ??
+                                invitation.membershipDurationDays ??
+                                undefined,
+                            name: invitation.name,
+                            syncOnJoin: invitation.syncOnJoin === true,
+                            uses: invitation.currentUses || invitation.uses || 0,
+                        }}
+                        onClose={() => setEditOpen(false)}
+                    />
+                )}
+            </Modal>
+
+            {/* Delete Confirmation Modal */}
+            <ConfirmModal
+                confirmText={isDeleting ? "Deleting..." : "Delete Invitation"}
+                description={`Are you sure you want to delete invitation "${code}"? This will invalidate the invite code and remove all associated users.`}
+                isLoading={isDeleting}
+                isOpen={deleteConfirmOpen}
+                onClose={() => setDeleteConfirmOpen(false)}
+                onConfirm={handleDelete}
+                title="Delete Invitation"
+                variant="danger"
+            />
+
+            {/* Remove User Confirmation Modal */}
+            <ConfirmModal
+                confirmText="Remove User"
+                description={`Are you sure you want to remove ${deleteUserConfirm.request?.username || displayEmail(deleteUserConfirm.request?.email)} from this invitation?`}
+                isOpen={deleteUserConfirm.open}
+                onClose={() => setDeleteUserConfirm({ open: false, request: null })}
+                onConfirm={() => {
+                    if (deleteUserConfirm.request) {
+                        handleDeleteUser(deleteUserConfirm.request.id);
+                    }
+                    setDeleteUserConfirm({ open: false, request: null });
+                }}
+                title="Remove User"
+                variant="danger"
+            />
+        </>
+    );
 }

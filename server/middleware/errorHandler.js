@@ -1,7 +1,5 @@
-const { handleError } = require('../utils/handlers');
+const { handleError } = require("../utils/handlers");
 
-const errorHandler = (err, req, res, next) => {
-  return handleError(err, req, res, next);
-};
+const errorHandler = (err, req, res, next) => handleError(err, req, res, next);
 
 module.exports = { errorHandler };

@@ -1,126 +1,130 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { api } from '@/lib/api';
-import { Badge, UserAvatar } from '@/components/ui';
-import { FireIcon, ArrowTrendingUpIcon } from '@heroicons/react/24/outline';
+import { ArrowTrendingUpIcon, FireIcon } from "@heroicons/react/24/outline";
+import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { UserAvatar } from "@/components/ui";
+import { api } from "@/lib/api";
 
 interface UserData {
-  id: string;
-  name: string;
-  email?: string;
-  avatarUrl?: string | null;
-  useGravatar?: boolean;
+    avatarUrl?: string | null;
+    email?: string;
+    id: string;
+    name: string;
+    useGravatar?: boolean;
 }
 
 interface UserStreaksData {
-  userId: string;
-  username: string;
-  email?: string;
-  avatarUrl?: string | null;
-  useGravatar?: boolean;
-  currentStreak: number;
-  longestStreak: number;
+    avatarUrl?: string | null;
+    currentStreak: number;
+    email?: string;
+    longestStreak: number;
+    useGravatar?: boolean;
+    userId: string;
+    username: string;
 }
 
 interface UserStreaksListProps {
-  users: UserData[];
+    users: UserData[];
 }
 
 export function UserStreaksList({ users }: UserStreaksListProps) {
-  const [streaks, setStreaks] = useState<UserStreaksData[]>([]);
-  const [loading, setLoading] = useState(true);
+    const [streaks, setStreaks] = useState<UserStreaksData[]>([]);
+    const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function fetchStreaks() {
-      if (users.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const streaksData = await Promise.all(
-          users.slice(0, 5).map(async (user) => {
-            try {
-              const data = await api.getUserStreaks(user.id);
-              return {
-                userId: user.id,
-                username: user.name,
-                email: user.email,
-                avatarUrl: user.avatarUrl,
-                useGravatar: user.useGravatar,
-                currentStreak: data.currentStreak || 0,
-                longestStreak: data.longestStreak || 0,
-              };
-            } catch (e) {
-              return null;
+    useEffect(() => {
+        async function fetchStreaks() {
+            if (users.length === 0) {
+                setLoading(false);
+                return;
             }
-          })
+
+            try {
+                const streaksData = await Promise.all(
+                    users.slice(0, 5).map(async (user) => {
+                        try {
+                            const data = await api.getUserStreaks(user.id);
+                            return {
+                                avatarUrl: user.avatarUrl,
+                                currentStreak: data.currentStreak || 0,
+                                email: user.email,
+                                longestStreak: data.longestStreak || 0,
+                                useGravatar: user.useGravatar,
+                                userId: user.id,
+                                username: user.name,
+                            };
+                        } catch {
+                            return null;
+                        }
+                    })
+                );
+
+                setStreaks(streaksData.filter(Boolean) as UserStreaksData[]);
+            } catch (error) {
+                console.error("Error fetching streaks:", error);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        fetchStreaks();
+    }, [users]);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center py-8">
+                <div className="flex items-center gap-2 text-muted text-sm">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    <span>Loading streaks...</span>
+                </div>
+            </div>
         );
-        
-        setStreaks(streaksData.filter(Boolean) as UserStreaksData[]);
-      } catch (error) {
-        console.error('Error fetching streaks:', error);
-      } finally {
-        setLoading(false);
-      }
     }
 
-    fetchStreaks();
-  }, [users]);
+    if (streaks.length === 0) {
+        return <div className="py-8 text-center text-muted text-sm">No streak data available</div>;
+    }
 
-  if (loading) {
+    // Sort by current streak
+    const sortedStreaks = [...streaks].sort((a, b) => b.currentStreak - a.currentStreak);
+
     return (
-      <div className="flex items-center justify-center py-8">
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-          <span>Loading streaks...</span>
+        <div className="space-y-3">
+            {sortedStreaks.map((user, index) => (
+                <motion.div
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-4 overflow-hidden rounded-xl bg-surface-hover p-4"
+                    initial={{ opacity: 0, x: -20 }}
+                    key={user.userId}
+                    transition={{ delay: index * 0.1 }}
+                >
+                    <div className="flex-shrink-0">
+                        <UserAvatar
+                            email={user.email}
+                            name={user.username}
+                            size="md"
+                            src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)}
+                            useGravatar={user.useGravatar}
+                            userId={user.userId}
+                        />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-default">{user.username}</p>
+                        <div className="mt-1 flex items-center gap-4 text-muted text-sm">
+                            <span className="flex items-center gap-1">
+                                <FireIcon className="h-4 w-4" />
+                                {user.currentStreak} day{user.currentStreak === 1 ? "" : "s"}{" "}
+                                current
+                            </span>
+                            <span className="flex items-center gap-1">
+                                <ArrowTrendingUpIcon className="h-4 w-4" />
+                                {user.longestStreak} day{user.longestStreak === 1 ? "" : "s"} best
+                            </span>
+                        </div>
+                    </div>
+                </motion.div>
+            ))}
         </div>
-      </div>
     );
-  }
-
-  if (streaks.length === 0) {
-    return (
-      <div className="text-center py-8 text-sm text-muted">
-        No streak data available
-      </div>
-    );
-  }
-
-  // Sort by current streak
-  const sortedStreaks = [...streaks].sort((a, b) => b.currentStreak - a.currentStreak);
-
-  return (
-    <div className="space-y-3">
-      {sortedStreaks.map((user, index) => (
-        <motion.div
-          key={user.userId}
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: index * 0.1 }}
-          className="flex items-center gap-4 p-4 rounded-xl bg-surface-hover overflow-hidden"
-        >
-          <div className="flex-shrink-0">
-            <UserAvatar userId={user.userId} name={user.username} email={user.email} src={user.useGravatar ? undefined : (user.avatarUrl ?? undefined)} useGravatar={user.useGravatar} size="md" />
-          </div>
-          
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-default truncate">{user.username}</p>
-            <div className="flex items-center gap-4 text-sm text-muted mt-1">
-              <span className="flex items-center gap-1">
-                <FireIcon className="w-4 h-4" />
-                {user.currentStreak} day{user.currentStreak !== 1 ? 's' : ''} current
-              </span>
-              <span className="flex items-center gap-1">
-                <ArrowTrendingUpIcon className="w-4 h-4" />
-                {user.longestStreak} day{user.longestStreak !== 1 ? 's' : ''} best
-              </span>
-            </div>
-          </div>
-        </motion.div>
-      ))}
-    </div>
-  );
 }

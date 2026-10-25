@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { API_BASE } from '@/lib/api';
-import { setLiveConnected } from '@/lib/liveState';
+import { useEffect } from "react";
+import { API_BASE } from "@/lib/api";
+import { setLiveConnected } from "@/lib/liveState";
 
 // Bridges the server's SSE live-update stream (/api/events) to window
 // events any component can listen for. One connection per tab, mounted once
@@ -16,28 +16,41 @@ import { setLiveConnected } from '@/lib/liveState';
 //
 // EventSource reconnects on its own after a drop (browser-native backoff),
 // and auth rides the session cookie via withCredentials.
-export const LIVE_EVENT_PREFIX = 'slicksync:live-';
+export const LIVE_EVENT_PREFIX = "slicksync:live-";
 
 export function LiveEventsBridge() {
-  useEffect(() => {
-    let source: EventSource | null = null;
-    try {
-      source = new EventSource(`${API_BASE}/events`, { withCredentials: true });
-      // Pollers stretch their interval while this is up (lib/adaptivePoll).
-      source.onopen = () => setLiveConnected(true);
-      source.onerror = () => setLiveConnected(false);
-      source.onmessage = (e) => {
+    useEffect(() => {
+        let source: EventSource | null = null;
         try {
-          const { type } = JSON.parse(e.data || '{}');
-          if (type) window.dispatchEvent(new Event(`${LIVE_EVENT_PREFIX}${type}`));
-        } catch { /* malformed frame - ignore, polling still covers it */ }
-      };
-      // No onerror handling on purpose: EventSource retries itself, and
-      // polling covers any gap - surfacing transient reconnects would just
-      // be noise.
-    } catch { /* EventSource unsupported - polling alone, as before */ }
-    return () => { setLiveConnected(false); try { source?.close(); } catch { /* already closed */ } };
-  }, []);
+            source = new EventSource(`${API_BASE}/events`, { withCredentials: true });
+            // Pollers stretch their interval while this is up (lib/adaptivePoll).
+            source.onopen = () => setLiveConnected(true);
+            source.onerror = () => setLiveConnected(false);
+            source.onmessage = (e) => {
+                try {
+                    const { type } = JSON.parse(e.data || "{}");
+                    if (type) {
+                        window.dispatchEvent(new Event(`${LIVE_EVENT_PREFIX}${type}`));
+                    }
+                } catch {
+                    /* malformed frame - ignore, polling still covers it */
+                }
+            };
+            // No onerror handling on purpose: EventSource retries itself, and
+            // polling covers any gap - surfacing transient reconnects would just
+            // be noise.
+        } catch {
+            /* EventSource unsupported - polling alone, as before */
+        }
+        return () => {
+            setLiveConnected(false);
+            try {
+                source?.close();
+            } catch {
+                /* already closed */
+            }
+        };
+    }, []);
 
-  return null;
+    return null;
 }

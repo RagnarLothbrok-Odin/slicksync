@@ -1,4 +1,4 @@
-import { API_BASE } from './api';
+import { API_BASE } from "./api";
 
 // Resolves which poster URL to actually render for a title: RPDB's
 // rating-embedded art (when configured, via our own /api/poster proxy - see
@@ -13,18 +13,26 @@ import { API_BASE } from './api';
 // src> prop type is `string | undefined`; a previous version returned
 // `string | null` here and broke the production build (TS2322) at every
 // call site passing this straight into src={...}.
-export function posterUrl(item: { id?: string | null; poster?: string | null }, rpdbEnabled: boolean): string | undefined {
-  if (isRpdbPoster(item, rpdbEnabled)) {
-    return `${API_BASE}/poster/${item.id}`;
-  }
-  return cachedImageUrl(item.poster, 342);
+export function posterUrl(
+    item: { id?: string | null; poster?: string | null },
+    rpdbEnabled: boolean
+): string | undefined {
+    if (isRpdbPoster(item, rpdbEnabled)) {
+        return `${API_BASE}/poster/${item.id}`;
+    }
+    return cachedImageUrl(item.poster, 342);
 }
 
 /** posterUrl's srcSet companion - undefined for RPDB art (that route serves
  * one baked image) and for anything the cache proxy passes through. */
-export function posterSrcSet(item: { id?: string | null; poster?: string | null }, rpdbEnabled: boolean): string | undefined {
-  if (isRpdbPoster(item, rpdbEnabled)) return undefined;
-  return cachedImageSrcSet(item.poster, 342);
+export function posterSrcSet(
+    item: { id?: string | null; poster?: string | null },
+    rpdbEnabled: boolean
+): string | undefined {
+    if (isRpdbPoster(item, rpdbEnabled)) {
+        return undefined;
+    }
+    return cachedImageSrcSet(item.poster, 342);
 }
 
 /** Routes an external image URL through the server's resize/cache proxy
@@ -38,12 +46,23 @@ export function posterSrcSet(item: { id?: string | null; poster?: string | null 
  * (including /api/poster RPDB links, which handle themselves), and GIFs -
  * the server would freeze an animated cover to its first frame, and
  * Community Covers explicitly supports animated GIF art. */
-export function cachedImageUrl(url: string | null | undefined, width: 64 | 154 | 185 | 342 | 500 | 780 = 342): string | undefined {
-  if (!url) return undefined;
-  if (!/^https?:\/\//i.test(url)) return url;
-  if (API_BASE && url.startsWith(API_BASE)) return url;
-  if (/\.gif(\?|$)/i.test(url)) return url;
-  return `${API_BASE}/img?src=${encodeURIComponent(url)}&w=${width}`;
+export function cachedImageUrl(
+    url: string | null | undefined,
+    width: 64 | 154 | 185 | 342 | 500 | 780 = 342
+): string | undefined {
+    if (!url) {
+        return undefined;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+        return url;
+    }
+    if (API_BASE && url.startsWith(API_BASE)) {
+        return url;
+    }
+    if (/\.gif(\?|$)/i.test(url)) {
+        return url;
+    }
+    return `${API_BASE}/img?src=${encodeURIComponent(url)}&w=${width}`;
 }
 
 /**
@@ -58,22 +77,40 @@ export function cachedImageUrl(url: string | null | undefined, width: 64 | 154 |
  * (local URLs, GIFs, empty values), so callers can spread it safely - an
  * <img> with srcSet={undefined} is just a normal <img>.
  */
-export function cachedImageSrcSet(url: string | null | undefined, width: 64 | 154 | 185 | 342 | 500 | 780 = 342): string | undefined {
-  if (!url) return undefined;
-  if (!/^https?:\/\//i.test(url)) return undefined;
-  if (API_BASE && url.startsWith(API_BASE)) return undefined;
-  if (/\.gif(\?|$)/i.test(url)) return undefined;
-  // Three rungs under the 342, not one: an 83px card on a 2x phone needs
-  // 166 device pixels, which is just over the 154 - so with only 154 and
-  // 342 on offer every phone took the 342 anyway, and the srcSet changed
-  // nothing where it mattered most. The 185 catches exactly that case.
-  const ladder: Record<number, Array<64 | 154 | 185 | 342 | 500 | 780>> = {
-    342: [154, 185], 500: [342], 780: [500], 185: [154], 154: [64], 64: [],
-  };
-  const rungs = ladder[width] || [];
-  if (rungs.length === 0) return undefined;
-  const at = (w: number) => `${API_BASE}/img?src=${encodeURIComponent(url)}&w=${w} ${w}w`;
-  return [...rungs, width].map(at).join(', ');
+export function cachedImageSrcSet(
+    url: string | null | undefined,
+    width: 64 | 154 | 185 | 342 | 500 | 780 = 342
+): string | undefined {
+    if (!url) {
+        return undefined;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+        return undefined;
+    }
+    if (API_BASE && url.startsWith(API_BASE)) {
+        return undefined;
+    }
+    if (/\.gif(\?|$)/i.test(url)) {
+        return undefined;
+    }
+    // Three rungs under the 342, not one: an 83px card on a 2x phone needs
+    // 166 device pixels, which is just over the 154 - so with only 154 and
+    // 342 on offer every phone took the 342 anyway, and the srcSet changed
+    // nothing where it mattered most. The 185 catches exactly that case.
+    const ladder: Record<number, Array<64 | 154 | 185 | 342 | 500 | 780>> = {
+        64: [],
+        154: [64],
+        185: [154],
+        342: [154, 185],
+        500: [342],
+        780: [500],
+    };
+    const rungs = ladder[width] || [];
+    if (rungs.length === 0) {
+        return undefined;
+    }
+    const at = (w: number) => `${API_BASE}/img?src=${encodeURIComponent(url)}&w=${w} ${w}w`;
+    return [...rungs, width].map(at).join(", ");
 }
 
 // True exactly when posterUrl() above would actually resolve to RPDB's art -
@@ -87,7 +124,7 @@ export function cachedImageSrcSet(url: string | null | undefined, width: 64 | 15
 // without a valid IMDb id still falls back to its own plain poster (no
 // baked-in ratings), where our row is the only rating info there is.
 export function isRpdbPoster(item: { id?: string | null }, rpdbEnabled: boolean): boolean {
-  return !!(rpdbEnabled && item.id && /^tt\d+$/.test(item.id));
+    return !!(rpdbEnabled && item.id && /^tt\d+$/.test(item.id));
 }
 
 /**
@@ -99,15 +136,26 @@ export function isRpdbPoster(item: { id?: string | null }, rpdbEnabled: boolean)
  * were chosen to move, so they move. External URLs and Gravatar are already
  * small and left alone.
  */
-export function avatarThumbUrl(src: string | null | undefined, size: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'): string | undefined {
-  if (!src) return undefined;
-  if (!src.startsWith('/uploads/avatars/')) return src;
-  // An animated avatar stays animated, at every size - that is the point
-  // of choosing one. The cost of the moving copies is contained elsewhere:
-  // rows that are off-screen are not painted at all (content-visibility on
-  // the history feed), so only the handful in view are ever decoding.
-  if (/\.gif(\?|$)/i.test(src)) return src;
-  if (size === '2xl') return src;
-  const w = size === 'lg' || size === 'xl' ? 154 : 64;
-  return `${API_BASE}/img?src=${encodeURIComponent(src)}&w=${w}`;
+export function avatarThumbUrl(
+    src: string | null | undefined,
+    size: "xs" | "sm" | "md" | "lg" | "xl" | "2xl"
+): string | undefined {
+    if (!src) {
+        return undefined;
+    }
+    if (!src.startsWith("/uploads/avatars/")) {
+        return src;
+    }
+    // An animated avatar stays animated, at every size - that is the point
+    // of choosing one. The cost of the moving copies is contained elsewhere:
+    // rows that are off-screen are not painted at all (content-visibility on
+    // the history feed), so only the handful in view are ever decoding.
+    if (/\.gif(\?|$)/i.test(src)) {
+        return src;
+    }
+    if (size === "2xl") {
+        return src;
+    }
+    const w = size === "lg" || size === "xl" ? 154 : 64;
+    return `${API_BASE}/img?src=${encodeURIComponent(src)}&w=${w}`;
 }

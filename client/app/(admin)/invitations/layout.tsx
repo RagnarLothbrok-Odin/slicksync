@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - Invitations',
+    title: "SlickSync - Invitations",
 };
 
-export default function InvitationsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function InvitationsLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

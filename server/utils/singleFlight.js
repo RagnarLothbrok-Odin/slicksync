@@ -17,27 +17,31 @@
 // are built by the caller and must include everything that changes the
 // answer (account scope included where results differ per account).
 
-const inflight = new Map()
-const settled = new Map()
+const inflight = new Map();
+const settled = new Map();
 
 // Bounded so a long-running instance can't accumulate keys forever; entries
 // expire by TTL anyway, this just caps the pathological case.
-const MAX_SETTLED = 500
+const MAX_SETTLED = 500;
 
 function sweep() {
-  const now = Date.now()
-  for (const [key, entry] of settled) {
-    if (entry.expiresAt <= now) settled.delete(key)
-  }
-  if (settled.size > MAX_SETTLED) {
-    // Oldest-first eviction; Map preserves insertion order.
-    const excess = settled.size - MAX_SETTLED
-    let i = 0
-    for (const key of settled.keys()) {
-      if (i++ >= excess) break
-      settled.delete(key)
+    const now = Date.now();
+    for (const [key, entry] of settled) {
+        if (entry.expiresAt <= now) {
+            settled.delete(key);
+        }
     }
-  }
+    if (settled.size > MAX_SETTLED) {
+        // Oldest-first eviction; Map preserves insertion order.
+        const excess = settled.size - MAX_SETTLED;
+        let i = 0;
+        for (const key of settled.keys()) {
+            if (i++ >= excess) {
+                break;
+            }
+            settled.delete(key);
+        }
+    }
 }
 
 /**
@@ -46,37 +50,43 @@ function sweep() {
  * @param {() => Promise<any>} work
  */
 async function coalesce(key, ttlMs, work) {
-  const now = Date.now()
-  const done = settled.get(key)
-  if (done && done.expiresAt > now) return done.value
-
-  const running = inflight.get(key)
-  if (running) return running
-
-  const promise = (async () => {
-    try {
-      const value = await work()
-      if (ttlMs > 0) {
-        settled.set(key, { value, expiresAt: Date.now() + ttlMs })
-        if (settled.size % 50 === 0) sweep()
-      }
-      return value
-    } finally {
-      inflight.delete(key)
+    const now = Date.now();
+    const done = settled.get(key);
+    if (done && done.expiresAt > now) {
+        return done.value;
     }
-  })()
 
-  inflight.set(key, promise)
-  return promise
+    const running = inflight.get(key);
+    if (running) {
+        return running;
+    }
+
+    const promise = (async () => {
+        try {
+            const value = await work();
+            if (ttlMs > 0) {
+                settled.set(key, { expiresAt: Date.now() + ttlMs, value });
+                if (settled.size % 50 === 0) {
+                    sweep();
+                }
+            }
+            return value;
+        } finally {
+            inflight.delete(key);
+        }
+    })();
+
+    inflight.set(key, promise);
+    return promise;
 }
 
 /** Drops a key's cached result - for when a write makes it stale. */
 function invalidate(key) {
-  settled.delete(key)
+    settled.delete(key);
 }
 
 function stats() {
-  return { inflight: inflight.size, settled: settled.size }
+    return { inflight: inflight.size, settled: settled.size };
 }
 
-module.exports = { coalesce, invalidate, stats }
+module.exports = { coalesce, invalidate, stats };

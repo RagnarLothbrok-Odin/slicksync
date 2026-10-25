@@ -21,62 +21,78 @@
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/fix-zero-duration-sessions.js
 //   docker exec -it -e DATABASE_URL="file:///app/data/sqlite.db" slicksync node scripts/fix-zero-duration-sessions.js --apply
 
-const { PrismaClient } = require('@prisma/client')
+const { PrismaClient } = require("@prisma/client");
 
 async function main() {
-  const apply = process.argv.includes('--apply')
-  const prisma = new PrismaClient()
-  try {
-    const rows = await prisma.watchSession.findMany({
-      where: {
-        isActive: false,
-        durationSeconds: 0,
-        startPosition: { not: null, gt: 0 },
-      },
-      select: { id: true, itemName: true, startPosition: true, totalDuration: true, startTime: true, endTime: true },
-      orderBy: { startTime: 'desc' },
-    })
+    const apply = process.argv.includes("--apply");
+    const prisma = new PrismaClient();
+    try {
+        const rows = await prisma.watchSession.findMany({
+            orderBy: { startTime: "desc" },
+            select: {
+                endTime: true,
+                id: true,
+                itemName: true,
+                startPosition: true,
+                startTime: true,
+                totalDuration: true,
+            },
+            where: {
+                durationSeconds: 0,
+                isActive: false,
+                startPosition: { gt: 0, not: null },
+            },
+        });
 
-    console.log(`Closed sessions with durationSeconds=0 and a usable startPosition: ${rows.length}\n`)
+        console.log(
+            `Closed sessions with durationSeconds=0 and a usable startPosition: ${rows.length}\n`
+        );
 
-    let totalFixed = 0
-    for (const row of rows) {
-      const cappedMs = row.totalDuration && row.totalDuration > 0
-        ? Math.min(row.startPosition, row.totalDuration)
-        : row.startPosition
-      const seedSeconds = Math.max(0, Math.floor(cappedMs / 1000))
-      if (seedSeconds <= 0) continue
+        let totalFixed = 0;
+        for (const row of rows) {
+            const cappedMs =
+                row.totalDuration && row.totalDuration > 0
+                    ? Math.min(row.startPosition, row.totalDuration)
+                    : row.startPosition;
+            const seedSeconds = Math.max(0, Math.floor(cappedMs / 1000));
+            if (seedSeconds <= 0) {
+                continue;
+            }
 
-      console.log(`  "${row.itemName}"  ${row.startTime.toISOString()}  0s -> ${seedSeconds}s`)
-      totalFixed++
+            console.log(
+                `  "${row.itemName}"  ${row.startTime.toISOString()}  0s -> ${seedSeconds}s`
+            );
+            totalFixed++;
 
-      if (apply) {
-        // Explicitly preserve updatedAt at the row's own endTime/startTime rather
-        // than letting Prisma's @updatedAt auto-bump it to "now" - the Activity
-        // page's cross-pipeline duration merge matches on updatedAt against a
-        // 3-hour window around the original watch date, and running this script
-        // days later would otherwise push that window's anchor to today and
-        // break the exact match this backfill is trying to enable.
-        await prisma.watchSession.update({
-          where: { id: row.id },
-          data: { durationSeconds: seedSeconds, updatedAt: row.endTime || row.startTime },
-        })
-      }
+            if (apply) {
+                // Explicitly preserve updatedAt at the row's own endTime/startTime rather
+                // than letting Prisma's @updatedAt auto-bump it to "now" - the Activity
+                // page's cross-pipeline duration merge matches on updatedAt against a
+                // 3-hour window around the original watch date, and running this script
+                // days later would otherwise push that window's anchor to today and
+                // break the exact match this backfill is trying to enable.
+                await prisma.watchSession.update({
+                    data: { durationSeconds: seedSeconds, updatedAt: row.endTime || row.startTime },
+                    where: { id: row.id },
+                });
+            }
+        }
+
+        if (totalFixed === 0) {
+            console.log("Nothing to do.");
+        } else if (apply) {
+            console.log(`\nUpdated ${totalFixed} session(s).`);
+        } else {
+            console.log(
+                `\nDry run only - re-run with --apply to write these ${totalFixed} update(s).`
+            );
+        }
+    } finally {
+        await prisma.$disconnect();
     }
-
-    if (totalFixed === 0) {
-      console.log('Nothing to do.')
-    } else if (apply) {
-      console.log(`\nUpdated ${totalFixed} session(s).`)
-    } else {
-      console.log(`\nDry run only - re-run with --apply to write these ${totalFixed} update(s).`)
-    }
-  } finally {
-    await prisma.$disconnect()
-  }
 }
 
 main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+    console.error(err);
+    process.exit(1);
+});

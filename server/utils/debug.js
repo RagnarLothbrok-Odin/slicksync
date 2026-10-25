@@ -1,30 +1,29 @@
 // Debug utility for conditional logging
-const DEBUG = process.env.NEXT_PUBLIC_DEBUG === 'true' || process.env.NEXT_PUBLIC_DEBUG === '1'
+const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true" || process.env.NEXT_PUBLIC_DEBUG === "1";
 
 const debug = {
-  log: (...args) => {
-    if (DEBUG) {
-      console.log(...args)
-    }
-  },
-  
-  error: (...args) => {
-    if (DEBUG) {
-      console.error(...args)
-    }
-  },
-  
-  warn: (...args) => {
-    if (DEBUG) {
-      console.warn(...args)
-    }
-  },
-  
-  info: (...args) => {
-    if (DEBUG) {
-      console.info(...args)
-    }
-  }
-}
+    error: (...args) => {
+        if (DEBUG) {
+            console.error(...args);
+        }
+    },
 
-module.exports = debug
+    info: (...args) => {
+        if (DEBUG) {
+            console.info(...args);
+        }
+    },
+    log: (...args) => {
+        if (DEBUG) {
+            console.log(...args);
+        }
+    },
+
+    warn: (...args) => {
+        if (DEBUG) {
+            console.warn(...args);
+        }
+    },
+};
+
+module.exports = debug;

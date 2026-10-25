@@ -1,13 +1,9 @@
-import { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'SlickSync - Groups',
+    title: "SlickSync - Groups",
 };
 
-export default function GroupsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return children;
+export default function GroupsLayout({ children }: { children: React.ReactNode }) {
+    return children;
 }

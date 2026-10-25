@@ -1,9 +1,15 @@
 // Vault entry "active" checkers. Each returns { ok: boolean, message: string, expiresAt?: Date }
 // testConfig is a parsed JSON object stored per-entry; shape varies by testType.
 
-const net = require('net')
-const dns = require('dns').promises
-const { assertSafeUrl, safeFetch, instancePolicy, isPrivateIp, isLinkLocalIp } = require('./safeUrl')
+const net = require("node:net");
+const dns = require("node:dns").promises;
+const {
+    assertSafeUrl,
+    safeFetch,
+    instancePolicy,
+    isPrivateIp,
+    isLinkLocalIp,
+} = require("./safeUrl");
 
 // A check that reaches out to an address the account typed in goes through the
 // same rule as every other such address (utils/safeUrl.js): an instance
@@ -11,12 +17,17 @@ const { assertSafeUrl, safeFetch, instancePolicy, isPrivateIp, isLinkLocalIp } =
 // install may, and nobody may point it at link-local. A refusal is a plain
 // "could not reach it" result for that entry - never a thrown error, and it is
 // not retried.
-const REFUSALS = new Set(['blocked host', 'unsupported protocol', 'invalid url', 'too many redirects'])
+const REFUSALS = new Set([
+    "blocked host",
+    "unsupported protocol",
+    "invalid url",
+    "too many redirects",
+]);
 
 function timeoutSignal(ms) {
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), ms)
-  return { signal: controller.signal, cancel: () => clearTimeout(id) }
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), ms);
+    return { cancel: () => clearTimeout(id), signal: controller.signal };
 }
 
 // fetch() with a per-attempt timeout, retried only on timeout/network
@@ -41,127 +52,157 @@ function timeoutSignal(ms) {
 // `checked` is for an address the account chose (an HTTP check, an indexer):
 // it is fetched through safeFetch, which also holds every redirect to the
 // same rule. The providers' own fixed hosts are fetched as they always were.
-async function fetchWithRetry(url, options = {}, { timeoutMs = 10000, attempts = 3, backoffMs = 750, checked = false } = {}) {
-  let lastErr
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    const { signal, cancel } = timeoutSignal(timeoutMs)
-    try {
-      const res = checked
-        ? await safeFetch(url, { ...options, signal }, instancePolicy())
-        : await fetch(url, { ...options, signal })
-      cancel()
-      return res
-    } catch (err) {
-      cancel()
-      lastErr = err
-      // Asking again would only be refused again.
-      if (REFUSALS.has(err?.message)) throw err
-      if (attempt < attempts) {
-        // Linear backoff - these stalls look like transient upstream
-        // congestion, so a short pause before retrying is enough.
-        await new Promise((r) => setTimeout(r, backoffMs * attempt))
-      }
+async function fetchWithRetry(
+    url,
+    options = {},
+    { timeoutMs = 10_000, attempts = 3, backoffMs = 750, checked = false } = {}
+) {
+    let lastErr;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        const { signal, cancel } = timeoutSignal(timeoutMs);
+        try {
+            const res = checked
+                ? await safeFetch(url, { ...options, signal }, instancePolicy())
+                : await fetch(url, { ...options, signal });
+            cancel();
+            return res;
+        } catch (err) {
+            cancel();
+            lastErr = err;
+            // Asking again would only be refused again.
+            if (REFUSALS.has(err?.message)) {
+                throw err;
+            }
+            if (attempt < attempts) {
+                // Linear backoff - these stalls look like transient upstream
+                // congestion, so a short pause before retrying is enough.
+                await new Promise((r) => setTimeout(r, backoffMs * attempt));
+            }
+        }
     }
-  }
-  throw lastErr
+    throw lastErr;
 }
 
 // Shared shape for the catch block of every checker below, so a timeout
 // reads the same way everywhere.
 function describeRequestError(err) {
-  if (err?.name === 'AbortError') return 'Timed out'
-  switch (err?.message) {
-    case 'invalid url':
-      return 'That is not a valid web address'
-    case 'unsupported protocol':
-      return 'The test address must start with http:// or https://'
-    case 'blocked host':
-      return instancePolicy().allowPrivate
-        ? 'That address is a link-local one (such as 169.254.x.x), which this server never connects to'
-        : 'That address is on a private or internal network, which this server does not connect to'
-    case 'unresolvable host':
-      return 'That address could not be found'
-    case 'too many redirects':
-      return 'That address redirected too many times'
-    default:
-      return err?.message || 'Request failed'
-  }
+    if (err?.name === "AbortError") {
+        return "Timed out";
+    }
+    switch (err?.message) {
+        case "invalid url":
+            return "That is not a valid web address";
+        case "unsupported protocol":
+            return "The test address must start with http:// or https://";
+        case "blocked host":
+            return instancePolicy().allowPrivate
+                ? "That address is a link-local one (such as 169.254.x.x), which this server never connects to"
+                : "That address is on a private or internal network, which this server does not connect to";
+        case "unresolvable host":
+            return "That address could not be found";
+        case "too many redirects":
+            return "That address redirected too many times";
+        default:
+            return err?.message || "Request failed";
+    }
 }
 
 // Generic HTTP check: hits a URL, optionally injecting the secret as a bearer token,
 // api-key header, or query param. Expects a status code and (optionally) a body substring.
 async function checkGenericHttp(secret, config = {}) {
-  const {
-    url,
-    method = 'GET',
-    authMode = 'bearer', // 'bearer' | 'header' | 'query' | 'none'
-    headerName = 'Authorization',
-    queryParam = 'apikey',
-    expectStatus = 200,
-    bodyContains
-  } = config
+    const {
+        url,
+        method = "GET",
+        authMode = "bearer", // 'bearer' | 'header' | 'query' | 'none'
+        headerName = "Authorization",
+        queryParam = "apikey",
+        expectStatus = 200,
+        bodyContains,
+    } = config;
 
-  if (!url) return { ok: false, message: 'No test URL configured' }
+    if (!url) {
+        return { message: "No test URL configured", ok: false };
+    }
 
-  let finalUrl = url
-  const headers = {}
-  if (authMode === 'bearer') headers['Authorization'] = `Bearer ${secret}`
-  else if (authMode === 'header') headers[headerName] = secret
-  else if (authMode === 'query') {
-    const sep = url.includes('?') ? '&' : '?'
-    finalUrl = `${url}${sep}${encodeURIComponent(queryParam)}=${encodeURIComponent(secret)}`
-  }
+    let finalUrl = url;
+    const headers = {};
+    if (authMode === "bearer") {
+        headers.Authorization = `Bearer ${secret}`;
+    } else if (authMode === "header") {
+        headers[headerName] = secret;
+    } else if (authMode === "query") {
+        const sep = url.includes("?") ? "&" : "?";
+        finalUrl = `${url}${sep}${encodeURIComponent(queryParam)}=${encodeURIComponent(secret)}`;
+    }
 
-  try {
-    const res = await fetchWithRetry(finalUrl, { method, headers }, { checked: true })
-    const text = await res.text().catch(() => '')
-    const statusOk = Array.isArray(expectStatus) ? expectStatus.includes(res.status) : res.status === expectStatus
-    if (!statusOk) return { ok: false, message: `Unexpected status ${res.status}` }
-    if (bodyContains && !text.includes(bodyContains)) return { ok: false, message: 'Response did not match expected content' }
-    return { ok: true, message: `OK (${res.status})` }
-  } catch (err) {
-    return { ok: false, message: describeRequestError(err) }
-  }
+    try {
+        const res = await fetchWithRetry(finalUrl, { headers, method }, { checked: true });
+        const text = await res.text().catch(() => "");
+        const statusOk = Array.isArray(expectStatus)
+            ? expectStatus.includes(res.status)
+            : res.status === expectStatus;
+        if (!statusOk) {
+            return { message: `Unexpected status ${res.status}`, ok: false };
+        }
+        if (bodyContains && !text.includes(bodyContains)) {
+            return { message: "Response did not match expected content", ok: false };
+        }
+        return { message: `OK (${res.status})`, ok: true };
+    } catch (err) {
+        return { message: describeRequestError(err), ok: false };
+    }
 }
 
 // Real-Debrid: /user also reports premium expiration, which we surface back
 // so the vault entry's expiresAt can auto-update from the source of truth.
 async function checkRealDebrid(secret) {
-  try {
-    const res = await fetchWithRetry('https://api.real-debrid.com/rest/1.0/user', {
-      headers: { Authorization: `Bearer ${secret}` }
-    })
-    if (!res.ok) return { ok: false, message: `Real-Debrid returned ${res.status}` }
-    const data = await res.json()
-    const expiresAt = data?.expiration ? new Date(data.expiration) : undefined
-    const type = data?.type || 'unknown'
-    if (type !== 'premium') {
-      return { ok: false, message: `Account type is "${type}", not premium`, expiresAt }
+    try {
+        const res = await fetchWithRetry("https://api.real-debrid.com/rest/1.0/user", {
+            headers: { Authorization: `Bearer ${secret}` },
+        });
+        if (!res.ok) {
+            return { message: `Real-Debrid returned ${res.status}`, ok: false };
+        }
+        const data = await res.json();
+        const expiresAt = data?.expiration ? new Date(data.expiration) : undefined;
+        const type = data?.type || "unknown";
+        if (type !== "premium") {
+            return { expiresAt, message: `Account type is "${type}", not premium`, ok: false };
+        }
+        return {
+            expiresAt,
+            message: `Premium active${expiresAt ? `, expires ${expiresAt.toISOString().split("T")[0]}` : ""}`,
+            ok: true,
+        };
+    } catch (err) {
+        return { message: describeRequestError(err), ok: false };
     }
-    return { ok: true, message: `Premium active${expiresAt ? `, expires ${expiresAt.toISOString().split('T')[0]}` : ''}`, expiresAt }
-  } catch (err) {
-    return { ok: false, message: describeRequestError(err) }
-  }
 }
 
 // TorBox: /user/me reports plan and premium_expires_at
 async function checkTorBox(secret) {
-  try {
-    const res = await fetchWithRetry('https://api.torbox.app/v1/api/user/me', {
-      headers: { Authorization: `Bearer ${secret}` }
-    })
-    if (!res.ok) return { ok: false, message: `TorBox returned ${res.status}` }
-    const data = await res.json()
-    const d = data?.data || data
-    const expiresAt = d?.premium_expires_at ? new Date(d.premium_expires_at) : undefined
-    const plan = d?.plan
-    if (plan === 0 || plan === undefined) {
-      return { ok: false, message: 'No active TorBox plan', expiresAt }
+    try {
+        const res = await fetchWithRetry("https://api.torbox.app/v1/api/user/me", {
+            headers: { Authorization: `Bearer ${secret}` },
+        });
+        if (!res.ok) {
+            return { message: `TorBox returned ${res.status}`, ok: false };
+        }
+        const data = await res.json();
+        const d = data?.data || data;
+        const expiresAt = d?.premium_expires_at ? new Date(d.premium_expires_at) : undefined;
+        const plan = d?.plan;
+        if (plan === 0 || plan === undefined) {
+            return { expiresAt, message: "No active TorBox plan", ok: false };
+        }
+        return {
+            expiresAt,
+            message: `Plan active${expiresAt ? `, expires ${expiresAt.toISOString().split("T")[0]}` : ""}`,
+            ok: true,
+        };
+    } catch (err) {
+        return { message: describeRequestError(err), ok: false };
     }
-    return { ok: true, message: `Plan active${expiresAt ? `, expires ${expiresAt.toISOString().split('T')[0]}` : ''}`, expiresAt }
-  } catch (err) {
-    return { ok: false, message: describeRequestError(err) }
-  }
 }
 
 // Newznab-compatible indexers (NZBGeek, NinjaCentral, UsenetCrawler, DrunkenSlug, etc.)
@@ -176,51 +217,71 @@ async function checkTorBox(secret) {
 // pulling in a full XML parser dependency for one self-closing tag. Absent
 // on indexers that don't support it is expected, not an error.
 function parseNewznabApiLimits(xmlText) {
-  const m = xmlText.match(/<newznab:apilimits\b([^/>]*)\/?>/i)
-  if (!m) return null
-  const attrs = {}
-  const attrRegex = /(\w+)="([^"]*)"/g
-  let attrMatch
-  while ((attrMatch = attrRegex.exec(m[1]))) {
-    attrs[attrMatch[1]] = attrMatch[2]
-  }
-  const apiCurrent = Number(attrs.apiCurrent)
-  const apiMax = Number(attrs.apiMax)
-  if (Number.isNaN(apiCurrent) || Number.isNaN(apiMax)) return null
-  return { apiCurrent, apiMax }
+    const m = xmlText.match(/<newznab:apilimits\b([^/>]*)\/?>/i);
+    if (!m) {
+        return null;
+    }
+    const attrs = {};
+    const attrRegex = /(\w+)="([^"]*)"/g;
+    for (const attrMatch of m[1].matchAll(attrRegex)) {
+        attrs[attrMatch[1]] = attrMatch[2];
+    }
+    const apiCurrent = Number(attrs.apiCurrent);
+    const apiMax = Number(attrs.apiMax);
+    if (Number.isNaN(apiCurrent) || Number.isNaN(apiMax)) {
+        return null;
+    }
+    return { apiCurrent, apiMax };
 }
 
 async function checkNewznabCaps(secret, config = {}) {
-  const { url } = config
-  if (!url) return { ok: false, message: 'No indexer base URL configured' }
-  const base = url.replace(/\/+$/, '')
-  try {
-    const testUrl = `${base}/api?t=caps&apikey=${encodeURIComponent(secret)}`
-    // Node's fetch sends no User-Agent at all by default, which reads as a
-    // bare script to a lot of indexers' own bot-protection (Cloudflare, etc.)
-    // and can produce a 403 that has nothing to do with the API key itself.
-    // A normal browser UA costs nothing and rules that out as a cause.
-    const res = await fetchWithRetry(testUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' } }, { checked: true })
-    if (res.status === 403) {
-      return { ok: false, message: 'Indexer returned 403 - likely blocking this server\'s IP (common for private indexers/Usenet providers toward cloud/VPS hosting ranges), not necessarily the API key' }
+    const { url } = config;
+    if (!url) {
+        return { message: "No indexer base URL configured", ok: false };
     }
-    if (!res.ok) return { ok: false, message: `Indexer returned ${res.status}` }
-    const text = await res.text()
-    if (/error/i.test(text) && /apikey|api key|invalid/i.test(text)) {
-      return { ok: false, message: 'API key rejected' }
+    const base = url.replace(/\/+$/, "");
+    try {
+        const testUrl = `${base}/api?t=caps&apikey=${encodeURIComponent(secret)}`;
+        // Node's fetch sends no User-Agent at all by default, which reads as a
+        // bare script to a lot of indexers' own bot-protection (Cloudflare, etc.)
+        // and can produce a 403 that has nothing to do with the API key itself.
+        // A normal browser UA costs nothing and rules that out as a cause.
+        const res = await fetchWithRetry(
+            testUrl,
+            {
+                headers: {
+                    "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                },
+            },
+            { checked: true }
+        );
+        if (res.status === 403) {
+            return {
+                message:
+                    "Indexer returned 403 - likely blocking this server's IP (common for private indexers/Usenet providers toward cloud/VPS hosting ranges), not necessarily the API key",
+                ok: false,
+            };
+        }
+        if (!res.ok) {
+            return { message: `Indexer returned ${res.status}`, ok: false };
+        }
+        const text = await res.text();
+        if (/error/i.test(text) && /apikey|api key|invalid/i.test(text)) {
+            return { message: "API key rejected", ok: false };
+        }
+        const limits = parseNewznabApiLimits(text);
+        if (limits) {
+            const quotaSuffix = ` (${limits.apiCurrent}/${limits.apiMax} API calls used today)`;
+            if (limits.apiCurrent >= limits.apiMax) {
+                return { message: `Daily API quota exhausted${quotaSuffix}`, ok: false };
+            }
+            return { message: `Indexer reachable, key accepted${quotaSuffix}`, ok: true };
+        }
+        return { message: "Indexer reachable, key accepted", ok: true };
+    } catch (err) {
+        return { message: describeRequestError(err), ok: false };
     }
-    const limits = parseNewznabApiLimits(text)
-    if (limits) {
-      const quotaSuffix = ` (${limits.apiCurrent}/${limits.apiMax} API calls used today)`
-      if (limits.apiCurrent >= limits.apiMax) {
-        return { ok: false, message: `Daily API quota exhausted${quotaSuffix}` }
-      }
-      return { ok: true, message: `Indexer reachable, key accepted${quotaSuffix}` }
-    }
-    return { ok: true, message: 'Indexer reachable, key accepted' }
-  } catch (err) {
-    return { ok: false, message: describeRequestError(err) }
-  }
 }
 
 // Raw TCP reachability — for things like Usenet NNTP servers where a full protocol
@@ -233,152 +294,215 @@ async function checkNewznabCaps(secret, config = {}) {
 // otherwise stall on a host's AAAA record, which dialling the name itself
 // never did.
 async function vettedTcpAddresses(host) {
-  const policy = instancePolicy()
-  const bare = String(host).trim().replace(/^\[|\]$/g, '')
-  const url = await assertSafeUrl(`http://${net.isIP(bare) === 6 ? `[${bare}]` : bare}`, policy)
-  // A bare host only: a port or path glued on would be read by the URL parser
-  // but not by the socket, which would then dial something else.
-  if (url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('invalid url')
-  const name = url.hostname.replace(/^\[|\]$/g, '')
-  if (net.isIP(name)) return [name]
-  const refused = policy.allowPrivate ? isLinkLocalIp : isPrivateIp
-  let addresses
-  try { addresses = await dns.lookup(name, { all: true }) } catch { throw new Error('unresolvable host') }
-  if (!addresses.length) throw new Error('unresolvable host')
-  if (addresses.some((a) => refused(a.address))) throw new Error('blocked host')
-  return [...addresses].sort((a, b) => a.family - b.family).map((a) => a.address)
+    const policy = instancePolicy();
+    const bare = String(host)
+        .trim()
+        .replace(/^\[|\]$/g, "");
+    const url = await assertSafeUrl(`http://${net.isIP(bare) === 6 ? `[${bare}]` : bare}`, policy);
+    // A bare host only: a port or path glued on would be read by the URL parser
+    // but not by the socket, which would then dial something else.
+    if (
+        url.port ||
+        url.username ||
+        url.password ||
+        url.pathname !== "/" ||
+        url.search ||
+        url.hash
+    ) {
+        throw new Error("invalid url");
+    }
+    const name = url.hostname.replace(/^\[|\]$/g, "");
+    if (net.isIP(name)) {
+        return [name];
+    }
+    const refused = policy.allowPrivate ? isLinkLocalIp : isPrivateIp;
+    let addresses;
+    try {
+        addresses = await dns.lookup(name, { all: true });
+    } catch (cause) {
+        throw new Error("unresolvable host", { cause });
+    }
+    if (!addresses.length) {
+        throw new Error("unresolvable host");
+    }
+    if (addresses.some((a) => refused(a.address))) {
+        throw new Error("blocked host");
+    }
+    return [...addresses].sort((a, b) => a.family - b.family).map((a) => a.address);
 }
 
 function dialOnce(address, port, label) {
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host: address, port: Number(port), timeout: 8000 })
-    socket.once('connect', () => {
-      socket.destroy()
-      resolve({ ok: true, message: `${label} reachable (connectivity only, not a login check)` })
-    })
-    socket.once('timeout', () => {
-      socket.destroy()
-      resolve({ ok: false, message: 'Connection timed out' })
-    })
-    socket.once('error', (err) => {
-      resolve({ ok: false, message: err?.message || 'Connection failed' })
-    })
-  })
+    return new Promise((resolve) => {
+        const socket = net.createConnection({ host: address, port: Number(port), timeout: 8000 });
+        socket.once("connect", () => {
+            socket.destroy();
+            resolve({
+                message: `${label} reachable (connectivity only, not a login check)`,
+                ok: true,
+            });
+        });
+        socket.once("timeout", () => {
+            socket.destroy();
+            resolve({ message: "Connection timed out", ok: false });
+        });
+        socket.once("error", (err) => {
+            resolve({ message: err?.message || "Connection failed", ok: false });
+        });
+    });
 }
 
-async function checkTcpReachability(secret, config = {}) {
-  const { host, port } = config
-  if (!host || !port) return { ok: false, message: 'No host/port configured' }
-  let addresses
-  try {
-    addresses = await vettedTcpAddresses(host)
-  } catch (err) {
-    return { ok: false, message: describeRequestError(err) }
-  }
-  let result
-  for (const address of addresses) {
-    result = await dialOnce(address, port, `${host}:${port}`)
-    if (result.ok) break
-  }
-  return result
+async function checkTcpReachability(_secret, config = {}) {
+    const { host, port } = config;
+    if (!(host && port)) {
+        return { message: "No host/port configured", ok: false };
+    }
+    let addresses;
+    try {
+        addresses = await vettedTcpAddresses(host);
+    } catch (err) {
+        return { message: describeRequestError(err), ok: false };
+    }
+    let result;
+    for (const address of addresses) {
+        result = await dialOnce(address, port, `${host}:${port}`);
+        if (result.ok) {
+            break;
+        }
+    }
+    return result;
 }
 
 // Stremio account credentials: config.identifier is the email/username (stored in
 // the entry's `provider` field), secret is the password. Confirms Stremio actually
 // accepts the login, not just that some server responded.
 async function checkStremioAuth(secret, config = {}) {
-  const identifier = config.identifier
-  if (!identifier) return { ok: false, message: 'No email/username on file for this entry' }
-  if (!secret) return { ok: false, message: 'No password on file for this entry' }
+    const identifier = config.identifier;
+    if (!identifier) {
+        return { message: "No email/username on file for this entry", ok: false };
+    }
+    if (!secret) {
+        return { message: "No password on file for this entry", ok: false };
+    }
 
-  // Write diagnostics directly to a file on the persisted data volume,
-  // bypassing stdout/stderr entirely. console.warn output has not reliably
-  // shown up in `docker logs` for this backend process even with stdbuf
-  // line-buffering applied (see v1.9.2/v1.9.22) - bun's own I/O internals
-  // may not route through the glibc buffered-stdio calls stdbuf intercepts,
-  // so a direct synchronous file write is the more reliable diagnostic path
-  // until that's confirmed one way or the other.
-  // Owner-read-write only — this log can carry auth-adjacent Stremio API
-  // details, so it should never be world-readable even on lax deploys.
-  // appendFileSync doesn't accept a mode, so we ensure the file exists with
-  // 0o600 the first time we're about to write to it.
-  const LOG_PATH = '/app/data/vault-debug.log'
-  function logDebug(entry) {
+    // Write diagnostics directly to a file on the persisted data volume,
+    // bypassing stdout/stderr entirely. console.warn output has not reliably
+    // shown up in `docker logs` for this backend process even with stdbuf
+    // line-buffering applied (see v1.9.2/v1.9.22) - bun's own I/O internals
+    // may not route through the glibc buffered-stdio calls stdbuf intercepts,
+    // so a direct synchronous file write is the more reliable diagnostic path
+    // until that's confirmed one way or the other.
+    // Owner-read-write only — this log can carry auth-adjacent Stremio API
+    // details, so it should never be world-readable even on lax deploys.
+    // appendFileSync doesn't accept a mode, so we ensure the file exists with
+    // 0o600 the first time we're about to write to it.
+    const LOG_PATH = "/app/data/vault-debug.log";
+    function logDebug(entry) {
+        try {
+            const fs = require("node:fs");
+            if (!fs.existsSync(LOG_PATH)) {
+                fs.writeFileSync(LOG_PATH, "", { mode: 0o600 });
+            }
+            // Redact `authKey` from any nested Stremio API response before writing.
+            // Stremio's successful-login response includes a live authKey which,
+            // if this log ever leaked, would grant full account access — we don't
+            // need it for the "did login succeed" question the diagnostic answers.
+            const redacted = JSON.parse(
+                JSON.stringify(entry, (k, v) => (k === "authKey" && v ? "[redacted]" : v))
+            );
+            const line = `[${new Date().toISOString()}] ${JSON.stringify(redacted)}\n`;
+            require("./debugLogFile").appendCapped(LOG_PATH, line);
+        } catch (e) {
+            console.warn("[VaultCheck] Failed to write debug log:", e?.message);
+        }
+    }
+
     try {
-      const fs = require('fs')
-      if (!fs.existsSync(LOG_PATH)) fs.writeFileSync(LOG_PATH, '', { mode: 0o600 })
-      // Redact `authKey` from any nested Stremio API response before writing.
-      // Stremio's successful-login response includes a live authKey which,
-      // if this log ever leaked, would grant full account access — we don't
-      // need it for the "did login succeed" question the diagnostic answers.
-      const redacted = JSON.parse(JSON.stringify(entry, (k, v) => k === 'authKey' && v ? '[redacted]' : v))
-      const line = `[${new Date().toISOString()}] ${JSON.stringify(redacted)}\n`
-      require('./debugLogFile').appendCapped(LOG_PATH, line)
-    } catch (e) {
-      console.warn('[VaultCheck] Failed to write debug log:', e?.message)
+        const { StremioAPIUtils } = require("./handlers");
+        const { store } = StremioAPIUtils.createAPIStore();
+
+        // Bypass store.login()'s wrapper (which discards the raw API response -
+        // see v1.9.24) and call the underlying request directly, so we can see
+        // exactly what Stremio's API actually returned rather than inferring it
+        // from side-effects. This is ground truth: if result.authKey is present,
+        // the login genuinely succeeded at the API level, full stop.
+        let rawResult;
+        let rawErr;
+        try {
+            rawResult = await store.request("login", { email: identifier, password: secret });
+        } catch (e) {
+            rawErr = e;
+        }
+
+        logDebug({
+            event: "stremio_raw_login_response",
+            identifier,
+            rawErrBody: rawErr?.body || rawErr?.response,
+            rawErrMessage: rawErr?.message,
+            rawErrStatus: rawErr?.status || rawErr?.statusCode,
+            rawResult,
+        });
+
+        if (rawErr) {
+            throw rawErr;
+        }
+
+        if (rawResult?.authKey) {
+            return { message: "Stremio login succeeded", ok: true };
+        }
+
+        const detail =
+            rawResult && typeof rawResult === "object"
+                ? rawResult.error || rawResult.message || JSON.stringify(rawResult).slice(0, 200)
+                : null;
+        return {
+            message: detail
+                ? `Stremio rejected these credentials: ${detail}`
+                : "Stremio rejected these credentials (no further detail returned - check /app/data/vault-debug.log)",
+            ok: false,
+        };
+    } catch (err) {
+        const msg = String(err?.message || "").toLowerCase();
+        if (msg.includes("passphrase") || msg.includes("wrong password")) {
+            return { message: "Invalid password", ok: false };
+        }
+        if (msg.includes("no such user") || msg.includes("invalid email")) {
+            return { message: "Invalid email", ok: false };
+        }
+        if (msg.includes("rate") || msg.includes("too many") || msg.includes("429")) {
+            return {
+                message:
+                    "Stremio rate-limited this login attempt - try again later, not necessarily a bad password",
+                ok: false,
+            };
+        }
+        logDebug({
+            event: "stremio_auth_threw",
+            identifier,
+            message: err?.message,
+            stack: err?.stack,
+        });
+        console.warn("[VaultCheck] Stremio auth threw for", identifier, err);
+        return { message: err?.message || "Stremio login failed", ok: false };
     }
-  }
-
-  try {
-    const { StremioAPIUtils } = require('./handlers')
-    const { store } = StremioAPIUtils.createAPIStore()
-
-    // Bypass store.login()'s wrapper (which discards the raw API response -
-    // see v1.9.24) and call the underlying request directly, so we can see
-    // exactly what Stremio's API actually returned rather than inferring it
-    // from side-effects. This is ground truth: if result.authKey is present,
-    // the login genuinely succeeded at the API level, full stop.
-    let rawResult
-    let rawErr
-    try {
-      rawResult = await store.request('login', { email: identifier, password: secret })
-    } catch (e) {
-      rawErr = e
-    }
-
-    logDebug({
-      event: 'stremio_raw_login_response',
-      identifier,
-      rawResult,
-      rawErrMessage: rawErr?.message,
-      rawErrStatus: rawErr?.status || rawErr?.statusCode,
-      rawErrBody: rawErr?.body || rawErr?.response
-    })
-
-    if (rawErr) throw rawErr
-
-    if (rawResult && rawResult.authKey) {
-      return { ok: true, message: 'Stremio login succeeded' }
-    }
-
-    const detail = rawResult && typeof rawResult === 'object'
-      ? (rawResult.error || rawResult.message || JSON.stringify(rawResult).slice(0, 200))
-      : null
-    return { ok: false, message: detail ? `Stremio rejected these credentials: ${detail}` : 'Stremio rejected these credentials (no further detail returned - check /app/data/vault-debug.log)' }
-  } catch (err) {
-    const msg = String(err?.message || '').toLowerCase()
-    if (msg.includes('passphrase') || msg.includes('wrong password')) return { ok: false, message: 'Invalid password' }
-    if (msg.includes('no such user') || msg.includes('invalid email')) return { ok: false, message: 'Invalid email' }
-    if (msg.includes('rate') || msg.includes('too many') || msg.includes('429')) return { ok: false, message: 'Stremio rate-limited this login attempt - try again later, not necessarily a bad password' }
-    logDebug({ event: 'stremio_auth_threw', identifier, message: err?.message, stack: err?.stack })
-    console.warn('[VaultCheck] Stremio auth threw for', identifier, err)
-    return { ok: false, message: err?.message || 'Stremio login failed' }
-  }
 }
 
 // Nuvio account credentials: same shape as Stremio's checker above.
 async function checkNuvioAuth(secret, config = {}) {
-  const identifier = config.identifier
-  if (!identifier) return { ok: false, message: 'No email/username on file for this entry' }
-  if (!secret) return { ok: false, message: 'No password on file for this entry' }
+    const identifier = config.identifier;
+    if (!identifier) {
+        return { message: "No email/username on file for this entry", ok: false };
+    }
+    if (!secret) {
+        return { message: "No password on file for this entry", ok: false };
+    }
 
-  try {
-    const { validateNuvioCredentials } = require('../providers/nuvioAuth')
-    await validateNuvioCredentials(identifier, secret)
-    return { ok: true, message: 'Nuvio login succeeded' }
-  } catch (err) {
-    return { ok: false, message: err?.message || 'Nuvio login failed' }
-  }
+    try {
+        const { validateNuvioCredentials } = require("../providers/nuvioAuth");
+        await validateNuvioCredentials(identifier, secret);
+        return { message: "Nuvio login succeeded", ok: true };
+    } catch (err) {
+        return { message: err?.message || "Nuvio login failed", ok: false };
+    }
 }
 
 // GET /models on an AI Services address. The address is whatever the account
@@ -388,14 +512,25 @@ async function checkNuvioAuth(secret, config = {}) {
 // pointed at its own. A refusal reads the same wherever it surfaces - the
 // Vault check below and Settings' model list.
 async function fetchAiModels(base, apiKey, signal) {
-  try {
-    return await safeFetch(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal }, instancePolicy())
-  } catch (err) {
-    if (/^(blocked host|unsupported protocol|invalid url|unresolvable host|too many redirects)$/.test(err?.message || '')) {
-      throw new Error('The AI Services address cannot be used from this server - check it under Settings -> External API Keys')
+    try {
+        return await safeFetch(
+            `${base}/models`,
+            { headers: { Authorization: `Bearer ${apiKey}` }, signal },
+            instancePolicy()
+        );
+    } catch (err) {
+        if (
+            /^(blocked host|unsupported protocol|invalid url|unresolvable host|too many redirects)$/.test(
+                err?.message || ""
+            )
+        ) {
+            throw new Error(
+                "The AI Services address cannot be used from this server - check it under Settings -> External API Keys",
+                { cause: err }
+            );
+        }
+        throw err;
     }
-    throw err
-  }
 }
 
 // AI Services entries (category 'ai', created by Settings' AI front door).
@@ -405,48 +540,67 @@ async function fetchAiModels(base, apiKey, signal) {
 // testType 'manual', which disabled the Vault card's check button entirely -
 // the one credential with a rich live API was the one you couldn't test.
 async function checkOpenAiCompatible(secret, config = {}) {
-  if (!secret) return { ok: false, message: 'No API key on file for this entry' }
-  const base = (typeof config.baseUrl === 'string' && config.baseUrl.trim())
-    ? config.baseUrl.trim().replace(/\/+$/, '')
-    : 'https://api.openai.com/v1'
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 10000)
-    let res
+    if (!secret) {
+        return { message: "No API key on file for this entry", ok: false };
+    }
+    const base =
+        typeof config.baseUrl === "string" && config.baseUrl.trim()
+            ? config.baseUrl.trim().replace(/\/+$/, "")
+            : "https://api.openai.com/v1";
     try {
-      res = await fetchAiModels(base, secret, controller.signal)
-    } finally { clearTimeout(timer) }
-    if (res.ok) return { ok: true, message: 'Provider accepted the key' }
-    if (res.status === 401 || res.status === 403) return { ok: false, message: `Provider rejected the key (${res.status})` }
-    if (res.status === 429) return { ok: false, message: 'Provider is rate-limiting this key (429)' }
-    return { ok: false, message: `Provider returned ${res.status}` }
-  } catch (err) {
-    return { ok: false, message: err?.name === 'AbortError' ? 'Provider did not respond within 10s' : (err?.message || 'Request failed') }
-  }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        let res;
+        try {
+            res = await fetchAiModels(base, secret, controller.signal);
+        } finally {
+            clearTimeout(timer);
+        }
+        if (res.ok) {
+            return { message: "Provider accepted the key", ok: true };
+        }
+        if (res.status === 401 || res.status === 403) {
+            return { message: `Provider rejected the key (${res.status})`, ok: false };
+        }
+        if (res.status === 429) {
+            return { message: "Provider is rate-limiting this key (429)", ok: false };
+        }
+        return { message: `Provider returned ${res.status}`, ok: false };
+    } catch (err) {
+        return {
+            message:
+                err?.name === "AbortError"
+                    ? "Provider did not respond within 10s"
+                    : err?.message || "Request failed",
+            ok: false,
+        };
+    }
 }
 
 const CHECKERS = {
-  openai_compatible: checkOpenAiCompatible,
-  generic_http: checkGenericHttp,
-  real_debrid: checkRealDebrid,
-  torbox: checkTorBox,
-  newznab_caps: checkNewznabCaps,
-  tcp_reachability: checkTcpReachability,
-  stremio_auth: checkStremioAuth,
-  nuvio_auth: checkNuvioAuth
-}
+    generic_http: checkGenericHttp,
+    newznab_caps: checkNewznabCaps,
+    nuvio_auth: checkNuvioAuth,
+    openai_compatible: checkOpenAiCompatible,
+    real_debrid: checkRealDebrid,
+    stremio_auth: checkStremioAuth,
+    tcp_reachability: checkTcpReachability,
+    torbox: checkTorBox,
+};
 
 async function runCheck(testType, secret, config) {
-  if (!testType || testType === 'manual') {
-    return { ok: null, message: 'Manual entry — no automated check configured' }
-  }
-  const checker = CHECKERS[testType]
-  if (!checker) return { ok: false, message: `Unknown test type: ${testType}` }
-  try {
-    return await checker(secret, config || {})
-  } catch (err) {
-    return { ok: false, message: err?.message || 'Check failed unexpectedly' }
-  }
+    if (!testType || testType === "manual") {
+        return { message: "Manual entry — no automated check configured", ok: null };
+    }
+    const checker = CHECKERS[testType];
+    if (!checker) {
+        return { message: `Unknown test type: ${testType}`, ok: false };
+    }
+    try {
+        return await checker(secret, config || {});
+    } catch (err) {
+        return { message: err?.message || "Check failed unexpectedly", ok: false };
+    }
 }
 
-module.exports = { runCheck, CHECKERS, fetchAiModels }
+module.exports = { CHECKERS, fetchAiModels, runCheck };

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { ReactNode, useEffect, useRef } from 'react';
-import { FocusContext, useFocusable, init } from '@noriginmedia/norigin-spatial-navigation';
+import { FocusContext, init, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { type ReactNode, useEffect, useRef } from "react";
 
 // init() wires up the library's own global keydown listener (arrow keys +
 // Enter) - called once per app lifetime, guarded here since a page using
@@ -37,20 +37,24 @@ const RETRY_DELAYS_MS = [50, 200, 500, 1000, 2000];
 // Tailwind's 2xl breakpoint (1536px), which is what the grid needs to show
 // its full 8-column density instead of falling back to a sparser one.
 function useTVViewport(active: boolean) {
-  useEffect(() => {
-    if (!active || typeof document === 'undefined') return;
-    let meta = document.querySelector('meta[name="viewport"]');
-    if (!meta) {
-      meta = document.createElement('meta');
-      meta.setAttribute('name', 'viewport');
-      document.head.appendChild(meta);
-    }
-    const previous = meta.getAttribute('content');
-    meta.setAttribute('content', 'width=1920, initial-scale=1');
-    return () => {
-      if (previous !== null) meta!.setAttribute('content', previous);
-    };
-  }, [active]);
+    useEffect(() => {
+        if (!active || typeof document === "undefined") {
+            return;
+        }
+        const existing = document.querySelector('meta[name="viewport"]');
+        const meta = existing ?? document.createElement("meta");
+        if (!existing) {
+            meta.setAttribute("name", "viewport");
+            document.head.appendChild(meta);
+        }
+        const previous = meta.getAttribute("content");
+        meta.setAttribute("content", "width=1920, initial-scale=1");
+        return () => {
+            if (previous !== null) {
+                meta.setAttribute("content", previous);
+            }
+        };
+    }, [active]);
 }
 
 // NebulaTopbar (TV's only real nav - see its own comments) is `position:
@@ -66,52 +70,63 @@ function useTVViewport(active: boolean) {
 // the bar. NebulaTopbar now renders a compact TV-only size (~130px, down
 // from ~300px at full desktop size - see its own isTV comments), so this
 // only needs to cover that, with margin.
-const TV_SCROLL_PADDING_TOP = '160px';
+const TV_SCROLL_PADDING_TOP = "160px";
 function useTVScrollPadding(active: boolean) {
-  useEffect(() => {
-    if (!active || typeof document === 'undefined') return;
-    const root = document.documentElement;
-    const previous = root.style.scrollPaddingTop;
-    root.style.scrollPaddingTop = TV_SCROLL_PADDING_TOP;
-    return () => {
-      root.style.scrollPaddingTop = previous;
-    };
-  }, [active]);
+    useEffect(() => {
+        if (!active || typeof document === "undefined") {
+            return;
+        }
+        const root = document.documentElement;
+        const previous = root.style.scrollPaddingTop;
+        root.style.scrollPaddingTop = TV_SCROLL_PADDING_TOP;
+        return () => {
+            root.style.scrollPaddingTop = previous;
+        };
+    }, [active]);
 }
 
 export function TVPageProvider({ children }: { children: ReactNode }) {
-  useTVViewport(true);
-  useTVScrollPadding(true);
+    useTVViewport(true);
+    useTVScrollPadding(true);
 
-  useEffect(() => {
-    if (initialized) return;
-    initialized = true;
-    init({ debug: false, visualDebug: false, distanceCalculationMethod: 'center' });
-  }, []);
+    useEffect(() => {
+        if (initialized) {
+            return;
+        }
+        initialized = true;
+        init({ debug: false, distanceCalculationMethod: "center", visualDebug: false });
+    }, []);
 
-  const { ref, focusKey, focusSelf, hasFocusedChild } = useFocusable<object, HTMLDivElement>({ focusable: false, trackChildren: true });
+    const { ref, focusKey, focusSelf, hasFocusedChild } = useFocusable<object, HTMLDivElement>({
+        focusable: false,
+        trackChildren: true,
+    });
 
-  // hasFocusedChild is reactive (triggers a re-render), but the retry
-  // timers below are scheduled once on mount and read this via a ref so
-  // each attempt sees the LIVE value, not whatever it was at schedule time.
-  const hasFocusedChildRef = useRef(false);
-  useEffect(() => {
-    hasFocusedChildRef.current = hasFocusedChild;
-  }, [hasFocusedChild]);
+    // hasFocusedChild is reactive (triggers a re-render), but the retry
+    // timers below are scheduled once on mount and read this via a ref so
+    // each attempt sees the LIVE value, not whatever it was at schedule time.
+    const hasFocusedChildRef = useRef(false);
+    useEffect(() => {
+        hasFocusedChildRef.current = hasFocusedChild;
+    }, [hasFocusedChild]);
 
-  useEffect(() => {
-    const timers = RETRY_DELAYS_MS.map((delay) => setTimeout(() => {
-      // Stop once something already has focus - either an earlier retry
-      // succeeded, or the user already moved focus themselves.
-      if (!hasFocusedChildRef.current) focusSelf();
-    }, delay));
-    return () => timers.forEach(clearTimeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    useEffect(() => {
+        const timers = RETRY_DELAYS_MS.map((delay) =>
+            setTimeout(() => {
+                // Stop once something already has focus - either an earlier retry
+                // succeeded, or the user already moved focus themselves.
+                if (!hasFocusedChildRef.current) {
+                    focusSelf();
+                }
+            }, delay)
+        );
+        return () => timers.forEach(clearTimeout);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-  return (
-    <FocusContext.Provider value={focusKey}>
-      <div ref={ref}>{children}</div>
-    </FocusContext.Provider>
-  );
+    return (
+        <FocusContext.Provider value={focusKey}>
+            <div ref={ref}>{children}</div>
+        </FocusContext.Provider>
+    );
 }

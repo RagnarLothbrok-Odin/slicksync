@@ -2,32 +2,39 @@
 // Consumes cached libraries (from activityMonitor + libraryCache) and only
 // falls back to Stremio API when cache is missing.
 
-const { StremioAPIClient } = require('stremio-api-client')
-const { getCachedLibrary, setCachedLibrary } = require('./libraryCache')
-const { fetchKitsuMetadata } = require('./kitsuUtils')
-const { enrichPostersFromCinemeta } = require('./libraryHelpers')
-const { getAccountDateString, resolveAccountTimezone } = require('./dateUtils')
-const { calculateAddonAnalytics, calculateServerHealth, generateOperationalAlerts } = require('./adminAnalytics')
-const { calculateTopItemsWithUsers, calculateWatchVelocity, calculateInterestingMetrics } = require('./enhancedMetrics')
-const { buildStremioLinks, buildNuvioAppUrl } = require('./appLinks')
-const { hasReachedEnd } = require('./sessionTracker')
+const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
+const { getCachedLibrary, setCachedLibrary: _setCachedLibrary } = require("./libraryCache");
+const { fetchKitsuMetadata } = require("./kitsuUtils");
+const { enrichPostersFromCinemeta } = require("./libraryHelpers");
+const { getAccountDateString, resolveAccountTimezone } = require("./dateUtils");
+const {
+    calculateAddonAnalytics,
+    calculateServerHealth,
+    generateOperationalAlerts,
+} = require("./adminAnalytics");
+const {
+    calculateTopItemsWithUsers,
+    calculateWatchVelocity,
+    calculateInterestingMetrics,
+} = require("./enhancedMetrics");
+const { buildStremioLinks, buildNuvioAppUrl } = require("./appLinks");
+const { hasReachedEnd } = require("./sessionTracker");
 
 // Helper function to extract base item ID (for series, strip season/episode info)
 function getBaseItemId(itemId, itemType) {
-  if (itemType === 'series') {
-    // For series, itemId may include season:episode (e.g., "tt123:1:5" or "kitsu:123:1")
-    // Return just the base ID
-    const parts = itemId.split(':')
-    if (parts[0] === 'kitsu') {
-      // Kitsu format: "kitsu:123:1" -> return "kitsu:123"
-      return parts.slice(0, 2).join(':')
-    } else {
-      // Standard format: "tt123:1:5" -> return "tt123"
-      return parts[0]
+    if (itemType === "series") {
+        // For series, itemId may include season:episode (e.g., "tt123:1:5" or "kitsu:123:1")
+        // Return just the base ID
+        const parts = itemId.split(":");
+        if (parts[0] === "kitsu") {
+            // Kitsu format: "kitsu:123:1" -> return "kitsu:123"
+            return parts.slice(0, 2).join(":");
+        }
+        // Standard format: "tt123:1:5" -> return "tt123"
+        return parts[0];
     }
-  }
-  // For movies, itemId is already the base ID
-  return itemId
+    // For movies, itemId is already the base ID
+    return itemId;
 }
 
 // Admin Analytics Helpers
@@ -36,299 +43,308 @@ function getBaseItemId(itemId, itemType) {
  * Calculate user lifecycle metrics including retention and at-risk users
  */
 async function calculateUserLifecycle(prisma, accountId, allUsers, watchActivityByUser) {
-  const now = new Date()
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-  // Get last activity date for each user from watch activity (like old slicksync)
-  const lastActivityDates = await prisma.watchActivity.groupBy({
-    by: ['userId'],
-    where: {
-      accountId: accountId || 'default'
-    },
-    _max: {
-      date: true
-    }
-  })
+    // Get last activity date for each user from watch activity (like old slicksync)
+    const lastActivityDates = await prisma.watchActivity.groupBy({
+        _max: {
+            date: true,
+        },
+        by: ["userId"],
+        where: {
+            accountId: accountId || "default",
+        },
+    });
 
-  const lastActivityMap = new Map()
-  lastActivityDates.forEach(item => {
-    lastActivityMap.set(item.userId, item._max.date)
-  })
+    const lastActivityMap = new Map();
+    lastActivityDates.forEach((item) => {
+        lastActivityMap.set(item.userId, item._max.date);
+    });
 
-  // Calculate retention cohorts
-  let active7d = 0
-  let active30d = 0
-  let active90d = 0
+    // Calculate retention cohorts
+    let active7d = 0;
+    let active30d = 0;
+    let active90d = 0;
 
-  // Track at-risk users
-  const atRiskUsers = []
-  const criticalRiskUsers = []
+    // Track at-risk users
+    const atRiskUsers = [];
+    const criticalRiskUsers = [];
 
-  allUsers.forEach(user => {
-    const lastActivity = lastActivityMap.get(user.id)
-    
-    if (lastActivity) {
-      if (lastActivity >= sevenDaysAgo) active7d++
-      if (lastActivity >= thirtyDaysAgo) active30d++
-      if (lastActivity >= ninetyDaysAgo) active90d++
+    allUsers.forEach((user) => {
+        const lastActivity = lastActivityMap.get(user.id);
 
-      const daysSinceActivity = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24))
-      const totalWatchTime = watchActivityByUser[user.id]?.watchTime || 0
+        if (lastActivity) {
+            if (lastActivity >= sevenDaysAgo) {
+                active7d++;
+            }
+            if (lastActivity >= thirtyDaysAgo) {
+                active30d++;
+            }
+            if (lastActivity >= ninetyDaysAgo) {
+                active90d++;
+            }
 
-      const userData = {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        lastActivity: lastActivity.toISOString(),
-        daysInactive: daysSinceActivity,
-        totalWatchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100
-      }
+            const daysSinceActivity = Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24));
+            const totalWatchTime = watchActivityByUser[user.id]?.watchTime || 0;
 
-      if (daysSinceActivity >= 60) {
-        criticalRiskUsers.push(userData)
-      } else if (daysSinceActivity >= 30) {
-        atRiskUsers.push(userData)
-      }
-    } else {
-      // Never watched anything - check join date
-      const daysSinceJoin = Math.floor((now - new Date(user.createdAt)) / (1000 * 60 * 60 * 24))
-      if (daysSinceJoin >= 30) {
-        atRiskUsers.push({
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          lastActivity: null,
-          daysInactive: daysSinceJoin,
-          totalWatchTimeHours: 0,
-          neverWatched: true
-        })
-      }
-    }
-  })
+            const userData = {
+                daysInactive: daysSinceActivity,
+                email: user.email,
+                id: user.id,
+                lastActivity: lastActivity.toISOString(),
+                totalWatchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100,
+                username: user.username,
+            };
 
-  return {
-    retention: {
-      total: allUsers.length,
-      active7d,
-      active30d,
-      active90d,
-      rate7d: allUsers.length > 0 ? Math.round((active7d / allUsers.length) * 100) : 0,
-      rate30d: allUsers.length > 0 ? Math.round((active30d / allUsers.length) * 100) : 0,
-      rate90d: allUsers.length > 0 ? Math.round((active90d / allUsers.length) * 100) : 0
-    },
-    atRisk: atRiskUsers.sort((a, b) => b.daysInactive - a.daysInactive),
-    criticalRisk: criticalRiskUsers.sort((a, b) => b.daysInactive - a.daysInactive)
-  }
+            if (daysSinceActivity >= 60) {
+                criticalRiskUsers.push(userData);
+            } else if (daysSinceActivity >= 30) {
+                atRiskUsers.push(userData);
+            }
+        } else {
+            // Never watched anything - check join date
+            const daysSinceJoin = Math.floor(
+                (now - new Date(user.createdAt)) / (1000 * 60 * 60 * 24)
+            );
+            if (daysSinceJoin >= 30) {
+                atRiskUsers.push({
+                    daysInactive: daysSinceJoin,
+                    email: user.email,
+                    id: user.id,
+                    lastActivity: null,
+                    neverWatched: true,
+                    totalWatchTimeHours: 0,
+                    username: user.username,
+                });
+            }
+        }
+    });
+
+    return {
+        atRisk: atRiskUsers.sort((a, b) => b.daysInactive - a.daysInactive),
+        criticalRisk: criticalRiskUsers.sort((a, b) => b.daysInactive - a.daysInactive),
+        retention: {
+            active7d,
+            active30d,
+            active90d,
+            rate7d: allUsers.length > 0 ? Math.round((active7d / allUsers.length) * 100) : 0,
+            rate30d: allUsers.length > 0 ? Math.round((active30d / allUsers.length) * 100) : 0,
+            rate90d: allUsers.length > 0 ? Math.round((active90d / allUsers.length) * 100) : 0,
+            total: allUsers.length,
+        },
+    };
 }
 
 /**
  * Calculate completion-weighted top content
  */
 async function calculateTopContent(watchSessions) {
-  const contentStats = new Map()
-  
-  // Process watch sessions to build content stats
-  watchSessions.forEach(session => {
-    const itemId = session.item.id
-    const itemType = session.item.type
-    
-    if (!contentStats.has(itemId)) {
-      contentStats.set(itemId, {
-        id: itemId,
-        name: session.item.name,
-        type: itemType,
-        poster: session.item.poster,
-        totalWatchTime: 0,
-        uniqueViewers: new Set(),
-        completionCount: 0,
-        totalSessions: 0,
-        recentVelocity: 0
-      })
-    }
-    
-    const stats = contentStats.get(itemId)
-    stats.totalWatchTime += session.durationSeconds || 0
-    stats.uniqueViewers.add(session.user.id)
-    stats.totalSessions++
-    
-    if (session.endTime && session.durationSeconds > 1800) {
-      stats.completionCount++
-    }
-    
-    const sessionDate = new Date(session.startTime)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    if (sessionDate >= sevenDaysAgo) {
-      stats.recentVelocity++
-    }
-  })
+    const contentStats = new Map();
 
-  const scoredContent = Array.from(contentStats.values()).map(content => {
-    const watchCount = content.uniqueViewers.size
-    const completionRate = content.totalSessions > 0 ? content.completionCount / content.totalSessions : 0
-    const watchVelocity = content.recentVelocity / Math.max(watchCount, 1)
-    const score = (completionRate * 0.6) + (Math.min(watchVelocity / 5, 1) * 0.4)
-    
+    // Process watch sessions to build content stats
+    watchSessions.forEach((session) => {
+        const itemId = session.item.id;
+        const itemType = session.item.type;
+
+        if (!contentStats.has(itemId)) {
+            contentStats.set(itemId, {
+                completionCount: 0,
+                id: itemId,
+                name: session.item.name,
+                poster: session.item.poster,
+                recentVelocity: 0,
+                totalSessions: 0,
+                totalWatchTime: 0,
+                type: itemType,
+                uniqueViewers: new Set(),
+            });
+        }
+
+        const stats = contentStats.get(itemId);
+        stats.totalWatchTime += session.durationSeconds || 0;
+        stats.uniqueViewers.add(session.user.id);
+        stats.totalSessions++;
+
+        if (session.endTime && session.durationSeconds > 1800) {
+            stats.completionCount++;
+        }
+
+        const sessionDate = new Date(session.startTime);
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        if (sessionDate >= sevenDaysAgo) {
+            stats.recentVelocity++;
+        }
+    });
+
+    const scoredContent = Array.from(contentStats.values()).map((content) => {
+        const watchCount = content.uniqueViewers.size;
+        const completionRate =
+            content.totalSessions > 0 ? content.completionCount / content.totalSessions : 0;
+        const watchVelocity = content.recentVelocity / Math.max(watchCount, 1);
+        const score = completionRate * 0.6 + Math.min(watchVelocity / 5, 1) * 0.4;
+
+        return {
+            ...content,
+            avgWatchTimeMinutes: Math.round(content.totalWatchTime / content.totalSessions / 60),
+            completionRate: Math.round(completionRate * 100),
+            score: Math.round(score * 100) / 100,
+            uniqueViewers: Array.from(content.uniqueViewers),
+            watchCount,
+        };
+    });
+
+    const sorted = scoredContent.sort((a, b) => b.score - a.score);
+
+    // Get top 30 items for poster enrichment (covers movies + series + trending overlap)
+    const topItems = sorted.slice(0, 30);
+
+    // Convert to format expected by enrichPostersFromCinemeta
+    const itemsForEnrichment = topItems.map((item) => ({
+        _id: item.id,
+        id: item.id,
+        poster: item.poster,
+        type: item.type,
+    }));
+
+    // Enrich missing posters from Cinemeta
+    await enrichPostersFromCinemeta(itemsForEnrichment, { requestTimeout: 1500, timeout: 5000 });
+
+    // Update posters in sorted results
+    const enrichedContent = sorted.map((item) => {
+        const enriched = itemsForEnrichment.find((e) => e.id === item.id);
+        if (enriched?.poster && !item.poster) {
+            return { ...item, poster: enriched.poster };
+        }
+        return item;
+    });
+
     return {
-      ...content,
-      watchCount,
-      uniqueViewers: Array.from(content.uniqueViewers),
-      completionRate: Math.round(completionRate * 100),
-      avgWatchTimeMinutes: Math.round((content.totalWatchTime / content.totalSessions) / 60),
-      score: Math.round(score * 100) / 100
-    }
-  })
-
-  const sorted = scoredContent.sort((a, b) => b.score - a.score)
-  
-  // Get top 30 items for poster enrichment (covers movies + series + trending overlap)
-  const topItems = sorted.slice(0, 30)
-  
-  // Convert to format expected by enrichPostersFromCinemeta
-  const itemsForEnrichment = topItems.map(item => ({
-    _id: item.id,
-    id: item.id,
-    type: item.type,
-    poster: item.poster
-  }))
-  
-  // Enrich missing posters from Cinemeta
-  await enrichPostersFromCinemeta(itemsForEnrichment, { timeout: 5000, requestTimeout: 1500 })
-  
-  // Update posters in sorted results
-  const enrichedContent = sorted.map(item => {
-    const enriched = itemsForEnrichment.find(e => e.id === item.id)
-    if (enriched && enriched.poster && !item.poster) {
-      return { ...item, poster: enriched.poster }
-    }
-    return item
-  })
-  
-  return {
-    movies: enrichedContent.filter(c => c.type === 'movie').slice(0, 10),
-    series: enrichedContent.filter(c => c.type === 'series').slice(0, 10),
-    trending: enrichedContent
-      .filter(c => c.recentVelocity > 0)
-      .sort((a, b) => b.recentVelocity - a.recentVelocity)
-      .slice(0, 10)
-  }
+        movies: enrichedContent.filter((c) => c.type === "movie").slice(0, 10),
+        series: enrichedContent.filter((c) => c.type === "series").slice(0, 10),
+        trending: enrichedContent
+            .filter((c) => c.recentVelocity > 0)
+            .sort((a, b) => b.recentVelocity - a.recentVelocity)
+            .slice(0, 10),
+    };
 }
 
 /**
  * Calculate engagement heatmap and session stats
  */
 async function calculateEngagementMetrics(watchSessions) {
-  const hourlyActivity = new Array(24).fill(0).map((_, hour) => ({
-    hour,
-    watchTimeMinutes: 0,
-    sessions: 0
-  }))
+    const hourlyActivity = new Array(24).fill(0).map((_, hour) => ({
+        hour,
+        sessions: 0,
+        watchTimeMinutes: 0,
+    }));
 
-  let totalSessionDuration = 0
-  let bingeSessions = 0
-  let sessionCount = 0
-  const sessionEpisodes = new Map()
+    let totalSessionDuration = 0;
+    let bingeSessions = 0;
+    let sessionCount = 0;
+    const sessionEpisodes = new Map();
 
-  watchSessions.forEach(session => {
-    const hour = new Date(session.startTime).getHours()
-    const duration = session.durationSeconds || 0
+    watchSessions.forEach((session) => {
+        const hour = new Date(session.startTime).getHours();
+        const duration = session.durationSeconds || 0;
 
-    hourlyActivity[hour].watchTimeMinutes += duration / 60
-    hourlyActivity[hour].sessions++
-    totalSessionDuration += duration
-    sessionCount++
+        hourlyActivity[hour].watchTimeMinutes += duration / 60;
+        hourlyActivity[hour].sessions++;
+        totalSessionDuration += duration;
+        sessionCount++;
 
-    const sessionKey = `${session.user.id}:${session.item.id}:${session.startTime?.split('T')[0]}`
-    if (!sessionEpisodes.has(sessionKey)) {
-      sessionEpisodes.set(sessionKey, new Set())
-    }
-    if (session.item.episode) {
-      sessionEpisodes.get(sessionKey).add(session.item.episode)
-    }
-  })
+        const sessionKey = `${session.user.id}:${session.item.id}:${session.startTime?.split("T")[0]}`;
+        if (!sessionEpisodes.has(sessionKey)) {
+            sessionEpisodes.set(sessionKey, new Set());
+        }
+        if (session.item.episode) {
+            sessionEpisodes.get(sessionKey).add(session.item.episode);
+        }
+    });
 
-  sessionEpisodes.forEach(episodes => {
-    if (episodes.size >= 3) {
-      bingeSessions++
-    }
-  })
+    sessionEpisodes.forEach((episodes) => {
+        if (episodes.size >= 3) {
+            bingeSessions++;
+        }
+    });
 
-  const avgSessionMinutes = sessionCount > 0 
-    ? Math.round((totalSessionDuration / sessionCount) / 60) 
-    : 0
+    const avgSessionMinutes =
+        sessionCount > 0 ? Math.round(totalSessionDuration / sessionCount / 60) : 0;
 
-  return {
-    hourlyActivity: hourlyActivity.map(h => ({
-      hour: h.hour,
-      watchTimeMinutes: Math.round(h.watchTimeMinutes * 10) / 10,
-      sessions: h.sessions
-    })),
-    averageSessionMinutes: avgSessionMinutes,
-    totalSessions: sessionCount,
-    bingeSessions,
-    peakHour: hourlyActivity.reduce((max, curr, idx) => 
-      curr.sessions > hourlyActivity[max].sessions ? idx : max, 0
-    )
-  }
+    return {
+        averageSessionMinutes: avgSessionMinutes,
+        bingeSessions,
+        hourlyActivity: hourlyActivity.map((h) => ({
+            hour: h.hour,
+            sessions: h.sessions,
+            watchTimeMinutes: Math.round(h.watchTimeMinutes * 10) / 10,
+        })),
+        peakHour: hourlyActivity.reduce(
+            (max, curr, idx) => (curr.sessions > hourlyActivity[max].sessions ? idx : max),
+            0
+        ),
+        totalSessions: sessionCount,
+    };
 }
 
 /**
  * Generate admin alerts based on metrics
  */
 function generateAlerts(userLifecycle, topContent, engagement, period) {
-  const critical = []
-  const warnings = []
+    const critical = [];
+    const warnings = [];
 
-  if (userLifecycle.criticalRisk.length > 0) {
-    critical.push({
-      type: 'inactive_users_critical',
-      message: `${userLifecycle.criticalRisk.length} users haven't watched anything in 60+ days`,
-      count: userLifecycle.criticalRisk.length,
-      users: userLifecycle.criticalRisk.slice(0, 5).map(u => u.username),
-      severity: 'critical'
-    })
-  }
+    if (userLifecycle.criticalRisk.length > 0) {
+        critical.push({
+            count: userLifecycle.criticalRisk.length,
+            message: `${userLifecycle.criticalRisk.length} users haven't watched anything in 60+ days`,
+            severity: "critical",
+            type: "inactive_users_critical",
+            users: userLifecycle.criticalRisk.slice(0, 5).map((u) => u.username),
+        });
+    }
 
-  if (userLifecycle.atRisk.length > 0) {
-    warnings.push({
-      type: 'inactive_users_warning',
-      message: `${userLifecycle.atRisk.length} users inactive for 30+ days`,
-      count: userLifecycle.atRisk.length,
-      severity: 'warning'
-    })
-  }
+    if (userLifecycle.atRisk.length > 0) {
+        warnings.push({
+            count: userLifecycle.atRisk.length,
+            message: `${userLifecycle.atRisk.length} users inactive for 30+ days`,
+            severity: "warning",
+            type: "inactive_users_warning",
+        });
+    }
 
-  if (userLifecycle.retention.rate30d < 30) {
-    warnings.push({
-      type: 'low_retention',
-      message: `30-day retention rate is only ${userLifecycle.retention.rate30d}%`,
-      severity: 'warning'
-    })
-  }
+    if (userLifecycle.retention.rate30d < 30) {
+        warnings.push({
+            message: `30-day retention rate is only ${userLifecycle.retention.rate30d}%`,
+            severity: "warning",
+            type: "low_retention",
+        });
+    }
 
-  if (topContent.trending.length === 0 && period !== '1h' && period !== '12h') {
-    warnings.push({
-      type: 'no_trending_content',
-      message: 'No content trending in the last 7 days',
-      severity: 'warning'
-    })
-  }
+    if (topContent.trending.length === 0 && period !== "1h" && period !== "12h") {
+        warnings.push({
+            message: "No content trending in the last 7 days",
+            severity: "warning",
+            type: "no_trending_content",
+        });
+    }
 
-  if (engagement.totalSessions === 0 && period !== '1h') {
-    warnings.push({
-      type: 'no_activity',
-      message: 'No watch activity in the selected period',
-      severity: 'warning'
-    })
-  }
+    if (engagement.totalSessions === 0 && period !== "1h") {
+        warnings.push({
+            message: "No watch activity in the selected period",
+            severity: "warning",
+            type: "no_activity",
+        });
+    }
 
-  return {
-    critical,
-    warnings,
-    total: critical.length + warnings.length,
-    hasCritical: critical.length > 0
-  }
+    return {
+        critical,
+        hasCritical: critical.length > 0,
+        total: critical.length + warnings.length,
+        warnings,
+    };
 }
 
 /**
@@ -348,8 +364,8 @@ function generateAlerts(userLifecycle, topContent, engagement, period) {
 // only the Activity page asks for everything, and only once its reader has
 // scrolled to the end of what the capped read returned. Still a ceiling
 // rather than no limit, so no account can ask for an unbounded response.
-const ACTIVITY_TAKE = 5000
-const ACTIVITY_TAKE_DEEP = 100000
+const ACTIVITY_TAKE = 5000;
+const ACTIVITY_TAKE_DEEP = 100_000;
 
 /**
  * Who is watching what right now, for one account. Built from live state
@@ -359,1463 +375,1692 @@ const ACTIVITY_TAKE_DEEP = 100000
  * or stopped.
  */
 async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
-  const nowPlaying = []
-  // "Now Playing" is seeded from BOTH signals, because neither covers
-  // everything on its own:
-  //   - The AIOStreams proxy sees streams it carries open/close in real time
-  //     (accurate liveness), but never sees content routed outside it - e.g.
-  //     usenet via newznab, which bypasses the proxy entirely.
-  //   - Native tracking sees anything the provider records, but only learns of
-  //     a session at the provider's checkpoint (at stop, for Nuvio) and then
-  //     holds it "active" for its whole freshness window (~15 min).
-  // So native is seeded here, and mergeProxyNowPlaying below reconciles them:
-  // the proxy wins for content it carries (including suppressing the stale
-  // native echo of a stream it knows already ended - which is what made an
-  // exited stream linger), while native survives untouched for content the
-  // proxy never carried. Native remains the sole source of history/duration.
-  const userMap = new Map(activeUsers.map(u => [u.id, u]))
+    const nowPlaying = [];
+    // "Now Playing" is seeded from BOTH signals, because neither covers
+    // everything on its own:
+    //   - The AIOStreams proxy sees streams it carries open/close in real time
+    //     (accurate liveness), but never sees content routed outside it - e.g.
+    //     usenet via newznab, which bypasses the proxy entirely.
+    //   - Native tracking sees anything the provider records, but only learns of
+    //     a session at the provider's checkpoint (at stop, for Nuvio) and then
+    //     holds it "active" for its whole freshness window (~15 min).
+    // So native is seeded here, and mergeProxyNowPlaying below reconciles them:
+    // the proxy wins for content it carries (including suppressing the stale
+    // native echo of a stream it knows already ended - which is what made an
+    // exited stream linger), while native survives untouched for content the
+    // proxy never carried. Native remains the sole source of history/duration.
+    const userMap = new Map(activeUsers.map((u) => [u.id, u]));
 
-  let activeSessionsFromDb = []
-  try {
-    activeSessionsFromDb = await prisma.watchSession.findMany({
-      where: {
-        accountId: accountIdValue || 'default',
-        isActive: true
-      },
-      orderBy: { startTime: 'desc' }
-    })
-  } catch (error) {
-    console.warn('[MetricsBuilder] Failed to fetch active sessions from database:', error.message)
-  }
-
-  for (const session of activeSessionsFromDb) {
-    const user = userMap.get(session.userId)
-    if (!user) continue
-    // A session whose last checkpoint sits at the end of the runtime is a
-    // watch that ended, not one that is playing. sessionTracker closes such
-    // a session on its next poll; a session it creates from that final
-    // checkpoint stays active until the poll after that, and this keeps it
-    // out of the panel in between.
-    if (hasReachedEnd(session.lastPosition, session.totalDuration)) continue
-    // Someone on a Jellyfin-compatible server has a real live signal - the
-    // server's own sessions list, added below - so a session only kept open
-    // by the library read's ~15-minute freshness window would leave a
-    // finished viewing on screen long after it stopped.
-    if (user.providerType === 'jellyfin') continue
-
-    nowPlaying.push({
-      user: {
-        id: user.id,
-        username: user.username || user.email,
-        email: user.email,
-        colorIndex: user.colorIndex || 0,
-        avatarUrl: user.avatarUrl || null,
-        useGravatar: user.useGravatar ?? false
-      },
-      item: {
-        id: session.itemId,
-        name: session.itemName,
-        type: session.itemType,
-        year: null,
-        poster: session.poster,
-        season: session.season,
-        episode: session.episode
-      },
-      videoId: session.videoId ?? null,
-      watchedAt: session.startTime.toISOString(),
-      watchedAtTimestamp: session.startTime.getTime(),
-      // Position for the "resume here" quick-launch (Now Playing panel) -
-      // lastPosition is a direct snapshot value per WatchSession's own field
-      // comment ("always accurate the instant new data arrives"), safe to
-      // surface as-is, unlike overallTimeWatched which needs two
-      // observations to diff (see this repo's CLAUDE.md).
-      lastPosition: session.lastPosition ?? null,
-      totalDuration: session.totalDuration ?? null,
-      // Same episode-aware deep-link builder Continue Watching already uses
-      // (server/utils/appLinks.js) - not the plain client-side one, which
-      // has no season/episode parameter at all for series.
-      ...(session.itemId ? {
-        stremioAppUrl: buildStremioLinks(session.itemId, session.itemType === 'series' ? 'series' : 'movie', session.season, session.episode).appUrl,
-        nuvioAppUrl: buildNuvioAppUrl(session.itemType === 'series' ? 'series' : 'movie', session.itemId),
-      } : {}),
-    })
-  }
-
-  // AIOStreams' own apps (Odin, Infuse, Swiftfin, its desktop app) report
-  // playback through Watch State, which none of the above can see - see
-  // utils/watchState.js liveViewings(). Added before the proxy merge, so a
-  // viewing that also streams through the proxy is shown once.
-  //
-  // A Jellyfin server's own sessions list does the same for people signed in
-  // to one - see utils/jellyfinLive.js.
-  try {
-    const { liveViewings } = require('./watchState')
-    const jellyfinViewings = require('./jellyfinLive').liveViewings(activeUsers.map((u) => u.id)).map((v) => ({ ...v, source: 'jellyfin' }))
-    for (const v of [...await liveViewings(prisma, accountIdValue || 'default'), ...jellyfinViewings]) {
-      const user = userMap.get(v.userId)
-      if (!user) continue
-      if (nowPlaying.some((np) => np.user.id === v.userId && np.item.id === v.itemId)) continue
-      nowPlaying.push({
-        user: {
-          id: user.id,
-          username: user.username || user.email,
-          email: user.email,
-          colorIndex: user.colorIndex || 0,
-          avatarUrl: user.avatarUrl || null,
-          useGravatar: user.useGravatar ?? false
-        },
-        item: {
-          id: v.itemId,
-          name: v.itemName || v.itemId,
-          type: v.itemType,
-          year: null,
-          poster: v.poster,
-          season: v.season,
-          episode: v.episode
-        },
-        videoId: v.videoId,
-        watchedAt: v.startedAt.toISOString(),
-        watchedAtTimestamp: v.startedAt.getTime(),
-        lastPosition: v.positionMs,
-        totalDuration: v.durationMs,
-        source: v.source || 'aiostreams',
-        // The device and app it's playing on, when the server says (Jellyfin does).
-        ...(v.device ? { device: v.device } : {}),
-        // A Jellyfin app has no link to open a title with, and a Stremio or
-        // Nuvio one would open the wrong app.
-        ...(v.source === 'jellyfin' ? {} : {
-          stremioAppUrl: buildStremioLinks(v.itemId, v.itemType === 'series' ? 'series' : 'movie', v.season, v.episode).appUrl,
-          nuvioAppUrl: buildNuvioAppUrl(v.itemType === 'series' ? 'series' : 'movie', v.itemId),
-        }),
-      })
+    let activeSessionsFromDb = [];
+    try {
+        activeSessionsFromDb = await prisma.watchSession.findMany({
+            orderBy: { startTime: "desc" },
+            where: {
+                accountId: accountIdValue || "default",
+                isActive: true,
+            },
+        });
+    } catch (error) {
+        console.warn(
+            "[MetricsBuilder] Failed to fetch active sessions from database:",
+            error.message
+        );
     }
-  } catch (error) {
-    console.warn('[MetricsBuilder] Failed to read AIOStreams viewings:', error.message)
-  }
 
-  // Reconcile against AIOStreams proxy-detected streams (see above).
-  try {
-    const { mergeProxyNowPlaying } = require('./proxyNowPlaying')
-    // Copied before the list is emptied: with no proxy streams to reconcile,
-    // the merge hands back this very array, and clearing it first used to
-    // wipe Now Playing whenever nothing had gone through the proxy lately.
-    const merged = [...await mergeProxyNowPlaying(prisma, accountIdValue || 'default', activeUsers, nowPlaying)]
-    nowPlaying.length = 0
-    nowPlaying.push(...merged)
-  } catch (error) {
-    console.warn('[MetricsBuilder] Failed to merge proxy now playing:', error.message)
-  }
+    for (const session of activeSessionsFromDb) {
+        const user = userMap.get(session.userId);
+        if (!user) {
+            continue;
+        }
+        // A session whose last checkpoint sits at the end of the runtime is a
+        // watch that ended, not one that is playing. sessionTracker closes such
+        // a session on its next poll; a session it creates from that final
+        // checkpoint stays active until the poll after that, and this keeps it
+        // out of the panel in between.
+        if (hasReachedEnd(session.lastPosition, session.totalDuration)) {
+            continue;
+        }
+        // Someone on a Jellyfin-compatible server has a real live signal - the
+        // server's own sessions list, added below - so a session only kept open
+        // by the library read's ~15-minute freshness window would leave a
+        // finished viewing on screen long after it stopped.
+        if (user.providerType === "jellyfin") {
+            continue;
+        }
 
-  // Most recent first.
-  nowPlaying.sort((a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp)
-  return nowPlaying
+        nowPlaying.push({
+            item: {
+                episode: session.episode,
+                id: session.itemId,
+                name: session.itemName,
+                poster: session.poster,
+                season: session.season,
+                type: session.itemType,
+                year: null,
+            },
+            // Position for the "resume here" quick-launch (Now Playing panel) -
+            // lastPosition is a direct snapshot value per WatchSession's own field
+            // comment ("always accurate the instant new data arrives"), safe to
+            // surface as-is, unlike overallTimeWatched which needs two
+            // observations to diff (see docs/runtime-behavior.md).
+            lastPosition: session.lastPosition ?? null,
+            totalDuration: session.totalDuration ?? null,
+            user: {
+                avatarUrl: user.avatarUrl || null,
+                colorIndex: user.colorIndex || 0,
+                email: user.email,
+                id: user.id,
+                useGravatar: user.useGravatar ?? false,
+                username: user.username || user.email,
+            },
+            videoId: session.videoId ?? null,
+            watchedAt: session.startTime.toISOString(),
+            watchedAtTimestamp: session.startTime.getTime(),
+            // Same episode-aware deep-link builder Continue Watching already uses
+            // (server/utils/appLinks.js) - not the plain client-side one, which
+            // has no season/episode parameter at all for series.
+            ...(session.itemId
+                ? {
+                      nuvioAppUrl: buildNuvioAppUrl(
+                          session.itemType === "series" ? "series" : "movie",
+                          session.itemId
+                      ),
+                      stremioAppUrl: buildStremioLinks(
+                          session.itemId,
+                          session.itemType === "series" ? "series" : "movie",
+                          session.season,
+                          session.episode
+                      ).appUrl,
+                  }
+                : {}),
+        });
+    }
+
+    // AIOStreams' own apps (Odin, Infuse, Swiftfin, its desktop app) report
+    // playback through Watch State, which none of the above can see - see
+    // utils/watchState.js liveViewings(). Added before the proxy merge, so a
+    // viewing that also streams through the proxy is shown once.
+    //
+    // A Jellyfin server's own sessions list does the same for people signed in
+    // to one - see utils/jellyfinLive.js.
+    try {
+        const { liveViewings } = require("./watchState");
+        const jellyfinViewings = require("./jellyfinLive")
+            .liveViewings(activeUsers.map((u) => u.id))
+            .map((v) => ({ ...v, source: "jellyfin" }));
+        for (const v of [
+            ...(await liveViewings(prisma, accountIdValue || "default")),
+            ...jellyfinViewings,
+        ]) {
+            const user = userMap.get(v.userId);
+            if (!user) {
+                continue;
+            }
+            if (nowPlaying.some((np) => np.user.id === v.userId && np.item.id === v.itemId)) {
+                continue;
+            }
+            nowPlaying.push({
+                item: {
+                    episode: v.episode,
+                    id: v.itemId,
+                    name: v.itemName || v.itemId,
+                    poster: v.poster,
+                    season: v.season,
+                    type: v.itemType,
+                    year: null,
+                },
+                lastPosition: v.positionMs,
+                source: v.source || "aiostreams",
+                totalDuration: v.durationMs,
+                user: {
+                    avatarUrl: user.avatarUrl || null,
+                    colorIndex: user.colorIndex || 0,
+                    email: user.email,
+                    id: user.id,
+                    useGravatar: user.useGravatar ?? false,
+                    username: user.username || user.email,
+                },
+                videoId: v.videoId,
+                watchedAt: v.startedAt.toISOString(),
+                watchedAtTimestamp: v.startedAt.getTime(),
+                // The device and app it's playing on, when the server says (Jellyfin does).
+                ...(v.device ? { device: v.device } : {}),
+                // A Jellyfin app has no link to open a title with, and a Stremio or
+                // Nuvio one would open the wrong app.
+                ...(v.source === "jellyfin"
+                    ? {}
+                    : {
+                          nuvioAppUrl: buildNuvioAppUrl(
+                              v.itemType === "series" ? "series" : "movie",
+                              v.itemId
+                          ),
+                          stremioAppUrl: buildStremioLinks(
+                              v.itemId,
+                              v.itemType === "series" ? "series" : "movie",
+                              v.season,
+                              v.episode
+                          ).appUrl,
+                      }),
+            });
+        }
+    } catch (error) {
+        console.warn("[MetricsBuilder] Failed to read AIOStreams viewings:", error.message);
+    }
+
+    // Reconcile against AIOStreams proxy-detected streams (see above).
+    try {
+        const { mergeProxyNowPlaying } = require("./proxyNowPlaying");
+        // Copied before the list is emptied: with no proxy streams to reconcile,
+        // the merge hands back this very array, and clearing it first used to
+        // wipe Now Playing whenever nothing had gone through the proxy lately.
+        const merged = [
+            ...(await mergeProxyNowPlaying(
+                prisma,
+                accountIdValue || "default",
+                activeUsers,
+                nowPlaying
+            )),
+        ];
+        nowPlaying.length = 0;
+        nowPlaying.push(...merged);
+    } catch (error) {
+        console.warn("[MetricsBuilder] Failed to merge proxy now playing:", error.message);
+    }
+
+    // Most recent first.
+    nowPlaying.sort((a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp);
+    return nowPlaying;
 }
 
 // Several dashboards and tabs ask within the same few seconds; one answer
 // serves them all. Short enough that a stream starting or stopping shows on
 // the next refresh.
-const LIVE_NOW_PLAYING_TTL_MS = 8 * 1000
-const liveNowPlayingMemo = new Map() // accountId -> { at, promise }
+const LIVE_NOW_PLAYING_TTL_MS = 8 * 1000;
+const liveNowPlayingMemo = new Map(); // accountId -> { at, promise }
 
 /** Forget the remembered list - a stream just started or stopped. */
 function invalidateLiveNowPlaying(accountId) {
-  liveNowPlayingMemo.delete(accountId || 'default')
+    liveNowPlayingMemo.delete(accountId || "default");
 }
 
 /** The current Now Playing list for an account, fresh to within a few seconds. */
 function liveNowPlaying(prisma, accountId) {
-  const accountIdValue = accountId || 'default'
-  const hit = liveNowPlayingMemo.get(accountIdValue)
-  if (hit && Date.now() - hit.at < LIVE_NOW_PLAYING_TTL_MS) return hit.promise
-  const promise = (async () => {
-    const activeUsers = await prisma.user.findMany({
-      where: { accountId: accountIdValue, isActive: true },
-      select: { id: true, username: true, email: true, colorIndex: true, avatarUrl: true, useGravatar: true, providerType: true, jellyfinServerKind: true, isActive: true },
-    })
-    return buildNowPlaying(prisma, accountIdValue, activeUsers)
-  })()
-  liveNowPlayingMemo.set(accountIdValue, { at: Date.now(), promise })
-  // A failed build must not be served for the rest of the window.
-  promise.catch(() => { if (liveNowPlayingMemo.get(accountIdValue)?.promise === promise) liveNowPlayingMemo.delete(accountIdValue) })
-  if (liveNowPlayingMemo.size > 500) liveNowPlayingMemo.delete(liveNowPlayingMemo.keys().next().value)
-  return promise
+    const accountIdValue = accountId || "default";
+    const hit = liveNowPlayingMemo.get(accountIdValue);
+    if (hit && Date.now() - hit.at < LIVE_NOW_PLAYING_TTL_MS) {
+        return hit.promise;
+    }
+    const promise = (async () => {
+        const activeUsers = await prisma.user.findMany({
+            select: {
+                avatarUrl: true,
+                colorIndex: true,
+                email: true,
+                id: true,
+                isActive: true,
+                jellyfinServerKind: true,
+                providerType: true,
+                useGravatar: true,
+                username: true,
+            },
+            where: { accountId: accountIdValue, isActive: true },
+        });
+        return buildNowPlaying(prisma, accountIdValue, activeUsers);
+    })();
+    liveNowPlayingMemo.set(accountIdValue, { at: Date.now(), promise });
+    // A failed build must not be served for the rest of the window.
+    promise.catch(() => {
+        if (liveNowPlayingMemo.get(accountIdValue)?.promise === promise) {
+            liveNowPlayingMemo.delete(accountIdValue);
+        }
+    });
+    if (liveNowPlayingMemo.size > 500) {
+        liveNowPlayingMemo.delete(liveNowPlayingMemo.keys().next().value);
+    }
+    return promise;
 }
 
-async function buildMetricsForAccount({ prisma, accountId, period = '30d', decrypt, deepActivity = false }) {
-  const activityTake = deepActivity ? ACTIVITY_TAKE_DEEP : ACTIVITY_TAKE
-  if (!accountId) {
-    throw new Error('accountId is required to build metrics')
-  }
-
-  const accountTimeZone = await resolveAccountTimezone(prisma, accountId)
-
-  // Calculate date range based on period
-  let startDate = new Date()
-  switch (period) {
-    case '1h':
-      startDate.setHours(startDate.getHours() - 1)
-      break
-    case '12h':
-      startDate.setHours(startDate.getHours() - 12)
-      break
-    case '1d':
-      startDate.setDate(startDate.getDate() - 1)
-      break
-    case '3d':
-      startDate.setDate(startDate.getDate() - 3)
-      break
-    case '7d':
-      startDate.setDate(startDate.getDate() - 7)
-      break
-    case '30d':
-      startDate.setDate(startDate.getDate() - 30)
-      break
-    case '90d':
-      startDate.setDate(startDate.getDate() - 90)
-      break
-    case '1y':
-      startDate.setFullYear(startDate.getFullYear() - 1)
-      break
-    case 'all':
-      startDate = new Date(0)
-      break
-    default:
-      startDate.setDate(startDate.getDate() - 30)
-  }
-
-  // Get all users for this account
-  const allUsers = await prisma.user.findMany({
-    where: { accountId },
-    select: {
-      id: true,
-      username: true,
-      email: true,
-      createdAt: true,
-      isActive: true,
-      stremioAuthKey: true,
-      inviteCode: true,
-      colorIndex: true,
-      avatarUrl: true,
-      useGravatar: true,
-      nuvioProfileId: true,
-      providerType: true,
-      jellyfinServerKind: true,
-      excludeFromHouseholdStats: true
-    },
-    orderBy: { createdAt: 'asc' }
-  })
-
-  // User joins
-  const userJoinsByDay = {}
-  const userJoinsByWeek = {}
-  const userJoinsByMonth = {}
-
-  allUsers.forEach(user => {
-    const date = new Date(user.createdAt)
-    if (period !== 'all' && date < startDate) return
-
-    // createdAt is a real timestamp (unlike WatchActivity.date, which is
-    // pre-bucketed to account-day at write time), so bucketing it by UTC day
-    // put anyone who signed up late in the account's own day into "tomorrow"
-    // on the New Signups chart, for any account west of UTC (including this
-    // project's own documented default, America/Los_Angeles).
-    const dayKey = getAccountDateString(date, accountTimeZone)
-    userJoinsByDay[dayKey] = (userJoinsByDay[dayKey] || 0) + 1
-
-    const weekStart = new Date(date)
-    weekStart.setDate(date.getDate() - date.getDay())
-    const weekNum = Math.ceil((weekStart.getDate() + 6) / 7)
-    const weekKey = `${weekStart.getFullYear()}-W${String(weekNum).padStart(2, '0')}`
-    userJoinsByWeek[weekKey] = (userJoinsByWeek[weekKey] || 0) + 1
-
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-    userJoinsByMonth[monthKey] = (userJoinsByMonth[monthKey] || 0) + 1
-  })
-
-  // Watch activity & time from WatchActivity table (accurate daily deltas)
-  // We include all active users, even if they don't have a Stremio auth key,
-  // because they might have library-email.json files.
-  const activeUsers = allUsers.filter(u => u.isActive)
-  const watchActivityByDay = {}
-  const watchActivityByUser = {}
-  const watchTimeByDay = {}
-  const watchActivityByDayPerUser = {}
-  const watchTimeByItem = {} // Track watch time per itemId
-  let totalMovies = 0
-  let totalShows = 0
-  let totalWatchTime = 0
-
-  // Try to use WatchActivity first (accurate daily deltas)
-  const accountIdValue = accountId || 'default'
-  // startDate is a real "N days/hours ago from right now" timestamp, not a
-  // pre-bucketed account-day value - deriving its day string via account
-  // timezone (not UTC) keeps this period-start boundary aligned with the
-  // account-day keys everything else in this chart is compared against.
-  const startDateStr = getAccountDateString(startDate, accountTimeZone)
-
-  // Track if we have any WatchActivity data
-  let hasWatchActivityData = false
-  let earliestWatchActivityDate = null
-  let earliestSnapshotDate = null
-
-  // Find the earliest snapshot date to know when we started tracking
-  try {
-    const earliestSnapshot = await prisma.watchSnapshot.findFirst({
-      where: {
-        accountId: accountIdValue
-      },
-      select: {
-        date: true
-      },
-      orderBy: {
-        date: 'asc'
-      }
-    })
-    if (earliestSnapshot) {
-      earliestSnapshotDate = earliestSnapshot.date
-    }
-  } catch (error) {
-    console.warn(`[Metrics] Error fetching earliest snapshot:`, error.message)
-  }
-
-  // Track DB activity to avoid double counting in fallback
-  const dbActivityKeys = new Set() 
-  let watchActivities = []
-
-  try {
-    // For short periods (1h, 12h, 24h, 1d, 3d), filter by createdAt timestamp, not just date
-    // For longer periods, date filtering is sufficient
-    const useTimestampFilter = period === '1h' || period === '12h' || period === '24h' || period === '1d' || period === '3d'
-
-    const whereClause = {
-      accountId: accountIdValue
+async function buildMetricsForAccount({
+    prisma,
+    accountId,
+    period = "30d",
+    decrypt: _decrypt,
+    deepActivity = false,
+}) {
+    const activityTake = deepActivity ? ACTIVITY_TAKE_DEEP : ACTIVITY_TAKE;
+    if (!accountId) {
+        throw new Error("accountId is required to build metrics");
     }
 
-    if (useTimestampFilter) {
-      // Filter by createdAt timestamp for accurate short-period filtering
-      whereClause.createdAt = {
-        gte: startDate
-      }
-    } else {
-      // Filter by date field for longer periods
-      whereClause.date = {
-        gte: new Date(startDateStr)
-      }
+    const accountTimeZone = await resolveAccountTimezone(prisma, accountId);
+
+    // Calculate date range based on period
+    let startDate = new Date();
+    switch (period) {
+        case "1h":
+            startDate.setHours(startDate.getHours() - 1);
+            break;
+        case "12h":
+            startDate.setHours(startDate.getHours() - 12);
+            break;
+        case "1d":
+            startDate.setDate(startDate.getDate() - 1);
+            break;
+        case "3d":
+            startDate.setDate(startDate.getDate() - 3);
+            break;
+        case "7d":
+            startDate.setDate(startDate.getDate() - 7);
+            break;
+        case "30d":
+            startDate.setDate(startDate.getDate() - 30);
+            break;
+        case "90d":
+            startDate.setDate(startDate.getDate() - 90);
+            break;
+        case "1y":
+            startDate.setFullYear(startDate.getFullYear() - 1);
+            break;
+        case "all":
+            startDate = new Date(0);
+            break;
+        default:
+            startDate.setDate(startDate.getDate() - 30);
     }
 
-    watchActivities = await prisma.watchActivity.findMany({
-      where: whereClause,
-      select: {
-        userId: true,
-        itemId: true,
-        date: true,
-        createdAt: true,
-        watchTimeSeconds: true,
-        itemType: true,
-        profileLabel: true
-      },
-      orderBy: { date: 'asc' }
-    })
+    // Get all users for this account
+    const allUsers = await prisma.user.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+            avatarUrl: true,
+            colorIndex: true,
+            createdAt: true,
+            email: true,
+            excludeFromHouseholdStats: true,
+            id: true,
+            inviteCode: true,
+            isActive: true,
+            jellyfinServerKind: true,
+            nuvioProfileId: true,
+            providerType: true,
+            stremioAuthKey: true,
+            useGravatar: true,
+            username: true,
+        },
+        where: { accountId },
+    });
 
-    // Same same-email phantom-duplicate problem dedupWatchActivityBySharedEmail
-    // already solves for the per-user watch-time-by-day chart and the user
-    // list's totalWatchTimeMinutes (see server/utils/watchDedup.js) - this is
-    // the third WatchActivity-aggregation call site (Top Viewers/leaderboard,
-    // via watchActivityByUser below) and was missed when that dedup was
-    // added elsewhere, so a shared-email pair's Stremio-library-sync phantom
-    // watch was double-counted here specifically.
-    const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require('./watchDedup')
-    watchActivities = dedupWatchActivityBySharedEmail(watchActivities, findSharedEmailUserIds(allUsers))
-    // People left out of household numbers (a test or guest) count toward
-    // nothing built from here: totals, the charts and Top Viewers.
-    const leftOut = new Set(allUsers.filter((u) => u.excludeFromHouseholdStats).map((u) => u.id))
-    if (leftOut.size) watchActivities = watchActivities.filter((a) => !leftOut.has(a.userId))
+    // User joins
+    const userJoinsByDay = {};
+    const userJoinsByWeek = {};
+    const userJoinsByMonth = {};
 
-    hasWatchActivityData = watchActivities.length > 0
-    if (hasWatchActivityData) {
-      earliestWatchActivityDate = watchActivities[0].date
-    }
-
-    // Use earliest snapshot date if available (either as the start date, or if earlier than WatchActivity)
-    if (earliestSnapshotDate) {
-      if (!earliestWatchActivityDate || earliestSnapshotDate < earliestWatchActivityDate) {
-        earliestWatchActivityDate = earliestSnapshotDate
-      }
-    }
-
-    // Process WatchActivity data
-    const userItemSet = new Set() // Track unique user+item combinations for counting
-    const userItemByDay = new Map() // Track unique items per day per user
-    const userMap = new Map(allUsers.map(u => [u.id, u]))
-
-    for (const activity of watchActivities) {
-      const userId = activity.userId
-      
-      // Only include activity for users that currently exist in the database
-      const dbUser = userMap.get(userId)
-      if (!dbUser) continue
-
-      const itemId = activity.itemId
-      const date = activity.date.toISOString().split('T')[0]
-      let watchTime = activity.watchTimeSeconds || 0
-      const itemType = activity.itemType
-
-      // Track that we have DB data for this user+item+date
-      dbActivityKeys.add(`${userId}:${itemId}:${date}`)
-
-      // For "1h" period, cap watch time at 1 hour (3600 seconds) per activity
-      // This prevents showing more than 1 hour when activities span longer periods
-      if (period === '1h' && watchTime > 3600) {
-        watchTime = 3600
-      }
-
-      // Initialize user data
-      if (!watchActivityByUser[userId]) {
-        watchActivityByUser[userId] = {
-          id: userId,
-          username: dbUser.username || dbUser.email || userId,
-          email: dbUser.email || null,
-          colorIndex: dbUser.colorIndex || 0,
-          avatarUrl: dbUser.avatarUrl || null,
-          useGravatar: dbUser.useGravatar ?? false,
-          dates: new Set(),
-          movies: 0,
-          shows: 0,
-          total: 0,
-          watchTime: 0,
-          watchTimeMovies: 0,
-          watchTimeShows: 0
-        }
-      }
-      if (!watchActivityByDayPerUser[userId]) {
-        watchActivityByDayPerUser[userId] = {}
-      }
-      if (!watchActivityByDayPerUser[userId][date]) {
-        watchActivityByDayPerUser[userId][date] = { movies: 0, shows: 0, total: 0 }
-      }
-      if (!watchActivityByDay[date]) {
-        watchActivityByDay[date] = { movies: 0, shows: 0, total: 0 }
-      }
-      if (!watchTimeByDay[date]) {
-        watchTimeByDay[date] = 0
-      }
-
-      // Only count items and watch time if the date is on or after the earliest tracking date
-      const activityDateStr = date
-      const shouldCount = !earliestWatchActivityDate || activityDateStr >= earliestWatchActivityDate.toISOString().split('T')[0]
-
-      if (shouldCount) {
-        watchActivityByUser[userId].dates.add(date)
-
-        // Track unique items (count once per user, not per day)
-        // Use base item ID to count unique series/movies, not episodes
-        const baseItemId = getBaseItemId(itemId, itemType)
-        const userItemKey = `${userId}:${baseItemId}`
-        if (!userItemSet.has(userItemKey)) {
-          userItemSet.add(userItemKey)
-          if (itemType === 'movie') {
-            watchActivityByUser[userId].movies++
-            totalMovies++
-          } else if (itemType === 'series') {
-            watchActivityByUser[userId].shows++
-            totalShows++
-          }
-          watchActivityByUser[userId].total++
+    allUsers.forEach((user) => {
+        const date = new Date(user.createdAt);
+        if (period !== "all" && date < startDate) {
+            return;
         }
 
-        // Accumulate watch time
-        watchActivityByUser[userId].watchTime += watchTime
-        watchTimeByDay[date] += watchTime
-        totalWatchTime += watchTime
+        // createdAt is a real timestamp (unlike WatchActivity.date, which is
+        // pre-bucketed to account-day at write time), so bucketing it by UTC day
+        // put anyone who signed up late in the account's own day into "tomorrow"
+        // on the New Signups chart, for any account west of UTC (including this
+        // project's own documented default, America/Los_Angeles).
+        const dayKey = getAccountDateString(date, accountTimeZone);
+        userJoinsByDay[dayKey] = (userJoinsByDay[dayKey] || 0) + 1;
 
-        if (itemType === 'movie') {
-          watchActivityByUser[userId].watchTimeMovies += watchTime
-        } else if (itemType === 'series') {
-          watchActivityByUser[userId].watchTimeShows += watchTime
-        }
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay());
+        const weekNum = Math.ceil((weekStart.getDate() + 6) / 7);
+        const weekKey = `${weekStart.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+        userJoinsByWeek[weekKey] = (userJoinsByWeek[weekKey] || 0) + 1;
 
-        // Track watch time per itemId
-        if (!watchTimeByItem[itemId]) {
-          watchTimeByItem[itemId] = {
-            itemId,
-            itemType,
-            watchTimeSeconds: 0,
-            watchTimeHours: 0
-          }
-        }
-        watchTimeByItem[itemId].watchTimeSeconds += watchTime
-      }
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+        userJoinsByMonth[monthKey] = (userJoinsByMonth[monthKey] || 0) + 1;
+    });
 
-      // Track unique items per day (for daily activity counts)
-      // Use base item ID to count unique series/movies per day, not episodes
-      const baseItemId = getBaseItemId(itemId, itemType)
-      const dayUserItemKey = `${date}:${userId}:${baseItemId}`
-      if (!userItemByDay.has(dayUserItemKey)) {
-        userItemByDay.set(dayUserItemKey, true)
-        if (itemType === 'movie') {
-          watchActivityByDay[date].movies++
-          watchActivityByDayPerUser[userId][date].movies++
-        } else if (itemType === 'series') {
-          watchActivityByDay[date].shows++
-          watchActivityByDayPerUser[userId][date].shows++
+    // Watch activity & time from WatchActivity table (accurate daily deltas)
+    // We include all active users, even if they don't have a Stremio auth key,
+    // because they might have library-email.json files.
+    const activeUsers = allUsers.filter((u) => u.isActive);
+    const watchActivityByDay = {};
+    const watchActivityByUser = {};
+    const watchTimeByDay = {};
+    const watchActivityByDayPerUser = {};
+    const watchTimeByItem = {}; // Track watch time per itemId
+    let totalMovies = 0;
+    let totalShows = 0;
+    let totalWatchTime = 0;
+
+    // Try to use WatchActivity first (accurate daily deltas)
+    const accountIdValue = accountId || "default";
+    // startDate is a real "N days/hours ago from right now" timestamp, not a
+    // pre-bucketed account-day value - deriving its day string via account
+    // timezone (not UTC) keeps this period-start boundary aligned with the
+    // account-day keys everything else in this chart is compared against.
+    const startDateStr = getAccountDateString(startDate, accountTimeZone);
+
+    // Track if we have any WatchActivity data
+    let hasWatchActivityData = false;
+    let earliestWatchActivityDate = null;
+    let earliestSnapshotDate = null;
+
+    // Find the earliest snapshot date to know when we started tracking
+    try {
+        const earliestSnapshot = await prisma.watchSnapshot.findFirst({
+            orderBy: {
+                date: "asc",
+            },
+            select: {
+                date: true,
+            },
+            where: {
+                accountId: accountIdValue,
+            },
+        });
+        if (earliestSnapshot) {
+            earliestSnapshotDate = earliestSnapshot.date;
         }
-        watchActivityByDay[date].total++
-        watchActivityByDayPerUser[userId][date].total++
-      }
+    } catch (error) {
+        console.warn("[Metrics] Error fetching earliest snapshot:", error.message);
     }
-  } catch (error) {
-    console.warn(`[Metrics] Error fetching WatchActivity:`, error.message)
-    // No fallback - metrics require accurate DB data for time-based calculations
-  }
 
-  // Note: Library JSON fallback has been removed from metrics calculation
-  // Metrics now rely exclusively on WatchActivity table data for accurate time-based tracking
-  // The activityMonitor syncs library data to DB every 5 minutes
-  // This provides accurate per-day, per-episode, per-session tracking
-  const shouldUseFallback = false
+    // Track DB activity to avoid double counting in fallback
+    const dbActivityKeys = new Set();
+    let watchActivities = [];
 
-  const userJoinsChart = Object.entries(userJoinsByDay)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, count]) => ({ date, count: Number(count) }))
+    try {
+        // For short periods (1h, 12h, 24h, 1d, 3d), filter by createdAt timestamp, not just date
+        // For longer periods, date filtering is sufficient
+        const useTimestampFilter =
+            period === "1h" ||
+            period === "12h" ||
+            period === "24h" ||
+            period === "1d" ||
+            period === "3d";
 
-  // Filter watchActivityChart to only include dates where we have actual WatchActivity data
-  // OR if using fallback, allow older dates
-  const watchActivityChart = Object.entries(watchActivityByDay)
-    .filter(([date]) => {
-      // If fallback is enabled, show all dates that are within the requested period
-      if (shouldUseFallback) {
-        // If period is 'all', show everything. Otherwise check start date.
-        if (period === 'all') return true
-        return date >= startDateStr
-      }
-      
-      // If fallback disabled, respect earliest snapshot/activity date
-      if (earliestWatchActivityDate) {
-        return date >= earliestWatchActivityDate.toISOString().split('T')[0]
-      }
-      return true
-    })
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, data]) => ({
-      date,
-      movies: data.movies,
-      shows: data.shows,
-      total: data.total
-    }))
+        const whereClause = {
+            accountId: accountIdValue,
+        };
 
+        if (useTimestampFilter) {
+            // Filter by createdAt timestamp for accurate short-period filtering
+            whereClause.createdAt = {
+                gte: startDate,
+            };
+        } else {
+            // Filter by date field for longer periods
+            whereClause.date = {
+                gte: new Date(startDateStr),
+            };
+        }
 
+        watchActivities = await prisma.watchActivity.findMany({
+            orderBy: { date: "asc" },
+            select: {
+                createdAt: true,
+                date: true,
+                itemId: true,
+                itemType: true,
+                profileLabel: true,
+                userId: true,
+                watchTimeSeconds: true,
+            },
+            where: whereClause,
+        });
 
+        // Same same-email phantom-duplicate problem dedupWatchActivityBySharedEmail
+        // already solves for the per-user watch-time-by-day chart and the user
+        // list's totalWatchTimeMinutes (see server/utils/watchDedup.js) - this is
+        // the third WatchActivity-aggregation call site (Top Viewers/leaderboard,
+        // via watchActivityByUser below) and was missed when that dedup was
+        // added elsewhere, so a shared-email pair's Stremio-library-sync phantom
+        // watch was double-counted here specifically.
+        const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require("./watchDedup");
+        watchActivities = dedupWatchActivityBySharedEmail(
+            watchActivities,
+            findSharedEmailUserIds(allUsers)
+        );
+        // People left out of household numbers (a test or guest) count toward
+        // nothing built from here: totals, the charts and Top Viewers.
+        const leftOut = new Set(
+            allUsers.filter((u) => u.excludeFromHouseholdStats).map((u) => u.id)
+        );
+        if (leftOut.size) {
+            watchActivities = watchActivities.filter((a) => !leftOut.has(a.userId));
+        }
 
+        hasWatchActivityData = watchActivities.length > 0;
+        if (hasWatchActivityData) {
+            earliestWatchActivityDate = watchActivities[0].date;
+        }
 
-  const watchActivityByUserByDayCharts = Object.fromEntries(
-    Object.entries(watchActivityByDayPerUser).map(([userId, days]) => {
-      const series = Object.entries(days)
+        // Use earliest snapshot date if available (either as the start date, or if earlier than WatchActivity)
+        if (
+            earliestSnapshotDate &&
+            (!earliestWatchActivityDate || earliestSnapshotDate < earliestWatchActivityDate)
+        ) {
+            earliestWatchActivityDate = earliestSnapshotDate;
+        }
+
+        // Process WatchActivity data
+        const userItemSet = new Set(); // Track unique user+item combinations for counting
+        const userItemByDay = new Map(); // Track unique items per day per user
+        const userMap = new Map(allUsers.map((u) => [u.id, u]));
+
+        for (const activity of watchActivities) {
+            const userId = activity.userId;
+
+            // Only include activity for users that currently exist in the database
+            const dbUser = userMap.get(userId);
+            if (!dbUser) {
+                continue;
+            }
+
+            const itemId = activity.itemId;
+            const date = activity.date.toISOString().split("T")[0];
+            let watchTime = activity.watchTimeSeconds || 0;
+            const itemType = activity.itemType;
+
+            // Track that we have DB data for this user+item+date
+            dbActivityKeys.add(`${userId}:${itemId}:${date}`);
+
+            // For "1h" period, cap watch time at 1 hour (3600 seconds) per activity
+            // This prevents showing more than 1 hour when activities span longer periods
+            if (period === "1h" && watchTime > 3600) {
+                watchTime = 3600;
+            }
+
+            // Initialize user data
+            if (!watchActivityByUser[userId]) {
+                watchActivityByUser[userId] = {
+                    avatarUrl: dbUser.avatarUrl || null,
+                    colorIndex: dbUser.colorIndex || 0,
+                    dates: new Set(),
+                    email: dbUser.email || null,
+                    id: userId,
+                    movies: 0,
+                    shows: 0,
+                    total: 0,
+                    useGravatar: dbUser.useGravatar ?? false,
+                    username: dbUser.username || dbUser.email || userId,
+                    watchTime: 0,
+                    watchTimeMovies: 0,
+                    watchTimeShows: 0,
+                };
+            }
+            if (!watchActivityByDayPerUser[userId]) {
+                watchActivityByDayPerUser[userId] = {};
+            }
+            if (!watchActivityByDayPerUser[userId][date]) {
+                watchActivityByDayPerUser[userId][date] = { movies: 0, shows: 0, total: 0 };
+            }
+            if (!watchActivityByDay[date]) {
+                watchActivityByDay[date] = { movies: 0, shows: 0, total: 0 };
+            }
+            if (!watchTimeByDay[date]) {
+                watchTimeByDay[date] = 0;
+            }
+
+            // Only count items and watch time if the date is on or after the earliest tracking date
+            const activityDateStr = date;
+            const shouldCount =
+                !earliestWatchActivityDate ||
+                activityDateStr >= earliestWatchActivityDate.toISOString().split("T")[0];
+
+            if (shouldCount) {
+                watchActivityByUser[userId].dates.add(date);
+
+                // Track unique items (count once per user, not per day)
+                // Use base item ID to count unique series/movies, not episodes
+                const baseItemId = getBaseItemId(itemId, itemType);
+                const userItemKey = `${userId}:${baseItemId}`;
+                if (!userItemSet.has(userItemKey)) {
+                    userItemSet.add(userItemKey);
+                    if (itemType === "movie") {
+                        watchActivityByUser[userId].movies++;
+                        totalMovies++;
+                    } else if (itemType === "series") {
+                        watchActivityByUser[userId].shows++;
+                        totalShows++;
+                    }
+                    watchActivityByUser[userId].total++;
+                }
+
+                // Accumulate watch time
+                watchActivityByUser[userId].watchTime += watchTime;
+                watchTimeByDay[date] += watchTime;
+                totalWatchTime += watchTime;
+
+                if (itemType === "movie") {
+                    watchActivityByUser[userId].watchTimeMovies += watchTime;
+                } else if (itemType === "series") {
+                    watchActivityByUser[userId].watchTimeShows += watchTime;
+                }
+
+                // Track watch time per itemId
+                if (!watchTimeByItem[itemId]) {
+                    watchTimeByItem[itemId] = {
+                        itemId,
+                        itemType,
+                        watchTimeHours: 0,
+                        watchTimeSeconds: 0,
+                    };
+                }
+                watchTimeByItem[itemId].watchTimeSeconds += watchTime;
+            }
+
+            // Track unique items per day (for daily activity counts)
+            // Use base item ID to count unique series/movies per day, not episodes
+            const baseItemId = getBaseItemId(itemId, itemType);
+            const dayUserItemKey = `${date}:${userId}:${baseItemId}`;
+            if (!userItemByDay.has(dayUserItemKey)) {
+                userItemByDay.set(dayUserItemKey, true);
+                if (itemType === "movie") {
+                    watchActivityByDay[date].movies++;
+                    watchActivityByDayPerUser[userId][date].movies++;
+                } else if (itemType === "series") {
+                    watchActivityByDay[date].shows++;
+                    watchActivityByDayPerUser[userId][date].shows++;
+                }
+                watchActivityByDay[date].total++;
+                watchActivityByDayPerUser[userId][date].total++;
+            }
+        }
+    } catch (error) {
+        console.warn("[Metrics] Error fetching WatchActivity:", error.message);
+        // No fallback - metrics require accurate DB data for time-based calculations
+    }
+
+    // Note: Library JSON fallback has been removed from metrics calculation
+    // Metrics now rely exclusively on WatchActivity table data for accurate time-based tracking
+    // The activityMonitor syncs library data to DB every 5 minutes
+    // This provides accurate per-day, per-episode, per-session tracking
+    const shouldUseFallback = false;
+
+    const userJoinsChart = Object.entries(userJoinsByDay)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, count]) => ({ count: Number(count), date }));
+
+    // Filter watchActivityChart to only include dates where we have actual WatchActivity data
+    // OR if using fallback, allow older dates
+    const watchActivityChart = Object.entries(watchActivityByDay)
         .filter(([date]) => {
-          // If fallback is enabled, show all dates that are within the requested period
-          if (shouldUseFallback) {
-            if (period === 'all') return true
-            return date >= startDateStr
-          }
+            // If fallback is enabled, show all dates that are within the requested period
+            if (shouldUseFallback) {
+                // If period is 'all', show everything. Otherwise check start date.
+                if (period === "all") {
+                    return true;
+                }
+                return date >= startDateStr;
+            }
 
-          // If fallback disabled, respect earliest snapshot/activity date
-          if (earliestWatchActivityDate) {
-            return date >= earliestWatchActivityDate.toISOString().split('T')[0]
-          }
-          return true
+            // If fallback disabled, respect earliest snapshot/activity date
+            if (earliestWatchActivityDate) {
+                return date >= earliestWatchActivityDate.toISOString().split("T")[0];
+            }
+            return true;
         })
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([date, data]) => ({
-          date,
-          movies: data.movies,
-          shows: data.shows,
-          total: data.total
+            date,
+            movies: data.movies,
+            shows: data.shows,
+            total: data.total,
+        }));
+
+    const watchActivityByUserByDayCharts = Object.fromEntries(
+        Object.entries(watchActivityByDayPerUser).map(([userId, days]) => {
+            const series = Object.entries(days)
+                .filter(([date]) => {
+                    // If fallback is enabled, show all dates that are within the requested period
+                    if (shouldUseFallback) {
+                        if (period === "all") {
+                            return true;
+                        }
+                        return date >= startDateStr;
+                    }
+
+                    // If fallback disabled, respect earliest snapshot/activity date
+                    if (earliestWatchActivityDate) {
+                        return date >= earliestWatchActivityDate.toISOString().split("T")[0];
+                    }
+                    return true;
+                })
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([date, data]) => ({
+                    date,
+                    movies: data.movies,
+                    shows: data.shows,
+                    total: data.total,
+                }));
+            return [userId, series];
+        })
+    );
+
+    // Convert watchTimeByItem to array and calculate hours
+    const watchTimeByItemArray = Object.values(watchTimeByItem)
+        .map((item) => ({
+            ...item,
+            watchTimeHours: Math.round((item.watchTimeSeconds / 3600) * 100) / 100,
         }))
-      return [userId, series]
-    })
-  )
+        .sort((a, b) => b.watchTimeSeconds - a.watchTimeSeconds); // Sort by watch time descending
 
-  // Convert watchTimeByItem to array and calculate hours
-  const watchTimeByItemArray = Object.values(watchTimeByItem)
-    .map(item => ({
-      ...item,
-      watchTimeHours: Math.round((item.watchTimeSeconds / 3600) * 100) / 100
-    }))
-    .sort((a, b) => b.watchTimeSeconds - a.watchTimeSeconds) // Sort by watch time descending
+    // Calculate "Now Playing" - users watching recently
+    // Use a 7.5-minute window (1.5x interval) to match session tracker logic
+    // This ensures we catch active watchers even if there's sync delay
+    let nowPlaying = [];
+    const startedPlaying = [];
 
-  // Calculate "Now Playing" - users watching recently
-  // Use a 7.5-minute window (1.5x interval) to match session tracker logic
-  // This ensures we catch active watchers even if there's sync delay
-  let nowPlaying = []
-  const startedPlaying = []
-
-  // Helper function to get watch date (same logic as activityMonitor)
-  // IMPORTANT: Only use state.lastWatched - this is the actual watch timestamp
-  // Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
-  function getWatchDate(item) {
-    if (item.state?.lastWatched) {
-      const d = new Date(item.state.lastWatched)
-      if (!isNaN(d.getTime())) return d
-    }
-    return null
-  }
-
-  function isActuallyWatched(item) {
-    // Nonzero position/overallTimeWatched alone is NOT reliable "watched"
-    // evidence - Nuvio records some position even for brief preview/hover
-    // autoplay while browsing the library. Require it to be a meaningful
-    // fraction of the item's actual runtime instead.
-    const state = item.state || {}
-    const timeWatched = Number(state.timeWatched || 0)
-    if (timeWatched > 0) return true
-
-    const progressMs = Math.max(Number(state.timeOffset || 0), Number(state.overallTimeWatched || 0))
-    if (progressMs <= 0) return false
-
-    const duration = Number(state.duration || 0)
-    if (duration > 0) {
-      return (progressMs / duration) > 0.05
-    }
-
-    return !!(state.video_id && state.video_id.trim() !== '')
-  }
-
-
-  // Helper function to extract season/episode info from an item
-  async function extractSeasonEpisode(item) {
-    let season = item.state?.season
-    let episode = item.state?.episode
-
-    if (item.state?.video_id) {
-      const videoId = item.state.video_id
-      const videoIdParts = videoId.split(':')
-
-      // Handle Kitsu IDs: format "kitsu:46676:1" -> episode = last segment, season from Kitsu API title
-      if (videoId.startsWith('kitsu:') && videoIdParts.length >= 3) {
-        const kitsuId = videoIdParts[1] // e.g., "46676" or "12"
-        const episodePart = videoIdParts[videoIdParts.length - 1]
-        const parsedEpisode = parseInt(episodePart, 10)
-
-        // Always extract episode from video_id for Kitsu items (override state value)
-        if (!isNaN(parsedEpisode)) {
-          episode = parsedEpisode
-        }
-
-        // Fetch season from Kitsu API if not already set to a valid value (> 0)
-        if ((season === undefined || season === null || season === 0) && kitsuId) {
-          try {
-            const kitsuData = await fetchKitsuMetadata(kitsuId)
-            if (kitsuData && kitsuData.season !== null) {
-              season = kitsuData.season
-            } else {
-              // Default to 1 if Kitsu API doesn't return a season (common for anime without explicit season numbers)
-              season = 1
+    // Helper function to get watch date (same logic as activityMonitor)
+    // IMPORTANT: Only use state.lastWatched - this is the actual watch timestamp
+    // Do NOT use _mtime - that's just when the library item was modified (e.g., added to library)
+    function getWatchDate(item) {
+        if (item.state?.lastWatched) {
+            const d = new Date(item.state.lastWatched);
+            if (!Number.isNaN(d.getTime())) {
+                return d;
             }
-          } catch (error) {
-            console.warn(`[MetricsBuilder] Failed to fetch Kitsu metadata for ID ${kitsuId}:`, error.message)
-            // Default to 1 if API call fails
-            season = 1
-          }
-        } else if (season === undefined || season === null || season === 0) {
-          // If no kitsuId but it's a kitsu video_id, default season to 1
-          season = 1
         }
-      }
-      // Handle standard IMDb format: "tt8080122:4:6" (season 4, episode 6)
-      else if (videoIdParts.length >= 3 && videoIdParts[0].startsWith('tt')) {
-        season = parseInt(videoIdParts[1], 10) || season
-        episode = parseInt(videoIdParts[2], 10) || episode
-      }
-      // Handle format: "tt8080122:6" (episode 6 only, no season or season 0)
-      else if (videoIdParts.length === 2 && videoIdParts[0].startsWith('tt')) {
-        episode = parseInt(videoIdParts[1], 10) || episode
-        if (season === undefined) season = 0
-      }
+        return null;
     }
 
-    return { season, episode }
-  }
+    function isActuallyWatched(item) {
+        // Nonzero position/overallTimeWatched alone is NOT reliable "watched"
+        // evidence - Nuvio records some position even for brief preview/hover
+        // autoplay while browsing the library. Require it to be a meaningful
+        // fraction of the item's actual runtime instead.
+        const state = item.state || {};
+        const timeWatched = Number(state.timeWatched || 0);
+        if (timeWatched > 0) {
+            return true;
+        }
 
-  const now = Date.now()
+        const progressMs = Math.max(
+            Number(state.timeOffset || 0),
+            Number(state.overallTimeWatched || 0)
+        );
+        if (progressMs <= 0) {
+            return false;
+        }
 
-  // Built by buildNowPlaying (above), from both signals - see its comments.
-  nowPlaying = await buildNowPlaying(prisma, accountIdValue, activeUsers)
+        const duration = Number(state.duration || 0);
+        if (duration > 0) {
+            return progressMs / duration > 0.05;
+        }
 
-  // Build startedPlaying from library cache (for period-based metrics, not UI display)
-  const periodStartTime = startDate.getTime()
-  for (const user of activeUsers) {
+        return !!(state.video_id && state.video_id.trim() !== "");
+    }
+
+    // Helper function to extract season/episode info from an item
+    async function extractSeasonEpisode(item) {
+        let season = item.state?.season;
+        let episode = item.state?.episode;
+
+        if (item.state?.video_id) {
+            const videoId = item.state.video_id;
+            const videoIdParts = videoId.split(":");
+
+            // Handle Kitsu IDs: format "kitsu:46676:1" -> episode = last segment, season from Kitsu API title
+            if (videoId.startsWith("kitsu:") && videoIdParts.length >= 3) {
+                const kitsuId = videoIdParts[1]; // e.g., "46676" or "12"
+                const episodePart = videoIdParts.at(-1);
+                const parsedEpisode = Number.parseInt(episodePart, 10);
+
+                // Always extract episode from video_id for Kitsu items (override state value)
+                if (!Number.isNaN(parsedEpisode)) {
+                    episode = parsedEpisode;
+                }
+
+                // Fetch season from Kitsu API if not already set to a valid value (> 0)
+                if ((season === undefined || season === null || season === 0) && kitsuId) {
+                    try {
+                        const kitsuData = await fetchKitsuMetadata(kitsuId);
+                        if (kitsuData && kitsuData.season !== null) {
+                            season = kitsuData.season;
+                        } else {
+                            // Default to 1 if Kitsu API doesn't return a season (common for anime without explicit season numbers)
+                            season = 1;
+                        }
+                    } catch (error) {
+                        console.warn(
+                            `[MetricsBuilder] Failed to fetch Kitsu metadata for ID ${kitsuId}:`,
+                            error.message
+                        );
+                        // Default to 1 if API call fails
+                        season = 1;
+                    }
+                } else if (season === undefined || season === null || season === 0) {
+                    // If no kitsuId but it's a kitsu video_id, default season to 1
+                    season = 1;
+                }
+            }
+            // Handle standard IMDb format: "tt8080122:4:6" (season 4, episode 6)
+            else if (videoIdParts.length >= 3 && videoIdParts[0].startsWith("tt")) {
+                season = Number.parseInt(videoIdParts[1], 10) || season;
+                episode = Number.parseInt(videoIdParts[2], 10) || episode;
+            }
+            // Handle format: "tt8080122:6" (episode 6 only, no season or season 0)
+            else if (videoIdParts.length === 2 && videoIdParts[0].startsWith("tt")) {
+                episode = Number.parseInt(videoIdParts[1], 10) || episode;
+                if (season === undefined) {
+                    season = 0;
+                }
+            }
+        }
+
+        return { episode, season };
+    }
+
+    const _now = Date.now();
+
+    // Built by buildNowPlaying (above), from both signals - see its comments.
+    nowPlaying = await buildNowPlaying(prisma, accountIdValue, activeUsers);
+
+    // Build startedPlaying from library cache (for period-based metrics, not UI display)
+    const periodStartTime = startDate.getTime();
+    for (const user of activeUsers) {
+        try {
+            const library = getCachedLibrary(accountIdValue, user);
+            if (!Array.isArray(library) || library.length === 0) {
+                continue;
+            }
+
+            for (const item of library) {
+                if (!isActuallyWatched(item)) {
+                    continue;
+                }
+
+                const watchDate = getWatchDate(item);
+                if (!watchDate) {
+                    continue;
+                }
+
+                const watchTime = watchDate.getTime();
+
+                if (watchTime >= periodStartTime) {
+                    const { season, episode } = await extractSeasonEpisode(item);
+                    startedPlaying.push({
+                        item: {
+                            episode,
+                            id: item._id || item.id,
+                            name: item.name,
+                            poster: item.poster,
+                            season,
+                            type: item.type,
+                            year: item.year,
+                        },
+                        startedAt: new Date(watchTime).toISOString(),
+                        startedAtTimestamp: watchTime,
+                        user: {
+                            colorIndex: user.colorIndex || 0,
+                            email: user.email,
+                            id: user.id,
+                            username: user.username || user.email,
+                        },
+                    });
+                }
+            }
+        } catch {
+            // A damaged cached library must not hide metrics from other users.
+        }
+    }
+
+    // Sort by most recent first (legacy library-derived nowPlaying)
+    nowPlaying.sort((a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp);
+    startedPlaying.sort((a, b) => b.startedAtTimestamp - a.startedAtTimestamp);
+
+    // Fetch episode + movie watch history from database and merge into one
+    // reliable "recent activity" feed. This is the WatchActivity-adjacent data
+    // (populated by the same proven pipeline as the leaderboard fix in
+    // v1.8.7) rather than WatchSession, which requires an item's progress to
+    // visibly change between two 5-minute polls to register at all — that
+    // heuristic was built for Stremio's data shape and, per investigation,
+    // doesn't reliably work for either provider at this poll interval.
+    // Cross-user library-sync dedup: when two users on the same account share a
+    // Stremio identity (same email, both signed into Stremio cloud even if one
+    // is used only as a Nuvio account), Stremio's server-side library
+    // replicates lastWatched timestamps to BOTH accounts to the millisecond.
+    // Each poller pass then writes a MovieWatchHistory / EpisodeWatchHistory
+    // row for every user whose library shows the item as watched — so a single
+    // play under one account shows up twice in the Activity feed under two
+    // different provider badges (confirmed 2026-07-22 with live production
+    // data: Men in Black had two rows dated 2026-07-21T09:18:09.106Z, the
+    // Nuvio one carrying real durationSeconds=1610 and the Stremio one
+    // carrying dur=null — a classic phantom from library sync).
+    //
+    // Keep only the "real watch" per item: same-second watchedAt on the same
+    // itemId (and same videoId, so a series-episode dedup doesn't collapse
+    // different episodes of the same show) → highest durationSeconds wins;
+    // ties break on any-non-null durationSeconds vs null. Different-second
+    // watches are left alone — two household members ACTUALLY watching the
+    // same movie separately produce different-second timestamps by way of
+    // independent poll cycles + network jitter, and shouldn't be deduped.
+    function dedupCrossUserSameSecond(rows, kind /* 'movie' | 'episode' */) {
+        // Group by (itemId, videoId, watchedAt truncated to the second).
+        const key = (r) => {
+            const id = kind === "movie" ? r.itemId : r.showId;
+            const vid = kind === "episode" ? r.videoId || "" : "";
+            const ts = Math.floor(new Date(r.watchedAt).getTime() / 1000);
+            return `${id}::${vid}::${ts}`;
+        };
+        const byKey = new Map();
+        for (const r of rows) {
+            const k = key(r);
+            const existing = byKey.get(k);
+            if (!existing) {
+                byKey.set(k, r);
+                continue;
+            }
+            // Prefer the row with any real durationSeconds over one with null; if
+            // both have real values, keep the higher one.
+            const rDur = Number(r.durationSeconds || 0);
+            const eDur = Number(existing.durationSeconds || 0);
+            if (rDur > eDur) {
+                byKey.set(k, r);
+            }
+        }
+        return [...byKey.values()];
+    }
+
+    let recentActivity = [];
+    // Whether any read the feed is built from came back full. A read that
+    // returns exactly its cap almost certainly had more behind it, which is
+    // how the Activity page knows there is older history worth asking for
+    // rather than guessing, or re-fetching everything every time.
+    let activityTruncated = false;
     try {
-      const library = getCachedLibrary(accountIdValue, user)
-      if (!Array.isArray(library) || library.length === 0) continue
-
-      for (const item of library) {
-        if (!isActuallyWatched(item)) continue
-
-        const watchDate = getWatchDate(item)
-        if (!watchDate) continue
-
-        const watchTime = watchDate.getTime()
-
-        if (watchTime >= periodStartTime) {
-          const { season, episode } = await extractSeasonEpisode(item)
-          startedPlaying.push({
-            user: {
-              id: user.id,
-              username: user.username || user.email,
-              email: user.email,
-              colorIndex: user.colorIndex || 0
-            },
-            item: {
-              id: item._id || item.id,
-              name: item.name,
-              type: item.type,
-              year: item.year,
-              poster: item.poster,
-              season: season,
-              episode: episode
-            },
-            startedAt: new Date(watchTime).toISOString(),
-            startedAtTimestamp: watchTime
-          })
+        const [episodeHistoryRaw, movieHistoryRaw] = await Promise.all([
+            prisma.episodeWatchHistory.findMany({
+                orderBy: { watchedAt: "desc" },
+                take: activityTake, // Activity page needs deep history (UI lazily renders)
+                where: { accountId: accountIdValue, watchedAt: { gte: startDate } },
+            }),
+            prisma.movieWatchHistory.findMany({
+                orderBy: { watchedAt: "desc" },
+                take: activityTake,
+                where: { accountId: accountIdValue, watchedAt: { gte: startDate } },
+            }),
+        ]);
+        if (episodeHistoryRaw.length >= activityTake || movieHistoryRaw.length >= activityTake) {
+            activityTruncated = true;
         }
-      }
-    } catch (error) {
-      // Skip users with errors
-      continue
-    }
-  }
 
-  // Sort by most recent first (legacy library-derived nowPlaying)
-  nowPlaying.sort((a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp)
-  startedPlaying.sort((a, b) => b.startedAtTimestamp - a.startedAtTimestamp)
+        // Apply the cross-user library-sync dedup BEFORE user lookup / mapping
+        // so we never build activity entries for phantom rows in the first
+        // place. Same-second coincidence catches most cases, but a shared-email
+        // Nuvio/Stremio pair's replicated rows aren't guaranteed to land in the
+        // exact same second (confirmed real case: ~42 minutes apart) - the
+        // identity-aware dedupWatchActivityBySharedEmail (already used for the
+        // WatchActivity aggregates, see its own comment) catches those too.
+        const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require("./watchDedup");
+        const sharedEmailUserIds = findSharedEmailUserIds(allUsers);
+        const episodeHistory = dedupWatchActivityBySharedEmail(
+            dedupCrossUserSameSecond(episodeHistoryRaw, "episode"),
+            sharedEmailUserIds,
+            {
+                dateField: "watchedAt",
+                durationField: "durationSeconds",
+                independentProfiles: false,
+                itemKey: (r) => `${r.showId}::${r.videoId || ""}`,
+            }
+        );
+        const movieHistory = dedupWatchActivityBySharedEmail(
+            dedupCrossUserSameSecond(movieHistoryRaw, "movie"),
+            sharedEmailUserIds,
+            {
+                dateField: "watchedAt",
+                durationField: "durationSeconds",
+                independentProfiles: false,
+                itemKey: (r) => r.itemId,
+            }
+        );
 
-  // Fetch episode + movie watch history from database and merge into one
-  // reliable "recent activity" feed. This is the WatchActivity-adjacent data
-  // (populated by the same proven pipeline as the leaderboard fix in
-  // v1.8.7) rather than WatchSession, which requires an item's progress to
-  // visibly change between two 5-minute polls to register at all — that
-  // heuristic was built for Stremio's data shape and, per investigation,
-  // doesn't reliably work for either provider at this poll interval.
-  // Cross-user library-sync dedup: when two users on the same account share a
-  // Stremio identity (same email, both signed into Stremio cloud even if one
-  // is used only as a Nuvio account), Stremio's server-side library
-  // replicates lastWatched timestamps to BOTH accounts to the millisecond.
-  // Each poller pass then writes a MovieWatchHistory / EpisodeWatchHistory
-  // row for every user whose library shows the item as watched — so a single
-  // play under one account shows up twice in the Activity feed under two
-  // different provider badges (confirmed 2026-07-22 with live production
-  // data: Men in Black had two rows dated 2026-07-21T09:18:09.106Z, the
-  // Nuvio one carrying real durationSeconds=1610 and the Stremio one
-  // carrying dur=null — a classic phantom from library sync).
-  //
-  // Keep only the "real watch" per item: same-second watchedAt on the same
-  // itemId (and same videoId, so a series-episode dedup doesn't collapse
-  // different episodes of the same show) → highest durationSeconds wins;
-  // ties break on any-non-null durationSeconds vs null. Different-second
-  // watches are left alone — two household members ACTUALLY watching the
-  // same movie separately produce different-second timestamps by way of
-  // independent poll cycles + network jitter, and shouldn't be deduped.
-  function dedupCrossUserSameSecond(rows, kind /* 'movie' | 'episode' */) {
-    // Group by (itemId, videoId, watchedAt truncated to the second).
-    const key = (r) => {
-      const id = kind === 'movie' ? r.itemId : r.showId
-      const vid = kind === 'episode' ? (r.videoId || '') : ''
-      const ts = Math.floor(new Date(r.watchedAt).getTime() / 1000)
-      return `${id}::${vid}::${ts}`
-    }
-    const byKey = new Map()
-    for (const r of rows) {
-      const k = key(r)
-      const existing = byKey.get(k)
-      if (!existing) { byKey.set(k, r); continue }
-      // Prefer the row with any real durationSeconds over one with null; if
-      // both have real values, keep the higher one.
-      const rDur = Number(r.durationSeconds || 0)
-      const eDur = Number(existing.durationSeconds || 0)
-      if (rDur > eDur) byKey.set(k, r)
-    }
-    return [...byKey.values()]
-  }
+        // Build user lookup and skip entries for users that no longer exist
+        // (deleted/recreated connection) instead of falling back to showing
+        // their raw database ID as a display name.
+        const userMap = new Map(allUsers.map((u) => [u.id, u]));
 
-  let recentActivity = []
-  // Whether any read the feed is built from came back full. A read that
-  // returns exactly its cap almost certainly had more behind it, which is
-  // how the Activity page knows there is older history worth asking for
-  // rather than guessing, or re-fetching everything every time.
-  let activityTruncated = false
-  try {
-    const [episodeHistoryRaw, movieHistoryRaw] = await Promise.all([
-      prisma.episodeWatchHistory.findMany({
-        where: { accountId: accountIdValue, watchedAt: { gte: startDate } },
-        orderBy: { watchedAt: 'desc' },
-        take: activityTake // Activity page needs deep history (UI lazily renders)
-      }),
-      prisma.movieWatchHistory.findMany({
-        where: { accountId: accountIdValue, watchedAt: { gte: startDate } },
-        orderBy: { watchedAt: 'desc' },
-        take: activityTake
-      })
-    ])
-    if (episodeHistoryRaw.length >= activityTake || movieHistoryRaw.length >= activityTake) activityTruncated = true
+        const episodeEntries = episodeHistory
+            .filter((ep) => userMap.has(ep.userId))
+            .map((ep) => {
+                const user = userMap.get(ep.userId);
+                return {
+                    completed: ep.completed ?? null,
+                    // See debridDetection.js - only set when this watch was
+                    // confidently correlated to a proxy-observed stream with a
+                    // recognized debrid URL pattern. Never a guess.
+                    debridService: ep.debridService || undefined,
+                    // The History row itself already carries the duration this specific
+                    // watch occasion recorded (see sessionTracker.js/metricsProcessor.js) -
+                    // read it directly instead of relying solely on the session-merge
+                    // backfill below, which only succeeds when the item's single reused
+                    // WatchSession row still falls within a 3-hour window of THIS
+                    // watchedAt. For anything watched more than once, later polls keep
+                    // moving that session's updatedAt forward, so older History entries
+                    // silently fall out of the merge window forever and previously
+                    // showed 0 duration despite the real value sitting right here.
+                    durationSeconds:
+                        ep.durationSeconds && ep.durationSeconds > 0
+                            ? ep.durationSeconds
+                            : undefined,
+                    episodeName: ep.episodeName || null,
+                    item: {
+                        episode: ep.episode,
+                        id: ep.showId,
+                        name: ep.showName,
+                        poster: ep.poster,
+                        season: ep.season,
+                        type: "series",
+                    },
+                    profileLabel: ep.profileLabel || null,
+                    user: {
+                        avatarUrl: user.avatarUrl || null,
+                        colorIndex: user.colorIndex || 0,
+                        email: user.email,
+                        id: ep.userId,
+                        jellyfinServerKind: user.jellyfinServerKind || null,
+                        providerType: user.providerType || "stremio",
+                        useGravatar: user.useGravatar ?? false,
+                        username: user.username || user.email || ep.userId,
+                    },
+                    videoId: ep.videoId,
+                    watchedAt: ep.watchedAt.toISOString(),
+                    watchedAtTimestamp: ep.watchedAt.getTime(),
+                };
+            });
 
-    // Apply the cross-user library-sync dedup BEFORE user lookup / mapping
-    // so we never build activity entries for phantom rows in the first
-    // place. Same-second coincidence catches most cases, but a shared-email
-    // Nuvio/Stremio pair's replicated rows aren't guaranteed to land in the
-    // exact same second (confirmed real case: ~42 minutes apart) - the
-    // identity-aware dedupWatchActivityBySharedEmail (already used for the
-    // WatchActivity aggregates, see its own comment) catches those too.
-    const { findSharedEmailUserIds, dedupWatchActivityBySharedEmail } = require('./watchDedup')
-    const sharedEmailUserIds = findSharedEmailUserIds(allUsers)
-    const episodeHistory = dedupWatchActivityBySharedEmail(
-      dedupCrossUserSameSecond(episodeHistoryRaw, 'episode'),
-      sharedEmailUserIds,
-      { itemKey: (r) => `${r.showId}::${r.videoId || ''}`, dateField: 'watchedAt', durationField: 'durationSeconds', independentProfiles: false }
-    )
-    const movieHistory = dedupWatchActivityBySharedEmail(
-      dedupCrossUserSameSecond(movieHistoryRaw, 'movie'),
-      sharedEmailUserIds,
-      { itemKey: (r) => r.itemId, dateField: 'watchedAt', durationField: 'durationSeconds', independentProfiles: false }
-    )
+        const movieEntries = movieHistory
+            .filter((m) => userMap.has(m.userId))
+            .map((m) => {
+                const user = userMap.get(m.userId);
+                return {
+                    completed: m.completed ?? null,
+                    debridService: m.debridService || undefined,
+                    // See the matching comment on episodeEntries above.
+                    durationSeconds:
+                        m.durationSeconds && m.durationSeconds > 0 ? m.durationSeconds : undefined,
+                    item: {
+                        episode: null,
+                        id: m.itemId,
+                        name: m.itemName,
+                        poster: m.poster,
+                        season: null,
+                        type: "movie",
+                    },
+                    profileLabel: m.profileLabel || null,
+                    rewatchCount: m.rewatchCount || 0,
+                    user: {
+                        avatarUrl: user.avatarUrl || null,
+                        colorIndex: user.colorIndex || 0,
+                        email: user.email,
+                        id: m.userId,
+                        jellyfinServerKind: user.jellyfinServerKind || null,
+                        providerType: user.providerType || "stremio",
+                        useGravatar: user.useGravatar ?? false,
+                        username: user.username || user.email || m.userId,
+                    },
+                    videoId: null,
+                    watchedAt: m.watchedAt.toISOString(),
+                    watchedAtTimestamp: m.watchedAt.getTime(),
+                };
+            });
 
-    // Build user lookup and skip entries for users that no longer exist
-    // (deleted/recreated connection) instead of falling back to showing
-    // their raw database ID as a display name.
-    const userMap = new Map(allUsers.map(u => [u.id, u]))
-
-    const episodeEntries = episodeHistory
-      .filter(ep => userMap.has(ep.userId))
-      .map(ep => {
-        const user = userMap.get(ep.userId)
-        return {
-          user: {
-            id: ep.userId,
-            username: user.username || user.email || ep.userId,
-            email: user.email,
-            colorIndex: user.colorIndex || 0,
-            avatarUrl: user.avatarUrl || null,
-            useGravatar: user.useGravatar ?? false,
-            providerType: user.providerType || 'stremio',
-            jellyfinServerKind: user.jellyfinServerKind || null
-          },
-          item: {
-            id: ep.showId,
-            name: ep.showName,
-            type: 'series',
-            poster: ep.poster,
-            season: ep.season,
-            episode: ep.episode
-          },
-          videoId: ep.videoId,
-          profileLabel: ep.profileLabel || null,
-          episodeName: ep.episodeName || null,
-          completed: ep.completed ?? null,
-          watchedAt: ep.watchedAt.toISOString(),
-          watchedAtTimestamp: ep.watchedAt.getTime(),
-          // The History row itself already carries the duration this specific
-          // watch occasion recorded (see sessionTracker.js/metricsProcessor.js) -
-          // read it directly instead of relying solely on the session-merge
-          // backfill below, which only succeeds when the item's single reused
-          // WatchSession row still falls within a 3-hour window of THIS
-          // watchedAt. For anything watched more than once, later polls keep
-          // moving that session's updatedAt forward, so older History entries
-          // silently fall out of the merge window forever and previously
-          // showed 0 duration despite the real value sitting right here.
-          durationSeconds: ep.durationSeconds && ep.durationSeconds > 0 ? ep.durationSeconds : undefined,
-          // See debridDetection.js - only set when this watch was
-          // confidently correlated to a proxy-observed stream with a
-          // recognized debrid URL pattern. Never a guess.
-          debridService: ep.debridService || undefined
-        }
-      })
-
-    const movieEntries = movieHistory
-      .filter(m => userMap.has(m.userId))
-      .map(m => {
-        const user = userMap.get(m.userId)
-        return {
-          user: {
-            id: m.userId,
-            username: user.username || user.email || m.userId,
-            email: user.email,
-            colorIndex: user.colorIndex || 0,
-            avatarUrl: user.avatarUrl || null,
-            useGravatar: user.useGravatar ?? false,
-            providerType: user.providerType || 'stremio',
-            jellyfinServerKind: user.jellyfinServerKind || null
-          },
-          item: {
-            id: m.itemId,
-            name: m.itemName,
-            type: 'movie',
-            poster: m.poster,
-            season: null,
-            episode: null
-          },
-          videoId: null,
-          profileLabel: m.profileLabel || null,
-          completed: m.completed ?? null,
-          rewatchCount: m.rewatchCount || 0,
-          watchedAt: m.watchedAt.toISOString(),
-          watchedAtTimestamp: m.watchedAt.getTime(),
-          // See the matching comment on episodeEntries above.
-          durationSeconds: m.durationSeconds && m.durationSeconds > 0 ? m.durationSeconds : undefined,
-          debridService: m.debridService || undefined
-        }
-      })
-
-    // Expand a movie into one entry per DAY it was actually watched.
-    //
-    // MovieWatchHistory is @@unique([accountId, userId, itemId]) - one row per
-    // movie, whose watchedAt is overwritten on a rewatch. That is why a
-    // rewatched film appeared to MOVE from, say, Monday to Yesterday instead
-    // of showing on both: the earlier day was never a separate row to lose,
-    // it was the same row being updated.
-    //
-    // WatchActivity is the per-day record and is append-only (no unique
-    // constraint, carries date + watchTimeSeconds), so the days the History
-    // table cannot express are still on disk - including for viewings that
-    // happened long before this code existed, which is why past days reappear
-    // rather than only accruing from now on.
-    //
-    // Movies only, deliberately. WatchActivity stores a series' SHOW id with
-    // no videoId, so it cannot say which episode was watched on an earlier
-    // day - reconstructing series days would mean guessing an episode and
-    // labelling a card with it. Rewatching a *different* episode already
-    // shows separately anyway (EpisodeWatchHistory is keyed by videoId); only
-    // rewatching the very same episode collapses, which is far rarer than the
-    // movie case this fixes.
-    // Expand a title into one entry per DAY it was actually watched.
-    //
-    // The History tables cannot express this: MovieWatchHistory is unique per
-    // (account, user, item) and EpisodeWatchHistory per (account, user,
-    // videoId), so a rewatch overwrites watchedAt rather than adding a row -
-    // which is why a rewatched title appeared to MOVE from one day to another
-    // instead of showing on both.
-    //
-    // WatchActivity is the per-day record and is append-only, so the days the
-    // History tables cannot hold are still on disk.
-    //
-    // Movies reconstruct all the way back. Series only from the point
-    // WatchActivity started recording videoId: before that a series row named
-    // only the SHOW, so an older day cannot say which episode it was, and
-    // guessing would put a confidently wrong episode on a card. Those older
-    // rows simply do not match any entry below and are skipped.
-    let extraDayEntries = []
-    try {
-      const activityRaw = await prisma.watchActivity.findMany({
-        where: { accountId: accountIdValue, date: { gte: startDate } },
-        select: { userId: true, itemId: true, videoId: true, date: true, watchTimeSeconds: true, profileLabel: true },
-        // Bounded like the two history reads above it, which this one was
-        // not: on all-time it read every row ever recorded, and the feed it
-        // builds is sent whole to the browser. Measured on two years of
-        // history for one person: 7,860 entries, 4.2MB, which a phone then
-        // has to receive and parse before the page appears. Newest first, so
-        // what a cap would ever drop is the oldest end of a feed nobody
-        // scrolls to.
-        orderBy: { date: 'desc' },
-        take: activityTake,
-      })
-        if (activityRaw.length >= activityTake) activityTruncated = true
-
-      // Same shared-email dedupe the History path above applies, and for the
-      // same reason: one person connected through two providers has a user row
-      // per provider, and library sync replicates the same viewing to both.
-      // Reading WatchActivity directly bypassed this and showed one viewing
-      // twice - confirmed on a real instance, where a single evening produced
-      // 16m under a Nuvio identity and 79m under the Stremio identity of the
-      // same person, both sharing one email address.
-      //
-      // itemKey is passed explicitly rather than using the default (itemId):
-      // for a series itemId is the SHOW, so two episodes watched on the same
-      // day would otherwise be collapsed into each other.
-      const activity = dedupWatchActivityBySharedEmail(activityRaw, sharedEmailUserIds, {
-        itemKey: (r) => `${r.itemId}::${r.videoId || ''}`,
-      })
-
-      // Sum per (user, item, episode, day).
-      //
-      // WatchActivity.date is NOT an instant - metricsProcessor writes it as
-      // `new Date(getAccountDateString(now, tz))`, an account-local calendar
-      // date parked at UTC midnight. Reading it back through
-      // getAccountDateString would convert an already-converted value and
-      // shift every day one earlier for any timezone behind UTC (verified: a
-      // row stored for 2026-08-22 came back as 2026-08-21 under
-      // America/Los_Angeles). Slicing the ISO date recovers what was written.
-      //
-      // This is the deliberate exception to the "bucket days via dateUtils,
-      // never toISOString" rule - that rule is about bucketing real instants
-      // like watchedAt, which is exactly what ownDay below still does.
-      const keyOf = (userId, itemId, videoId, day) =>
-        `${userId}\u0000${itemId}\u0000${videoId || ''}\u0000${day}`
-      const secondsByKey = new Map()
-      for (const row of activity) {
-        const k = keyOf(row.userId, row.itemId, row.videoId, new Date(row.date).toISOString().slice(0, 10))
-        secondsByKey.set(k, (secondsByKey.get(k) || 0) + (row.watchTimeSeconds || 0))
-      }
-
-      for (const entry of [...movieEntries, ...episodeEntries]) {
-        const ownDay = getAccountDateString(new Date(entry.watchedAtTimestamp), accountTimeZone)
-        const prefix = `${entry.user.id}\u0000${entry.item.id}\u0000${entry.videoId || ''}\u0000`
-
-        // Upgrade the History row's OWN day to the per-day total when that is
-        // larger. Its durationSeconds is backfilled from a matching proxy
-        // WatchSession, which may only have observed part of the viewing - a
-        // confirmed real case showed 39m on the card for a film whose seven
-        // deltas that day summed to 101m, with the snapshot's own
-        // overallTimeWatched agreeing at 102m. The watch time had been
-        // recorded correctly all along; the figure DISPLAYED was the partial
-        // one.
+        // Expand a movie into one entry per DAY it was actually watched.
         //
-        // max(), never sum(): both numbers describe the SAME viewing, so
-        // adding them would double-count. Same rule the cross-pipeline session
-        // merge further down already follows.
-        const ownDaySeconds = secondsByKey.get(prefix + ownDay) || 0
-        if (ownDaySeconds > (entry.durationSeconds || 0)) {
-          entry.durationSeconds = ownDaySeconds
+        // MovieWatchHistory is @@unique([accountId, userId, itemId]) - one row per
+        // movie, whose watchedAt is overwritten on a rewatch. That is why a
+        // rewatched film appeared to MOVE from, say, Monday to Yesterday instead
+        // of showing on both: the earlier day was never a separate row to lose,
+        // it was the same row being updated.
+        //
+        // WatchActivity is the per-day record and is append-only (no unique
+        // constraint, carries date + watchTimeSeconds), so the days the History
+        // table cannot express are still on disk - including for viewings that
+        // happened long before this code existed, which is why past days reappear
+        // rather than only accruing from now on.
+        //
+        // Movies only, deliberately. WatchActivity stores a series' SHOW id with
+        // no videoId, so it cannot say which episode was watched on an earlier
+        // day - reconstructing series days would mean guessing an episode and
+        // labelling a card with it. Rewatching a *different* episode already
+        // shows separately anyway (EpisodeWatchHistory is keyed by videoId); only
+        // rewatching the very same episode collapses, which is far rarer than the
+        // movie case this fixes.
+        // Expand a title into one entry per DAY it was actually watched.
+        //
+        // The History tables cannot express this: MovieWatchHistory is unique per
+        // (account, user, item) and EpisodeWatchHistory per (account, user,
+        // videoId), so a rewatch overwrites watchedAt rather than adding a row -
+        // which is why a rewatched title appeared to MOVE from one day to another
+        // instead of showing on both.
+        //
+        // WatchActivity is the per-day record and is append-only, so the days the
+        // History tables cannot hold are still on disk.
+        //
+        // Movies reconstruct all the way back. Series only from the point
+        // WatchActivity started recording videoId: before that a series row named
+        // only the SHOW, so an older day cannot say which episode it was, and
+        // guessing would put a confidently wrong episode on a card. Those older
+        // rows simply do not match any entry below and are skipped.
+        let extraDayEntries = [];
+        try {
+            const activityRaw = await prisma.watchActivity.findMany({
+                // Bounded like the two history reads above it, which this one was
+                // not: on all-time it read every row ever recorded, and the feed it
+                // builds is sent whole to the browser. Measured on two years of
+                // history for one person: 7,860 entries, 4.2MB, which a phone then
+                // has to receive and parse before the page appears. Newest first, so
+                // what a cap would ever drop is the oldest end of a feed nobody
+                // scrolls to.
+                orderBy: { date: "desc" },
+                select: {
+                    date: true,
+                    itemId: true,
+                    profileLabel: true,
+                    userId: true,
+                    videoId: true,
+                    watchTimeSeconds: true,
+                },
+                take: activityTake,
+                where: { accountId: accountIdValue, date: { gte: startDate } },
+            });
+            if (activityRaw.length >= activityTake) {
+                activityTruncated = true;
+            }
+
+            // Same shared-email dedupe the History path above applies, and for the
+            // same reason: one person connected through two providers has a user row
+            // per provider, and library sync replicates the same viewing to both.
+            // Reading WatchActivity directly bypassed this and showed one viewing
+            // twice - confirmed on a real instance, where a single evening produced
+            // 16m under a Nuvio identity and 79m under the Stremio identity of the
+            // same person, both sharing one email address.
+            //
+            // itemKey is passed explicitly rather than using the default (itemId):
+            // for a series itemId is the SHOW, so two episodes watched on the same
+            // day would otherwise be collapsed into each other.
+            const activity = dedupWatchActivityBySharedEmail(activityRaw, sharedEmailUserIds, {
+                itemKey: (r) => `${r.itemId}::${r.videoId || ""}`,
+            });
+
+            // Sum per (user, item, episode, day).
+            //
+            // WatchActivity.date is NOT an instant - metricsProcessor writes it as
+            // `new Date(getAccountDateString(now, tz))`, an account-local calendar
+            // date parked at UTC midnight. Reading it back through
+            // getAccountDateString would convert an already-converted value and
+            // shift every day one earlier for any timezone behind UTC (verified: a
+            // row stored for 2026-08-22 came back as 2026-08-21 under
+            // America/Los_Angeles). Slicing the ISO date recovers what was written.
+            //
+            // This is the deliberate exception to the "bucket days via dateUtils,
+            // never toISOString" rule - that rule is about bucketing real instants
+            // like watchedAt, which is exactly what ownDay below still does.
+            const keyOf = (userId, itemId, videoId, day) =>
+                `${userId}\u0000${itemId}\u0000${videoId || ""}\u0000${day}`;
+            const secondsByKey = new Map();
+            for (const row of activity) {
+                const k = keyOf(
+                    row.userId,
+                    row.itemId,
+                    row.videoId,
+                    new Date(row.date).toISOString().slice(0, 10)
+                );
+                secondsByKey.set(k, (secondsByKey.get(k) || 0) + (row.watchTimeSeconds || 0));
+            }
+
+            for (const entry of [...movieEntries, ...episodeEntries]) {
+                const ownDay = getAccountDateString(
+                    new Date(entry.watchedAtTimestamp),
+                    accountTimeZone
+                );
+                const prefix = `${entry.user.id}\u0000${entry.item.id}\u0000${entry.videoId || ""}\u0000`;
+
+                // Upgrade the History row's OWN day to the per-day total when that is
+                // larger. Its durationSeconds is backfilled from a matching proxy
+                // WatchSession, which may only have observed part of the viewing - a
+                // confirmed real case showed 39m on the card for a film whose seven
+                // deltas that day summed to 101m, with the snapshot's own
+                // overallTimeWatched agreeing at 102m. The watch time had been
+                // recorded correctly all along; the figure DISPLAYED was the partial
+                // one.
+                //
+                // max(), never sum(): both numbers describe the SAME viewing, so
+                // adding them would double-count. Same rule the cross-pipeline session
+                // merge further down already follows.
+                const ownDaySeconds = secondsByKey.get(prefix + ownDay) || 0;
+                if (ownDaySeconds > (entry.durationSeconds || 0)) {
+                    entry.durationSeconds = ownDaySeconds;
+                }
+
+                for (const [key, seconds] of secondsByKey) {
+                    if (!key.startsWith(prefix)) {
+                        continue;
+                    }
+                    const day = key.slice(prefix.length);
+                    // Its own day is handled above - it keeps the real clock time from
+                    // the History row rather than becoming a second, date-only card.
+                    if (day === ownDay) {
+                        continue;
+                    }
+                    if (!(seconds > 0)) {
+                        continue;
+                    }
+
+                    extraDayEntries.push({
+                        ...entry,
+                        // Only the surviving History row knows how it ended and how many
+                        // rewatches there have been; asserting either for a historical day
+                        // would be inventing detail we do not have.
+                        completed: null,
+                        dateOnly: true,
+                        debridService: undefined,
+                        durationSeconds: seconds,
+                        rewatchCount: 0,
+                        // Local midnight of that day. WatchActivity stores the day only,
+                        // never a time, so dateOnly tells the UI to render a date and NOT
+                        // invent a "12:00 AM" that would read as a real viewing time.
+                        watchedAt: new Date(`${day}T00:00:00`).toISOString(),
+                        watchedAtTimestamp: new Date(`${day}T00:00:00`).getTime(),
+                    });
+                }
+            }
+        } catch (error) {
+            // A failure here must not cost the whole activity feed - fall back to
+            // the previous one-card-per-title behaviour rather than returning none.
+            console.warn("[MetricsBuilder] Could not expand watch days:", error.message);
+            extraDayEntries = [];
         }
 
-        for (const [key, seconds] of secondsByKey) {
-          if (!key.startsWith(prefix)) continue
-          const day = key.slice(prefix.length)
-          // Its own day is handled above - it keeps the real clock time from
-          // the History row rather than becoming a second, date-only card.
-          if (day === ownDay) continue
-          if (!(seconds > 0)) continue
-
-          extraDayEntries.push({
-            ...entry,
-            // Local midnight of that day. WatchActivity stores the day only,
-            // never a time, so dateOnly tells the UI to render a date and NOT
-            // invent a "12:00 AM" that would read as a real viewing time.
-            watchedAt: new Date(day + 'T00:00:00').toISOString(),
-            watchedAtTimestamp: new Date(day + 'T00:00:00').getTime(),
-            dateOnly: true,
-            durationSeconds: seconds,
-            // Only the surviving History row knows how it ended and how many
-            // rewatches there have been; asserting either for a historical day
-            // would be inventing detail we do not have.
-            completed: null,
-            rewatchCount: 0,
-            debridService: undefined,
-          })
-        }
-      }
+        recentActivity = [...episodeEntries, ...movieEntries, ...extraDayEntries].sort(
+            (a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp
+        );
     } catch (error) {
-      // A failure here must not cost the whole activity feed - fall back to
-      // the previous one-card-per-title behaviour rather than returning none.
-      console.warn(`[MetricsBuilder] Could not expand watch days:`, error.message)
-      extraDayEntries = []
+        console.warn("[MetricsBuilder] Error fetching recent activity:", error.message);
     }
 
-    recentActivity = [...episodeEntries, ...movieEntries, ...extraDayEntries]
-      .sort((a, b) => b.watchedAtTimestamp - a.watchedAtTimestamp)
-  } catch (error) {
-    console.warn(`[MetricsBuilder] Error fetching recent activity:`, error.message)
-  }
+    // Kept for backwards compatibility with anything still reading the old
+    // episode-only field name; identical content, series entries only.
+    const recentEpisodes = recentActivity.filter((a) => a.item.type === "series");
 
-  // Kept for backwards compatibility with anything still reading the old
-  // episode-only field name; identical content, series entries only.
-  const recentEpisodes = recentActivity.filter(a => a.item.type === 'series')
+    // Fetch watch sessions from database
+    // This provides start time, end time, and duration for each viewing session
+    let watchSessions = [];
+    try {
+        const sessions = await prisma.watchSession.findMany({
+            orderBy: {
+                startTime: "desc",
+            },
+            take: activityTake, // Activity page needs deep history (UI lazily renders)
+            where: {
+                accountId: accountIdValue,
+                startTime: {
+                    gte: startDate,
+                },
+            },
+        });
 
-  // Fetch watch sessions from database
-  // This provides start time, end time, and duration for each viewing session
-  let watchSessions = []
-  try {
-    const sessions = await prisma.watchSession.findMany({
-      where: {
-        accountId: accountIdValue,
-        startTime: {
-          gte: startDate
+        // Build user lookup for sessions
+        const userMap = new Map(allUsers.map((u) => [u.id, u]));
+
+        // Skip sessions belonging to users that no longer exist (e.g. a
+        // deleted/recreated connection) instead of showing them with the raw
+        // userId as a fallback display name — same reasoning as the identical
+        // guard already used for watchActivityByUser above.
+        watchSessions = sessions
+            .filter((session) => userMap.has(session.userId))
+            .map((session) => {
+                const user = userMap.get(session.userId);
+                return {
+                    durationSeconds: session.durationSeconds,
+                    endTime: session.endTime ? session.endTime.toISOString() : null,
+                    id: session.id,
+                    isActive: session.isActive,
+                    item: {
+                        episode: session.episode,
+                        id: session.itemId,
+                        name: session.itemName,
+                        poster: session.poster,
+                        season: session.season,
+                        type: session.itemType,
+                    },
+                    requestCount: session.requestCount ?? null,
+                    startTime: session.startTime.toISOString(),
+                    startTimeTimestamp: session.startTime.getTime(),
+                    updatedAtTimestamp: session.updatedAt
+                        ? session.updatedAt.getTime()
+                        : session.startTime.getTime(),
+                    user: {
+                        avatarUrl: user?.avatarUrl || null,
+                        colorIndex: user?.colorIndex || 0,
+                        email: user?.email,
+                        id: session.userId,
+                        useGravatar: user?.useGravatar ?? false,
+                        username: user?.username || user?.email || session.userId,
+                    },
+                    videoId: session.videoId,
+                };
+            });
+    } catch (error) {
+        console.warn("[MetricsBuilder] Error fetching watch sessions:", error.message);
+    }
+
+    // Cross-pipeline dedup / duration upgrade: recentActivity entries now
+    // carry their own durationSeconds straight from the History row (see
+    // episodeEntries/movieEntries above), but a still-active or more-recently-
+    // updated WatchSession can have a MORE accurate figure for the same watch
+    // (e.g. a session that kept accumulating real progress after the History
+    // row was written) - Math.max below takes whichever is larger rather than
+    // ever overwriting a good History-sourced value with a worse one. As of
+    // the proxy no longer writing WatchSession rows at all ("proxy no longer
+    // writing watch history - native owns it"), every session here is native
+    // and shares the exact same real item ID as the recentActivity entry it
+    // corresponds to - there's no longer a "native real ID vs proxy
+    // synthetic proxy:<title> ID" mismatch to work around, so match on that
+    // ID directly. For a series, WatchSession is one row per SHOW, not per
+    // episode (sessionTracker.js updates season/episode on the same row in
+    // place as the show progresses), so also check the session's own
+    // season/episode columns against the activity's - this attributes the
+    // session's current duration to the episode it actually reflects,
+    // rather than whichever same-show episode happened to be checked
+    // first. Title-text matching is kept only as a fallback, in case any
+    // pre-upgrade proxy-created session rows are still lingering with a
+    // non-matching ID.
+    function normalizeForMerge(name) {
+        return (name || "")
+            .toLowerCase()
+            .replace(/\(\d{4}\)/g, "")
+            .replace(/[^a-z0-9]+/g, " ")
+            .trim();
+    }
+
+    function isSameEvent(activity, session) {
+        if (activity.item?.id && session.item?.id && activity.item.id === session.item.id) {
+            if (
+                activity.item?.type === "series" &&
+                activity.item?.season != null &&
+                activity.item?.episode != null
+            ) {
+                return (
+                    session.item?.season === activity.item.season &&
+                    session.item?.episode === activity.item.episode
+                );
+            }
+            return true;
         }
-      },
-      orderBy: {
-        startTime: 'desc'
-      },
-      take: activityTake // Activity page needs deep history (UI lazily renders)
-    })
+        const activityTitle = normalizeForMerge(activity.item?.name);
+        const sessionTitle = normalizeForMerge(session.item?.name);
+        return !!activityTitle && activityTitle === sessionTitle;
+    }
 
-    // Build user lookup for sessions
-    const userMap = new Map(allUsers.map(u => [u.id, u]))
+    // The household's calendar day a moment falls on. Compared whole, never
+    // sliced - see dateUtils.js.
+    const accountDayOf = (ms) => getAccountDateString(new Date(ms), accountTimeZone);
 
-    // Skip sessions belonging to users that no longer exist (e.g. a
-    // deleted/recreated connection) instead of showing them with the raw
-    // userId as a fallback display name — same reasoning as the identical
-    // guard already used for watchActivityByUser above.
-    watchSessions = sessions
-      .filter(session => userMap.has(session.userId))
-      .map(session => {
-      const user = userMap.get(session.userId)
-      return {
-        id: session.id,
-        user: {
-          id: session.userId,
-          username: user?.username || user?.email || session.userId,
-          email: user?.email,
-          colorIndex: user?.colorIndex || 0,
-          avatarUrl: user?.avatarUrl || null,
-          useGravatar: user?.useGravatar ?? false
+    function mergeCrossPipelineDuplicates(recentActivityList, watchSessionsList) {
+        const MERGE_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 hours
+        // Two moments further apart than this cannot share a calendar day (25h
+        // covers the day a clock change makes longer), so no date is worked out.
+        const SAME_DAY_REACH_MS = 25 * 60 * 60 * 1000;
+        const consumedSessionIds = new Set();
+        // Working out a calendar day is slow next to comparing two numbers, and
+        // this loop compares every entry with every session of the same person -
+        // millions of pairs for a long history. So a day is worked out at most
+        // once per session and once per entry, and only for a pair that is
+        // outside the three hours yet close enough to share a day at all.
+        const sessionDays = new Map();
+        const sessionDay = (session) => {
+            let day = sessionDays.get(session.id);
+            if (day === undefined) {
+                day = accountDayOf(session.updatedAtTimestamp);
+                sessionDays.set(session.id, day);
+            }
+            return day;
+        };
+
+        for (const activity of recentActivityList) {
+            let activityDay;
+            const match = watchSessionsList.find((session) => {
+                if (consumedSessionIds.has(session.id)) {
+                    return false;
+                }
+                if (session.user.id !== activity.user.id) {
+                    return false;
+                }
+                // updatedAtTimestamp, not startTimeTimestamp: a WatchSession row is
+                // reused/reactivated across every rewatch of the same item, and its
+                // startTime only ever moves backward - it holds the date of the
+                // FIRST watch, not the most recent one. Using startTime here meant
+                // any show watched across more than one sitting fell outside the
+                // merge window for every episode after the first, permanently
+                // losing its duration in the Activity feed.
+                // Within three hours of each other, or on the same day for this
+                // household. The History row keeps the time of the FIRST sitting, so
+                // a title picked up again later that evening sat more than three
+                // hours from its own session - the two were then sent as separate
+                // entries and the page showed the session's last-sitting figure
+                // (confirmed real case: 32m shown for a film whose day totalled
+                // far more).
+                const diff = Math.abs(session.updatedAtTimestamp - activity.watchedAtTimestamp);
+                if (diff > MERGE_WINDOW_MS) {
+                    if (diff > SAME_DAY_REACH_MS) {
+                        return false;
+                    }
+                    if (activityDay === undefined) {
+                        activityDay = accountDayOf(activity.watchedAtTimestamp);
+                    }
+                    if (sessionDay(session) !== activityDay) {
+                        return false;
+                    }
+                }
+                return isSameEvent(activity, session);
+            });
+
+            if (match) {
+                // max, not sum: both pipelines are almost always observing the
+                // SAME concurrent viewing minutes (native tracking and the
+                // AIOStreams proxy both see the same real-time stream), not two
+                // sequential, non-overlapping segments - summing double-counted
+                // the overlap. The longer of the two independent measurements is
+                // the better estimate of actual watch time.
+                activity.durationSeconds = Math.max(
+                    activity.durationSeconds || 0,
+                    match.durationSeconds || 0
+                );
+                consumedSessionIds.add(match.id);
+            }
+        }
+
+        const dedupedSessions = watchSessionsList.filter((s) => !consumedSessionIds.has(s.id));
+        return { dedupedSessions, recentActivityList };
+    }
+
+    {
+        const merged = mergeCrossPipelineDuplicates(recentActivity, watchSessions);
+        watchSessions = merged.dedupedSessions;
+    }
+
+    // Second pass: dedup WITHIN watchSessions itself. Confirmed via real
+    // data that an older, separate native session tracker also writes
+    // directly into WatchSession (not just EpisodeWatchHistory/
+    // MovieWatchHistory) - using real item IDs and its own fields
+    // (startPosition/lastPosition/totalDuration), distinct from our
+    // AIOStreams-proxy writes (metadataItemId or a "proxy:" fallback
+    // slug). Two different ID schemes for the same real content land in
+    // the same table and were never being cross-checked against each
+    // other before this pass.
+    function mergeWithinWatchSessions(sessionsList) {
+        const MERGE_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 hours
+        const removedIds = new Set();
+        const sorted = [...sessionsList].sort(
+            (a, b) => a.startTimeTimestamp - b.startTimeTimestamp
+        );
+
+        for (let i = 0; i < sorted.length; i++) {
+            const a = sorted[i];
+            if (removedIds.has(a.id)) {
+                continue;
+            }
+
+            for (let j = i + 1; j < sorted.length; j++) {
+                const b = sorted[j];
+                if (removedIds.has(b.id)) {
+                    continue;
+                }
+                if (a.user.id !== b.user.id) {
+                    continue;
+                }
+                if (Math.abs(a.startTimeTimestamp - b.startTimeTimestamp) > MERGE_WINDOW_MS) {
+                    continue;
+                }
+
+                // Check both directions - either entry could be the one carrying
+                // real season/episode data (the native tracker doesn't always
+                // start before the proxy one, or vice versa).
+                const aAsActivity = {
+                    item: {
+                        episode: a.item?.episode,
+                        name: a.item?.name,
+                        season: a.item?.season,
+                        type: a.item?.type,
+                    },
+                };
+                const bAsSession = { item: { name: b.item?.name } };
+                const bAsActivity = {
+                    item: {
+                        episode: b.item?.episode,
+                        name: b.item?.name,
+                        season: b.item?.season,
+                        type: b.item?.type,
+                    },
+                };
+                const aAsSession = { item: { name: a.item?.name } };
+
+                if (
+                    !(isSameEvent(aAsActivity, bAsSession) || isSameEvent(bAsActivity, aAsSession))
+                ) {
+                    continue;
+                }
+
+                // Keep whichever has a real (non-proxy-fallback, non-tmdb) ID
+                // scheme when possible - that's the more authoritative/complete
+                // record (has real season/episode, videoId, position data).
+                // Otherwise keep whichever started first.
+                const aLooksReal =
+                    a.item?.id &&
+                    !String(a.item.id).startsWith("tmdb:") &&
+                    !String(a.item.id).startsWith("proxy:");
+                const bLooksReal =
+                    b.item?.id &&
+                    !String(b.item.id).startsWith("tmdb:") &&
+                    !String(b.item.id).startsWith("proxy:");
+
+                let keep = a;
+                let drop = b;
+                if (bLooksReal && !aLooksReal) {
+                    keep = b;
+                    drop = a;
+                }
+
+                // max, not sum - same overlapping-observation reasoning as the
+                // cross-pipeline merge above.
+                keep.durationSeconds = Math.max(
+                    keep.durationSeconds || 0,
+                    drop.durationSeconds || 0
+                );
+                removedIds.add(drop.id);
+            }
+        }
+
+        return sessionsList.filter((s) => !removedIds.has(s.id));
+    }
+
+    watchSessions = mergeWithinWatchSessions(watchSessions);
+
+    // Calculate summary stats (Movies, Shows, Total Time) from WatchActivity data (already period-filtered)
+    const activeUserCount = Object.keys(watchActivityByUser).length;
+
+    // Build topUsers from the same WatchActivity-derived data that byUserByDay
+    // already uses (watchActivityByUser). This USED to be built from
+    // WatchSession data instead, but that table turned out to be far sparser
+    // and less reliable than WatchActivity for at least some users/setups —
+    // in one confirmed real case, a user with 326 real WatchActivity rows had
+    // ZERO qualifying WatchSession rows and was completely missing from the
+    // leaderboard, while a deleted/orphaned user's leftover session rows
+    // still showed up with their raw ID as a display name. Deliberately NOT
+    // resetting totalMovies/totalShows/totalWatchTime here anymore either —
+    // those were already correctly computed from WatchActivity data above;
+    // the old code was throwing that away and recomputing (wrongly) from the
+    // same unreliable session data.
+    const topUsers = Object.values(watchActivityByUser)
+        .sort((a, b) => b.total - a.total)
+        .map((user) => {
+            let currentStreak = 0;
+            const dates = Array.from(user.dates).sort((a, b) => b.localeCompare(a));
+            if (dates.length > 0) {
+                const today = getAccountDateString(new Date(), accountTimeZone);
+                const yesterdayDate = new Date();
+                yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                const yesterday = getAccountDateString(yesterdayDate, accountTimeZone);
+                const checkDateStr = dates.includes(today)
+                    ? today
+                    : dates.includes(yesterday)
+                      ? yesterday
+                      : null;
+                if (checkDateStr) {
+                    const checkDate = new Date(checkDateStr);
+                    while (true) {
+                        const dateStr = checkDate.toISOString().split("T")[0];
+                        if (dates.includes(dateStr)) {
+                            currentStreak++;
+                            checkDate.setDate(checkDate.getDate() - 1);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            return {
+                ...user,
+                streak: currentStreak,
+                watchTimeHours: Math.round((user.watchTime / 3600) * 100) / 100,
+                watchTimeMoviesHours: Math.round((user.watchTimeMovies / 3600) * 100) / 100,
+                watchTimeShowsHours: Math.round((user.watchTimeShows / 3600) * 100) / 100,
+            };
+        })
+        .map(({ dates, ...rest }) => rest);
+
+    // Watch Time Trend Chart data — derived from watchTimeByDay, which was
+    // already correctly accumulated from WatchActivity earlier in this
+    // function. This USED to be built from WatchSession data instead
+    // (watchTimeByDayFromSessions), which meant "Watch Time Today" on the
+    // Activity page and the Watch Time Trend graph on the Metrics page were
+    // both reading the same unreliable, sparse session data that caused the
+    // leaderboard bug fixed in v1.8.7 — same root cause, different field.
+    const watchTimeChart = Object.entries(watchTimeByDay)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, seconds]) => ({
+            date,
+            hours: Math.round((seconds / 3600) * 100) / 100,
+        }));
+
+    let growthTrend = { direction: "up", percentage: 0 };
+    if (watchTimeChart.length >= 4) {
+        const midPoint = Math.floor(watchTimeChart.length / 2);
+        const firstHalf = watchTimeChart.slice(0, midPoint);
+        const secondHalf = watchTimeChart.slice(midPoint);
+        const firstHalfTotal = firstHalf.reduce((sum, day) => sum + day.hours, 0);
+        const secondHalfTotal = secondHalf.reduce((sum, day) => sum + day.hours, 0);
+        if (firstHalfTotal > 0) {
+            const growth = ((secondHalfTotal - firstHalfTotal) / firstHalfTotal) * 100;
+            growthTrend = {
+                direction: growth >= 0 ? "up" : "down",
+                percentage: Math.round(Math.abs(growth)),
+            };
+        } else if (secondHalfTotal > 0) {
+            growthTrend = { direction: "up", percentage: 100 };
+        }
+    }
+
+    // Calculate admin analytics (Phase 1)
+    const userLifecycle = await calculateUserLifecycle(
+        prisma,
+        accountId,
+        allUsers,
+        watchActivityByUser
+    );
+    const topContent = await calculateTopContent(watchSessions);
+    const engagement = await calculateEngagementMetrics(watchSessions);
+    const alerts = generateAlerts(userLifecycle, topContent, engagement, period);
+
+    // Calculate Phase 2 analytics (Addon Performance & Server Health)
+    const addonAnalytics = await calculateAddonAnalytics(prisma, accountId);
+    const serverHealth = await calculateServerHealth(prisma, accountId);
+    const operationalAlerts = generateOperationalAlerts(serverHealth, addonAnalytics);
+
+    const allAlerts = {
+        ...alerts,
+        hasCritical: alerts.hasCritical || operationalAlerts.some((a) => a.severity === "critical"),
+        operational: operationalAlerts,
+        total: alerts.total + operationalAlerts.length,
+    };
+
+    // Phase 3: Enhanced Metrics
+    const topItems = calculateTopItemsWithUsers(watchSessions, allUsers);
+    const watchVelocity = calculateWatchVelocity(watchSessions, accountTimeZone);
+    const interestingMetrics = calculateInterestingMetrics(
+        watchActivityByUser,
+        engagement,
+        watchSessions,
+        allUsers
+    );
+
+    return {
+        activityTruncated,
+        admin: {
+            addonAnalytics,
+            alerts: allAlerts,
+            engagement,
+            interestingMetrics,
+            serverHealth,
+            topContent,
+            topItems,
+            userLifecycle,
+            watchVelocity,
         },
-        item: {
-          id: session.itemId,
-          name: session.itemName,
-          type: session.itemType,
-          poster: session.poster,
-          season: session.season,
-          episode: session.episode
+        nowPlaying,
+        period,
+        recentActivity,
+        recentEpisodes,
+        startedPlaying,
+        summary: {
+            activeUsers: activeUserCount,
+            totalMovies,
+            totalShows,
+            totalUsers: allUsers.length,
+            totalWatched: totalMovies + totalShows,
+            totalWatchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100,
         },
-        videoId: session.videoId,
-        startTime: session.startTime.toISOString(),
-        endTime: session.endTime ? session.endTime.toISOString() : null,
-        durationSeconds: session.durationSeconds,
-        requestCount: session.requestCount ?? null,
-        isActive: session.isActive,
-        startTimeTimestamp: session.startTime.getTime(),
-        updatedAtTimestamp: session.updatedAt ? session.updatedAt.getTime() : session.startTime.getTime()
-      }
-    })
-  } catch (error) {
-    console.warn(`[MetricsBuilder] Error fetching watch sessions:`, error.message)
-  }
-
-  // Cross-pipeline dedup / duration upgrade: recentActivity entries now
-  // carry their own durationSeconds straight from the History row (see
-  // episodeEntries/movieEntries above), but a still-active or more-recently-
-  // updated WatchSession can have a MORE accurate figure for the same watch
-  // (e.g. a session that kept accumulating real progress after the History
-  // row was written) - Math.max below takes whichever is larger rather than
-  // ever overwriting a good History-sourced value with a worse one. As of
-  // the proxy no longer writing WatchSession rows at all ("proxy no longer
-  // writing watch history - native owns it"), every session here is native
-  // and shares the exact same real item ID as the recentActivity entry it
-  // corresponds to - there's no longer a "native real ID vs proxy
-  // synthetic proxy:<title> ID" mismatch to work around, so match on that
-  // ID directly. For a series, WatchSession is one row per SHOW, not per
-  // episode (sessionTracker.js updates season/episode on the same row in
-  // place as the show progresses), so also check the session's own
-  // season/episode columns against the activity's - this attributes the
-  // session's current duration to the episode it actually reflects,
-  // rather than whichever same-show episode happened to be checked
-  // first. Title-text matching is kept only as a fallback, in case any
-  // pre-upgrade proxy-created session rows are still lingering with a
-  // non-matching ID.
-  function normalizeForMerge(name) {
-    return (name || '')
-      .toLowerCase()
-      .replace(/\(\d{4}\)/g, '')
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim()
-  }
-
-  function isSameEvent(activity, session) {
-    if (activity.item?.id && session.item?.id && activity.item.id === session.item.id) {
-      if (activity.item?.type === 'series' && activity.item?.season != null && activity.item?.episode != null) {
-        return session.item?.season === activity.item.season && session.item?.episode === activity.item.episode
-      }
-      return true
-    }
-    const activityTitle = normalizeForMerge(activity.item?.name)
-    const sessionTitle = normalizeForMerge(session.item?.name)
-    return !!activityTitle && activityTitle === sessionTitle
-  }
-
-  // The household's calendar day a moment falls on. Compared whole, never
-  // sliced - see dateUtils.js.
-  const accountDayOf = (ms) => getAccountDateString(new Date(ms), accountTimeZone)
-
-  function mergeCrossPipelineDuplicates(recentActivityList, watchSessionsList) {
-    const MERGE_WINDOW_MS = 3 * 60 * 60 * 1000 // 3 hours
-    // Two moments further apart than this cannot share a calendar day (25h
-    // covers the day a clock change makes longer), so no date is worked out.
-    const SAME_DAY_REACH_MS = 25 * 60 * 60 * 1000
-    const consumedSessionIds = new Set()
-    // Working out a calendar day is slow next to comparing two numbers, and
-    // this loop compares every entry with every session of the same person -
-    // millions of pairs for a long history. So a day is worked out at most
-    // once per session and once per entry, and only for a pair that is
-    // outside the three hours yet close enough to share a day at all.
-    const sessionDays = new Map()
-    const sessionDay = (session) => {
-      let day = sessionDays.get(session.id)
-      if (day === undefined) {
-        day = accountDayOf(session.updatedAtTimestamp)
-        sessionDays.set(session.id, day)
-      }
-      return day
-    }
-
-    for (const activity of recentActivityList) {
-      let activityDay
-      const match = watchSessionsList.find((session) => {
-        if (consumedSessionIds.has(session.id)) return false
-        if (session.user.id !== activity.user.id) return false
-        // updatedAtTimestamp, not startTimeTimestamp: a WatchSession row is
-        // reused/reactivated across every rewatch of the same item, and its
-        // startTime only ever moves backward - it holds the date of the
-        // FIRST watch, not the most recent one. Using startTime here meant
-        // any show watched across more than one sitting fell outside the
-        // merge window for every episode after the first, permanently
-        // losing its duration in the Activity feed.
-        // Within three hours of each other, or on the same day for this
-        // household. The History row keeps the time of the FIRST sitting, so
-        // a title picked up again later that evening sat more than three
-        // hours from its own session - the two were then sent as separate
-        // entries and the page showed the session's last-sitting figure
-        // (confirmed real case: 32m shown for a film whose day totalled
-        // far more).
-        const diff = Math.abs(session.updatedAtTimestamp - activity.watchedAtTimestamp)
-        if (diff > MERGE_WINDOW_MS) {
-          if (diff > SAME_DAY_REACH_MS) return false
-          if (activityDay === undefined) activityDay = accountDayOf(activity.watchedAtTimestamp)
-          if (sessionDay(session) !== activityDay) return false
-        }
-        return isSameEvent(activity, session)
-      })
-
-      if (match) {
-        // max, not sum: both pipelines are almost always observing the
-        // SAME concurrent viewing minutes (native tracking and the
-        // AIOStreams proxy both see the same real-time stream), not two
-        // sequential, non-overlapping segments - summing double-counted
-        // the overlap. The longer of the two independent measurements is
-        // the better estimate of actual watch time.
-        activity.durationSeconds = Math.max(activity.durationSeconds || 0, match.durationSeconds || 0)
-        consumedSessionIds.add(match.id)
-      }
-    }
-
-    const dedupedSessions = watchSessionsList.filter((s) => !consumedSessionIds.has(s.id))
-    return { recentActivityList, dedupedSessions }
-  }
-
-  {
-    const merged = mergeCrossPipelineDuplicates(recentActivity, watchSessions)
-    watchSessions = merged.dedupedSessions
-  }
-
-  // Second pass: dedup WITHIN watchSessions itself. Confirmed via real
-  // data that an older, separate native session tracker also writes
-  // directly into WatchSession (not just EpisodeWatchHistory/
-  // MovieWatchHistory) - using real item IDs and its own fields
-  // (startPosition/lastPosition/totalDuration), distinct from our
-  // AIOStreams-proxy writes (metadataItemId or a "proxy:" fallback
-  // slug). Two different ID schemes for the same real content land in
-  // the same table and were never being cross-checked against each
-  // other before this pass.
-  function mergeWithinWatchSessions(sessionsList) {
-    const MERGE_WINDOW_MS = 3 * 60 * 60 * 1000 // 3 hours
-    const removedIds = new Set()
-    const sorted = [...sessionsList].sort((a, b) => a.startTimeTimestamp - b.startTimeTimestamp)
-
-    for (let i = 0; i < sorted.length; i++) {
-      const a = sorted[i]
-      if (removedIds.has(a.id)) continue
-
-      for (let j = i + 1; j < sorted.length; j++) {
-        const b = sorted[j]
-        if (removedIds.has(b.id)) continue
-        if (a.user.id !== b.user.id) continue
-        if (Math.abs(a.startTimeTimestamp - b.startTimeTimestamp) > MERGE_WINDOW_MS) continue
-
-        // Check both directions - either entry could be the one carrying
-        // real season/episode data (the native tracker doesn't always
-        // start before the proxy one, or vice versa).
-        const aAsActivity = { item: { type: a.item?.type, season: a.item?.season, episode: a.item?.episode, name: a.item?.name } }
-        const bAsSession = { item: { name: b.item?.name } }
-        const bAsActivity = { item: { type: b.item?.type, season: b.item?.season, episode: b.item?.episode, name: b.item?.name } }
-        const aAsSession = { item: { name: a.item?.name } }
-
-        if (!isSameEvent(aAsActivity, bAsSession) && !isSameEvent(bAsActivity, aAsSession)) continue
-
-        // Keep whichever has a real (non-proxy-fallback, non-tmdb) ID
-        // scheme when possible - that's the more authoritative/complete
-        // record (has real season/episode, videoId, position data).
-        // Otherwise keep whichever started first.
-        const aLooksReal = a.item?.id && !String(a.item.id).startsWith('tmdb:') && !String(a.item.id).startsWith('proxy:')
-        const bLooksReal = b.item?.id && !String(b.item.id).startsWith('tmdb:') && !String(b.item.id).startsWith('proxy:')
-
-        let keep = a
-        let drop = b
-        if (bLooksReal && !aLooksReal) {
-          keep = b
-          drop = a
-        }
-
-        // max, not sum - same overlapping-observation reasoning as the
-        // cross-pipeline merge above.
-        keep.durationSeconds = Math.max(keep.durationSeconds || 0, drop.durationSeconds || 0)
-        removedIds.add(drop.id)
-      }
-    }
-
-    return sessionsList.filter((s) => !removedIds.has(s.id))
-  }
-
-  watchSessions = mergeWithinWatchSessions(watchSessions)
-
-  // Calculate summary stats (Movies, Shows, Total Time) from WatchActivity data (already period-filtered)
-  const activeUserCount = Object.keys(watchActivityByUser).length;
-
-  // Build topUsers from the same WatchActivity-derived data that byUserByDay
-  // already uses (watchActivityByUser). This USED to be built from
-  // WatchSession data instead, but that table turned out to be far sparser
-  // and less reliable than WatchActivity for at least some users/setups —
-  // in one confirmed real case, a user with 326 real WatchActivity rows had
-  // ZERO qualifying WatchSession rows and was completely missing from the
-  // leaderboard, while a deleted/orphaned user's leftover session rows
-  // still showed up with their raw ID as a display name. Deliberately NOT
-  // resetting totalMovies/totalShows/totalWatchTime here anymore either —
-  // those were already correctly computed from WatchActivity data above;
-  // the old code was throwing that away and recomputing (wrongly) from the
-  // same unreliable session data.
-  const topUsers = Object.values(watchActivityByUser)
-    .sort((a, b) => b.total - a.total)
-    .map(user => {
-      let currentStreak = 0
-      const dates = Array.from(user.dates).sort((a, b) => b.localeCompare(a))
-      if (dates.length > 0) {
-        const today = getAccountDateString(new Date(), accountTimeZone)
-        const yesterdayDate = new Date(); yesterdayDate.setDate(yesterdayDate.getDate() - 1)
-        const yesterday = getAccountDateString(yesterdayDate, accountTimeZone)
-        let checkDateStr = dates.includes(today) ? today : (dates.includes(yesterday) ? yesterday : null)
-        if (checkDateStr) {
-          let checkDate = new Date(checkDateStr)
-          while (true) {
-            const dateStr = checkDate.toISOString().split('T')[0]
-            if (dates.includes(dateStr)) { currentStreak++; checkDate.setDate(checkDate.getDate() - 1) }
-            else break
-          }
-        }
-      }
-      return {
-        ...user,
-        watchTimeHours: Math.round((user.watchTime / 3600) * 100) / 100,
-        watchTimeMoviesHours: Math.round((user.watchTimeMovies / 3600) * 100) / 100,
-        watchTimeShowsHours: Math.round((user.watchTimeShows / 3600) * 100) / 100,
-        streak: currentStreak
-      }
-    })
-    .map(({ dates, ...rest }) => rest)
-
-  // Watch Time Trend Chart data — derived from watchTimeByDay, which was
-  // already correctly accumulated from WatchActivity earlier in this
-  // function. This USED to be built from WatchSession data instead
-  // (watchTimeByDayFromSessions), which meant "Watch Time Today" on the
-  // Activity page and the Watch Time Trend graph on the Metrics page were
-  // both reading the same unreliable, sparse session data that caused the
-  // leaderboard bug fixed in v1.8.7 — same root cause, different field.
-  const watchTimeChart = Object.entries(watchTimeByDay)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, seconds]) => ({
-      date,
-      hours: Math.round((seconds / 3600) * 100) / 100
-    }))
-
-  let growthTrend = { percentage: 0, direction: 'up' }
-  if (watchTimeChart.length >= 4) {
-    const midPoint = Math.floor(watchTimeChart.length / 2)
-    const firstHalf = watchTimeChart.slice(0, midPoint)
-    const secondHalf = watchTimeChart.slice(midPoint)
-    const firstHalfTotal = firstHalf.reduce((sum, day) => sum + day.hours, 0)
-    const secondHalfTotal = secondHalf.reduce((sum, day) => sum + day.hours, 0)
-    if (firstHalfTotal > 0) {
-      const growth = ((secondHalfTotal - firstHalfTotal) / firstHalfTotal) * 100
-      growthTrend = { percentage: Math.round(Math.abs(growth)), direction: growth >= 0 ? 'up' : 'down' }
-    } else if (secondHalfTotal > 0) growthTrend = { percentage: 100, direction: 'up' }
-  }
-
-  // Calculate admin analytics (Phase 1)
-  const userLifecycle = await calculateUserLifecycle(prisma, accountId, allUsers, watchActivityByUser)
-  const topContent = await calculateTopContent(watchSessions)
-  const engagement = await calculateEngagementMetrics(watchSessions)
-  const alerts = generateAlerts(userLifecycle, topContent, engagement, period)
-
-  // Calculate Phase 2 analytics (Addon Performance & Server Health)
-  const addonAnalytics = await calculateAddonAnalytics(prisma, accountId)
-  const serverHealth = await calculateServerHealth(prisma, accountId)
-  const operationalAlerts = generateOperationalAlerts(serverHealth, addonAnalytics)
-  
-  const allAlerts = {
-    ...alerts,
-    operational: operationalAlerts,
-    total: alerts.total + operationalAlerts.length,
-    hasCritical: alerts.hasCritical || operationalAlerts.some(a => a.severity === 'critical')
-  }
-
-  // Phase 3: Enhanced Metrics
-  const topItems = calculateTopItemsWithUsers(watchSessions, allUsers)
-  const watchVelocity = calculateWatchVelocity(watchSessions, accountTimeZone)
-  const interestingMetrics = calculateInterestingMetrics(watchActivityByUser, engagement, watchSessions, allUsers)
-
-  return {
-    // The account's current calendar day, in its configured timezone - the
-    // one authoritative source for "what day is today" here. watchTime.byDay
-    // and watchActivity.byDay are already keyed by account-day (WatchActivity.date
-    // is written as new Date(getAccountDateString(...)) at record time, so
-    // reading it back losslessly recovers that same account-day string - no
-    // bug there). But a client trying to find "today"'s entry in those arrays
-    // by computing its own "today" (browser-local time, or worse, UTC) can
-    // land on the wrong key whenever the viewer's clock and the account's
-    // configured timezone disagree about what day it currently is - this
-    // field removes the need for the client to guess at all.
-    today: getAccountDateString(new Date(), accountTimeZone),
-    summary: {
-      totalUsers: allUsers.length,
-      activeUsers: activeUserCount,
-      totalMovies,
-      totalShows,
-      totalWatched: totalMovies + totalShows,
-      totalWatchTimeHours: Math.round((totalWatchTime / 3600) * 100) / 100
-    },
-    userJoins: {
-      byDay: userJoinsChart,
-      byWeek: Object.entries(userJoinsByWeek).map(([week, count]) => ({ week, count: Number(count) })),
-      byMonth: Object.entries(userJoinsByMonth).map(([month, count]) => ({ month, count: Number(count) }))
-    },
-    watchActivity: {
-      byDay: watchActivityChart,
-      byUser: topUsers,
-      byUserByDay: watchActivityByUserByDayCharts
-    },
-    watchTime: {
-      byDay: watchTimeChart,
-      byItem: watchTimeByItemArray,
-      trend: growthTrend
-    },
-    nowPlaying,
-    startedPlaying,
-    recentActivity,
-    activityTruncated,
-    recentEpisodes,
-    watchSessions,
-    period,
-    admin: {
-      userLifecycle,
-      topContent,
-      engagement,
-      alerts: allAlerts,
-      addonAnalytics,
-      serverHealth,
-      topItems,
-      watchVelocity,
-      interestingMetrics
-    }
-  }
+        // The account's current calendar day, in its configured timezone - the
+        // one authoritative source for "what day is today" here. watchTime.byDay
+        // and watchActivity.byDay are already keyed by account-day (WatchActivity.date
+        // is written as new Date(getAccountDateString(...)) at record time, so
+        // reading it back losslessly recovers that same account-day string - no
+        // bug there). But a client trying to find "today"'s entry in those arrays
+        // by computing its own "today" (browser-local time, or worse, UTC) can
+        // land on the wrong key whenever the viewer's clock and the account's
+        // configured timezone disagree about what day it currently is - this
+        // field removes the need for the client to guess at all.
+        today: getAccountDateString(new Date(), accountTimeZone),
+        userJoins: {
+            byDay: userJoinsChart,
+            byMonth: Object.entries(userJoinsByMonth).map(([month, count]) => ({
+                count: Number(count),
+                month,
+            })),
+            byWeek: Object.entries(userJoinsByWeek).map(([week, count]) => ({
+                count: Number(count),
+                week,
+            })),
+        },
+        watchActivity: {
+            byDay: watchActivityChart,
+            byUser: topUsers,
+            byUserByDay: watchActivityByUserByDayCharts,
+        },
+        watchSessions,
+        watchTime: {
+            byDay: watchTimeChart,
+            byItem: watchTimeByItemArray,
+            trend: growthTrend,
+        },
+    };
 }
 
 module.exports = {
-  buildNowPlaying,
-  liveNowPlaying,
-  invalidateLiveNowPlaying,
-  buildMetricsForAccount
-}
-
-
-
-
-
-
-
-
-
-
-
+    buildMetricsForAccount,
+    buildNowPlaying,
+    invalidateLiveNowPlaying,
+    liveNowPlaying,
+};

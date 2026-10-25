@@ -10,22 +10,37 @@
  * false, writing nothing, when the stored value can't be read.
  */
 async function setAccountSyncKeys(prisma, accountId, keys) {
-  const acc = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } })
-  let cfg = acc?.sync
-  const asString = typeof cfg === 'string'
-  if (asString) { try { cfg = JSON.parse(cfg) } catch { return false } }
-  const next = { ...(cfg && typeof cfg === 'object' ? cfg : {}), ...keys }
-  if (asString) {
-    await prisma.appAccount.update({ where: { id: accountId }, data: { sync: JSON.stringify(next) } })
-    return true
-  }
-  // Nothing stored yet says nothing about the column, so try both shapes.
-  try {
-    await prisma.appAccount.update({ where: { id: accountId }, data: { sync: next } })
-  } catch {
-    await prisma.appAccount.update({ where: { id: accountId }, data: { sync: JSON.stringify(next) } })
-  }
-  return true
+    const acc = await prisma.appAccount.findUnique({
+        select: { sync: true },
+        where: { id: accountId },
+    });
+    let cfg = acc?.sync;
+    const asString = typeof cfg === "string";
+    if (asString) {
+        try {
+            cfg = JSON.parse(cfg);
+        } catch {
+            return false;
+        }
+    }
+    const next = { ...(cfg && typeof cfg === "object" ? cfg : {}), ...keys };
+    if (asString) {
+        await prisma.appAccount.update({
+            data: { sync: JSON.stringify(next) },
+            where: { id: accountId },
+        });
+        return true;
+    }
+    // Nothing stored yet says nothing about the column, so try both shapes.
+    try {
+        await prisma.appAccount.update({ data: { sync: next }, where: { id: accountId } });
+    } catch {
+        await prisma.appAccount.update({
+            data: { sync: JSON.stringify(next) },
+            where: { id: accountId },
+        });
+    }
+    return true;
 }
 
-module.exports = { setAccountSyncKeys }
+module.exports = { setAccountSyncKeys };

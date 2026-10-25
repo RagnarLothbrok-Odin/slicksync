@@ -1,16 +1,17 @@
 services:
   slicksync:
-    image: ghcr.io/slicknsliding/slicksync:public
+    image: ghcr.io/ragnarlothbrok-odin/slicksync:public
     env_file:
       - .env
     environment:
       # Both are required in public mode. Generate each with:
       #   openssl rand -base64 32
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy env.example to .env and generate one with "openssl rand -base64 32"}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy .env.example to .env and generate one with "openssl rand -base64 32"}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is not set - generate a second value with "openssl rand -base64 32"}
       DATABASE_URL: postgresql://slicksync:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - choose one in .env}@db:5432/slicksync
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "3000:3000"
     volumes:
@@ -26,6 +27,12 @@ services:
       POSTGRES_USER: slicksync
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - choose one in .env}
       POSTGRES_DB: slicksync
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     volumes:
       - pgdata:/var/lib/postgresql/data
     # Deliberately not published to the host. Only the app talks to it, over

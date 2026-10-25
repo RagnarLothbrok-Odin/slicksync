@@ -18,40 +18,48 @@
 // valid until the user revokes the app from their own Connected Apps
 // settings - there is no refresh flow to implement.
 
-const { resolveKeyFromSettings } = require('./listImport')
+const { resolveKeyFromSettings } = require("./listImport");
 
-const SIMKL_BASE = 'https://api.simkl.com'
+const SIMKL_BASE = "https://api.simkl.com";
 
 async function resolveSimklClientId(prisma, getAccountId, req) {
-  const clientId = await resolveKeyFromSettings(prisma, getAccountId, req, 'simklClientId', 'SIMKL_CLIENT_ID')
-  if (!clientId) {
-    const err = new Error('No SIMKL Client ID configured - add one in Settings, or set SIMKL_CLIENT_ID for the whole instance')
-    err.status = 400
-    throw err
-  }
-  return clientId
+    const clientId = await resolveKeyFromSettings(
+        prisma,
+        getAccountId,
+        req,
+        "simklClientId",
+        "SIMKL_CLIENT_ID"
+    );
+    if (!clientId) {
+        const err = new Error(
+            "No SIMKL Client ID configured - add one in Settings, or set SIMKL_CLIENT_ID for the whole instance"
+        );
+        err.status = 400;
+        throw err;
+    }
+    return clientId;
 }
 
 // accountId-direct variant for background jobs (no req/getAccountId), same
 // shape as resolveOmdbKeyForAccount.
 async function resolveSimklClientIdForAccount(prisma, accountId) {
-  return resolveSimklClientId(prisma, () => accountId, null)
+    return resolveSimklClientId(prisma, () => accountId, null);
 }
 
 async function startSimklPin(clientId) {
-  const res = await fetch(`${SIMKL_BASE}/oauth/pin?client_id=${encodeURIComponent(clientId)}`)
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => '')
-    console.error(`SIMKL pin request failed (${res.status}): ${bodyText}`)
-    throw new Error('Failed to start SIMKL authorization')
-  }
-  const data = await res.json()
-  return {
-    userCode: data.user_code,
-    verificationUrl: data.verification_url || data.verification_uri,
-    expiresIn: data.expires_in,
-    pollIntervalSeconds: data.interval || 5,
-  }
+    const res = await fetch(`${SIMKL_BASE}/oauth/pin?client_id=${encodeURIComponent(clientId)}`);
+    if (!res.ok) {
+        const bodyText = await res.text().catch(() => "");
+        console.error(`SIMKL pin request failed (${res.status}): ${bodyText}`);
+        throw new Error("Failed to start SIMKL authorization");
+    }
+    const data = await res.json();
+    return {
+        expiresIn: data.expires_in,
+        pollIntervalSeconds: data.interval || 5,
+        userCode: data.user_code,
+        verificationUrl: data.verification_url || data.verification_uri,
+    };
 }
 
 // Result shape: { status: 'pending' | 'authorized', accessToken? }
@@ -59,40 +67,46 @@ async function startSimklPin(clientId) {
 // Simkl's own docs warn that polling again after receiving the token can
 // return a newly-generated (different) code.
 async function pollSimklPin(clientId, userCode) {
-  const res = await fetch(`${SIMKL_BASE}/oauth/pin/${encodeURIComponent(userCode)}?client_id=${encodeURIComponent(clientId)}`)
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => '')
-    console.error(`SIMKL pin poll failed (${res.status}): ${bodyText}`)
-    throw new Error('Failed to poll SIMKL authorization')
-  }
-  const data = await res.json()
-  if (data.result === 'OK' && data.access_token) {
-    return { status: 'authorized', accessToken: data.access_token }
-  }
-  return { status: 'pending' }
+    const res = await fetch(
+        `${SIMKL_BASE}/oauth/pin/${encodeURIComponent(userCode)}?client_id=${encodeURIComponent(clientId)}`
+    );
+    if (!res.ok) {
+        const bodyText = await res.text().catch(() => "");
+        console.error(`SIMKL pin poll failed (${res.status}): ${bodyText}`);
+        throw new Error("Failed to poll SIMKL authorization");
+    }
+    const data = await res.json();
+    if (data.result === "OK" && data.access_token) {
+        return { accessToken: data.access_token, status: "authorized" };
+    }
+    return { status: "pending" };
 }
 
 function authHeaders(clientId, accessToken) {
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${accessToken}`,
-    'simkl-api-key': clientId,
-  }
+    return {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "simkl-api-key": clientId,
+    };
 }
 
 async function getSimklAccountInfo(clientId, accessToken) {
-  const res = await fetch(`${SIMKL_BASE}/users/settings`, { headers: authHeaders(clientId, accessToken) })
-  if (!res.ok) return null
-  const data = await res.json().catch(() => null)
-  return data?.user?.name || data?.account?.id || null
+    const res = await fetch(`${SIMKL_BASE}/users/settings`, {
+        headers: authHeaders(clientId, accessToken),
+    });
+    if (!res.ok) {
+        return null;
+    }
+    const data = await res.json().catch(() => null);
+    return data?.user?.name || data?.account?.id || null;
 }
 
 module.exports = {
-  resolveSimklClientId,
-  resolveSimklClientIdForAccount,
-  startSimklPin,
-  pollSimklPin,
-  authHeaders,
-  getSimklAccountInfo,
-  SIMKL_BASE,
-}
+    authHeaders,
+    getSimklAccountInfo,
+    pollSimklPin,
+    resolveSimklClientId,
+    resolveSimklClientIdForAccount,
+    SIMKL_BASE,
+    startSimklPin,
+};

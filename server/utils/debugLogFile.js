@@ -16,80 +16,89 @@
 // best-effort and swallowed: a debug log must never be able to break the
 // thing it is observing.
 
-const fs = require('fs')
+const fs = require("node:fs");
 
-const MAX_BYTES = 5 * 1024 * 1024
+const MAX_BYTES = 5 * 1024 * 1024;
 // How much of the tail survives a trim. Deliberately well under the cap so
 // trimming happens rarely rather than on nearly every write once full.
-const KEEP_BYTES = 1 * 1024 * 1024
+const KEEP_BYTES = 1 * 1024 * 1024;
 
 // Avoids a stat() syscall on every single line: track what we've written
 // since the last check and only re-stat once that alone could matter.
-const bytesSinceCheck = new Map()
-const CHECK_EVERY_BYTES = 64 * 1024
+const bytesSinceCheck = new Map();
+const CHECK_EVERY_BYTES = 64 * 1024;
 
 function trimIfNeeded(filePath) {
-  try {
-    const { size } = fs.statSync(filePath)
-    if (size <= MAX_BYTES) return
-    const fd = fs.openSync(filePath, 'r')
     try {
-      const buf = Buffer.alloc(KEEP_BYTES)
-      const read = fs.readSync(fd, buf, 0, KEEP_BYTES, size - KEEP_BYTES)
-      let tail = buf.subarray(0, read)
-      // Start at a line boundary so the first surviving entry isn't a
-      // fragment of one.
-      const nl = tail.indexOf(0x0a)
-      if (nl !== -1 && nl + 1 < tail.length) tail = tail.subarray(nl + 1)
-      fs.writeFileSync(filePath, `[trimmed - older entries discarded at ${new Date().toISOString()}]\n`)
-      fs.appendFileSync(filePath, tail)
-    } finally {
-      fs.closeSync(fd)
+        const { size } = fs.statSync(filePath);
+        if (size <= MAX_BYTES) {
+            return;
+        }
+        const fd = fs.openSync(filePath, "r");
+        try {
+            const buf = Buffer.alloc(KEEP_BYTES);
+            const read = fs.readSync(fd, buf, 0, KEEP_BYTES, size - KEEP_BYTES);
+            let tail = buf.subarray(0, read);
+            // Start at a line boundary so the first surviving entry isn't a
+            // fragment of one.
+            const nl = tail.indexOf(0x0a);
+            if (nl !== -1 && nl + 1 < tail.length) {
+                tail = tail.subarray(nl + 1);
+            }
+            fs.writeFileSync(
+                filePath,
+                `[trimmed - older entries discarded at ${new Date().toISOString()}]\n`
+            );
+            fs.appendFileSync(filePath, tail);
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch {
+        // Unreadable/locked - leave it alone rather than risk losing the file.
     }
-  } catch {
-    // Unreadable/locked - leave it alone rather than risk losing the file.
-  }
 }
 
 // Lines waiting to be written, per file. Callers write dozens of heartbeat
 // lines a minute; each used to be its own synchronous disk write on the
 // request path. They're now gathered and written together, off it.
-const pending = new Map()
-let flushTimer = null
+const pending = new Map();
+let flushTimer = null;
 
 function flush() {
-  flushTimer = null
-  const batch = [...pending]
-  pending.clear()
-  for (const [filePath, lines] of batch) {
-    try {
-      const text = lines.join('')
-      const since = (bytesSinceCheck.get(filePath) || 0) + Buffer.byteLength(text)
-      if (since >= CHECK_EVERY_BYTES) {
-        bytesSinceCheck.set(filePath, 0)
-        trimIfNeeded(filePath)
-      } else {
-        bytesSinceCheck.set(filePath, since)
-      }
-      fs.promises.appendFile(filePath, text).catch(() => {})
-    } catch {
-      // Never let a debug write break its caller.
+    flushTimer = null;
+    const batch = [...pending];
+    pending.clear();
+    for (const [filePath, lines] of batch) {
+        try {
+            const text = lines.join("");
+            const since = (bytesSinceCheck.get(filePath) || 0) + Buffer.byteLength(text);
+            if (since >= CHECK_EVERY_BYTES) {
+                bytesSinceCheck.set(filePath, 0);
+                trimIfNeeded(filePath);
+            } else {
+                bytesSinceCheck.set(filePath, since);
+            }
+            fs.promises.appendFile(filePath, text).catch(() => undefined);
+        } catch {
+            // Never let a debug write break its caller.
+        }
     }
-  }
 }
 
 /** Appends one line, trimming the file first if it has grown past the cap. */
 function appendCapped(filePath, line) {
-  try {
-    if (!pending.has(filePath)) pending.set(filePath, [])
-    pending.get(filePath).push(line)
-    if (!flushTimer) {
-      flushTimer = setTimeout(flush, 1000)
-      flushTimer.unref?.()
+    try {
+        if (!pending.has(filePath)) {
+            pending.set(filePath, []);
+        }
+        pending.get(filePath).push(line);
+        if (!flushTimer) {
+            flushTimer = setTimeout(flush, 1000);
+            flushTimer.unref?.();
+        }
+    } catch {
+        // Never let a debug write break its caller.
     }
-  } catch {
-    // Never let a debug write break its caller.
-  }
 }
 
-module.exports = { appendCapped, MAX_BYTES }
+module.exports = { appendCapped, MAX_BYTES };

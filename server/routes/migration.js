@@ -1,5 +1,5 @@
-const express = require('express')
-const crypto = require('crypto')
+const express = require("express");
+const crypto = require("node:crypto");
 
 // One-code instance migration.
 //
@@ -24,60 +24,93 @@ const crypto = require('crypto')
 //    exactly as true of the manual DR-kit file plus its passphrase. Treat
 //    the code like the password it is; it is single-use either way.
 
-const OFFER_TTL_MS = 15 * 60 * 1000
-const offers = new Map() // token -> { accountId, passphrase, expiresAt }
+const OFFER_TTL_MS = 15 * 60 * 1000;
+const offers = new Map(); // token -> { accountId, passphrase, expiresAt }
 
 function mintOffer(accountId) {
-  const token = crypto.randomBytes(24).toString('hex')
-  const passphrase = crypto.randomBytes(24).toString('base64url')
-  offers.set(token, { accountId, passphrase, expiresAt: Date.now() + OFFER_TTL_MS })
-  return { token, passphrase }
+    const token = crypto.randomBytes(24).toString("hex");
+    const passphrase = crypto.randomBytes(24).toString("base64url");
+    offers.set(token, { accountId, expiresAt: Date.now() + OFFER_TTL_MS, passphrase });
+    return { passphrase, token };
 }
 
 function consumeOffer(token) {
-  const offer = offers.get(token)
-  if (!offer) return null
-  offers.delete(token) // single-use, even on later failure - re-offer instead
-  if (Date.now() > offer.expiresAt) return null
-  return offer
+    const offer = offers.get(token);
+    if (!offer) {
+        return null;
+    }
+    offers.delete(token); // single-use, even on later failure - re-offer instead
+    if (Date.now() > offer.expiresAt) {
+        return null;
+    }
+    return offer;
 }
 
 function encodeCode(url, token, passphrase) {
-  return 'slickmig1.' + Buffer.from(JSON.stringify({ u: url, t: token, k: passphrase }), 'utf8').toString('base64url')
+    return (
+        "slickmig1." +
+        Buffer.from(JSON.stringify({ k: passphrase, t: token, u: url }), "utf8").toString(
+            "base64url"
+        )
+    );
 }
 
 function decodeCode(code) {
-  try {
-    const raw = String(code || '').trim()
-    if (!raw.startsWith('slickmig1.')) return null
-    const parsed = JSON.parse(Buffer.from(raw.slice('slickmig1.'.length), 'base64url').toString('utf8'))
-    if (typeof parsed?.u !== 'string' || typeof parsed?.t !== 'string' || typeof parsed?.k !== 'string') return null
-    if (!/^https?:\/\//i.test(parsed.u)) return null
-    return parsed
-  } catch { return null }
+    try {
+        const raw = String(code || "").trim();
+        if (!raw.startsWith("slickmig1.")) {
+            return null;
+        }
+        const parsed = JSON.parse(
+            Buffer.from(raw.slice("slickmig1.".length), "base64url").toString("utf8")
+        );
+        if (
+            typeof parsed?.u !== "string" ||
+            typeof parsed?.t !== "string" ||
+            typeof parsed?.k !== "string"
+        ) {
+            return null;
+        }
+        if (!/^https?:\/\//i.test(parsed.u)) {
+            return null;
+        }
+        return parsed;
+    } catch {
+        return null;
+    }
 }
 
 module.exports = ({ prisma, decrypt }) => {
-  const router = express.Router()
+    const router = express.Router();
 
-  // GET /bundle?token= - the one-time kit read. Public path, token-gated.
-  router.get('/bundle', async (req, res) => {
-    try {
-      const offer = consumeOffer(String(req.query.token || ''))
-      if (!offer) return res.status(404).json({ error: 'No such offer - codes are single-use and expire after 15 minutes. Generate a fresh one.' })
-      const { buildKit } = require('../utils/disasterRecoveryKit')
-      const kit = await buildKit(prisma, offer.accountId, offer.passphrase, { appAccountId: offer.accountId }, { decrypt })
-      res.json({ kit })
-    } catch (e) {
-      console.error('[Migration] bundle failed:', e?.message)
-      res.status(500).json({ error: 'Failed to build the migration bundle' })
-    }
-  })
+    // GET /bundle?token= - the one-time kit read. Public path, token-gated.
+    router.get("/bundle", async (req, res) => {
+        try {
+            const offer = consumeOffer(String(req.query.token || ""));
+            if (!offer) {
+                return res.status(404).json({
+                    error: "No such offer - codes are single-use and expire after 15 minutes. Generate a fresh one.",
+                });
+            }
+            const { buildKit } = require("../utils/disasterRecoveryKit");
+            const kit = await buildKit(
+                prisma,
+                offer.accountId,
+                offer.passphrase,
+                { appAccountId: offer.accountId },
+                { decrypt }
+            );
+            res.json({ kit });
+        } catch (e) {
+            console.error("[Migration] bundle failed:", e?.message);
+            res.status(500).json({ error: "Failed to build the migration bundle" });
+        }
+    });
 
-  return router
-}
+    return router;
+};
 
-module.exports.mintOffer = mintOffer
-module.exports.encodeCode = encodeCode
-module.exports.decodeCode = decodeCode
-module.exports.consumeOffer = consumeOffer
+module.exports.mintOffer = mintOffer;
+module.exports.encodeCode = encodeCode;
+module.exports.decodeCode = decodeCode;
+module.exports.consumeOffer = consumeOffer;

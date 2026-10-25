@@ -4,6 +4,6 @@
  * Re-exports from the existing utils/stremio.js to keep things centralized.
  */
 
-const { validateStremioAuthKey } = require('../utils/stremio')
+const { validateStremioAuthKey } = require("../utils/stremio");
 
-module.exports = { validateStremioAuthKey }
+module.exports = { validateStremioAuthKey };

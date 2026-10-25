@@ -4,112 +4,117 @@
  * is moved here so it's encapsulated in the provider.
  */
 
-const { StremioAPIClient } = require('stremio-api-client')
+const { StremioAPIClient } = require("stremio-api-client");
 
 function createStremioProvider({ authKey }) {
-  const client = new StremioAPIClient({
-    endpoint: 'https://api.strem.io',
-    authKey
-  })
+    const client = new StremioAPIClient({
+        authKey,
+        endpoint: "https://api.strem.io",
+    });
 
-  return {
-    type: 'stremio',
+    return {
+        async addAddon(url, manifest) {
+            await client.request("addonCollectionAdd", { addonId: url, manifest });
+        },
 
-    // --- Addon Transport ---
+        async addLibraryItem(changes) {
+            await client.request("datastorePut", {
+                changes,
+                collection: "libraryItem",
+            });
+        },
 
-    async getAddons() {
-      const collection = await client.request('addonCollectionGet', {})
+        async clearAddons() {
+            await client.request("addonCollectionSet", { addons: [] });
+        },
 
-      // Reading never writes to a person's account. This runs for every
-      // status badge and background check, and an account whose list came
-      // back as null once (a degraded answer from Stremio, not necessarily an
-      // empty account) used to be overwritten with an empty one by the read
-      // itself. Null is treated as "no addons" below; the next sync writes a
-      // proper list.
-      //
-      // Normalization logic from sync.js:16-62 — handles null, non-array, corrupted responses
-      const rawAddons = collection?.addons !== undefined ? collection.addons : collection
-      let addonsArray = []
-      if (rawAddons !== null && rawAddons !== undefined) {
-        if (Array.isArray(rawAddons)) {
-          addonsArray = rawAddons
-        } else if (typeof rawAddons === 'object') {
-          addonsArray = Object.values(rawAddons)
-        }
-      }
+        // Raw client access for edge cases during migration
+        get client() {
+            return client;
+        },
 
-      const addons = addonsArray.map((addon) => {
-        const manifest = addon?.manifest
-        if (manifest && typeof manifest === 'object') {
-          const { manifestUrl, ...restManifest } = manifest
-          return { ...addon, manifest: restManifest, transportName: '' }
-        }
-        return { ...addon, transportName: '' }
-      })
+        // --- Addon Transport ---
 
-      if (!Array.isArray(addons)) return { addons: [] }
-      return { addons }
-    },
+        async getAddons() {
+            const collection = await client.request("addonCollectionGet", {});
 
-    async setAddons(addons) {
-      await client.request('addonCollectionSet', { addons })
-    },
+            // Reading never writes to a person's account. This runs for every
+            // status badge and background check, and an account whose list came
+            // back as null once (a degraded answer from Stremio, not necessarily an
+            // empty account) used to be overwritten with an empty one by the read
+            // itself. Null is treated as "no addons" below; the next sync writes a
+            // proper list.
+            //
+            // Normalization logic from sync.js:16-62 — handles null, non-array, corrupted responses
+            const rawAddons = collection?.addons === undefined ? collection : collection.addons;
+            let addonsArray = [];
+            if (rawAddons !== null && rawAddons !== undefined) {
+                if (Array.isArray(rawAddons)) {
+                    addonsArray = rawAddons;
+                } else if (typeof rawAddons === "object") {
+                    addonsArray = Object.values(rawAddons);
+                }
+            }
 
-    async addAddon(url, manifest) {
-      await client.request('addonCollectionAdd', { addonId: url, manifest })
-    },
+            const addons = addonsArray.map((addon) => {
+                const manifest = addon?.manifest;
+                if (manifest && typeof manifest === "object") {
+                    const { manifestUrl, ...restManifest } = manifest;
+                    return { ...addon, manifest: restManifest, transportName: "" };
+                }
+                return { ...addon, transportName: "" };
+            });
 
-    async clearAddons() {
-      await client.request('addonCollectionSet', { addons: [] })
-    },
+            if (!Array.isArray(addons)) {
+                return { addons: [] };
+            }
+            return { addons };
+        },
 
-    // --- Content ---
+        // --- Content ---
 
-    async getLibrary() {
-      const items = await client.request('datastoreGet', {
-        collection: 'libraryItem',
-        ids: [],
-        all: true
-      })
-      return items
-    },
+        async getLibrary() {
+            const items = await client.request("datastoreGet", {
+                all: true,
+                collection: "libraryItem",
+                ids: [],
+            });
+            return items;
+        },
 
-    // Capability flag: Stremio supports library writes via datastorePut
-    supportsLibraryWrite: true,
+        async getLikeStatus(mediaId, mediaType) {
+            const res = await fetch(
+                `https://likes.stremio.com/api/get_status?authToken=${encodeURIComponent(authKey)}&mediaId=${encodeURIComponent(mediaId)}&mediaType=${encodeURIComponent(mediaType)}`
+            );
+            if (!res.ok) {
+                return null;
+            }
+            return await res.json();
+        },
 
-    async addLibraryItem(changes) {
-      await client.request('datastorePut', {
-        collection: 'libraryItem',
-        changes
-      })
-    },
+        async removeLibraryItem(changes) {
+            await client.request("datastorePut", {
+                changes,
+                collection: "libraryItem",
+            });
+        },
 
-    async removeLibraryItem(changes) {
-      await client.request('datastorePut', {
-        collection: 'libraryItem',
-        changes
-      })
-    },
+        async setAddons(addons) {
+            await client.request("addonCollectionSet", { addons });
+        },
 
-    async getLikeStatus(mediaId, mediaType) {
-      const res = await fetch(
-        `https://likes.stremio.com/api/get_status?authToken=${encodeURIComponent(authKey)}&mediaId=${encodeURIComponent(mediaId)}&mediaType=${encodeURIComponent(mediaType)}`
-      )
-      if (!res.ok) return null
-      return await res.json()
-    },
+        async setLikeStatus(mediaId, mediaType, status) {
+            await fetch("https://likes.stremio.com/api/send", {
+                body: JSON.stringify({ authToken: authKey, mediaId, mediaType, status }),
+                headers: { "Content-Type": "application/json" },
+                method: "POST",
+            });
+        },
 
-    async setLikeStatus(mediaId, mediaType, status) {
-      await fetch('https://likes.stremio.com/api/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authToken: authKey, mediaId, mediaType, status })
-      })
-    },
-
-    // Raw client access for edge cases during migration
-    get client() { return client }
-  }
+        // Capability flag: Stremio supports library writes via datastorePut
+        supportsLibraryWrite: true,
+        type: "stremio",
+    };
 }
 
-module.exports = { createStremioProvider }
+module.exports = { createStremioProvider };

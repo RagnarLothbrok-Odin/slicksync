@@ -11,112 +11,153 @@
 // YYYY-MM-DD, but a runtime whose ICU falls back to en-US yields MM/DD/YYYY),
 // so slicing by position is not portable. formatToParts reads the named parts
 // regardless of order.
-const { resolveAccountTimezone } = require('./dateUtils')
+const { resolveAccountTimezone } = require("./dateUtils");
 
 async function buildYearInReview(prisma, accountId, year, users = []) {
-  const accountIdValue = accountId || 'default'
-  const tz = await resolveAccountTimezone(prisma, accountIdValue)
-  const y = Number(year) || new Date().getFullYear()
+    const accountIdValue = accountId || "default";
+    const tz = await resolveAccountTimezone(prisma, accountIdValue);
+    const y = Number(year) || new Date().getFullYear();
 
-  const partsFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit' })
-  const ymOf = (d) => {
-    const parts = partsFmt.formatToParts(new Date(d))
-    const yr = Number(parts.find((p) => p.type === 'year')?.value)
-    const mo = Number(parts.find((p) => p.type === 'month')?.value) - 1 // 0-11
-    return { yr, mo }
-  }
+    const partsFmt = new Intl.DateTimeFormat("en-US", {
+        month: "2-digit",
+        timeZone: tz,
+        year: "numeric",
+    });
+    const ymOf = (d) => {
+        const parts = partsFmt.formatToParts(new Date(d));
+        const yr = Number(parts.find((p) => p.type === "year")?.value);
+        const mo = Number(parts.find((p) => p.type === "month")?.value) - 1; // 0-11
+        return { mo, yr };
+    };
 
-  // A generous UTC window around the target year: a timezone offset can push a
-  // local calendar day into an adjacent UTC day, so we over-fetch by a day on
-  // each side and then filter precisely by the account-timezone year below.
-  const start = new Date(Date.UTC(y - 1, 11, 30))
-  const end = new Date(Date.UTC(y + 1, 0, 2))
-  const inYear = (d) => d && ymOf(d).yr === y
-  const monthOf = (d) => ymOf(d).mo
+    // A generous UTC window around the target year: a timezone offset can push a
+    // local calendar day into an adjacent UTC day, so we over-fetch by a day on
+    // each side and then filter precisely by the account-timezone year below.
+    const start = new Date(Date.UTC(y - 1, 11, 30));
+    const end = new Date(Date.UTC(y + 1, 0, 2));
+    const inYear = (d) => d && ymOf(d).yr === y;
+    const monthOf = (d) => ymOf(d).mo;
 
-  const [activity, movies, episodes] = await Promise.all([
-    prisma.watchActivity.findMany({
-      where: { accountId: accountIdValue, date: { gte: start, lte: end } },
-      select: { userId: true, itemType: true, watchTimeSeconds: true, date: true },
-    }),
-    prisma.movieWatchHistory.findMany({
-      where: { accountId: accountIdValue, watchedAt: { gte: start, lte: end } },
-      select: { userId: true, itemId: true, itemName: true, poster: true, completed: true, rewatchCount: true, watchedAt: true },
-    }),
-    prisma.episodeWatchHistory.findMany({
-      where: { accountId: accountIdValue, watchedAt: { gte: start, lte: end } },
-      select: { userId: true, showId: true, showName: true, poster: true, watchedAt: true },
-    }),
-  ])
+    const [activity, movies, episodes] = await Promise.all([
+        prisma.watchActivity.findMany({
+            select: { date: true, itemType: true, userId: true, watchTimeSeconds: true },
+            where: { accountId: accountIdValue, date: { gte: start, lte: end } },
+        }),
+        prisma.movieWatchHistory.findMany({
+            select: {
+                completed: true,
+                itemId: true,
+                itemName: true,
+                poster: true,
+                rewatchCount: true,
+                userId: true,
+                watchedAt: true,
+            },
+            where: { accountId: accountIdValue, watchedAt: { gte: start, lte: end } },
+        }),
+        prisma.episodeWatchHistory.findMany({
+            select: { poster: true, showId: true, showName: true, userId: true, watchedAt: true },
+            where: { accountId: accountIdValue, watchedAt: { gte: start, lte: end } },
+        }),
+    ]);
 
-  // People left out of household numbers (a test or guest) are not part of
-  // the household's year.
-  const leftOutRows = await prisma.user.findMany({ where: { accountId: accountIdValue, excludeFromHouseholdStats: true }, select: { id: true } }).catch(() => [])
-  const leftOut = new Set(leftOutRows.map((u) => u.id))
-  const keep = (r) => !leftOut.has(r.userId)
-  activity.splice(0, activity.length, ...activity.filter(keep))
-  movies.splice(0, movies.length, ...movies.filter(keep))
-  episodes.splice(0, episodes.length, ...episodes.filter(keep))
+    // People left out of household numbers (a test or guest) are not part of
+    // the household's year.
+    const leftOutRows = await prisma.user
+        .findMany({
+            select: { id: true },
+            where: { accountId: accountIdValue, excludeFromHouseholdStats: true },
+        })
+        .catch(() => []);
+    const leftOut = new Set(leftOutRows.map((u) => u.id));
+    const keep = (r) => !leftOut.has(r.userId);
+    activity.splice(0, activity.length, ...activity.filter(keep));
+    movies.splice(0, movies.length, ...movies.filter(keep));
+    episodes.splice(0, episodes.length, ...episodes.filter(keep));
 
-  const userMap = new Map(users.map((u) => [u.id, u]))
-  const displayName = (id) => { const u = userMap.get(id); return u ? (u.username || u.email || id) : id }
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const displayName = (id) => {
+        const u = userMap.get(id);
+        return u ? u.username || u.email || id : id;
+    };
 
-  // Watch time (the one true duration source is WatchActivity's deltas).
-  let totalSeconds = 0
-  let movieSeconds = 0
-  let seriesSeconds = 0
-  const byMonth = Array.from({ length: 12 }, () => 0)
-  const perUser = new Map()
-  for (const a of activity) {
-    if (!inYear(a.date)) continue
-    const s = a.watchTimeSeconds || 0
-    totalSeconds += s
-    byMonth[monthOf(a.date)] += s
-    perUser.set(a.userId, (perUser.get(a.userId) || 0) + s)
-    if (a.itemType === 'movie') movieSeconds += s
-    else seriesSeconds += s
-  }
+    // Watch time (the one true duration source is WatchActivity's deltas).
+    let totalSeconds = 0;
+    let movieSeconds = 0;
+    let seriesSeconds = 0;
+    const byMonth = Array.from({ length: 12 }, () => 0);
+    const perUser = new Map();
+    for (const a of activity) {
+        if (!inYear(a.date)) {
+            continue;
+        }
+        const s = a.watchTimeSeconds || 0;
+        totalSeconds += s;
+        byMonth[monthOf(a.date)] += s;
+        perUser.set(a.userId, (perUser.get(a.userId) || 0) + s);
+        if (a.itemType === "movie") {
+            movieSeconds += s;
+        } else {
+            seriesSeconds += s;
+        }
+    }
 
-  // Movies.
-  const yearMovies = movies.filter((m) => inYear(m.watchedAt))
-  const distinctMovies = new Set(yearMovies.map((m) => m.itemId))
-  const completedMovies = yearMovies.filter((m) => m.completed === true).length
-  const mostRewatched = yearMovies
-    .filter((m) => (m.rewatchCount || 0) > 0)
-    .sort((a, b) => (b.rewatchCount || 0) - (a.rewatchCount || 0))
-    .slice(0, 5)
-    .map((m) => ({ id: m.itemId, name: m.itemName, poster: m.poster || null, type: 'movie', rewatchCount: m.rewatchCount || 0 }))
+    // Movies.
+    const yearMovies = movies.filter((m) => inYear(m.watchedAt));
+    const distinctMovies = new Set(yearMovies.map((m) => m.itemId));
+    const completedMovies = yearMovies.filter((m) => m.completed === true).length;
+    const mostRewatched = yearMovies
+        .filter((m) => (m.rewatchCount || 0) > 0)
+        .sort((a, b) => (b.rewatchCount || 0) - (a.rewatchCount || 0))
+        .slice(0, 5)
+        .map((m) => ({
+            id: m.itemId,
+            name: m.itemName,
+            poster: m.poster || null,
+            rewatchCount: m.rewatchCount || 0,
+            type: "movie",
+        }));
 
-  // Episodes / shows.
-  const yearEpisodes = episodes.filter((e) => inYear(e.watchedAt))
-  const showCounts = new Map()
-  for (const e of yearEpisodes) {
-    if (!showCounts.has(e.showId)) showCounts.set(e.showId, { id: e.showId, name: e.showName || 'Unknown', poster: e.poster || null, type: 'series', episodeCount: 0 })
-    showCounts.get(e.showId).episodeCount++
-  }
-  const topShows = [...showCounts.values()].sort((a, b) => b.episodeCount - a.episodeCount).slice(0, 5)
+    // Episodes / shows.
+    const yearEpisodes = episodes.filter((e) => inYear(e.watchedAt));
+    const showCounts = new Map();
+    for (const e of yearEpisodes) {
+        if (!showCounts.has(e.showId)) {
+            showCounts.set(e.showId, {
+                episodeCount: 0,
+                id: e.showId,
+                name: e.showName || "Unknown",
+                poster: e.poster || null,
+                type: "series",
+            });
+        }
+        showCounts.get(e.showId).episodeCount++;
+    }
+    const topShows = [...showCounts.values()]
+        .sort((a, b) => b.episodeCount - a.episodeCount)
+        .slice(0, 5);
 
-  const perUserArr = [...perUser.entries()]
-    .map(([id, seconds]) => ({ userId: id, username: displayName(id), seconds }))
-    .sort((a, b) => b.seconds - a.seconds)
-  const busiestMonth = byMonth.reduce((best, s, i) => (s > byMonth[best] ? i : best), 0)
+    const perUserArr = [...perUser.entries()]
+        .map(([id, seconds]) => ({ seconds, userId: id, username: displayName(id) }))
+        .sort((a, b) => b.seconds - a.seconds);
+    const busiestMonth = byMonth.reduce((best, s, i) => (s > byMonth[best] ? i : best), 0);
 
-  return {
-    year: y,
-    totalWatchTimeSeconds: totalSeconds,
-    movieWatchTimeSeconds: movieSeconds,
-    seriesWatchTimeSeconds: seriesSeconds,
-    moviesWatched: distinctMovies.size,
-    completedMovies,
-    episodesWatched: yearEpisodes.length,
-    showsWatched: showCounts.size,
-    byMonth,
-    busiestMonth,
-    topShows,
-    mostRewatched,
-    perUser: perUserArr,
-    hasData: totalSeconds > 0 || distinctMovies.size > 0 || yearEpisodes.length > 0,
-  }
+    return {
+        busiestMonth,
+        byMonth,
+        completedMovies,
+        episodesWatched: yearEpisodes.length,
+        hasData: totalSeconds > 0 || distinctMovies.size > 0 || yearEpisodes.length > 0,
+        mostRewatched,
+        moviesWatched: distinctMovies.size,
+        movieWatchTimeSeconds: movieSeconds,
+        perUser: perUserArr,
+        seriesWatchTimeSeconds: seriesSeconds,
+        showsWatched: showCounts.size,
+        topShows,
+        totalWatchTimeSeconds: totalSeconds,
+        year: y,
+    };
 }
 
-module.exports = { buildYearInReview }
+module.exports = { buildYearInReview };

@@ -1,28 +1,28 @@
 # Multi-stage Dockerfile for SlickSync
 FROM oven/bun:1-alpine AS base
 
-# Install npm for building
-RUN apk add --no-cache libc6-compat openssl3 curl npm
+# Install native runtime libraries
+RUN apk add --no-cache libc6-compat openssl3 curl
 WORKDIR /app
 
 # Deps stage - install dependencies
 FROM base AS deps
 WORKDIR /app
-COPY package*.json ./
-COPY client/package*.json ./client/
+COPY package.json bun.lock ./
+COPY client/package.json ./client/
 COPY prisma ./prisma/
 RUN bun install --frozen-lockfile
-RUN cd client && bun install --frozen-lockfile
 
 # Runtime dependencies only. The image used to ship whatever the build needed,
-# so every release carried eslint, nodemon, concurrently and their transitive
+# so every release carried linters, concurrently and their transitive
 # tree to every self-hoster - none of which runs in the container. Note that
 # prisma itself is a real runtime dependency here, because scripts/start.sh
 # applies the schema on every boot, so it lives under dependencies rather than
 # being dropped by this install.
 FROM base AS prod-deps
 WORKDIR /app
-COPY package*.json ./
+COPY package.json bun.lock ./
+COPY client/package.json ./client/
 COPY prisma ./prisma/
 RUN bun install --frozen-lockfile --production
 
@@ -30,7 +30,8 @@ RUN bun install --frozen-lockfile --production
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/client/node_modules ./client/node_modules
+# Copy the workspace whether Bun hoists all packages or keeps client-local ones.
+COPY --from=deps /app/client ./client
 COPY . .
 
 # Set build-time variables first
@@ -46,7 +47,7 @@ RUN if [ "$INSTANCE" = "public" ]; then \
         cp prisma/schema.sqlite.prisma prisma/schema.prisma; \
     fi
 # Use the main schema file for generation
-RUN npx prisma generate --schema=prisma/schema.prisma
+RUN bunx --no-install prisma generate --schema=prisma/schema.prisma
 
 # Set environment variables
 ARG NEXT_PUBLIC_API_URL
@@ -61,7 +62,7 @@ RUN cd client && \
     date +%s > .build-stamp && \
     NEXT_PUBLIC_AUTH_ENABLED=$( [ "$INSTANCE" = "public" ] && echo true || echo false ) \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-} \
-    npm run build && \
+    bun run build && \
     cp .build-stamp .next/build-stamp
 
 # Production stage
@@ -80,7 +81,7 @@ RUN mkdir -p /app/data /app/logs && chown -R appuser:nodejs /app/data /app/logs
 # fully-buffer (rather than line-buffer) output when backgrounded in a
 # non-TTY context, which was making the backend's own console output never
 # reach `docker logs` at all despite the process running correctly.
-RUN apk add --no-cache curl openssl3 npm coreutils
+RUN apk add --no-cache curl openssl3 coreutils
 
 # Set environment variables for Prisma
 ENV PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x,linux-musl-arm64-openssl-3.0.x"
@@ -124,9 +125,9 @@ COPY --from=builder --chown=appuser:nodejs /app/client/next.config.ts ./client/
 # The standalone server serves its static assets from .next/static and the
 # public folder from public, both beside its own server.js - Next leaves
 # copying them there to the deployment.
-RUN test -f /app/client/.next/standalone/server.js && \
-    cp -r /app/client/.next/static /app/client/.next/standalone/.next/static && \
-    cp -r /app/client/public /app/client/.next/standalone/public && \
+RUN test -f /app/client/.next/standalone/client/server.js && \
+    cp -r /app/client/.next/static /app/client/.next/standalone/client/.next/static && \
+    cp -r /app/client/public /app/client/.next/standalone/client/public && \
     chown -R appuser:nodejs /app/client/.next/standalone
 
 # Use maintained startup script that selects Prisma schema based on DATABASE_URL

@@ -22,20 +22,22 @@
 // Cinemeta identifies itself consistently across both providers; matching on
 // the id first and the URL second avoids depending on a display name a user
 // can rename.
-const CINEMETA_ID = 'com.linvo.cinemeta'
-const CINEMETA_URL_MARKER = 'cinemeta'
+const CINEMETA_ID = "com.linvo.cinemeta";
+const CINEMETA_URL_MARKER = "cinemeta";
 
 function isCinemeta(addon) {
-  const id = addon?.manifest?.id || ''
-  if (id === CINEMETA_ID) return true
-  const url = addon?.transportUrl || addon?.manifestUrl || addon?.url || ''
-  return CINEMETA_URL_MARKER.length > 0 && url.toLowerCase().includes(CINEMETA_URL_MARKER)
+    const id = addon?.manifest?.id || "";
+    if (id === CINEMETA_ID) {
+        return true;
+    }
+    const url = addon?.transportUrl || addon?.manifestUrl || addon?.url || "";
+    return CINEMETA_URL_MARKER.length > 0 && url.toLowerCase().includes(CINEMETA_URL_MARKER);
 }
 
 function findCinemeta(addons) {
-  const list = Array.isArray(addons) ? addons : (addons?.addons || [])
-  const index = list.findIndex(isCinemeta)
-  return { list, index, addon: index >= 0 ? list[index] : null }
+    const list = Array.isArray(addons) ? addons : addons?.addons || [];
+    const index = list.findIndex(isCinemeta);
+    return { addon: index >= 0 ? list[index] : null, index, list };
 }
 
 /**
@@ -49,53 +51,63 @@ function findCinemeta(addons) {
  * results.
  */
 function applyPatch(originalManifest, patch) {
-  const manifest = JSON.parse(JSON.stringify(originalManifest || {}))
+    const manifest = JSON.parse(JSON.stringify(originalManifest || {}));
 
-  if (patch.removeCatalogs) {
-    manifest.catalogs = []
-  } else if (patch.removeSearch && Array.isArray(manifest.catalogs)) {
-    manifest.catalogs = manifest.catalogs.map((c) => {
-      const clone = { ...c }
-      if (Array.isArray(clone.extra)) {
-        clone.extra = clone.extra.filter((e) => (e?.name || e) !== 'search')
-      }
-      if (Array.isArray(clone.extraSupported)) {
-        clone.extraSupported = clone.extraSupported.filter((e) => e !== 'search')
-      }
-      if (Array.isArray(clone.extraRequired)) {
-        clone.extraRequired = clone.extraRequired.filter((e) => e !== 'search')
-      }
-      return clone
-    })
-  }
+    if (patch.removeCatalogs) {
+        manifest.catalogs = [];
+    } else if (patch.removeSearch && Array.isArray(manifest.catalogs)) {
+        manifest.catalogs = manifest.catalogs.map((c) => {
+            const clone = { ...c };
+            if (Array.isArray(clone.extra)) {
+                clone.extra = clone.extra.filter((e) => (e?.name || e) !== "search");
+            }
+            if (Array.isArray(clone.extraSupported)) {
+                clone.extraSupported = clone.extraSupported.filter((e) => e !== "search");
+            }
+            if (Array.isArray(clone.extraRequired)) {
+                clone.extraRequired = clone.extraRequired.filter((e) => e !== "search");
+            }
+            return clone;
+        });
+    }
 
-  if (patch.removeMeta && Array.isArray(manifest.resources)) {
-    manifest.resources = manifest.resources.filter((r) => {
-      const name = typeof r === 'string' ? r : (r && (r.name || r.type))
-      return name !== 'meta'
-    })
-  }
+    if (patch.removeMeta && Array.isArray(manifest.resources)) {
+        manifest.resources = manifest.resources.filter((r) => {
+            const name = typeof r === "string" ? r : r && (r.name || r.type);
+            return name !== "meta";
+        });
+    }
 
-  // A manifest that declares catalogs while claiming no catalog resource is
-  // internally inconsistent, and clients handle that inconsistently. Keep
-  // the two in step.
-  if (Array.isArray(manifest.resources) && Array.isArray(manifest.catalogs) && manifest.catalogs.length === 0) {
-    manifest.resources = manifest.resources.filter((r) => {
-      const name = typeof r === 'string' ? r : (r && (r.name || r.type))
-      return name !== 'catalog'
-    })
-  }
+    // A manifest that declares catalogs while claiming no catalog resource is
+    // internally inconsistent, and clients handle that inconsistently. Keep
+    // the two in step.
+    if (
+        Array.isArray(manifest.resources) &&
+        Array.isArray(manifest.catalogs) &&
+        manifest.catalogs.length === 0
+    ) {
+        manifest.resources = manifest.resources.filter((r) => {
+            const name = typeof r === "string" ? r : r && (r.name || r.type);
+            return name !== "catalog";
+        });
+    }
 
-  return manifest
+    return manifest;
 }
 
 /** What a patch has actually removed, for the UI to read back. */
 function describePatch(patch) {
-  const parts = []
-  if (patch?.removeSearch) parts.push('search')
-  if (patch?.removeCatalogs) parts.push('catalogs')
-  if (patch?.removeMeta) parts.push('metadata')
-  return parts.length === 0 ? 'nothing removed' : `${parts.join(', ')} removed`
+    const parts = [];
+    if (patch?.removeSearch) {
+        parts.push("search");
+    }
+    if (patch?.removeCatalogs) {
+        parts.push("catalogs");
+    }
+    if (patch?.removeMeta) {
+        parts.push("metadata");
+    }
+    return parts.length === 0 ? "nothing removed" : `${parts.join(", ")} removed`;
 }
 
-module.exports = { isCinemeta, findCinemeta, applyPatch, describePatch, CINEMETA_ID }
+module.exports = { applyPatch, CINEMETA_ID, describePatch, findCinemeta, isCinemeta };

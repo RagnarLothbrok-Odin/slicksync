@@ -13,157 +13,196 @@
 // for it, so it shouldn't be generated on a timer and forgotten about the
 // way a routine backup is.
 
-const crypto = require('crypto');
-const { SETTINGS_SECRET_FIELDS } = require('./settingsSecrets')
-const { scryptKey, aesGcmEncrypt, aesGcmDecrypt } = require('./encryption');
+const crypto = require("node:crypto");
+const { SETTINGS_SECRET_FIELDS } = require("./settingsSecrets");
+const { scryptKey, aesGcmEncrypt, aesGcmDecrypt } = require("./encryption");
 
 const MIN_PASSPHRASE_LENGTH = 12;
 
 async function buildKit(prisma, accountId, passphrase, req, { decrypt }) {
-  if (!passphrase || String(passphrase).length < MIN_PASSPHRASE_LENGTH) {
-    throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters`);
-  }
-
-  // Reuse the exact same export the regular config backup uses - one
-  // source of truth for what "the config" contains, same internal-fetch
-  // pattern backup.js already relies on.
-  const baseUrl = `http://localhost:${process.env.PORT || 4000}`;
-  const configRsp = await fetch(`${baseUrl}/api/public-auth/config-export`, {
-    headers: req.headers?.cookie ? { cookie: req.headers.cookie } : {},
-  });
-  if (!configRsp.ok) throw new Error('Failed to build config export');
-  const config = await configRsp.json();
-
-  const entries = await prisma.vaultEntry.findMany({ where: { accountId } });
-  const vault = entries.map((entry) => {
-    let secret = null;
-    try { secret = decrypt(entry.encryptedSecret, req); } catch { secret = null; }
-    const { encryptedSecret, id, accountId: _acc, ...rest } = entry;
-    return { ...rest, secret };
-  });
-
-  // The config export above deliberately strips real secrets out of
-  // AppAccount.sync (webhookUrl, rpdbApiKey, tmdbApiKey, mdblistApiKey) so
-  // they never land in a plain backup file - see buildConfigExportPayload.
-  // This kit is the one place they DO get backed up, same passphrase
-  // protection as Vault below.
-  let syncSecrets = null;
-  try {
-    const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } });
-    let cfg = acct?.sync;
-    if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg) } catch { cfg = null } }
-    if (cfg && typeof cfg === 'object') {
-      // Every field the export strips, so nothing is stripped-and-lost.
-      // Hand-maintained copies of this list drifted before - see
-      // settingsSecrets.js.
-      syncSecrets = {};
-      for (const f of SETTINGS_SECRET_FIELDS) syncSecrets[f] = cfg[f] ?? null;
+    if (!passphrase || String(passphrase).length < MIN_PASSPHRASE_LENGTH) {
+        throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters`);
     }
-  } catch { }
 
-  const bundle = {
-    exportedAt: new Date().toISOString(),
-    appVersion: process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || null,
-    config,
-    vault,
-    syncSecrets,
-  };
+    // Reuse the exact same export the regular config backup uses - one
+    // source of truth for what "the config" contains, same internal-fetch
+    // pattern backup.js already relies on.
+    const baseUrl = `http://localhost:${process.env.PORT || 4000}`;
+    const configRsp = await fetch(`${baseUrl}/api/public-auth/config-export`, {
+        headers: req.headers?.cookie ? { cookie: req.headers.cookie } : {},
+    });
+    if (!configRsp.ok) {
+        throw new Error("Failed to build config export");
+    }
+    const config = await configRsp.json();
 
-  const salt = crypto.randomBytes(16);
-  const key = await scryptKey(passphrase, salt);
-  const payload = aesGcmEncrypt(key, JSON.stringify(bundle));
+    const entries = await prisma.vaultEntry.findMany({ where: { accountId } });
+    const vault = entries.map((entry) => {
+        let secret = null;
+        try {
+            secret = decrypt(entry.encryptedSecret, req);
+        } catch {
+            secret = null;
+        }
+        const { encryptedSecret, id, accountId: _acc, ...rest } = entry;
+        return { ...rest, secret };
+    });
 
-  return {
-    salt: salt.toString('base64'),
-    payload,
-    exportedAt: bundle.exportedAt,
-    counts: {
-      users: config.users?.length || 0,
-      groups: config.groups?.length || 0,
-      addons: config.addons?.length || 0,
-      vaultEntries: vault.length,
-    },
-  };
+    // The config export above deliberately strips real secrets out of
+    // AppAccount.sync (webhookUrl, rpdbApiKey, tmdbApiKey, mdblistApiKey) so
+    // they never land in a plain backup file - see buildConfigExportPayload.
+    // This kit is the one place they DO get backed up, same passphrase
+    // protection as Vault below.
+    let syncSecrets = null;
+    try {
+        const acct = await prisma.appAccount.findUnique({
+            select: { sync: true },
+            where: { id: accountId },
+        });
+        let cfg = acct?.sync;
+        if (typeof cfg === "string") {
+            try {
+                cfg = JSON.parse(cfg);
+            } catch {
+                cfg = null;
+            }
+        }
+        if (cfg && typeof cfg === "object") {
+            // Every field the export strips, so nothing is stripped-and-lost.
+            // Hand-maintained copies of this list drifted before - see
+            // settingsSecrets.js.
+            syncSecrets = {};
+            for (const f of SETTINGS_SECRET_FIELDS) {
+                syncSecrets[f] = cfg[f] ?? null;
+            }
+        }
+    } catch {
+        // Malformed optional data leaves the existing fallback in place.
+    }
+
+    const bundle = {
+        appVersion: process.env.NEXT_PUBLIC_APP_VERSION || process.env.APP_VERSION || null,
+        config,
+        exportedAt: new Date().toISOString(),
+        syncSecrets,
+        vault,
+    };
+
+    const salt = crypto.randomBytes(16);
+    const key = await scryptKey(passphrase, salt);
+    const payload = aesGcmEncrypt(key, JSON.stringify(bundle));
+
+    return {
+        counts: {
+            addons: config.addons?.length || 0,
+            groups: config.groups?.length || 0,
+            users: config.users?.length || 0,
+            vaultEntries: vault.length,
+        },
+        exportedAt: bundle.exportedAt,
+        payload,
+        salt: salt.toString("base64"),
+    };
 }
 
 async function restoreKit(prisma, accountId, passphrase, kit, req, { encrypt }) {
-  if (!passphrase) throw new Error('Passphrase is required');
-  if (!kit || !kit.salt || !kit.payload) throw new Error('Invalid recovery kit file');
-
-  const salt = Buffer.from(kit.salt, 'base64');
-  const key = await scryptKey(passphrase, salt);
-  let bundle;
-  try {
-    bundle = JSON.parse(aesGcmDecrypt(key, kit.payload));
-  } catch {
-    throw new Error('Wrong passphrase, or the file is corrupted');
-  }
-
-  // Import config via the same battle-tested handler restore-from-backup uses.
-  const baseUrl = `http://localhost:${process.env.PORT || 4000}`;
-  const importRsp = await fetch(`${baseUrl}/api/public-auth/config-import`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(req.headers?.cookie ? { cookie: req.headers.cookie } : {}),
-      ...(req.headers?.authorization ? { authorization: req.headers.authorization } : {}),
-      ...(req.headers?.['x-csrf-token'] ? { 'x-csrf-token': req.headers['x-csrf-token'] } : {}),
-    },
-    body: JSON.stringify({ jsonData: JSON.stringify(bundle.config) }),
-  });
-  if (!importRsp.ok) {
-    const result = await importRsp.json().catch(() => ({}));
-    throw new Error(result?.message || 'Config import failed');
-  }
-
-  // Restore the secrets the config export left out (see buildKit above) -
-  // merged onto whatever's already there, same reasoning as config-import's
-  // own merge: don't blindly overwrite a field this bundle doesn't carry.
-  if (bundle.syncSecrets && typeof bundle.syncSecrets === 'object') {
-    try {
-      const acct = await prisma.appAccount.findUnique({ where: { id: accountId }, select: { sync: true } });
-      let existingSync = acct?.sync;
-      if (typeof existingSync === 'string') {
-        try { existingSync = JSON.parse(existingSync) } catch { existingSync = null }
-      }
-      const base = (existingSync && typeof existingSync === 'object') ? existingSync : {};
-      const merged = { ...base };
-      for (const [key, value] of Object.entries(bundle.syncSecrets)) {
-        if (value !== null && value !== undefined && value !== '') merged[key] = value;
-      }
-      const valueToStore = typeof acct?.sync === 'string' ? JSON.stringify(merged) : merged;
-      await prisma.appAccount.update({ where: { id: accountId }, data: { sync: valueToStore } });
-    } catch (e) {
-      console.warn('[DisasterRecoveryKit] Failed to restore sync secrets:', e?.message);
+    if (!passphrase) {
+        throw new Error("Passphrase is required");
     }
-  }
-
-  // Vault: re-encrypt every secret under THIS instance's own current key,
-  // not the kit's passphrase-derived one - the bundle being portable is the
-  // whole point, Vault shouldn't end up permanently encrypted with a
-  // one-off recovery passphrase.
-  let restoredVaultCount = 0;
-  for (const entry of (bundle.vault || [])) {
-    try {
-      const { secret, ...rest } = entry;
-      if (!secret) continue;
-      await prisma.vaultEntry.create({
-        data: { ...rest, accountId, encryptedSecret: encrypt(secret, req) },
-      });
-      restoredVaultCount++;
-    } catch (e) {
-      console.warn('[DisasterRecoveryKit] Failed to restore a vault entry:', e?.message);
+    if (!(kit?.salt && kit.payload)) {
+        throw new Error("Invalid recovery kit file");
     }
-  }
 
-  return {
-    restoredVaultCount,
-    counts: {
-      users: bundle.config?.users?.length || 0,
-      groups: bundle.config?.groups?.length || 0,
-      addons: bundle.config?.addons?.length || 0,
-    },
-  };
+    const salt = Buffer.from(kit.salt, "base64");
+    const key = await scryptKey(passphrase, salt);
+    let bundle;
+    try {
+        bundle = JSON.parse(aesGcmDecrypt(key, kit.payload));
+    } catch (cause) {
+        throw new Error("Wrong passphrase, or the file is corrupted", { cause });
+    }
+
+    // Import config via the same battle-tested handler restore-from-backup uses.
+    const baseUrl = `http://localhost:${process.env.PORT || 4000}`;
+    const importRsp = await fetch(`${baseUrl}/api/public-auth/config-import`, {
+        body: JSON.stringify({ jsonData: JSON.stringify(bundle.config) }),
+        headers: {
+            "Content-Type": "application/json",
+            ...(req.headers?.cookie ? { cookie: req.headers.cookie } : {}),
+            ...(req.headers?.authorization ? { authorization: req.headers.authorization } : {}),
+            ...(req.headers?.["x-csrf-token"]
+                ? { "x-csrf-token": req.headers["x-csrf-token"] }
+                : {}),
+        },
+        method: "POST",
+    });
+    if (!importRsp.ok) {
+        const result = await importRsp.json().catch(() => ({}));
+        throw new Error(result?.message || "Config import failed");
+    }
+
+    // Restore the secrets the config export left out (see buildKit above) -
+    // merged onto whatever's already there, same reasoning as config-import's
+    // own merge: don't blindly overwrite a field this bundle doesn't carry.
+    if (bundle.syncSecrets && typeof bundle.syncSecrets === "object") {
+        try {
+            const acct = await prisma.appAccount.findUnique({
+                select: { sync: true },
+                where: { id: accountId },
+            });
+            let existingSync = acct?.sync;
+            if (typeof existingSync === "string") {
+                try {
+                    existingSync = JSON.parse(existingSync);
+                } catch {
+                    existingSync = null;
+                }
+            }
+            const base = existingSync && typeof existingSync === "object" ? existingSync : {};
+            const merged = { ...base };
+            for (const [keyLocal, value] of Object.entries(bundle.syncSecrets)) {
+                if (value !== null && value !== undefined && value !== "") {
+                    merged[keyLocal] = value;
+                }
+            }
+            const valueToStore = typeof acct?.sync === "string" ? JSON.stringify(merged) : merged;
+            await prisma.appAccount.update({
+                data: { sync: valueToStore },
+                where: { id: accountId },
+            });
+        } catch (e) {
+            console.warn("[DisasterRecoveryKit] Failed to restore sync secrets:", e?.message);
+        }
+    }
+
+    // Vault: re-encrypt every secret under THIS instance's own current key,
+    // not the kit's passphrase-derived one - the bundle being portable is the
+    // whole point, Vault shouldn't end up permanently encrypted with a
+    // one-off recovery passphrase.
+    let restoredVaultCount = 0;
+    for (const entry of bundle.vault || []) {
+        try {
+            const { secret, ...rest } = entry;
+            if (!secret) {
+                continue;
+            }
+            await prisma.vaultEntry.create({
+                data: { ...rest, accountId, encryptedSecret: encrypt(secret, req) },
+            });
+            restoredVaultCount++;
+        } catch (e) {
+            console.warn("[DisasterRecoveryKit] Failed to restore a vault entry:", e?.message);
+        }
+    }
+
+    return {
+        counts: {
+            addons: bundle.config?.addons?.length || 0,
+            groups: bundle.config?.groups?.length || 0,
+            users: bundle.config?.users?.length || 0,
+        },
+        restoredVaultCount,
+    };
 }
 
-module.exports = { buildKit, restoreKit, MIN_PASSPHRASE_LENGTH };
+module.exports = { buildKit, MIN_PASSPHRASE_LENGTH, restoreKit };

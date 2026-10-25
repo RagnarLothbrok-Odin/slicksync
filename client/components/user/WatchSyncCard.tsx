@@ -1,51 +1,79 @@
-'use client';
+"use client";
 
 // The AIOSync card on Tasks: one link to the AIOSync page (the person is
 // picked there, with For), and under it who is synced with whom - one line
 // per person whose sign-ins or profiles are kept in step.
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { ArrowsRightLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
-import { api } from '@/lib/api';
+import { ArrowsRightLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 
-type Synced = { userId: string; name: string; places: string[] };
+interface Synced {
+    name: string;
+    places: string[];
+    userId: string;
+}
 
-const joinNames = (names: string[]) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+const joinNames = (names: string[]) =>
+    names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 export function WatchSyncCard() {
-  const [synced, setSynced] = useState<Synced[]>([]);
-  useEffect(() => {
-    api.getWatchSyncOverview().then((r) => setSynced(r.synced || [])).catch(() => {});
-  }, []);
+    const [synced, setSynced] = useState<Synced[]>([]);
+    useEffect(() => {
+        api.getWatchSyncOverview()
+            .then((r) => setSynced(r.synced || []))
+            .catch(() => undefined);
+    }, []);
 
-  return (
-    <Link
-      href="/tasks/aiosync"
-      className="mb-6 flex items-center gap-3 p-5 rounded-2xl border transition-colors hover:border-[color:var(--color-secondary)]"
-      style={{ borderColor: 'color-mix(in srgb, var(--color-secondary) 40%, var(--color-surface-border))', background: 'color-mix(in srgb, var(--color-surface) 55%, transparent)' }}
-    >
-      <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'color-mix(in srgb, var(--color-secondary) 18%, transparent)' }}>
-        <ArrowsRightLeftIcon className="w-5 h-5" style={{ color: 'var(--color-secondary)' }} />
-      </span>
-      <span className="flex-1 min-w-0">
-        <span className="block text-base font-semibold font-display text-default">AIOSync</span>
-        <span className="block text-xs text-muted">Copy watched titles and resume points between any sign-ins and profiles, or keep them in step</span>
-        {synced.length > 0 && (
-          <span className="flex flex-wrap gap-1.5 mt-2">
-            {synced.map((s) => (
-              <span
-                key={s.userId}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
-                style={{ color: 'var(--color-success)', background: 'color-mix(in srgb, var(--color-success) 15%, transparent)' }}
-              >
-                ⇄ {s.name}: {s.places[0]} synced with {joinNames(s.places.slice(1))}
-              </span>
-            ))}
-          </span>
-        )}
-      </span>
-      <ChevronRightIcon className="w-5 h-5 text-muted shrink-0" />
-    </Link>
-  );
+    return (
+        <Link
+            className="mb-6 flex items-center gap-3 rounded-2xl border p-5 transition-colors hover:border-[color:var(--color-secondary)]"
+            href="/tasks/aiosync"
+            style={{
+                background: "color-mix(in srgb, var(--color-surface) 55%, transparent)",
+                borderColor:
+                    "color-mix(in srgb, var(--color-secondary) 40%, var(--color-surface-border))",
+            }}
+        >
+            <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                style={{
+                    background: "color-mix(in srgb, var(--color-secondary) 18%, transparent)",
+                }}
+            >
+                <ArrowsRightLeftIcon
+                    className="h-5 w-5"
+                    style={{ color: "var(--color-secondary)" }}
+                />
+            </span>
+            <span className="min-w-0 flex-1">
+                <span className="block font-display font-semibold text-base text-default">
+                    AIOSync
+                </span>
+                <span className="block text-muted text-xs">
+                    Copy watched titles and resume points between any sign-ins and profiles, or keep
+                    them in step
+                </span>
+                {synced.length > 0 && (
+                    <span className="mt-2 flex flex-wrap gap-1.5">
+                        {synced.map((s) => (
+                            <span
+                                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold text-[11px]"
+                                key={s.userId}
+                                style={{
+                                    background:
+                                        "color-mix(in srgb, var(--color-success) 15%, transparent)",
+                                    color: "var(--color-success)",
+                                }}
+                            >
+                                ⇄ {s.name}: {s.places[0]} synced with {joinNames(s.places.slice(1))}
+                            </span>
+                        ))}
+                    </span>
+                )}
+            </span>
+            <ChevronRightIcon className="h-5 w-5 shrink-0 text-muted" />
+        </Link>
+    );
 }

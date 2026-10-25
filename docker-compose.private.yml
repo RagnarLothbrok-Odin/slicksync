@@ -1,14 +1,14 @@
 services:
   slicksync:
-    image: ghcr.io/slicknsliding/slicksync:private
-    # Reads the .env you copied from env.example. Without this, nothing you
+    image: ghcr.io/ragnarlothbrok-odin/slicksync:private
+    # Reads the .env you copied from .env.example. Without this, nothing you
     # put in that file reaches the container.
     env_file:
       - .env
     environment:
       # Signs login sessions, so it has to be real randomness. Generate one
       # with: openssl rand -base64 32
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy env.example to .env and generate one with "openssl rand -base64 32"}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy .env.example to .env and generate one with "openssl rand -base64 32"}
       # Deliberately not set here. Left unset, the instance generates one on
       # first boot and keeps it in the data volume below, which is why that
       # volume must survive updates - it is what your stored provider

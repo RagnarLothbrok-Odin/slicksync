@@ -1,366 +1,423 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { api } from '@/lib/api';
-import { startAdaptivePoll } from '@/lib/adaptivePoll';
-import { Badge } from './Badge';
-import { toast } from './Toast';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { startAdaptivePoll } from "@/lib/adaptivePoll";
+import { api } from "@/lib/api";
+import { Badge } from "./Badge";
+import { toast } from "./Toast";
 
 interface SyncBadgeProps {
-  userId?: string;
-  groupId?: string;
-  onSync?: (id: string) => void;
-  onReconnect?: (id: string) => void;
-  isSyncing?: boolean;
-  size?: 'sm' | 'md';
-  className?: string;
+    className?: string;
+    groupId?: string;
+    isSyncing?: boolean;
+    onReconnect?: (id: string) => void;
+    onSync?: (id: string) => void;
+    size?: "sm" | "md";
+    userId?: string;
 }
 
-type SyncStatus = 'synced' | 'unsynced' | 'stale' | 'connect' | 'syncing' | 'checking' | 'error' | 'unsupported';
+type SyncStatus =
+    | "synced"
+    | "unsynced"
+    | "stale"
+    | "connect"
+    | "syncing"
+    | "checking"
+    | "error"
+    | "unsupported";
 
 export function SyncBadge({
-  userId,
-  groupId,
-  onSync,
-  onReconnect,
-  isSyncing = false,
-  size = 'sm',
-  className = ''
+    userId,
+    groupId,
+    onSync,
+    onReconnect,
+    isSyncing = false,
+    size = "sm",
+    className = "",
 }: SyncBadgeProps) {
-  // Last verdict this browser saw for this exact badge, so a page load can
-  // show an answer immediately instead of a spinner. The check behind it
-  // costs a live round trip to the provider (~200-700ms measured), which is
-  // what makes it trustworthy - but re-deciding from scratch on every
-  // navigation is why the badge visibly sat on "Checking" every single time.
-  // The cached value is only a starting point: a fresh check always runs and
-  // silently corrects it.
-  const cacheKey = userId ? `ss-syncbadge:u:${userId}` : (groupId ? `ss-syncbadge:g:${groupId}` : '');
-  // Long on purpose: the remembered verdict is only what shows first, and the
-  // fresh check right behind it corrects it. A short window meant every visit
-  // after a break opened on a row of "Checking" badges.
-  const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-  const readCached = (): SyncStatus | null => {
-    if (!cacheKey || typeof window === 'undefined') return null;
-    try {
-      const raw = window.localStorage.getItem(cacheKey);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (!parsed?.status || Date.now() - (parsed.at || 0) > CACHE_TTL_MS) return null;
-      return parsed.status as SyncStatus;
-    } catch {
-      return null;
-    }
-  };
-  const writeCached = (s: SyncStatus) => {
-    // Never remember a transient - "checking" and "syncing" describe this
-    // moment, not the account.
-    if (!cacheKey || typeof window === 'undefined' || s === 'checking' || s === 'syncing') return;
-    try { window.localStorage.setItem(cacheKey, JSON.stringify({ status: s, at: Date.now() })); } catch { /* private mode */ }
-  };
-
-  const initial = readCached();
-  const [status, setStatus] = useState<SyncStatus>(initial || 'checking');
-  const [isLoading, setIsLoading] = useState(!initial);
-  const prevIsSyncing = useRef(isSyncing);
-  // Mirrors `status`/the real per-member error text outside React's state
-  // so the click handler below can read the just-refreshed verdict
-  // synchronously after awaiting fetchSyncStatus() - `status` itself is
-  // stale in that closure until next render.
-  const statusRef = useRef<SyncStatus>(initial || 'checking');
-  const lastMessageRef = useRef<string | undefined>(undefined);
-  const updateStatus = (s: SyncStatus, message?: string) => {
-    statusRef.current = s;
-    lastMessageRef.current = message;
-    setStatus(s);
-    writeCached(s);
-  };
-
-  const fetchSyncStatus = useCallback(async () => {
-    if (!userId && !groupId) {
-      updateStatus('stale');
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      // Only the FIRST check shows "Checking". Every refresh after that -
-      // polling, or the re-check right after a sync - keeps the verdict
-      // already on screen until the new one arrives, because replacing a
-      // known answer with a spinner is what made this feel slow: the badge
-      // went Synced -> Checking -> Synced for no reason a person could see.
-      if (statusRef.current === 'checking') setIsLoading(true);
-      if (userId) {
-        // No preliminary user fetch: the status endpoint answers "stale" for
-        // a user in no group itself, so this is one round trip instead of
-        // two.
-        const syncStatus = await api.getUserSyncStatus(userId);
-        const syncStatusValue = (syncStatus as any)?.status;
-        const syncMessage = (syncStatus as any)?.message;
-
-        if (syncStatusValue === 'error') {
-          const message = syncMessage || '';
-          if (message.includes('Stremio connection invalid') ||
-              message.includes('authentication') ||
-              message.includes('auth') ||
-              message.includes('invalid') ||
-              message.includes('corrupted')) {
-            updateStatus('connect', syncMessage);
-          } else {
-            updateStatus('error', syncMessage);
-          }
-        } else if (syncStatusValue === 'stale' || !syncStatusValue) {
-          // Backend returns 'stale' or nothing for users without proper sync
-          updateStatus('stale');
-        } else {
-          updateStatus(syncStatusValue);
+    // Last verdict this browser saw for this exact badge, so a page load can
+    // show an answer immediately instead of a spinner. The check behind it
+    // costs a live round trip to the provider (~200-700ms measured), which is
+    // what makes it trustworthy - but re-deciding from scratch on every
+    // navigation is why the badge visibly sat on "Checking" every single time.
+    // The cached value is only a starting point: a fresh check always runs and
+    // silently corrects it.
+    const cacheKey = userId
+        ? `ss-syncbadge:u:${userId}`
+        : groupId
+          ? `ss-syncbadge:g:${groupId}`
+          : "";
+    // Long on purpose: the remembered verdict is only what shows first, and the
+    // fresh check right behind it corrects it. A short window meant every visit
+    // after a break opened on a row of "Checking" badges.
+    const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+    const readCached = (): SyncStatus | null => {
+        if (!cacheKey || typeof window === "undefined") {
+            return null;
         }
-      } else if (groupId) {
-        // For groups, check if all users are synced. A single call - the
-        // group's userIds/addons count come back on the same group fetch,
-        // and the actual per-member sync check is aggregated server-side
-        // (server/routes/groups.js `/:id/sync-status`) instead of this
-        // component firing one request per member itself. That per-member
-        // fan-out, repeated by every group's badge every 30s, was enough on
-        // its own to exhaust the API rate limit for households with several
-        // groups/users and take down unrelated pages.
-        const aggregated = await api.getGroupSyncStatus(groupId);
-        // Both counts come back with the status now. This used to fetch the
-        // whole group first just to read them, so every badge cost two
-        // round trips and a page listing ten groups made twenty requests
-        // before it could show a single verdict.
-        const memberCount = aggregated?.memberCount ?? (aggregated?.userStatuses?.length ?? 0);
-        const addonCount = aggregated?.addonCount ?? 0;
-
-        // Nothing to sync yet: no addons on the group, or nobody in it.
-        if (addonCount === 0 || memberCount === 0) {
-          updateStatus('stale');
-        } else {
-          const userStatuses = aggregated?.userStatuses || [];
-          const syncResults = userStatuses.map(s => s.status);
-          const allSynced = syncResults.length > 0 && syncResults.every(s => s === 'synced');
-          const failing = userStatuses.find(s => s.status === 'error' || s.status === 'connect');
-
-          if (failing) {
-            updateStatus('error', failing.message);
-          } else {
-            updateStatus(allSynced ? 'synced' : 'unsynced');
-          }
+        try {
+            const raw = window.localStorage.getItem(cacheKey);
+            if (!raw) {
+                return null;
+            }
+            const parsed = JSON.parse(raw);
+            if (!parsed?.status || Date.now() - (parsed.at || 0) > CACHE_TTL_MS) {
+                return null;
+            }
+            return parsed.status as SyncStatus;
+        } catch {
+            return null;
         }
-      }
-    } catch (error) {
-      console.error('Error fetching sync status:', error);
-      updateStatus('error');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [userId, groupId]);
-
-  // A check that lands right after a write (a sync elsewhere, or this
-  // badge's own first mount right after navigating away from a page where a
-  // sync just ran) can still see "unsynced" if it reads the provider
-  // (Nuvio's own backend, documented elsewhere in this codebase as
-  // occasionally slow/degraded) before the write has actually propagated
-  // there - a real read-after-write race, not a failed sync. Confirmed live:
-  // "Sync Group" succeeds, a fresh check moments later (including on a
-  // different page's badge) reads back stale state and shows "Unsynced",
-  // then a manual re-check right after correctly shows "Synced" with no
-  // further action taken. Only retries while the verdict is "unsynced" - a
-  // genuinely-never-synced check has no reason to self-correct, so this
-  // never masks a real problem, just a propagation-lag false negative in
-  // the few seconds right after a write.
-  const fetchSyncStatusVerified = useCallback(async (retriesLeft = 2) => {
-    await fetchSyncStatus();
-    if (statusRef.current === 'unsynced' && retriesLeft > 0) {
-      // 1.2s rather than 2.5s: this covers a provider's read-after-write
-      // lag, which is usually well under a second. Two retries still span a
-      // couple of seconds in total, so anything that used to settle still
-      // does - it just stops looking stuck while it happens.
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      await fetchSyncStatusVerified(retriesLeft - 1);
-    }
-  }, [fetchSyncStatus]);
-
-  // Initial fetch and polling
-  useEffect(() => {
-    fetchSyncStatusVerified();
-
-    // Poll for updates. Sync status only changes on user action (connect,
-    // sync, addon edits), and the isSyncing-transition effect below already
-    // refetches immediately right after a sync completes, so this interval
-    // only needs to catch drift, not be near-real-time. Plain fetchSyncStatus
-    // here (no retry) - this is routine background polling, not immediately
-    // following a known write, so there's no propagation-lag window to guard.
-    // Every two minutes on its own, every five while live updates are
-    // connected (a sync anywhere is pushed the moment it finishes, below),
-    // never while the tab is hidden.
-    const stopPoll = startAdaptivePoll(fetchSyncStatus, 120000, 300000);
-    // A sync finishing anywhere - the scheduler, another admin, a group
-    // edit - refreshes this badge right away. Several can finish within a
-    // second (a group sync is one per member), so the refetch is coalesced.
-    let pending: ReturnType<typeof setTimeout> | null = null;
-    const onLiveSync = () => {
-      if (pending) clearTimeout(pending);
-      pending = setTimeout(() => { pending = null; fetchSyncStatus(); }, 800);
     };
-    window.addEventListener('slicksync:live-sync', onLiveSync);
-    return () => {
-      stopPoll();
-      if (pending) clearTimeout(pending);
-      window.removeEventListener('slicksync:live-sync', onLiveSync);
+    const writeCached = (s: SyncStatus) => {
+        // Never remember a transient - "checking" and "syncing" describe this
+        // moment, not the account.
+        if (!cacheKey || typeof window === "undefined" || s === "checking" || s === "syncing") {
+            return;
+        }
+        try {
+            window.localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), status: s }));
+        } catch {
+            /* private mode */
+        }
     };
-  }, [fetchSyncStatusVerified, fetchSyncStatus]);
 
-  // When sync completes, refetch the actual status instead of assuming success
-  useEffect(() => {
-    if (prevIsSyncing.current && !isSyncing) {
-      fetchSyncStatusVerified();
+    const initial = readCached();
+    const [status, setStatus] = useState<SyncStatus>(initial || "checking");
+    const [isLoading, setIsLoading] = useState(!initial);
+    const prevIsSyncing = useRef(isSyncing);
+    // Mirrors `status`/the real per-member error text outside React's state
+    // so the click handler below can read the just-refreshed verdict
+    // synchronously after awaiting fetchSyncStatus() - `status` itself is
+    // stale in that closure until next render.
+    const statusRef = useRef<SyncStatus>(initial || "checking");
+    const lastMessageRef = useRef<string | undefined>(undefined);
+    const updateStatus = (s: SyncStatus, message?: string) => {
+        statusRef.current = s;
+        lastMessageRef.current = message;
+        setStatus(s);
+        writeCached(s);
+    };
+
+    const fetchSyncStatus = useCallback(async () => {
+        if (!(userId || groupId)) {
+            updateStatus("stale");
+            setIsLoading(false);
+            return;
+        }
+
+        try {
+            // Only the FIRST check shows "Checking". Every refresh after that -
+            // polling, or the re-check right after a sync - keeps the verdict
+            // already on screen until the new one arrives, because replacing a
+            // known answer with a spinner is what made this feel slow: the badge
+            // went Synced -> Checking -> Synced for no reason a person could see.
+            if (statusRef.current === "checking") {
+                setIsLoading(true);
+            }
+            if (userId) {
+                // No preliminary user fetch: the status endpoint answers "stale" for
+                // a user in no group itself, so this is one round trip instead of
+                // two.
+                const syncStatus = await api.getUserSyncStatus(userId);
+                const syncStatusValue = syncStatus?.status;
+                const syncMessage = syncStatus?.message;
+
+                if (syncStatusValue === "error") {
+                    const message = syncMessage || "";
+                    if (
+                        message.includes("Stremio connection invalid") ||
+                        message.includes("authentication") ||
+                        message.includes("auth") ||
+                        message.includes("invalid") ||
+                        message.includes("corrupted")
+                    ) {
+                        updateStatus("connect", syncMessage);
+                    } else {
+                        updateStatus("error", syncMessage);
+                    }
+                } else if (syncStatusValue === "stale" || !syncStatusValue) {
+                    // Backend returns 'stale' or nothing for users without proper sync
+                    updateStatus("stale");
+                } else {
+                    updateStatus(syncStatusValue);
+                }
+            } else if (groupId) {
+                // For groups, check if all users are synced. A single call - the
+                // group's userIds/addons count come back on the same group fetch,
+                // and the actual per-member sync check is aggregated server-side
+                // (server/routes/groups.js `/:id/sync-status`) instead of this
+                // component firing one request per member itself. That per-member
+                // fan-out, repeated by every group's badge every 30s, was enough on
+                // its own to exhaust the API rate limit for households with several
+                // groups/users and take down unrelated pages.
+                const aggregated = await api.getGroupSyncStatus(groupId);
+                // Both counts come back with the status now. This used to fetch the
+                // whole group first just to read them, so every badge cost two
+                // round trips and a page listing ten groups made twenty requests
+                // before it could show a single verdict.
+                const memberCount =
+                    aggregated?.memberCount ?? aggregated?.userStatuses?.length ?? 0;
+                const addonCount = aggregated?.addonCount ?? 0;
+
+                // Nothing to sync yet: no addons on the group, or nobody in it.
+                if (addonCount === 0 || memberCount === 0) {
+                    updateStatus("stale");
+                } else {
+                    const userStatuses = aggregated?.userStatuses || [];
+                    const syncResults = userStatuses.map((s) => s.status);
+                    const allSynced =
+                        syncResults.length > 0 && syncResults.every((s) => s === "synced");
+                    const failing = userStatuses.find(
+                        (s) => s.status === "error" || s.status === "connect"
+                    );
+
+                    if (failing) {
+                        updateStatus("error", failing.message);
+                    } else {
+                        updateStatus(allSynced ? "synced" : "unsynced");
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("Error fetching sync status:", error);
+            updateStatus("error");
+        } finally {
+            setIsLoading(false);
+        }
+    }, [userId, groupId]);
+
+    // A check that lands right after a write (a sync elsewhere, or this
+    // badge's own first mount right after navigating away from a page where a
+    // sync just ran) can still see "unsynced" if it reads the provider
+    // (Nuvio's own backend, documented elsewhere in this codebase as
+    // occasionally slow/degraded) before the write has actually propagated
+    // there - a real read-after-write race, not a failed sync. Confirmed live:
+    // "Sync Group" succeeds, a fresh check moments later (including on a
+    // different page's badge) reads back stale state and shows "Unsynced",
+    // then a manual re-check right after correctly shows "Synced" with no
+    // further action taken. Only retries while the verdict is "unsynced" - a
+    // genuinely-never-synced check has no reason to self-correct, so this
+    // never masks a real problem, just a propagation-lag false negative in
+    // the few seconds right after a write.
+    const fetchSyncStatusVerified = useCallback(
+        async (retriesLeft = 2) => {
+            await fetchSyncStatus();
+            if (statusRef.current === "unsynced" && retriesLeft > 0) {
+                // 1.2s rather than 2.5s: this covers a provider's read-after-write
+                // lag, which is usually well under a second. Two retries still span a
+                // couple of seconds in total, so anything that used to settle still
+                // does - it just stops looking stuck while it happens.
+                await new Promise((resolve) => setTimeout(resolve, 1200));
+                await fetchSyncStatusVerified(retriesLeft - 1);
+            }
+        },
+        [fetchSyncStatus]
+    );
+
+    // Initial fetch and polling
+    useEffect(() => {
+        fetchSyncStatusVerified();
+
+        // Poll for updates. Sync status only changes on user action (connect,
+        // sync, addon edits), and the isSyncing-transition effect below already
+        // refetches immediately right after a sync completes, so this interval
+        // only needs to catch drift, not be near-real-time. Plain fetchSyncStatus
+        // here (no retry) - this is routine background polling, not immediately
+        // following a known write, so there's no propagation-lag window to guard.
+        // Every two minutes on its own, every five while live updates are
+        // connected (a sync anywhere is pushed the moment it finishes, below),
+        // never while the tab is hidden.
+        const stopPoll = startAdaptivePoll(fetchSyncStatus, 120_000, 300_000);
+        // A sync finishing anywhere - the scheduler, another admin, a group
+        // edit - refreshes this badge right away. Several can finish within a
+        // second (a group sync is one per member), so the refetch is coalesced.
+        let pending: ReturnType<typeof setTimeout> | null = null;
+        const onLiveSync = () => {
+            if (pending) {
+                clearTimeout(pending);
+            }
+            pending = setTimeout(() => {
+                pending = null;
+                fetchSyncStatus();
+            }, 800);
+        };
+        window.addEventListener("slicksync:live-sync", onLiveSync);
+        return () => {
+            stopPoll();
+            if (pending) {
+                clearTimeout(pending);
+            }
+            window.removeEventListener("slicksync:live-sync", onLiveSync);
+        };
+    }, [fetchSyncStatusVerified, fetchSyncStatus]);
+
+    // When sync completes, refetch the actual status instead of assuming success
+    useEffect(() => {
+        if (prevIsSyncing.current && !isSyncing) {
+            fetchSyncStatusVerified();
+        }
+        prevIsSyncing.current = isSyncing;
+    }, [isSyncing, fetchSyncStatusVerified]);
+
+    // While a sync runs, or while the very first check is in flight, the badge
+    // says so. Otherwise it shows the last verdict it actually has, including
+    // during a background refresh.
+    const finalStatus = isSyncing
+        ? "syncing"
+        : isLoading && status === "checking"
+          ? "checking"
+          : status;
+
+    const getStatusConfig = () => {
+        const syncedDot = "#22c55e";
+        const unsyncedDot = "#ef4444";
+        const neutralDot = "var(--color-text-muted)";
+
+        switch (finalStatus) {
+            case "synced":
+                return {
+                    dot: syncedDot,
+                    text: "Synced",
+                    variant: "success" as const,
+                };
+            case "unsynced":
+                return {
+                    dot: unsyncedDot,
+                    text: "Unsynced",
+                    variant: "error" as const,
+                };
+            case "stale":
+                return {
+                    dot: neutralDot,
+                    text: "Stale",
+                    variant: "muted" as const,
+                };
+            case "connect":
+                return {
+                    dot: neutralDot,
+                    text: "Reconnect",
+                    variant: "warning" as const,
+                };
+            case "syncing":
+                return {
+                    dot: neutralDot,
+                    text: "Syncing",
+                    variant: "muted" as const,
+                };
+            case "checking":
+                return {
+                    dot: neutralDot,
+                    text: "Checking",
+                    variant: "muted" as const,
+                };
+            case "error":
+                return {
+                    dot: unsyncedDot,
+                    text: "Error",
+                    variant: "error" as const,
+                };
+            default:
+                return {
+                    dot: neutralDot,
+                    text: "Unknown",
+                    variant: "muted" as const,
+                };
+        }
+    };
+
+    // A Jellyfin server has no addon list, so there is no sync state to show.
+    if (finalStatus === "unsupported") {
+        return null;
     }
-    prevIsSyncing.current = isSyncing;
-  }, [isSyncing, fetchSyncStatusVerified]);
 
-  // While a sync runs, or while the very first check is in flight, the badge
-  // says so. Otherwise it shows the last verdict it actually has, including
-  // during a background refresh.
-  const finalStatus = isSyncing ? 'syncing' : ((isLoading && status === 'checking') ? 'checking' : status);
+    const config = getStatusConfig();
+    const isSpinning = finalStatus === "syncing" || finalStatus === "checking";
 
-  const getStatusConfig = () => {
-    const syncedDot = '#22c55e';
-    const unsyncedDot = '#ef4444';
-    const neutralDot = 'var(--color-text-muted)';
+    const content = (
+        <Badge className={`${className} bg-surface-hover`} size={size} variant={config.variant}>
+            <div
+                className={`mr-1 h-2 w-2 rounded-full ${isSpinning ? "animate-spin" : ""}`}
+                style={{ backgroundColor: config.dot }}
+            />
+            {config.text}
+        </Badge>
+    );
 
-    switch (finalStatus) {
-      case 'synced':
-        return {
-          text: 'Synced',
-          dot: syncedDot,
-          variant: 'success' as const
-        };
-      case 'unsynced':
-        return {
-          text: 'Unsynced',
-          dot: unsyncedDot,
-          variant: 'error' as const
-        };
-      case 'stale':
-        return {
-          text: 'Stale',
-          dot: neutralDot,
-          variant: 'muted' as const
-        };
-      case 'connect':
-        return {
-          text: 'Reconnect',
-          dot: neutralDot,
-          variant: 'warning' as const
-        };
-      case 'syncing':
-        return {
-          text: 'Syncing',
-          dot: neutralDot,
-          variant: 'muted' as const
-        };
-      case 'checking':
-        return {
-          text: 'Checking',
-          dot: neutralDot,
-          variant: 'muted' as const
-        };
-      case 'error':
-        return {
-          text: 'Error',
-          dot: unsyncedDot,
-          variant: 'error' as const
-        };
-      default:
-        return {
-          text: 'Unknown',
-          dot: neutralDot,
-          variant: 'muted' as const
-        };
+    // Handle reconnect status separately
+    if (finalStatus === "connect" && onReconnect && userId) {
+        return (
+            <button
+                className="relative z-10 cursor-pointer border-0 shadow-none ring-0 focus:outline-none"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onReconnect(userId);
+                }}
+                type="button"
+            >
+                {content}
+            </button>
+        );
     }
-  };
 
-  // A Jellyfin server has no addon list, so there is no sync state to show.
-  if (finalStatus === 'unsupported') return null;
+    // For error state, don't make it clickable to sync - instead re-check
+    // live and show what's actually wrong right now. This badge polls every
+    // 2 minutes and only refetches early when ITS OWN sync completes, so an
+    // out-of-band fix (e.g. a "Sync All" elsewhere, or the provider recovering
+    // on its own) can leave it showing a stale "Error" long after the real
+    // status has moved on - confirmed real case: "Sync All" reported success
+    // and a direct sync-plan check showed everything matched, while this
+    // badge kept showing the old error because nothing had told it to look
+    // again. A fresh check on click means the toast always reflects current
+    // reality, and uses the real per-member error text instead of a generic
+    // guess about credentials.
+    if (finalStatus === "error" && groupId) {
+        return (
+            <button
+                className="w-full cursor-pointer border-0 bg-transparent p-0 text-left"
+                onClick={async (e) => {
+                    e.stopPropagation();
+                    const toastId = `sync-error-${groupId || userId}`;
+                    toast.loading("Checking...", { id: toastId });
+                    await fetchSyncStatus();
+                    if (statusRef.current === "error" || statusRef.current === "connect") {
+                        toast.error(
+                            lastMessageRef.current || "Fix user credentials to resolve sync errors",
+                            { id: toastId }
+                        );
+                    } else {
+                        toast.success("Actually already synced - this just hadn't refreshed yet", {
+                            id: toastId,
+                        });
+                    }
+                }}
+                type="button"
+            >
+                {content}
+            </button>
+        );
+    }
 
-  const config = getStatusConfig();
-  const isSpinning = finalStatus === 'syncing' || finalStatus === 'checking';
+    // Only make unsynced clickable, not error
+    if (onSync && (userId || groupId) && finalStatus === "unsynced") {
+        return (
+            <button
+                className="relative z-10 cursor-pointer border-0 shadow-none ring-0 focus:outline-none"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const id = userId || groupId;
+                    if (id) {
+                        onSync(id);
+                    }
+                }}
+                type="button"
+            >
+                {content}
+            </button>
+        );
+    }
 
-  const content = (
-    <Badge variant={config.variant} size={size} className={`${className} bg-surface-hover`}>
-      <div 
-        className={`w-2 h-2 rounded-full mr-1 ${isSpinning ? 'animate-spin' : ''}`} 
-        style={{ backgroundColor: config.dot }}
-      />
-      {config.text}
-    </Badge>
-  );
-
-  // Handle reconnect status separately
-  if (finalStatus === 'connect' && onReconnect && userId) {
-    return (
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          onReconnect(userId);
-        }}
-        className="focus:outline-none border-0 shadow-none ring-0 cursor-pointer relative z-10"
-        type="button"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  // For error state, don't make it clickable to sync - instead re-check
-  // live and show what's actually wrong right now. This badge polls every
-  // 2 minutes and only refetches early when ITS OWN sync completes, so an
-  // out-of-band fix (e.g. a "Sync All" elsewhere, or the provider recovering
-  // on its own) can leave it showing a stale "Error" long after the real
-  // status has moved on - confirmed real case: "Sync All" reported success
-  // and a direct sync-plan check showed everything matched, while this
-  // badge kept showing the old error because nothing had told it to look
-  // again. A fresh check on click means the toast always reflects current
-  // reality, and uses the real per-member error text instead of a generic
-  // guess about credentials.
-  if (finalStatus === 'error' && groupId) {
-    return (
-      <div
-        onClick={async (e) => {
-          e.stopPropagation();
-          const toastId = `sync-error-${groupId || userId}`;
-          toast.loading('Checking...', { id: toastId });
-          await fetchSyncStatus();
-          if (statusRef.current === 'error' || statusRef.current === 'connect') {
-            toast.error(lastMessageRef.current || 'Fix user credentials to resolve sync errors', { id: toastId });
-          } else {
-            toast.success('Actually already synced - this just hadn\'t refreshed yet', { id: toastId });
-          }
-        }}
-        className="cursor-pointer"
-      >
-        {content}
-      </div>
-    );
-  }
-
-  // Only make unsynced clickable, not error
-  if (onSync && finalStatus === 'unsynced') {
-    return (
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          onSync(userId || groupId!);
-        }}
-        className="focus:outline-none border-0 shadow-none ring-0 cursor-pointer relative z-10"
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return content;
+    return content;
 }
