@@ -384,8 +384,8 @@ export default function UserHomePage() {
                 </div>
             )}
 
-            <PersonalContinueWatching />
             <PersonalCalendar />
+            <PersonalContinueWatching />
 
             {/* Stats Grid */}
             {!(loading || error) && stats && (
