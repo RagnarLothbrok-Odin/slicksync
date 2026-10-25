@@ -682,15 +682,20 @@ export interface BingeWatch {
 }
 
 export interface NowPlayingItem {
+    elapsedFrozen?: boolean;
+    elapsedSeconds?: number | null;
     item: {
         id: string;
         name: string;
         type: string;
-        poster?: string;
+        poster?: string | null;
         season?: number;
         episode?: number;
     };
+    /** Native playback checkpoints and runtime are milliseconds. */
+    lastPosition?: number | null;
     startTime: string;
+    totalDuration?: number | null;
     videoId?: string;
 }
 

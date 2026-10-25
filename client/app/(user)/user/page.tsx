@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { Avatar, Button } from "@/components/ui";
 import { PersonalCalendar } from "@/components/user/PersonalCalendar";
 import { PersonalContinueWatching } from "@/components/user/PersonalContinueWatching";
+import { PersonalNowPlaying } from "@/components/user/PersonalNowPlaying";
 import { usePersonalPreferences } from "@/components/user/PersonalPreferences";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
@@ -384,98 +385,13 @@ export default function UserHomePage() {
                 </div>
             )}
 
+            <PersonalNowPlaying />
             <PersonalContinueWatching />
             <PersonalCalendar />
 
             {/* Stats Grid */}
             {!(loading || error) && stats && (
                 <>
-                    {/* Now Playing - first, above today's numbers: what is on right now is
-              what someone opens this page to see, and at the bottom it sat
-              below a phone's whole screen of stat cards. Only there while
-              something plays. */}
-                    {activityData?.nowPlaying && activityData.nowPlaying.length > 0 && (
-                        <motion.div
-                            animate={{ opacity: 1, y: 0 }}
-                            className="mb-8 rounded-xl p-5"
-                            initial={{ opacity: 0, y: 20 }}
-                            style={{
-                                background: "var(--color-surface)",
-                                border: "2px solid var(--color-secondary)",
-                            }}
-                            transition={{ delay: 0.05 }}
-                        >
-                            <div className="mb-4 flex items-center gap-2">
-                                <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-green-500" />
-                                <h3
-                                    className="font-semibold"
-                                    style={{ color: "var(--color-text)" }}
-                                >
-                                    Now Playing
-                                </h3>
-                            </div>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                {activityData.nowPlaying.map((np, index) => (
-                                    <div
-                                        className="flex items-center gap-3 rounded-lg p-3"
-                                        key={index}
-                                        style={{ background: "var(--color-surface-elevated)" }}
-                                    >
-                                        {np.item.poster ? (
-                                            <img
-                                                alt={np.item.name}
-                                                className="h-14 w-10 rounded object-cover"
-                                                height={56}
-                                                src={np.item.poster}
-                                                width={40}
-                                            />
-                                        ) : (
-                                            <div
-                                                className="flex h-14 w-10 items-center justify-center rounded"
-                                                style={{ background: "var(--color-surface)" }}
-                                            >
-                                                {np.item.type === "movie" ? (
-                                                    <FilmIcon
-                                                        className="h-5 w-5"
-                                                        style={{
-                                                            color: "var(--color-text-subtle)",
-                                                        }}
-                                                    />
-                                                ) : (
-                                                    <TvIcon
-                                                        className="h-5 w-5"
-                                                        style={{
-                                                            color: "var(--color-text-subtle)",
-                                                        }}
-                                                    />
-                                                )}
-                                            </div>
-                                        )}
-                                        <div className="min-w-0 flex-1">
-                                            <p
-                                                className="truncate font-medium text-sm"
-                                                style={{ color: "var(--color-text)" }}
-                                            >
-                                                {np.item.name}
-                                            </p>
-                                            {np.item.type === "series" && np.item.episode && (
-                                                <p
-                                                    className="text-xs"
-                                                    style={{ color: "var(--color-text-muted)" }}
-                                                >
-                                                    {np.item.season
-                                                        ? `S${np.item.season}E${np.item.episode}`
-                                                        : `E${np.item.episode}`}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-                                    </div>
-                                ))}
-                            </div>
-                        </motion.div>
-                    )}
-
                     <motion.h3
                         animate={{ opacity: 1 }}
                         className="mb-4 font-semibold text-lg"
