@@ -303,6 +303,7 @@ async function liveViewings(prisma, accountId, userIds = null) {
             itemId: c.itemId,
             itemName: c.itemName || null,
             itemType: c.itemType,
+            observedAt: new Date(c.startAt).toISOString(),
             positionMs: position,
             poster: c.poster || null,
             season: c.season ?? null,

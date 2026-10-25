@@ -179,6 +179,14 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                             type: row.item.type,
                         },
                         lastPosition: row.lastPosition ?? null,
+                        playback: row.playback
+                            ? {
+                                  evidence: row.playback.evidence,
+                                  observedAt: row.playback.observedAt,
+                                  position: row.playback.position,
+                                  state: row.playback.state,
+                              }
+                            : null,
                         startTime: row.watchedAt,
                         totalDuration: row.totalDuration ?? null,
                         videoId: row.videoId,

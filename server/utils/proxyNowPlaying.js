@@ -398,6 +398,11 @@ async function mergeProxyNowPlaying(
         // can supply it.
         const existing = theirSessions.find((np) => pairMatches(described, np.item)) || null;
         const existingTitleMatches = !!existing;
+        // An open connection cannot override a player's pause or stop state.
+        // Direct reports are retained in the final pass below.
+        if (existing?.playback?.evidence === "player" || existing?.playback?.evidence === "event") {
+            continue;
+        }
 
         result.push({
             item: existingTitleMatches
@@ -488,6 +493,12 @@ async function mergeProxyNowPlaying(
             // Most recent connection's own start time (e.g. when the last seek
             // happened) - kept separately, not used for duration display.
             lastConnectionStartTime: representative.startTime.toISOString(),
+            playback: {
+                evidence: "proxy",
+                observedAt: mostRecentPollConfirmation.toISOString(),
+                position: "checkpoint",
+                state: "unknown",
+            },
             source: "aiostreams-proxy",
             startTime: earliestStartTime,
             // Proxy startTime/liveness is the authoritative signal here, not
@@ -536,7 +547,9 @@ async function mergeProxyNowPlaying(
         // entry above replaces it), or recently finished carrying it (stale echo).
         const matches = (streams) => !!streams && streams.some((d) => pairMatches(d, np.item));
         const isSuperseded = matches(active) || matches(ended);
-        if (!isSuperseded) {
+        const directReport =
+            np.playback?.evidence === "player" || np.playback?.evidence === "event";
+        if (directReport || !isSuperseded) {
             result.push(np);
         }
     }

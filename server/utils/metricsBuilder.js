@@ -444,6 +444,14 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             // surface as-is, unlike overallTimeWatched which needs two
             // observations to diff (see docs/runtime-behavior.md).
             lastPosition: session.lastPosition ?? null,
+            playback: {
+                evidence: "history",
+                // A database refresh is not a fresh player observation.
+                observedAt: null,
+                position: "checkpoint",
+                state: "unknown",
+            },
+            source: "native",
             totalDuration: session.totalDuration ?? null,
             user: {
                 avatarUrl: user.avatarUrl || null,
@@ -496,8 +504,17 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             if (!user) {
                 continue;
             }
-            if (nowPlaying.some((np) => np.user.id === v.userId && np.item.id === v.itemId)) {
-                continue;
+            // Player reports outrank library checkpoints. Replace only the
+            // matching video; another device may be playing a different episode.
+            for (let i = nowPlaying.length - 1; i >= 0; i--) {
+                const np = nowPlaying[i];
+                if (
+                    np.user.id === v.userId &&
+                    np.item.id === v.itemId &&
+                    (!(np.videoId && v.videoId) || np.videoId === v.videoId)
+                ) {
+                    nowPlaying.splice(i, 1);
+                }
             }
             nowPlaying.push({
                 item: {
@@ -510,6 +527,12 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
                     year: null,
                 },
                 lastPosition: v.positionMs,
+                playback: {
+                    evidence: v.source === "jellyfin" ? "player" : "event",
+                    observedAt: v.observedAt || null,
+                    position: v.paused ? "reported" : "estimated",
+                    state: v.paused ? "paused" : "playing",
+                },
                 source: v.source || "aiostreams",
                 totalDuration: v.durationMs,
                 user: {

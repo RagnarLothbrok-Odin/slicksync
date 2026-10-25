@@ -69,6 +69,7 @@ function liveViewings(userIds = null) {
                 itemId: v.itemId,
                 itemName: v.itemName,
                 itemType: v.itemType,
+                observedAt: new Date(entry.at).toISOString(),
                 paused: v.paused === true,
                 // Where it was at the last pass, moved on by the time since unless paused.
                 positionMs: v.paused
