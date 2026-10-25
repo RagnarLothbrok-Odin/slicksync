@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ResumeTourIcon } from "@/components/ui/icons/ResumeTourIcon";
 import { WizardBooksIcon } from "@/components/ui/icons/WizardBooksIcon";
+import type { NotificationsDropdownProps } from "@/components/ui/NotificationsDropdown";
 import { FLOATING_ICON_STYLE, NotificationsDropdown } from "@/components/ui/NotificationsDropdown";
 import { openCommandPalette } from "@/lib/commandPaletteBus";
 import {
@@ -16,12 +17,10 @@ import {
     ONBOARDING_VISIBILITY_EVENT,
 } from "@/lib/onboardingStorage";
 
-interface TopbarActionsProps {
+interface TopbarActionsProps
+    extends Pick<NotificationsDropdownProps, "activities" | "inviteHistory" | "taskHistory"> {
     // Only the sidebar Header passes these through; the Nebula copy renders
     // the bell with no preloaded data, same as before.
-    activities?: any[];
-    inviteHistory?: any[];
-    taskHistory?: any[];
 }
 
 // Gap between the bottom of the sticky nav bar and the pinned cluster.

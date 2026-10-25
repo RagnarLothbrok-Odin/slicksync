@@ -2,6 +2,7 @@
 
 import { ChartPieIcon, PuzzlePieceIcon, UsersIcon } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
+import type { TooltipPayloadEntry, TooltipValueType } from "recharts";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Badge, StatCard } from "@/components/ui";
 import type { AddonStat, ResourceStat } from "@/lib/api";
@@ -133,10 +134,21 @@ export function AddonPerformanceCard({
                                     ))}
                                 </Pie>
                                 <Tooltip
-                                    formatter={(value: any, name: any, props: any) => [
-                                        `${value} (${props.payload.percentage}%)`,
-                                        name,
-                                    ]}
+                                    formatter={(
+                                        value: TooltipValueType | undefined,
+                                        name: string | number | undefined,
+                                        props: TooltipPayloadEntry
+                                    ) => {
+                                        const payload: unknown = props.payload;
+                                        const percentage =
+                                            typeof payload === "object" &&
+                                            payload !== null &&
+                                            "percentage" in payload &&
+                                            typeof payload.percentage === "number"
+                                                ? payload.percentage
+                                                : 0;
+                                        return [`${value ?? 0} (${percentage}%)`, name ?? ""];
+                                    }}
                                 />
                             </PieChart>
                         </ResponsiveContainer>

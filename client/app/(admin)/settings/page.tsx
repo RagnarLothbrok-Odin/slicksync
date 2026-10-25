@@ -1189,7 +1189,10 @@ export default function SettingsPage() {
         };
     }, []);
 
-    const handleSaveSetting = async (key: keyof SyncSettings, value: any) => {
+    const handleSaveSetting = async <K extends keyof SyncSettings>(
+        key: K,
+        value: SyncSettings[K]
+    ) => {
         const newSettings = { ...syncSettings, [key]: value };
         setSyncSettings(newSettings);
 
@@ -2164,12 +2167,19 @@ export default function SettingsPage() {
                                                                 disabled={
                                                                     !syncSettings.notifyDigestEnabled
                                                                 }
-                                                                onChange={(e) =>
-                                                                    handleSaveSetting(
-                                                                        "notifyDigestFrequency",
-                                                                        e.target.value
-                                                                    )
-                                                                }
+                                                                onChange={(e) => {
+                                                                    const frequency =
+                                                                        e.target.value;
+                                                                    if (
+                                                                        frequency === "daily" ||
+                                                                        frequency === "weekly"
+                                                                    ) {
+                                                                        handleSaveSetting(
+                                                                            "notifyDigestFrequency",
+                                                                            frequency
+                                                                        );
+                                                                    }
+                                                                }}
                                                                 value={
                                                                     syncSettings.notifyDigestFrequency ||
                                                                     "daily"

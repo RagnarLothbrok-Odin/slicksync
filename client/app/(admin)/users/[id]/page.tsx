@@ -87,9 +87,12 @@ import { startAdaptivePoll } from "@/lib/adaptivePoll";
 import {
     type Addon,
     api,
+    type Group,
     type MergeCandidate,
     type MergeInfo,
     type MergePreview,
+    type MetricsData,
+    type StreakData,
     type StremioAddon,
     type User,
 } from "@/lib/api";
@@ -220,7 +223,7 @@ const WatchTimeChart = memo(function WatchTimeChartLocal({ data }: { data: Watch
                         />
                         <Tooltip
                             contentStyle={TOOLTIP_STYLE}
-                            formatter={(value: any) => [formatMinutes(value), "Watch Time"]}
+                            formatter={(value) => [formatMinutes(Number(value) || 0), "Watch Time"]}
                             labelStyle={TOOLTIP_LABEL_STYLE}
                         />
                         <Area
@@ -576,7 +579,7 @@ export default function UserDetailPage() {
     }, []);
 
     // Data state
-    const [user, setUser] = useState<any>(null);
+    const [user, setUser] = useState<User | null>(null);
 
     useEffect(() => {
         if (user?.traxAddonEnabled && !traxManifestUrl) {
@@ -687,7 +690,7 @@ export default function UserDetailPage() {
         setIsTogglingTrax(true);
         try {
             const r = await api.setTraxAddon(params.id as string, next);
-            setUser((prev: any) => (prev ? { ...prev, traxAddonEnabled: r.enabled } : prev));
+            setUser((prev) => (prev ? { ...prev, traxAddonEnabled: r.enabled } : prev));
             setTraxManifestUrl(r.manifestUrl || null);
             if (r.enabled) {
                 toast.success(
@@ -704,11 +707,11 @@ export default function UserDetailPage() {
             setIsTogglingTrax(false);
         }
     };
-    const [groups, setGroups] = useState<any[]>([]);
+    const [groups, setGroups] = useState<Group[]>([]);
     const [watchTimeData, setWatchTimeData] = useState<WatchTimeDataPoint[]>([]);
     const [_totalWatchTimeSeconds, setTotalWatchTimeSeconds] = useState(0);
-    const [streaks, setStreaks] = useState<any>(null);
-    const [metricsData, setMetricsData] = useState<any>(null);
+    const [streaks, setStreaks] = useState<StreakData | null>(null);
+    const [metricsData, setMetricsData] = useState<MetricsData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [providerAddonsLoading, setProviderAddonsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
@@ -777,7 +780,7 @@ export default function UserDetailPage() {
         const targetId = String(params.id);
         const targetUsername = user?.username?.toLowerCase();
 
-        return metricsData.watchSessions.filter((s: any) => {
+        return metricsData.watchSessions.filter((s) => {
             const sessionId = String(s.user.id);
             const sessionUsername = s.user.username?.toLowerCase();
 
@@ -786,8 +789,11 @@ export default function UserDetailPage() {
     }, [metricsData, params.id, user]);
 
     const userTopItems = useMemo(() => {
-        const itemsMap = new Map<string, any>();
-        userSessions.forEach((s: any) => {
+        const itemsMap = new Map<
+            string,
+            NonNullable<MetricsData["watchSessions"]>[number]["item"] & { watchTime: number }
+        >();
+        userSessions.forEach((s) => {
             if (!itemsMap.has(s.item.id)) {
                 itemsMap.set(s.item.id, {
                     id: s.item.id,
@@ -798,6 +804,9 @@ export default function UserDetailPage() {
                 });
             }
             const item = itemsMap.get(s.item.id);
+            if (!item) {
+                return;
+            }
             // Use durationSeconds if session is complete, otherwise use elapsed time
             const sessionStart = new Date(s.startTime).getTime();
             const _sessionEnd = s.endTime ? new Date(s.endTime).getTime() : nowTick;
@@ -817,10 +826,7 @@ export default function UserDetailPage() {
     const userRecentActivity = useMemo(
         () =>
             [...userSessions]
-                .sort(
-                    (a: any, b: any) =>
-                        new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-                )
+                .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
                 .slice(0, 5),
         [userSessions]
     );
@@ -830,7 +836,7 @@ export default function UserDetailPage() {
     // and never while the tab is hidden. It used to run once a second for
     // the life of the page, re-rendering everything on it each time.
     const hasLiveSession =
-        (metricsData?.nowPlaying?.length ?? 0) > 0 || userSessions.some((s: any) => !s.endTime);
+        (metricsData?.nowPlaying?.length ?? 0) > 0 || userSessions.some((s) => !s.endTime);
     useEffect(() => {
         if (!hasLiveSession) {
             return;
@@ -845,7 +851,7 @@ export default function UserDetailPage() {
 
     const liveTodayMinutes = useMemo(() => {
         let totalSeconds = 0;
-        userSessions.forEach((s: any) => {
+        userSessions.forEach((s) => {
             const sessionStart = new Date(s.startTime).getTime();
             const sessionEnd = s.endTime ? new Date(s.endTime).getTime() : nowTick;
             const start = Math.max(sessionStart, dateBoundaries.todayStart);
@@ -858,7 +864,7 @@ export default function UserDetailPage() {
 
     const liveWeekMinutes = useMemo(() => {
         let totalSeconds = 0;
-        userSessions.forEach((s: any) => {
+        userSessions.forEach((s) => {
             const sessionStart = new Date(s.startTime).getTime();
             const sessionEnd = s.endTime ? new Date(s.endTime).getTime() : nowTick;
             const start = Math.max(sessionStart, dateBoundaries.weekStart);
@@ -878,8 +884,8 @@ export default function UserDetailPage() {
         let extraSeconds = 0;
         if (metricsData?.nowPlaying) {
             metricsData.nowPlaying
-                .filter((np: any) => np.user.id === params.id || np.user.username === user.username)
-                .forEach((np: any) => {
+                .filter((np) => np.user.id === params.id || np.user.username === user.username)
+                .forEach((np) => {
                     const startMs = np.watchedAtTimestamp || new Date(np.watchedAt).getTime();
                     if (startMs) {
                         extraSeconds += Math.max(0, (nowTick - startMs) / 1000);
@@ -975,9 +981,7 @@ export default function UserDetailPage() {
                     // Use byDate from API response (fixed interface)
                     const periods = watchTime.byDate || [];
                     // Sort by date just in case
-                    periods.sort(
-                        (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()
-                    );
+                    periods.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
                     const transformed = periods.map((p) => ({
                         date: p.date,
@@ -1050,7 +1054,7 @@ export default function UserDetailPage() {
             colorIndex?: number;
             alsoOnServer?: boolean;
         }) => {
-            setUser((prev: any) => (prev ? { ...prev, ...data } : null));
+            setUser((prev) => (prev ? { ...prev, ...data } : null));
             await api.updateUser(params.id as string, data);
             // Their server too, when asked (server/utils/serverAvatars.js). The
             // picture is saved here either way; only the server half can fail.
@@ -1072,7 +1076,7 @@ export default function UserDetailPage() {
     const _handleColorChange = useCallback(
         async (colorIndex: number) => {
             // Optimistic update
-            setUser((prev: any) => (prev ? { ...prev, colorIndex } : null));
+            setUser((prev) => (prev ? { ...prev, colorIndex } : null));
 
             try {
                 await api.updateUser(params.id as string, { colorIndex });
@@ -1321,8 +1325,7 @@ export default function UserDetailPage() {
             setGroupAddons(newAddons);
 
             try {
-                const groupId =
-                    user.groupIds && user.groupIds.length > 0 ? user.groupIds[0] : user.groupId;
+                const groupId = user?.groupIds?.[0] || user?.groupId;
                 if (groupId) {
                     const stringIds = newAddons.map((a) => String(a.id));
                     await api.reorderGroupAddons(groupId, stringIds);
@@ -1509,7 +1512,7 @@ export default function UserDetailPage() {
                                                         name={user.username || user.name || "User"}
                                                         showRing
                                                         size="2xl"
-                                                        src={user.avatarUrl}
+                                                        src={user.avatarUrl || undefined}
                                                         useGravatar={user.useGravatar}
                                                         userId={user.id}
                                                     />
@@ -1590,14 +1593,14 @@ export default function UserDetailPage() {
                                                             size="sm"
                                                             userId={user.id}
                                                         />
-                                                        {streaks?.currentStreak > 0 ? (
+                                                        {(streaks?.currentStreak ?? 0) > 0 ? (
                                                             <Badge
                                                                 className="hidden sm:inline-flex"
                                                                 size="sm"
                                                                 variant="warning"
                                                             >
                                                                 <FireIcon className="mr-1 h-3 w-3" />
-                                                                {streaks.currentStreak}
+                                                                {streaks?.currentStreak}
                                                             </Badge>
                                                         ) : null}
                                                     </span>
@@ -1989,7 +1992,7 @@ export default function UserDetailPage() {
                                                         const v = !user.excludeFromHouseholdStats;
                                                         try {
                                                             await api.setHouseholdStats(user.id, v);
-                                                            setUser((prev: typeof user) =>
+                                                            setUser((prev) =>
                                                                 prev
                                                                     ? {
                                                                           ...prev,
@@ -2109,7 +2112,7 @@ export default function UserDetailPage() {
                                                                         toast.success(
                                                                             "SIMKL disconnected"
                                                                         );
-                                                                        setUser((prev: any) =>
+                                                                        setUser((prev) =>
                                                                             prev
                                                                                 ? {
                                                                                       ...prev,
@@ -2770,145 +2773,133 @@ export default function UserDetailPage() {
 
                                                 <StaggerContainer className="space-y-3">
                                                     {userRecentActivity.length > 0 ? (
-                                                        userRecentActivity.map(
-                                                            (s: any, index: number) => (
-                                                                <StaggerItem
-                                                                    key={`activity-${s.id}-${index}`}
+                                                        userRecentActivity.map((s, index) => (
+                                                            <StaggerItem
+                                                                key={`activity-${s.id}-${index}`}
+                                                            >
+                                                                <motion.div
+                                                                    className="group flex cursor-pointer items-center gap-4 rounded-xl border border-transparent bg-surface-hover p-3 transition-colors hover:border-default hover:bg-surface"
+                                                                    whileHover={{ x: 4 }}
                                                                 >
-                                                                    <motion.div
-                                                                        className="group flex cursor-pointer items-center gap-4 rounded-xl border border-transparent bg-surface-hover p-3 transition-colors hover:border-default hover:bg-surface"
-                                                                        whileHover={{ x: 4 }}
-                                                                    >
-                                                                        {/* Poster */}
-                                                                        <div className="flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface shadow-inner">
-                                                                            {s.item.poster ? (
-                                                                                <img
-                                                                                    alt={
-                                                                                        s.item.name
-                                                                                    }
-                                                                                    className="h-full w-full object-cover"
-                                                                                    height={64}
-                                                                                    src={
-                                                                                        s.item
-                                                                                            .poster
-                                                                                    }
-                                                                                    width={48}
-                                                                                />
-                                                                            ) : (
-                                                                                <div
-                                                                                    className="flex h-full w-full items-center justify-center"
-                                                                                    style={{
-                                                                                        background:
-                                                                                            "var(--color-primary-muted)",
-                                                                                    }}
-                                                                                >
-                                                                                    {s.item.type ===
-                                                                                    "movie" ? (
-                                                                                        <FilmIcon
-                                                                                            className="h-6 w-6"
-                                                                                            style={{
-                                                                                                color: "var(--color-primary)",
-                                                                                            }}
-                                                                                        />
-                                                                                    ) : (
-                                                                                        <TvIcon
-                                                                                            className="h-6 w-6"
-                                                                                            style={{
-                                                                                                color: "var(--color-secondary)",
-                                                                                            }}
-                                                                                        />
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-
-                                                                        {/* Info */}
-                                                                        <div className="min-w-0 flex-1">
-                                                                            <div className="mb-0.5 flex items-center gap-2">
-                                                                                <p className="truncate font-medium text-default transition-colors group-hover:text-primary">
-                                                                                    {s.item.name}
-                                                                                </p>
-                                                                                {s.isActive && (
-                                                                                    <div className="flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5">
-                                                                                        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-                                                                                        <span className="font-bold text-[10px] text-primary uppercase tracking-wider">
-                                                                                            Live
-                                                                                        </span>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                            <div className="flex items-center gap-2 text-muted text-xs">
+                                                                    {/* Poster */}
+                                                                    <div className="flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface shadow-inner">
+                                                                        {s.item.poster ? (
+                                                                            <img
+                                                                                alt={s.item.name}
+                                                                                className="h-full w-full object-cover"
+                                                                                height={64}
+                                                                                src={s.item.poster}
+                                                                                width={48}
+                                                                            />
+                                                                        ) : (
+                                                                            <div
+                                                                                className="flex h-full w-full items-center justify-center"
+                                                                                style={{
+                                                                                    background:
+                                                                                        "var(--color-primary-muted)",
+                                                                                }}
+                                                                            >
                                                                                 {s.item.type ===
-                                                                                    "series" &&
-                                                                                    s.item
-                                                                                        .season && (
-                                                                                        <span className="font-medium text-secondary">
-                                                                                            S
-                                                                                            {String(
-                                                                                                s
-                                                                                                    .item
-                                                                                                    .season
-                                                                                            ).padStart(
-                                                                                                2,
-                                                                                                "0"
-                                                                                            )}
-                                                                                            E
-                                                                                            {String(
-                                                                                                s
-                                                                                                    .item
-                                                                                                    .episode
-                                                                                            ).padStart(
-                                                                                                2,
-                                                                                                "0"
-                                                                                            )}
-                                                                                        </span>
-                                                                                    )}
-                                                                                <span>
-                                                                                    {new Date(
-                                                                                        s.startTime
-                                                                                    ).toLocaleTimeString(
-                                                                                        [],
-                                                                                        {
-                                                                                            hour: "2-digit",
-                                                                                            minute: "2-digit",
-                                                                                        }
-                                                                                    )}
-                                                                                </span>
-                                                                                {s.durationSeconds >
-                                                                                    0 && (
-                                                                                    <>
-                                                                                        <span>
-                                                                                            •
-                                                                                        </span>
-                                                                                        <span>
-                                                                                            {formatMinutes(
-                                                                                                Math.round(
-                                                                                                    s.durationSeconds /
-                                                                                                        60
-                                                                                                )
-                                                                                            )}
-                                                                                        </span>
-                                                                                    </>
+                                                                                "movie" ? (
+                                                                                    <FilmIcon
+                                                                                        className="h-6 w-6"
+                                                                                        style={{
+                                                                                            color: "var(--color-primary)",
+                                                                                        }}
+                                                                                    />
+                                                                                ) : (
+                                                                                    <TvIcon
+                                                                                        className="h-6 w-6"
+                                                                                        style={{
+                                                                                            color: "var(--color-secondary)",
+                                                                                        }}
+                                                                                    />
                                                                                 )}
                                                                             </div>
-                                                                        </div>
+                                                                        )}
+                                                                    </div>
 
-                                                                        {/* Status */}
-                                                                        <div className="shrink-0">
-                                                                            {s.isActive ? (
-                                                                                <div className="rounded-full bg-secondary/10 p-2">
-                                                                                    <PlayIcon className="h-4 w-4 text-secondary" />
-                                                                                </div>
-                                                                            ) : (
-                                                                                <div className="rounded-full bg-primary/10 p-2">
-                                                                                    <CheckCircleIcon className="h-4 w-4 text-primary" />
+                                                                    {/* Info */}
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="mb-0.5 flex items-center gap-2">
+                                                                            <p className="truncate font-medium text-default transition-colors group-hover:text-primary">
+                                                                                {s.item.name}
+                                                                            </p>
+                                                                            {s.isActive && (
+                                                                                <div className="flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5">
+                                                                                    <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                                                                                    <span className="font-bold text-[10px] text-primary uppercase tracking-wider">
+                                                                                        Live
+                                                                                    </span>
                                                                                 </div>
                                                                             )}
                                                                         </div>
-                                                                    </motion.div>
-                                                                </StaggerItem>
-                                                            )
-                                                        )
+                                                                        <div className="flex items-center gap-2 text-muted text-xs">
+                                                                            {s.item.type ===
+                                                                                "series" &&
+                                                                                s.item.season && (
+                                                                                    <span className="font-medium text-secondary">
+                                                                                        S
+                                                                                        {String(
+                                                                                            s.item
+                                                                                                .season
+                                                                                        ).padStart(
+                                                                                            2,
+                                                                                            "0"
+                                                                                        )}
+                                                                                        E
+                                                                                        {String(
+                                                                                            s.item
+                                                                                                .episode
+                                                                                        ).padStart(
+                                                                                            2,
+                                                                                            "0"
+                                                                                        )}
+                                                                                    </span>
+                                                                                )}
+                                                                            <span>
+                                                                                {new Date(
+                                                                                    s.startTime
+                                                                                ).toLocaleTimeString(
+                                                                                    [],
+                                                                                    {
+                                                                                        hour: "2-digit",
+                                                                                        minute: "2-digit",
+                                                                                    }
+                                                                                )}
+                                                                            </span>
+                                                                            {s.durationSeconds >
+                                                                                0 && (
+                                                                                <>
+                                                                                    <span>•</span>
+                                                                                    <span>
+                                                                                        {formatMinutes(
+                                                                                            Math.round(
+                                                                                                s.durationSeconds /
+                                                                                                    60
+                                                                                            )
+                                                                                        )}
+                                                                                    </span>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Status */}
+                                                                    <div className="shrink-0">
+                                                                        {s.isActive ? (
+                                                                            <div className="rounded-full bg-secondary/10 p-2">
+                                                                                <PlayIcon className="h-4 w-4 text-secondary" />
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="rounded-full bg-primary/10 p-2">
+                                                                                <CheckCircleIcon className="h-4 w-4 text-primary" />
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </motion.div>
+                                                            </StaggerItem>
+                                                        ))
                                                     ) : (
                                                         <div className="py-8 text-center text-muted text-sm">
                                                             No recent activity
@@ -3796,7 +3787,7 @@ export default function UserDetailPage() {
                 onClose={() => setIsSimklModalOpen(false)}
                 onLinked={() => {
                     setIsSimklModalOpen(false);
-                    setUser((prev: any) =>
+                    setUser((prev) =>
                         prev
                             ? {
                                   ...prev,
@@ -3810,7 +3801,7 @@ export default function UserDetailPage() {
             />
 
             {/* Edit Details Modal */}
-            {isEditDetailsOpen && (
+            {isEditDetailsOpen && user && (
                 <EditUserDetailsModal
                     groups={groups}
                     isOpen={isEditDetailsOpen}
@@ -3959,8 +3950,8 @@ function EditUserDetailsModal({
 }: {
     isOpen: boolean;
     onClose: () => void;
-    user: any;
-    groups: any[];
+    user: User;
+    groups: Group[];
     onUpdateGroup: (groupId: string) => Promise<void>;
     onUpdateExpiresAt: (date: string) => Promise<void>;
 }) {

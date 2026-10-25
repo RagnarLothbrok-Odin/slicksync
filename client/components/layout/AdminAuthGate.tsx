@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useLayoutEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 
 interface AdminAuthGateProps {
     children: React.ReactNode;
@@ -53,7 +53,7 @@ export function AdminAuthGate({ children }: AdminAuthGateProps) {
                     setStatus("ok");
                 }
             })
-            .catch((err: any) => {
+            .catch((err: unknown) => {
                 if (cancelled) {
                     return;
                 }
@@ -61,7 +61,11 @@ export function AdminAuthGate({ children }: AdminAuthGateProps) {
                 // flight via api.ts). Anything else - a network error, the server
                 // being briefly unreachable - fails open rather than stranding the
                 // user on a spinner forever over a transient issue unrelated to auth.
-                setStatus(err?.response?.status === 401 ? "unauthenticated" : "ok");
+                setStatus(
+                    err instanceof ApiError && err.response?.status === 401
+                        ? "unauthenticated"
+                        : "ok"
+                );
             });
         return () => {
             cancelled = true;

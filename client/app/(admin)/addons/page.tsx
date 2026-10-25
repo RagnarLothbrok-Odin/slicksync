@@ -62,6 +62,7 @@ import { BeginnerHint } from "@/components/ui/BeginnerHint";
 import { useSortableDragState } from "@/components/ui/DragSortable";
 import { toast } from "@/components/ui/Toast";
 import { showDeletedWithUndo } from "@/components/ui/undoToast";
+import type { Group } from "@/lib/api";
 import { type Addon, api } from "@/lib/api";
 import { readErrorMessage, readErrorName } from "@/lib/errors";
 import { useIsMobile } from "@/lib/hooks/useIsMobile";
@@ -70,6 +71,7 @@ import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLongPress } from "@/lib/hooks/useLongPress";
 import { useLayoutMode } from "@/lib/layout-mode";
 import { configKindOf, type SharedPeer, sharedConfigPeers } from "@/lib/sharedConfig";
+import type { StremioManifest } from "@/lib/stremio-manifest";
 import { useDefaultViewMode } from "@/lib/viewMode";
 
 const ADDON_VAULT_CATEGORIES = [
@@ -86,7 +88,7 @@ const ADDON_VAULT_CATEGORIES = [
 ];
 
 // Helper to compute configure URL from addon object
-function getConfigureUrl(addon: any): string | null {
+function getConfigureUrl(addon: Pick<Addon, "manifestUrl" | "url"> | null): string | null {
     const manifestUrl = addon?.manifestUrl || addon?.url;
     if (!manifestUrl) {
         return null;
@@ -256,7 +258,7 @@ export default function AddonsPage() {
     const [addons, setAddons] = useState<Addon[]>([]);
     // Addons whose links open the same AIOStreams/AIOMetadata configuration.
     const sharedPeers = useMemo(() => sharedConfigPeers(addons), [addons]);
-    const [groups, setGroups] = useState<any[]>([]);
+    const [groups, setGroups] = useState<Group[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
 
@@ -284,9 +286,8 @@ export default function AddonsPage() {
         setAddons(cached);
         setIsLoading(false);
     });
-    // The page's own groups state is untyped (any[]) - mirror that rather
-    // than importing a type the page itself doesn't use.
-    useLastKnown<unknown[]>("/groups", (cached) => setGroups(cached));
+    // Cached snapshots use the same response model as live group updates.
+    useLastKnown<Group[]>("/groups", (cached) => setGroups(cached));
     useLastKnown<{ tags: string[]; tagColors: Record<string, string> }>(
         "/addons/tags",
         (cached) => {
@@ -2374,14 +2375,14 @@ function AddAddonModal({
 }: {
     isOpen: boolean;
     onClose: () => void;
-    groups: any[];
+    groups: Group[];
 }) {
     const groupLabelId1 = useId();
     const fieldId2 = useId();
     const [isLoading, setIsLoading] = useState(false);
     const [manifestUrl, setManifestUrl] = useState("");
     const [error, setError] = useState("");
-    const [manifestData, setManifestData] = useState<any>(null);
+    const [manifestData, setManifestData] = useState<Partial<StremioManifest> | null>(null);
     const [isLoadingManifest, setIsLoadingManifest] = useState(false);
     const [urlError, setUrlError] = useState("");
     const [showSuccess, setShowSuccess] = useState(false);
@@ -2649,13 +2650,13 @@ function AddAddonModal({
                                                             manifestData?.resources || [];
                                                         const hasSearchCatalog = (
                                                             manifestData?.catalogs || []
-                                                        ).some((c: any) =>
+                                                        ).some((c) =>
                                                             c?.extra?.some(
-                                                                (e: any) => e.name === "search"
+                                                                (e) => e.name === "search"
                                                             )
                                                         );
                                                         const resourceNames = resources
-                                                            .map((r: any) =>
+                                                            .map((r) =>
                                                                 typeof r === "string" ? r : r.name
                                                             )
                                                             .filter(Boolean);

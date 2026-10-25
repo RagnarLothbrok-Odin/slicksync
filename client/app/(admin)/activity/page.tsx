@@ -65,6 +65,7 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { toast } from "@/components/ui/Toast";
 import { showDeletedWithUndo } from "@/components/ui/undoToast";
 import { startAdaptivePoll } from "@/lib/adaptivePoll";
+import type { Addon, ProxyRequestLog } from "@/lib/api";
 import { api, type Group, type Invitation, type MetricsData } from "@/lib/api";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
@@ -383,7 +384,7 @@ interface TaskHistoryItem {
 // Helper to transform invitations to invite history
 function transformInvitationsToHistory(
     invitations: Invitation[] | null,
-    groups: any[] | null
+    groups: Group[] | null
 ): InviteHistoryItem[] {
     if (!invitations) {
         return [];
@@ -1421,10 +1422,10 @@ function DeviceClaimsPanel() {
 }
 
 function ProxyHistoryView() {
-    const [proxyLogs, setProxyLogs] = useState<any[]>([]);
+    const [proxyLogs, setProxyLogs] = useState<ProxyRequestLog[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedAddon, setSelectedAddon] = useState<string | null>(null);
-    const [addons, setAddons] = useState<any[]>([]);
+    const [addons, setAddons] = useState<Addon[]>([]);
 
     useEffect(() => {
         // Fetch addons list
@@ -2066,7 +2067,7 @@ function ActivityPageContent() {
     const [loadingOlder, setLoadingOlder] = useState(false);
     const [olderLoaded, setOlderLoaded] = useState(false);
     const [invitations, setInvitations] = useState<Invitation[]>([]);
-    const [groups, setGroups] = useState<any[]>([]);
+    const [groups, setGroups] = useState<Group[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
     // Instant navigation: last-known feed, invitations and groups shown at

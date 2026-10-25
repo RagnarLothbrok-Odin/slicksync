@@ -22,6 +22,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { LabelProps, TooltipPayloadEntry, TooltipValueType } from "recharts";
 import {
     Bar,
     BarChart,
@@ -58,7 +59,7 @@ import {
 } from "@/components/ui";
 import { DraggableList } from "@/components/ui/DragSortable";
 import { toast } from "@/components/ui/Toast";
-import { type Addon, api, type Group, type User } from "@/lib/api";
+import { type Addon, ApiError, api, type Group, type User } from "@/lib/api";
 import { readErrorMessage } from "@/lib/errors";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
@@ -199,10 +200,13 @@ const GroupWatchTimeChart = memo(function GroupWatchTimeChartLocal({
                         />
                         <Tooltip
                             contentStyle={TOOLTIP_STYLE}
-                            formatter={(value: any, name: any) => {
+                            formatter={(
+                                value: TooltipValueType | undefined,
+                                name: string | number | undefined
+                            ) => {
                                 const user = users.find((u) => u.id === name);
                                 return [
-                                    formatMinutes(value),
+                                    formatMinutes(Number(value) || 0),
                                     user?.username || user?.name || "Unknown",
                                 ];
                             }}
@@ -242,8 +246,21 @@ const GroupWatchTimeChart = memo(function GroupWatchTimeChartLocal({
 });
 
 // Custom label for diagonal user names under bars
-const UserLabel = (props: any) => {
-    const { x, width, y, height, userName } = props;
+const UserLabel = ({ viewBox, userName }: LabelProps & { userName: string }) => {
+    if (
+        !(viewBox && "x" in viewBox && "y" in viewBox && "width" in viewBox && "height" in viewBox)
+    ) {
+        return null;
+    }
+    const { x, y, width, height } = viewBox;
+    if (
+        typeof x !== "number" ||
+        typeof y !== "number" ||
+        typeof width !== "number" ||
+        typeof height !== "number"
+    ) {
+        return null;
+    }
     // Calculate baseline y position (y + height is the bottom of the bar)
     // We want to position the text well below the date labels
     const baselineY = y + height;
@@ -287,7 +304,9 @@ const GroupContentBreakdownChart = memo(function GroupContentBreakdownChartLocal
 
         // Transform data: each date has stacked bars per user showing movies and series
         const transformedData = data.map((day) => {
-            const result: any = { date: day.date };
+            const result: Record<string, string | number | { movies: number; series: number }> = {
+                date: day.date,
+            };
             activeUsersList.forEach((user) => {
                 const movies = (day[`${user.id}_movies`] as number) || 0;
                 const series = (day[`${user.id}_series`] as number) || 0;
@@ -343,11 +362,16 @@ const GroupContentBreakdownChart = memo(function GroupContentBreakdownChartLocal
                         <Tooltip
                             contentStyle={TOOLTIP_STYLE}
                             cursor={{ fill: "rgba(255,255,255,0.05)" }}
-                            formatter={(value: any, name: any, props: any) => {
+                            formatter={(
+                                value: TooltipValueType | undefined,
+                                name: string | number | undefined,
+                                props: TooltipPayloadEntry
+                            ) => {
                                 // Parse the dataKey to find the user and type
-                                const dataKey = props.dataKey as string;
+                                const dataKey =
+                                    typeof props.dataKey === "string" ? props.dataKey : null;
                                 if (!dataKey) {
-                                    return [value, name];
+                                    return [value, name ?? ""];
                                 }
 
                                 const parts = dataKey.split("_");
@@ -372,7 +396,7 @@ const GroupContentBreakdownChart = memo(function GroupContentBreakdownChartLocal
                                 >
                                     {/* Show user label under the stack */}
                                     <LabelList
-                                        content={(props: any) => (
+                                        content={(props) => (
                                             <UserLabel
                                                 {...props}
                                                 userName={user.username || user.name || "User"}
@@ -960,15 +984,17 @@ export default function GroupDetailPage() {
                 toast.success("Addon order updated");
                 // Refetch to ensure we have the latest data
                 await refetchData();
-            } catch (err: any) {
+            } catch (err) {
                 // Revert on error
                 setAddons(addons);
                 console.error("❌ Failed to reorder addons:", err);
-                if (err?.response?.data) {
+                if (err instanceof ApiError && err.response?.data) {
                     console.error("📦 Error response details:", err.response.data);
                 }
                 const errorMessage =
-                    err?.response?.data?.message || err?.message || "Failed to update addon order";
+                    err instanceof ApiError
+                        ? err.response?.data?.message || err.message
+                        : readErrorMessage(err, "Failed to update addon order");
                 toast.error(errorMessage);
             } finally {
                 setGroupSyncing(false);

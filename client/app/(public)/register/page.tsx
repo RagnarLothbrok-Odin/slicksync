@@ -6,8 +6,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import { PasswordToggleButton } from "@/components/ui/Input";
 import { SlickSyncLogo } from "@/components/ui/SlickSyncLogo";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { readErrorMessage } from "@/lib/errors";
 
 // Public-mode (multi-tenant) self-registration - the flow the README already
 // documented ("first visit shows a registration screen") but that had no
@@ -79,8 +80,8 @@ export default function RegisterPage() {
                 localStorage.setItem("slicksync-admin-token", data.token);
             }
             router.push("/");
-        } catch (err: any) {
-            if (err?.response?.status === 409) {
+        } catch (err) {
+            if (err instanceof ApiError && err.response?.status === 409) {
                 // Vanishingly unlikely (server-generated UUID collision), but
                 // recoverable - just get a fresh one and let them retry.
                 setFormError(
@@ -88,7 +89,7 @@ export default function RegisterPage() {
                 );
                 loadUuid();
             } else {
-                setFormError(err?.message || "Registration failed. Please try again.");
+                setFormError(readErrorMessage(err, "Registration failed. Please try again."));
             }
         } finally {
             setIsSubmitting(false);

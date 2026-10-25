@@ -24,47 +24,73 @@ import { Avatar, Button } from "@/components/ui";
 import { SwipeToDismiss } from "@/components/ui/SwipeToDismiss";
 import { toast } from "@/components/ui/Toast";
 import { startAdaptivePoll } from "@/lib/adaptivePoll";
-import { api } from "@/lib/api";
+import { api, type InviteRequest } from "@/lib/api";
 import { readErrorMessage } from "@/lib/errors";
 import { useCoarsePointer } from "@/lib/hooks/useCoarsePointer";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 
-interface NotificationItem {
-    data?: any;
+interface NotificationBase {
     id: string;
     message: string;
     poster?: string;
     read: boolean;
     timestamp: Date;
     title: string;
-    type:
-        | "activity"
-        | "invite"
-        | "task"
-        | "user"
-        | "request"
-        | "episode"
-        | "addon"
-        | "sync"
-        | "vault"
-        | "mismatch"
-        | "update"
-        | "announcement"
-        | "device";
+}
+type NotificationKind =
+    | "activity"
+    | "invite"
+    | "task"
+    | "user"
+    | "request"
+    | "episode"
+    | "addon"
+    | "sync"
+    | "vault"
+    | "mismatch"
+    | "update"
+    | "announcement"
+    | "device";
+type NotificationItem = NotificationBase &
+    (
+        | { type: "request"; data: InviteRequest }
+        | { type: Exclude<NotificationKind, "request">; data?: { url?: string | null } }
+    );
+
+interface ActivityNotification {
+    contentName: string;
+    id: string;
+    poster?: string;
+    timestamp: string | Date;
+    type: string;
+    userName: string;
+}
+interface InviteNotification {
+    action: string;
+    groupName?: string;
+    id: string;
+    timestamp: string | Date;
+    userName?: string;
+}
+interface TaskNotification {
+    id: string;
+    status: string;
+    timestamp: string | Date;
+    type: string;
 }
 
-interface NotificationsDropdownProps {
+export interface NotificationsDropdownProps {
     // Optional - self-fetched real activity/invite data (see the effects
     // below) covers everything today. These stay accepted and merged in
     // case a future caller has cheaper data already in hand (e.g. a page
     // that already fetched metrics for its own use), so nothing needs to
     // change here if that gets wired up later.
-    activities?: any[];
+    activities?: ActivityNotification[];
     /** While the topbar buttons float over the page: the bell gets its own round
      *  backdrop so it stays readable over posters (see TopbarActions). */
     floating?: boolean;
-    inviteHistory?: any[];
-    taskHistory?: any[];
+    inviteHistory?: InviteNotification[];
+    taskHistory?: TaskNotification[];
 }
 
 /** Each floating topbar icon's own round backdrop - shared with TopbarActions. */
@@ -82,12 +108,25 @@ export const FLOATING_ICON_STYLE: React.CSSProperties = {
 // to whatever landed first and climb back - 18, then 1, then 18 - on every
 // page change. Each source now starts from what it last held this session;
 // a sign-out reloads the page, so nothing carries over between accounts.
-const lastKnown: Record<string, any[]> = {};
-type ListUpdate = any[] | ((prev: any[]) => any[]);
-function useRememberedList(key: string): [any[], (next: ListUpdate) => void] {
-    const [value, setValue] = useState<any[]>(() => lastKnown[key] || []);
+type NotificationFeeds = {
+    pendingRequests: Awaited<ReturnType<typeof api.getInvitationBell>>["pending"];
+    acceptedRequests: Awaited<ReturnType<typeof api.getInvitationBell>>["accepted"];
+    storedNotifications: Awaited<ReturnType<typeof api.getNotifications>>;
+    episodeAlerts: Awaited<ReturnType<typeof api.getEpisodeAlerts>>;
+    addonHealthAlerts: Awaited<ReturnType<typeof api.getAddonHealthAlerts>>;
+};
+const lastKnown: Partial<NotificationFeeds> = {};
+type ListUpdate<K extends keyof NotificationFeeds> =
+    | NotificationFeeds[K]
+    | ((prev: NotificationFeeds[K]) => NotificationFeeds[K]);
+function useRememberedList<K extends keyof NotificationFeeds>(
+    key: K
+): [NotificationFeeds[K], (next: ListUpdate<K>) => void] {
+    const [value, setValue] = useState<NotificationFeeds[K]>(
+        () => lastKnown[key] || ([] as NotificationFeeds[K])
+    );
     const set = useCallback(
-        (next: ListUpdate) => {
+        (next: ListUpdate<K>) => {
             setValue((prev) => {
                 const resolved = typeof next === "function" ? next(prev) : next;
                 lastKnown[key] = resolved;
@@ -215,11 +254,12 @@ export function NotificationsDropdown({
         // that only affects notifications created from here on; anything
         // already in the table (and anyone's local read/dismissed state keyed
         // off it) still has the old value.
-        if (n.data?.url === "/health") {
+        const destination = n.type === "request" ? undefined : n.data?.url;
+        if (destination === "/health") {
             return "/metrics?tab=health";
         }
-        if (n.data?.url) {
-            return n.data.url;
+        if (destination) {
+            return destination;
         }
         switch (n.type) {
             case "addon":

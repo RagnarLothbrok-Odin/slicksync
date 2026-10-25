@@ -73,7 +73,10 @@ const RecentAddonItem = memo(function RecentAddonItemLocal({
     isReloading,
     onReload,
 }: {
-    addon: any;
+    addon: Pick<Addon, "id" | "logo" | "name" | "resources" | "version" | "status"> & {
+        groupCount: number;
+        userCount: number;
+    };
     isReloading: boolean;
     onReload: (e: React.MouseEvent) => void;
 }) {
@@ -505,7 +508,13 @@ export default function DashboardPage() {
             return [];
         }
 
-        const items: any[] = [];
+        const items: {
+            user: NonNullable<MetricsData["watchSessions"]>[number]["user"];
+            item: NonNullable<MetricsData["watchSessions"]>[number]["item"];
+            isLive: boolean;
+            timestamp: number;
+            watchedAt: string;
+        }[] = [];
 
         // Add live items first
         if (metricsData.nowPlaying) {
@@ -926,10 +935,10 @@ export default function DashboardPage() {
                                                         {np.isLive ? "is watching" : "watched"}{" "}
                                                         {np.item.name}
                                                         {np.item.type === "series" &&
-                                                            np.item.episode !== undefined &&
+                                                            np.item.episode != null &&
                                                             np.item.episode > 0 && (
                                                                 <span className="ml-1 text-subtle">
-                                                                    {np.item.season !== undefined &&
+                                                                    {np.item.season != null &&
                                                                     np.item.season > 0
                                                                         ? `S${String(np.item.season).padStart(2, "0")}E${String(np.item.episode).padStart(2, "0")}`
                                                                         : `E${String(np.item.episode).padStart(2, "0")}`}
@@ -1354,10 +1363,10 @@ export default function DashboardPage() {
                                                     {np.isLive ? "is watching" : "watched"}{" "}
                                                     {np.item.name}
                                                     {np.item.type === "series" &&
-                                                        np.item.episode !== undefined &&
+                                                        np.item.episode != null &&
                                                         np.item.episode > 0 && (
                                                             <span className="ml-1 text-subtle">
-                                                                {np.item.season !== undefined &&
+                                                                {np.item.season != null &&
                                                                 np.item.season > 0
                                                                     ? `S${String(np.item.season).padStart(2, "0")}E${String(np.item.episode).padStart(2, "0")}`
                                                                     : `E${String(np.item.episode).padStart(2, "0")}`}

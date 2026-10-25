@@ -27,6 +27,7 @@ import { startAdaptivePoll } from "@/lib/adaptivePoll";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
+import type { UserInfo } from "@/lib/user-api";
 import { type UserActivityData, userActivity, type WatchSession } from "@/lib/user-api";
 
 // Helper to format duration in a human-readable way
@@ -240,7 +241,10 @@ const WatchTimeChart = memo(function WatchTimeChartLocal({
                         />
                         <Tooltip
                             contentStyle={TOOLTIP_STYLE}
-                            formatter={(value: any) => [formatDuration(value * 60), "Watch Time"]}
+                            formatter={(value) => [
+                                formatDuration((Number(value) || 0) * 60),
+                                "Watch Time",
+                            ]}
                             labelStyle={TOOLTIP_LABEL_STYLE}
                         />
                         <Area
@@ -339,7 +343,7 @@ const ActivityCard = memo(function ActivityCardLocal({
     onFilterByContent,
 }: {
     session: WatchSession;
-    userInfo: any;
+    userInfo: UserInfo | null;
     onFilterByContent?: (name: string) => void;
 }) {
     const [imageError, setImageError] = useState(false);

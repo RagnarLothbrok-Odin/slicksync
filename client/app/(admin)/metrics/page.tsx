@@ -131,7 +131,7 @@ const WatchTimeChart = memo(function WatchTimeChartLocal({
                     fontSize={12}
                     stroke="#64748b"
                     tickFormatter={(value) => {
-                        const date = new Date(value);
+                        const date = new Date(typeof value === "number" ? value : String(value));
                         return date.toLocaleDateString("en-US", {
                             day: "numeric",
                             month: "short",
@@ -157,9 +157,12 @@ const WatchTimeChart = memo(function WatchTimeChartLocal({
                 />
                 <Tooltip
                     contentStyle={TOOLTIP_STYLE}
-                    formatter={(value: any) => [formatMinutes(Math.round(value * 60)), "Time"]}
-                    labelFormatter={(value: any) => {
-                        const date = new Date(value);
+                    formatter={(value) => [
+                        formatMinutes(Math.round((Number(value) || 0) * 60)),
+                        "Time",
+                    ]}
+                    labelFormatter={(value) => {
+                        const date = new Date(typeof value === "number" ? value : String(value));
                         return date.toLocaleDateString("en-US", {
                             day: "numeric",
                             month: "short",
@@ -197,7 +200,7 @@ const ContentBreakdownChart = memo(function ContentBreakdownChartLocal({
                     fontSize={12}
                     stroke="#64748b"
                     tickFormatter={(value) => {
-                        const date = new Date(value);
+                        const date = new Date(typeof value === "number" ? value : String(value));
                         return date.toLocaleDateString("en-US", {
                             day: "numeric",
                             month: "short",
@@ -208,8 +211,8 @@ const ContentBreakdownChart = memo(function ContentBreakdownChartLocal({
                 <YAxis fontSize={12} stroke="#64748b" />
                 <Tooltip
                     contentStyle={TOOLTIP_STYLE}
-                    labelFormatter={(value: any) => {
-                        const date = new Date(value);
+                    labelFormatter={(value) => {
+                        const date = new Date(typeof value === "number" ? value : String(value));
                         return date.toLocaleDateString("en-US", {
                             day: "numeric",
                             month: "short",
@@ -1442,7 +1445,11 @@ export default function MetricsPage() {
                                                             fontSize={12}
                                                             stroke="#64748b"
                                                             tickFormatter={(value) => {
-                                                                const date = new Date(value);
+                                                                const date = new Date(
+                                                                    typeof value === "number"
+                                                                        ? value
+                                                                        : String(value)
+                                                                );
                                                                 return date.toLocaleDateString(
                                                                     "en-US",
                                                                     {
@@ -1460,8 +1467,12 @@ export default function MetricsPage() {
                                                                 `${value} user${Number(value) === 1 ? "" : "s"}`,
                                                                 "New Signups",
                                                             ]}
-                                                            labelFormatter={(value: any) => {
-                                                                const date = new Date(value);
+                                                            labelFormatter={(value) => {
+                                                                const date = new Date(
+                                                                    typeof value === "number"
+                                                                        ? value
+                                                                        : String(value)
+                                                                );
                                                                 return date.toLocaleDateString(
                                                                     "en-US",
                                                                     {

@@ -3,19 +3,18 @@
 import { Bars3Icon } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
 import { useMobileMenu } from "@/app/(admin)/AdminClientLayout";
+import type { NotificationsDropdownProps } from "@/components/ui/NotificationsDropdown";
 import { TopbarActions } from "./TopbarActions";
 
-interface HeaderProps {
+interface HeaderProps
+    extends Pick<NotificationsDropdownProps, "activities" | "inviteHistory" | "taskHistory"> {
     actions?: React.ReactNode;
-    activities?: any[];
-    inviteHistory?: any[];
     isMobileMenuOpen?: boolean;
     // Navigation controls precede the title; page actions stay at the end
     // of the row, matching NebulaPageHeading.
     leading?: React.ReactNode;
     onMenuClick?: () => void;
     subtitle?: string;
-    taskHistory?: any[];
     title: React.ReactNode;
 }
 

@@ -172,9 +172,16 @@ export default function JellyfinSignIn({
                 { jellyfinUsername: loginName.trim(), password, serverUrl: server.serverUrl },
                 server
             );
-        } catch (err: any) {
-            setError(err?.message || "Could not sign in");
-            if (err?.pinNeeded || err?.data?.pinNeeded || /pin/i.test(err?.message || "")) {
+        } catch (err) {
+            setError(readErrorMessage(err, "Could not sign in"));
+            const hasPinHint = (value: unknown) =>
+                typeof value === "object" &&
+                value !== null &&
+                "pinNeeded" in value &&
+                value.pinNeeded === true;
+            const data =
+                typeof err === "object" && err !== null && "data" in err ? err.data : undefined;
+            if (hasPinHint(err) || hasPinHint(data) || /\bpin\b/i.test(readErrorMessage(err, ""))) {
                 setPinHint(true);
             }
         } finally {

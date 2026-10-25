@@ -18,6 +18,7 @@ import JellyfinSignIn, {
 } from "@/components/jellyfin/JellyfinSignIn";
 import { Button, PasswordToggleButton, SlickSyncLogo } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
+import type { User } from "@/lib/api";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import { readErrorMessage } from "@/lib/errors";
@@ -177,7 +178,7 @@ export function CreateUserModal({
 
     // Every way of adding someone ends here: a moment on the success step,
     // then their page.
-    const finishAdding = (created: any) => {
+    const finishAdding = (created: Pick<User, "id">) => {
         setStep("success");
         setTimeout(() => {
             onClose();
@@ -368,7 +369,7 @@ export function CreateUserModal({
         // Create mode. An empty name is fine: the server takes the account's own.
         setIsSubmitting(true);
         try {
-            let created: any;
+            let created: User | null = null;
             if (authMethod === "authKey") {
                 // Auth Key method
                 if (!authKey.trim()) {
@@ -394,6 +395,10 @@ export function CreateUserModal({
                     registerNew,
                     username: username.trim(),
                 });
+            }
+            if (!created) {
+                toast.error("Complete provider authorization before adding this user");
+                return;
             }
             finishAdding(created);
         } catch (err) {

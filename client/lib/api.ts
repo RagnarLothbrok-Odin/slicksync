@@ -7,6 +7,7 @@ import type { StremioCatalog, StremioManifest } from "@/lib/stremio-manifest";
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export class ApiError extends Error {
+    code?: string;
     data?: ErrorPayload;
     originalError?: unknown;
     response?: { data: ErrorPayload; status: number };
@@ -2092,7 +2093,10 @@ class ApiClient {
     /** Paste the code on the NEW instance - fetches and restores everything.
      * Destructive: replaces this instance's data. */
     async receiveMigration(code: string) {
-        return this.fetch<Record<string, unknown>>("/settings/migration/receive", {
+        return this.fetch<{
+            counts?: { users?: number; groups?: number; addons?: number };
+            message?: string;
+        }>("/settings/migration/receive", {
             body: JSON.stringify({ code }),
             method: "POST",
         });
@@ -2633,9 +2637,7 @@ class ApiClient {
         });
         if (!response.ok) {
             const error = await response.json().catch(() => ({ message: "Import failed" }));
-            const err = new Error(error.message || `HTTP ${response.status}`) as Error & {
-                code?: string;
-            };
+            const err = new ApiError(error.message || `HTTP ${response.status}`);
             err.code = error.code;
             throw err;
         }
@@ -2658,16 +2660,10 @@ class ApiClient {
      * placeholders that only the server-side proxy resolves, so the real key
      * never again appears in the stored URL or on any device. */
     async vaultifyAddon(addonId: string) {
-        return this.fetch<
-            {
-                data?: {
-                    vaultified: boolean;
-                    entries: string[];
-                    proxyManifestUrl: string;
-                    note: string;
-                };
-            } & { message?: string }
-        >(`/addons/${encodeURIComponent(addonId)}/vaultify`, { method: "POST" });
+        return this.fetch<VaultifyResult | { data: VaultifyResult; message?: string }>(
+            `/addons/${encodeURIComponent(addonId)}/vaultify`,
+            { method: "POST" }
+        );
     }
 
     async unvaultifyAddon(addonId: string) {
@@ -5324,6 +5320,7 @@ export interface User {
     syncStatus?: string | null;
     /** SlickTrax Addon - per-user Stremio addon toggle + its URL token. */
     traxAddonEnabled?: boolean;
+    traxManifestUrl?: string | null;
     /** In-player actions in the SlickTrax addon (opt-in per user). */
     traxToken?: string | null;
     updatedAt?: string;
@@ -5559,14 +5556,30 @@ export interface AddonHealthConfig {
     probeUrl?: string;
 }
 
+export interface VaultifyResult {
+    entries: string[];
+    note: string;
+    proxyManifestUrl: string;
+    vaultified: boolean;
+}
+
+export interface AddonBackup {
+    backupAddon?: AddonBackup | null;
+    customLogo?: string | null;
+    iconUrl?: string;
+    id: string;
+    isActive: boolean;
+    isOnline: boolean;
+    lastHealthCheck?: string | null;
+    logo?: string;
+    manifest?: Partial<StremioManifest>;
+    name: string;
+    stremioAddonId?: string;
+    version?: string;
+}
+
 export interface Addon {
-    backupAddon?: {
-        id: string;
-        name: string;
-        isActive: boolean;
-        isOnline: boolean;
-        lastHealthCheck?: string;
-    };
+    backupAddon?: AddonBackup | null;
     // Backup fields
     backupAddonId?: string;
     catalogs: Array<string | { type: string; id: string; search?: boolean }>;
@@ -5661,12 +5674,16 @@ export interface InviteRequest {
     createdAt: string;
     email: string;
     id: string;
+    invitation?: { id: string; name?: string; groupName?: string };
     invitationId: string;
     oauthCode?: string;
+    oauthExpiresAt?: string;
     oauthLink?: string;
+    requestedAt?: string;
     respondedAt?: string;
     respondedBy?: string;
     status: "pending" | "accepted" | "rejected" | "joined";
+    userId?: string;
     username: string;
 }
 

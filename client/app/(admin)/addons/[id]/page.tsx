@@ -54,7 +54,7 @@ import { configKindOf, type SharedPeer, sharedConfigPeers } from "@/lib/sharedCo
 import type { StremioCatalog, StremioManifest, StremioResource } from "@/lib/stremio-manifest";
 
 // Helper to compute configure URL from manifest URL
-function getConfigureUrl(addon: any): string | null {
+function getConfigureUrl(addon: Pick<Addon, "manifestUrl" | "url"> | null): string | null {
     const manifestUrl = addon?.manifestUrl || addon?.url;
     if (!manifestUrl) {
         return null;
@@ -77,6 +77,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DragOverlay, useSortableSensors } from "@/components/ui/DragSortable";
+import type { AddonBackup } from "@/lib/api";
 
 interface AddonWithGroups extends Addon {
     customLogo?: string | null;
@@ -234,7 +235,7 @@ function ManifestUrlInput({ value, onSave }: ManifestUrlInputProps) {
 
     const validateAndFetchManifest = async (
         url: string
-    ): Promise<{ valid: boolean; error?: string; data?: any }> => {
+    ): Promise<{ valid: boolean; error?: string; data?: Partial<StremioManifest> }> => {
         if (!url || url.trim() === "") {
             return { error: "URL is required", valid: false };
         }
@@ -404,7 +405,7 @@ function SortableCatalogItem({
     isSelected,
     onToggle,
 }: {
-    catalog: any;
+    catalog: StremioCatalog;
     isSelected: boolean;
     onToggle: () => void;
 }) {
@@ -568,12 +569,12 @@ export default function AddonDetailPage() {
         try {
             if (addon.vaultified) {
                 await api.unvaultifyAddon(addon.id);
-                setAddon((prev: any) => (prev ? { ...prev, vaultified: false } : prev));
+                setAddon((prev) => (prev ? { ...prev, vaultified: false } : prev));
                 toast.success("Addon URL restored with the current secrets");
             } else {
-                const r: any = await api.vaultifyAddon(addon.id);
-                const d = r?.data ?? r;
-                setAddon((prev: any) =>
+                const r = await api.vaultifyAddon(addon.id);
+                const d = "data" in r ? r.data : r;
+                setAddon((prev) =>
                     prev
                         ? {
                               ...prev,
@@ -628,12 +629,12 @@ export default function AddonDetailPage() {
                 // page could render. Now: one request per group, all at once, and no
                 // second fetch at all.
                 const groupAddonLists = await Promise.all(
-                    groupsData.map((g) => api.getGroupAddons(g.id).catch(() => [] as any[]))
+                    groupsData.map((g) => api.getGroupAddons(g.id).catch(() => [] as Addon[]))
                 );
                 const groupsWithAddon: Group[] = [];
                 let userCount = 0;
                 groupsData.forEach((group, i) => {
-                    if (!groupAddonLists[i].some((ga: any) => ga.id === params.id)) {
+                    if (!groupAddonLists[i].some((ga) => ga.id === params.id)) {
                         return;
                     }
                     groupsWithAddon.push(group);
@@ -2698,7 +2699,7 @@ function BackupAddonPickerModal({
     currentAddonId: string;
     excludeIds?: string[];
 }) {
-    const [addons, setAddons] = useState<any[]>([]);
+    const [addons, setAddons] = useState<Addon[]>([]);
     const [search, setSearch] = useState("");
     const [loading, setLoading] = useState(true);
 
@@ -2718,7 +2719,7 @@ function BackupAddonPickerModal({
             .catch(() => setLoading(false));
     }, [isOpen, currentAddonId, excludeIds]);
 
-    const filtered = addons.filter((a: any) => {
+    const filtered = addons.filter((a) => {
         if (!search) {
             return true;
         }
@@ -2803,7 +2804,7 @@ function BackupAddonPickerModal({
                         </p>
                     </div>
                 ) : (
-                    filtered.map((addon: any) => {
+                    filtered.map((addon) => {
                         const logo =
                             addon.customLogo ||
                             addon.logo ||
@@ -2903,7 +2904,7 @@ function AddonBackupSection({
     onUpdate,
 }: {
     addonId: string;
-    addon: any;
+    addon: Addon;
     onUpdate: () => void;
 }) {
     const [loading, setLoading] = useState(false);
@@ -2944,11 +2945,11 @@ function AddonBackupSection({
     }, [addonId, addon]);
 
     // Build the backup chain from addon data - recursively traverse the chain
-    const buildChain = (startAddon: any): any[] => {
-        const chain: any[] = [];
+    const buildChain = (startAddon: Pick<Addon, "backupAddon">): AddonBackup[] => {
+        const chain: AddonBackup[] = [];
 
         // Recursive function to traverse the entire chain
-        const traverse = (addonLocal: any) => {
+        const traverse = (addonLocal: Pick<Addon, "backupAddon">) => {
             if (addonLocal?.backupAddon) {
                 chain.push(addonLocal.backupAddon);
                 // Continue traversing if this backup also has a backup
@@ -2961,7 +2962,7 @@ function AddonBackupSection({
     };
 
     const backupChain = buildChain(addon);
-    const lastAddonInChain = backupChain.length > 0 ? backupChain.at(-1) : addon;
+    const lastAddonInChain = backupChain.at(-1) ?? addon;
 
     const handleSelectBackup = async (backupId: string) => {
         setLoading(true);
@@ -2998,7 +2999,12 @@ function AddonBackupSection({
     };
 
     // Derive logos helper - same logic as addons list page
-    const getLogo = (a: any) => {
+    const getLogo = (
+        a:
+            | Pick<AddonBackup, "customLogo" | "manifest" | "logo" | "iconUrl" | "stremioAddonId">
+            | null
+            | undefined
+    ) => {
         if (!a) {
             return null;
         }
@@ -3084,7 +3090,7 @@ function AddonBackupSection({
                                         alt=""
                                         className="h-full w-full object-contain p-1"
                                         height={40}
-                                        src={getLogo(addon)}
+                                        src={getLogo(addon) ?? undefined}
                                         width={40}
                                     />
                                 ) : (
@@ -3153,7 +3159,7 @@ function AddonBackupSection({
                     </div>
 
                     {/* Backup Chain - flattened structure for consistent spacing */}
-                    {backupChain.flatMap((backup: any, index: number) => [
+                    {backupChain.flatMap((backup, index) => [
                         // Card
                         <motion.div
                             animate={{ opacity: 1, y: 0 }}
@@ -3216,7 +3222,7 @@ function AddonBackupSection({
                                             alt=""
                                             className="h-full w-full object-contain p-1"
                                             height={40}
-                                            src={getLogo(backup)}
+                                            src={getLogo(backup) ?? undefined}
                                             width={40}
                                         />
                                     ) : (
@@ -3356,7 +3362,7 @@ function AddonBackupSection({
             {/* Addon Picker Modal */}
             <BackupAddonPickerModal
                 currentAddonId={addonId}
-                excludeIds={backupChain.map((b: any) => b.id)}
+                excludeIds={backupChain.map((b) => b.id)}
                 isOpen={isPickerOpen}
                 onClose={() => setIsPickerOpen(false)}
                 onSelect={handleSelectBackup}

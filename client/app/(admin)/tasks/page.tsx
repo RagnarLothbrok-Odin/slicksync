@@ -44,6 +44,7 @@ import { toast } from "@/components/ui/Toast";
 import { WatchSyncCard } from "@/components/user/WatchSyncCard";
 import {
     type AddonSnapshot,
+    ApiError,
     api,
     type BackupFile,
     type DisasterRecoveryKit,
@@ -690,10 +691,10 @@ export default function TasksPage() {
                 );
             }
             toast.success(`Configuration imported${parts.length ? `: ${parts.join(", ")}` : ""}`);
-        } catch (e: any) {
+        } catch (e) {
             // Encrypted off-site backup (.enc): ask for its passphrase and retry
             // once - the file itself is fine, it just needs the key.
-            if (e?.code === "PASSPHRASE_REQUIRED" && !passphrase) {
+            if (e instanceof ApiError && e.code === "PASSPHRASE_REQUIRED" && !passphrase) {
                 const entered = window.prompt("This backup is encrypted. Enter its passphrase:");
                 setImportingConfig(false);
                 if (entered) {
@@ -701,7 +702,7 @@ export default function TasksPage() {
                 }
                 return;
             }
-            toast.error(e.message || "Failed to import configuration");
+            toast.error(readErrorMessage(e, "Failed to import configuration"));
         } finally {
             setImportingConfig(false);
         }
@@ -911,7 +912,7 @@ export default function TasksPage() {
             onConfirm: async () => {
                 setIsReceivingMigration(true);
                 try {
-                    const r: any = await api.receiveMigration(receiveCode.trim());
+                    const r = await api.receiveMigration(receiveCode.trim());
                     toast.success(
                         `Migration complete${r?.counts ? `: ${r.counts.users ?? "?"} users, ${r.counts.groups ?? "?"} groups, ${r.counts.addons ?? "?"} addons` : ""} - reloading`
                     );

@@ -30,7 +30,7 @@ type LoginMode = "user" | "admin";
 
 // The public admin sign-in through a Jellyfin-compatible server talks to
 // /api/auth directly, like the 2FA step below - a session does not exist yet.
-async function jellyfinAuthPost(path: string, body: unknown) {
+async function jellyfinAuthPost<T>(path: string, body: unknown): Promise<T> {
     const response = await fetch(path, {
         body: JSON.stringify(body),
         credentials: "include",
@@ -45,7 +45,7 @@ async function jellyfinAuthPost(path: string, body: unknown) {
         error.pinNeeded = data?.pinNeeded === true;
         throw error;
     }
-    return data;
+    return data as T;
 }
 
 // The answer of an admin sign-in route as an object. A rate limit or a proxy in
@@ -53,7 +53,15 @@ async function jellyfinAuthPost(path: string, body: unknown) {
 // and that must not read as "cannot reach the server" - the status already says
 // what happened (see failureLine). A success that is not JSON is another
 // matter: it is not a sign-in at all, so it still counts as unreachable.
-async function readAuthAnswer(response: Response): Promise<any> {
+interface AuthAnswer {
+    account?: unknown;
+    message?: string;
+    pendingToken?: string;
+    requiresTwoFactor?: boolean;
+    token?: string;
+}
+
+async function readAuthAnswer(response: Response): Promise<AuthAnswer> {
     const data = await response.json().catch(() => undefined);
     if (data && typeof data === "object") {
         return data;
@@ -66,7 +74,7 @@ async function readAuthAnswer(response: Response): Promise<any> {
 
 // What to tell the person when a sign-in step failed: the server's own words
 // when it gave some, otherwise a line chosen by the status.
-function failureLine(response: Response, data: any, fallback: string): string {
+function failureLine(response: Response, data: AuthAnswer, fallback: string): string {
     if (typeof data?.message === "string" && data.message) {
         return data.message;
     }
@@ -165,7 +173,10 @@ function LoginContent() {
         router.push("/user");
     };
     const handleAdminJellyfin = async (credentials: JellyfinCredentials) => {
-        const data = await jellyfinAuthPost("/api/public-auth/jellyfin-login", credentials);
+        const data = await jellyfinAuthPost<AuthAnswer>(
+            "/api/public-auth/jellyfin-login",
+            credentials
+        );
         startAdminSession(data?.token);
         router.push("/");
     };

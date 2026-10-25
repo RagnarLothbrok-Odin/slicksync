@@ -49,6 +49,7 @@ import {
 import { useSortableDragState } from "@/components/ui/DragSortable";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
+import type { VaultEntryInput } from "@/lib/api";
 import { api, type VaultCategory, type VaultEntry, type VaultTestType } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import { readErrorMessage } from "@/lib/errors";
@@ -942,7 +943,7 @@ function VaultPageContent() {
 
         setIsSaving(true);
         try {
-            const payload: any = {
+            const payload: Omit<VaultEntryInput, "secret"> & { secret?: string } = {
                 category: form.category,
                 cost:
                     form.cost.trim() !== "" && Number(form.cost) >= 0
@@ -992,7 +993,7 @@ function VaultPageContent() {
                     toast.success("Vault entry updated");
                 }
             } else {
-                await api.createVaultEntry(payload);
+                await api.createVaultEntry({ ...payload, secret: payload.secret ?? "" });
                 toast.success("Vault entry added");
             }
             setIsAddOpen(false);

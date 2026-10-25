@@ -127,7 +127,9 @@ export function DbStorageCard() {
                                 fontSize={12}
                                 stroke="#64748b"
                                 tickFormatter={(value) =>
-                                    new Date(value).toLocaleDateString("en-US", {
+                                    new Date(
+                                        typeof value === "number" ? value : String(value)
+                                    ).toLocaleDateString("en-US", {
                                         day: "numeric",
                                         month: "short",
                                     })
@@ -140,12 +142,11 @@ export function DbStorageCard() {
                             />
                             <Tooltip
                                 contentStyle={TOOLTIP_STYLE}
-                                formatter={(value: any) => [
-                                    `${Number(value).toFixed(1)} MB`,
-                                    "Size",
-                                ]}
-                                labelFormatter={(value: any) =>
-                                    new Date(value).toLocaleString("en-US", {
+                                formatter={(value) => [`${Number(value).toFixed(1)} MB`, "Size"]}
+                                labelFormatter={(value) =>
+                                    new Date(
+                                        typeof value === "number" ? value : String(value)
+                                    ).toLocaleString("en-US", {
                                         day: "numeric",
                                         hour: "numeric",
                                         minute: "2-digit",

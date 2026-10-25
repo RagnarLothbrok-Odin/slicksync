@@ -44,6 +44,7 @@ import {
 } from "@/components/ui";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "@/components/ui/Toast";
+import type { InviteRequest } from "@/lib/api";
 import { api, type Group, type Invitation } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import { readErrorMessage } from "@/lib/errors";
@@ -101,7 +102,7 @@ export default function InvitationsPage() {
     const [groups, setGroups] = useState<Group[]>([]);
     // Only once the groups are known can an invitation's group be called missing.
     const [groupsLoaded, setGroupsLoaded] = useState(false);
-    const [requests, setRequests] = useState<any[]>([]);
+    const [requests, setRequests] = useState<InviteRequest[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
     // Instant navigation: last-known invitations and groups shown at once
@@ -145,7 +146,7 @@ export default function InvitationsPage() {
                 setGroupsLoaded(true);
 
                 // Extract requests from invitations (they may be embedded)
-                const allRequests: any[] = [];
+                const allRequests: InviteRequest[] = [];
                 for (const inv of invitationsData) {
                     if (inv.requests && Array.isArray(inv.requests)) {
                         allRequests.push(
@@ -189,7 +190,7 @@ export default function InvitationsPage() {
         const groupByName = new Map(groups.map((g) => [g.name, g]));
 
         // Group requests by invitation ID
-        const requestsByInvitation = new Map<string, any[]>();
+        const requestsByInvitation = new Map<string, InviteRequest[]>();
         for (const req of requests) {
             const invId = String(req.invitationId || req.invitation?.id || "");
             if (invId) {
@@ -221,7 +222,7 @@ export default function InvitationsPage() {
             // Add accepted requests count (since they occupy a slot but might not be fully joined yet)
             const invitationRequests = requestsByInvitation.get(String(inv.id)) || [];
             const acceptedRequests = invitationRequests.filter(
-                (r: any) => r.status === "accepted"
+                (r) => r.status === "accepted"
             ).length;
             const uses = baseUses + acceptedRequests;
 
@@ -256,7 +257,7 @@ export default function InvitationsPage() {
     // Transform requests for display
     const requestsDisplay = useMemo<RequestDisplay[]>(
         () =>
-            (requests || []).map((req: any) => ({
+            (requests || []).map((req) => ({
                 createdAt: req.createdAt || req.requestedAt || new Date().toISOString(),
                 email: req.email,
                 id: req.id,

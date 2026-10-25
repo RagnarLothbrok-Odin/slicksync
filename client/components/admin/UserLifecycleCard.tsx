@@ -69,7 +69,9 @@ export function UserLifecycleCard({ lifecycle, userJoins }: UserLifecycleCardPro
                             fontSize={12}
                             stroke="#64748b"
                             tickFormatter={(value) => {
-                                const date = new Date(value);
+                                const date = new Date(
+                                    typeof value === "number" ? value : String(value)
+                                );
                                 return date.toLocaleDateString("en-US", {
                                     day: "numeric",
                                     month: "short",
@@ -84,8 +86,10 @@ export function UserLifecycleCard({ lifecycle, userJoins }: UserLifecycleCardPro
                                 border: "1px solid rgba(255,255,255,0.1)",
                                 borderRadius: "12px",
                             }}
-                            labelFormatter={(value: any) => {
-                                const date = new Date(value);
+                            labelFormatter={(value) => {
+                                const date = new Date(
+                                    typeof value === "number" ? value : String(value)
+                                );
                                 return date.toLocaleDateString("en-US", {
                                     day: "numeric",
                                     month: "long",
