@@ -2104,3 +2104,60 @@ body {
   background: rgba(245, 158, 11, 0.04);
   border-color: rgba(245, 158, 11, 0.4);
 }
+
+/* Shared airing-date controls keep selected, hover and press feedback distinct. */
+.airing-date {
+  color: var(--color-text-muted);
+  background: var(--color-surface-hover);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    transform 100ms ease;
+}
+.airing-date[aria-pressed="true"] {
+  color: var(--color-primary);
+  background: var(--color-primary-muted);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+@media (hover: hover) {
+  .airing-date:hover {
+    color: var(--color-text);
+    background: color-mix(
+      in srgb,
+      var(--color-primary) 22%,
+      var(--color-surface)
+    );
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--color-primary) 55%, transparent);
+  }
+  .airing-date[aria-pressed="true"]:hover {
+    color: var(--color-primary);
+    background: color-mix(
+      in srgb,
+      var(--color-primary) 30%,
+      var(--color-surface)
+    );
+    box-shadow: inset 0 0 0 1px var(--color-primary);
+  }
+}
+.airing-date:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.airing-date:active {
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 35%,
+    var(--color-surface)
+  );
+  transform: scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .airing-date {
+    transition: none;
+  }
+  .airing-date:active {
+    transform: none;
+  }
+}

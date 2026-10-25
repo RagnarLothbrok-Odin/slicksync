@@ -411,22 +411,8 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                 <legend className="sr-only">Choose an airing date</legend>
                                 <button
                                     aria-pressed={activeDay === "all"}
-                                    className="flex min-h-20 min-w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-3 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary motion-safe:active:scale-[0.97]"
+                                    className="airing-date flex min-h-20 min-w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-3"
                                     onClick={() => setSelectedDay("all")}
-                                    style={{
-                                        background:
-                                            activeDay === "all"
-                                                ? "var(--color-primary-muted)"
-                                                : "var(--color-surface-hover)",
-                                        boxShadow:
-                                            activeDay === "all"
-                                                ? "inset 0 0 0 1px var(--color-primary)"
-                                                : undefined,
-                                        color:
-                                            activeDay === "all"
-                                                ? "var(--color-primary)"
-                                                : "var(--color-text-muted)",
-                                    }}
                                     type="button"
                                 >
                                     <CalendarDaysIcon className="h-5 w-5" />
@@ -440,20 +426,9 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                         <button
                                             aria-label={`${label.text}, ${group.items.length} episode${group.items.length === 1 ? "" : "s"}`}
                                             aria-pressed={selected}
-                                            className="flex min-h-20 min-w-20 shrink-0 flex-col items-center justify-center rounded-2xl px-3 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary motion-safe:active:scale-[0.97]"
+                                            className="airing-date flex min-h-20 min-w-20 shrink-0 flex-col items-center justify-center rounded-2xl px-3 py-2"
                                             key={group.key}
                                             onClick={() => setSelectedDay(group.key)}
-                                            style={{
-                                                background: selected
-                                                    ? "var(--color-primary-muted)"
-                                                    : "var(--color-surface-hover)",
-                                                boxShadow: selected
-                                                    ? "inset 0 0 0 1px var(--color-primary)"
-                                                    : undefined,
-                                                color: selected
-                                                    ? "var(--color-primary)"
-                                                    : "var(--color-text-muted)",
-                                            }}
                                             type="button"
                                         >
                                             <span className="font-medium text-xs">
