@@ -30,7 +30,8 @@ RUN bun install --frozen-lockfile --production
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/client/node_modules ./client/node_modules
+# Copy the workspace whether Bun hoists all packages or keeps client-local ones.
+COPY --from=deps /app/client ./client
 COPY . .
 
 # Set build-time variables first
