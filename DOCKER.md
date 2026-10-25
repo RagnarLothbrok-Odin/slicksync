@@ -1,7 +1,7 @@
 # Docker
 
 How the image is built and what runs inside it. For installing and updating,
-follow the [README](./README.md#-installation); this describes the machinery
+follow the [README](./README.md#-setup); this describes the machinery
 behind it.
 
 ## One image, two processes

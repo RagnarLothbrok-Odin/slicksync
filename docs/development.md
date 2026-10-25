@@ -2,16 +2,37 @@
 
 SlickSync is a Bun workspace. Run installs and shared commands from the repository root. The root package owns server dependencies and shared tools; `client` owns the Next.js application. Commit only the root `bun.lock`.
 
+## Local setup
+
+Install the Bun version declared in the root `packageManager` field, then run
+`bun install --frozen-lockfile` from the repository root. Copy `.env.example` to
+`.env` and configure private login credentials and a random `JWT_SECRET`.
+
+For local SQLite development, add `DATABASE_URL="file:./dev.db"` to `.env`.
+Prisma resolves this relative path beside the schema in `prisma/`.
+Select the schema, generate the client, and create the local database:
+
 ```sh
-bun install --frozen-lockfile
+cp prisma/schema.sqlite.prisma prisma/schema.prisma
+bunx --no-install prisma generate
+bunx --no-install prisma db push --schema prisma/schema.prisma
 bun run dev
+```
+
+Open `http://localhost:3000`. The backend listens on port 4000 and the frontend
+proxies `/api` requests to it. Use a separate development database; these commands
+are for a fresh local setup, not a production migration.
+
+```sh
 bun run type-check
 bun run build
 bun run test
 bun run lint
 ```
 
-`dev:private` and `dev:public` retain their instance-specific configuration. Existing environment requirements still apply.
+`dev:private` and `dev:public` are legacy convenience scripts with fixed development
+credentials. Prefer `bun run dev` with your own environment configuration. Public
+mode additionally needs a PostgreSQL database and the PostgreSQL Prisma schema.
 
 ## Lint and format
 
