@@ -42,7 +42,7 @@ image without it would reach for the network at startup.
 
 ## Instance types
 
-`INSTANCE` remains a build argument. This fork publishes the private image; the public build path remains in the application for development.
+`INSTANCE` is a build argument. Stable releases publish both private and public images.
 
 | | `:private` | `:public` |
 |---|---|---|
@@ -63,7 +63,33 @@ docker build --build-arg INSTANCE=private -t ghcr.io/ragnarlothbrok-odin/slicksy
 docker compose -f docker-compose.private.yml up -d --pull never
 ```
 
-The private release workflow publishes to GHCR and needs no Docker Hub credentials. Public and beta deployment bundles are not included. Their underlying application code and database schemas have not been removed.
+The release workflow publishes both modes to GHCR and needs no Docker Hub credentials.
+Beta images are not published.
+
+### Public deployment
+
+`docker-compose.public.yml` runs the public image with PostgreSQL 16. Copy
+`.env.example` to `.env`, set independent random `JWT_SECRET` and `ENCRYPTION_KEY`
+values, and set `POSTGRES_PASSWORD` to a URL-safe value, for example the output of
+`openssl rand -hex 32`. The app waits for PostgreSQL's healthcheck before starting.
+Only frontend port 3000 is published; the database stays on the Compose network.
+
+```sh
+docker compose -f docker-compose.public.yml up -d
+```
+
+For a local source build before images are published:
+
+```sh
+docker build --build-arg INSTANCE=public -t ghcr.io/ragnarlothbrok-odin/slicksync:public .
+docker compose -f docker-compose.public.yml up -d --pull never
+```
+
+Public mode allows account registration and isolates account data. Put the app
+behind HTTPS before exposing it. Preserve both `pgdata` (PostgreSQL records) and
+`slicksync_data` (files and backups), along with the encryption key. Do not switch
+an existing private SQLite installation to public mode expecting automatic data
+migration. Run the two modes as separate deployments if both are needed.
 
 ## The data volume
 
@@ -91,7 +117,8 @@ health without you polling anything.
 
 Everything configurable is documented in `.env.example`, which is the
 authoritative list. The supplied Compose file requires `JWT_SECRET`. Public deployments need their
-own PostgreSQL connection configuration; no public Compose bundle is maintained. On a private instance an
+PostgreSQL connection configuration; the public Compose file supplies it from
+`POSTGRES_PASSWORD` and requires an explicit `ENCRYPTION_KEY`. On a private instance an
 encryption key generates itself on first boot and is kept in the data volume.
 
 ## Startup and updates
@@ -107,5 +134,11 @@ rollback mechanism. Review schema changes before deploying a new image.
 
 The `private` filename and image tag identify the single-household application
 mode, not repository or GHCR package visibility. Keep the explicit Compose filename
-in commands. This fork publishes only the moving `:private` tag, so record the
-image digest if you need a reproducible rollback.
+in commands. Published stable GitHub Releases produce moving `:private` and `:public` tags,
+plus `:private-v<version>` and `:public-v<version>` tags for that release. Both
+support Linux amd64 and arm64. To pin a deployment, change its Compose `image`
+to the matching version tag. Record an image digest for an exact immutable pin.
+
+Creating a draft, pushing a tag alone, or publishing a prerelease does not
+publish images. The release tag must be `v<major>.<minor>.<patch>` and match the
+root package version. Publishing images never updates a running server by itself.

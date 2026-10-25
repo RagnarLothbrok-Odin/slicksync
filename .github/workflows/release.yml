@@ -164,7 +164,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Keep an version reference alongside the convenience tag.
+          # Keep a version reference alongside the convenience tag.
           tags: |
             type=raw,value=${{ matrix.instance }}
             type=raw,value=${{ matrix.instance }}-${{ github.event.release.tag_name }}

@@ -352,7 +352,7 @@ docker compose -f docker-compose.private.yml up -d
 docker compose -f docker-compose.private.yml logs -f   # watch it come up
 ```
 
-This pulls `ghcr.io/ragnarlothbrok-odin/slicksync:private`, published by this fork's private release workflow. The image must be published before it can be pulled. To build the checked-out source locally instead:
+This pulls `ghcr.io/ragnarlothbrok-odin/slicksync:private`, published by this fork's release workflow. The image must be published before it can be pulled. To build the checked-out source locally instead:
 
 ```bash
 docker build --build-arg INSTANCE=private -t ghcr.io/ragnarlothbrok-odin/slicksync:private .
@@ -384,7 +384,24 @@ Frontend and API are both served through `:3000` — only that port needs a mapp
 >
 > Keep `./slicksync-data` until you've checked everything is there. If your compose file already mounts a volume at `/app/data`, none of this applies. Full details in the [1.88.0 release notes](https://github.com/slicknsliding/slicksync/releases/tag/v1.88.0).
 
-This fork ships a private, single-household deployment. The PostgreSQL schema and multi-tenant application code remain available for development, but public and beta deployment bundles are not maintained here.
+### Public multi-account deployment
+
+For hosting independent accounts, use `docker-compose.public.yml`. It runs
+PostgreSQL alongside SlickSync and waits for the database to become healthy.
+Set `JWT_SECRET`, `ENCRYPTION_KEY`, and a URL-safe `POSTGRES_PASSWORD` in `.env`,
+then run:
+
+```sh
+docker compose -f docker-compose.public.yml up -d
+```
+
+Preserve both database and application volumes. This is a separate deployment
+mode, not an automatic migration from private SQLite. See [DOCKER.md](./DOCKER.md)
+for local builds, backups and configuration.
+
+Stable releases publish both modes for AMD64 and ARM64. Use `:private` or
+`:public` for the current release, or pin `:private-v<version>` or
+`:public-v<version>` for a specific release. Beta images are not published.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
