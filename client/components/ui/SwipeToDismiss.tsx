@@ -33,7 +33,7 @@ export function SwipeToDismiss({
         return <>{children}</>;
     }
 
-    const onDragEnd = (_e: unknown, info: PanInfo) => {
+    const onDragEnd = async (_e: unknown, info: PanInfo) => {
         const row = rowRef.current;
         const width = row?.offsetWidth || 320;
         const far = info.offset.x < -width * DISMISS_SHARE;
@@ -45,13 +45,9 @@ export function SwipeToDismiss({
         leaving.current = true;
         // Slide out, then close the gap, so the rows below move up rather than
         // jumping into the space.
-        animate(x, -width, { duration: 0.18, ease: "easeOut" }).then(() =>
-            animate(
-                row,
-                { height: [row.offsetHeight, 0] },
-                { duration: 0.16, ease: "easeOut" }
-            ).then(onDismiss)
-        );
+        await animate(x, -width, { duration: 0.18, ease: "easeOut" });
+        await animate(row, { height: [row.offsetHeight, 0] }, { duration: 0.16, ease: "easeOut" });
+        onDismiss();
     };
 
     return (

@@ -37,7 +37,8 @@ const owner = (extra = {}) => ({
     ...extra,
 });
 
-function fakeAio(config, { maxPersonas = 20, signIn = true } = {}) {
+function fakeAio(initialConfig, { maxPersonas = 20, signIn = true } = {}) {
+    let config = initialConfig;
     const saved = [];
     const original = global.fetch;
     global.fetch = async (url, opts = {}) => {

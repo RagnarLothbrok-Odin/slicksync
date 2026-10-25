@@ -164,9 +164,13 @@ function setCachedLibrary(accountId, user, library) {
         fs.promises
             .writeFile(tmp, json, "utf8")
             .then(() => fs.promises.rename(tmp, cachePath))
-            .catch((error) => {
+            .catch(async (error) => {
                 lastWritten.delete(cachePath);
-                fs.promises.unlink(tmp).catch(() => undefined);
+                try {
+                    await fs.promises.unlink(tmp);
+                } catch {
+                    /* A failed write may never have created the temporary file. */
+                }
                 console.warn(
                     `Failed to write cache for user ${user.id || user} in account ${accountId}:`,
                     error.message

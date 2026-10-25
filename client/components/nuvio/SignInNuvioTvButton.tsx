@@ -181,7 +181,11 @@ export function SignInNuvioTvButton({ userId, name }: { userId: string; name: st
                                 }}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
-                                        found ? approve() : lookUp();
+                                        if (found) {
+                                            approve();
+                                        } else {
+                                            lookUp();
+                                        }
                                     }
                                 }}
                                 placeholder="K7MQ2X"

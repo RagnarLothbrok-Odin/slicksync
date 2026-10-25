@@ -5,6 +5,7 @@
     "rules": {
       "suspicious": {
         "noConsole": "off",
+        "noAlert": "off",
         "useAwait": "off",
         "noEqualsToNull": "off",
         "noBitwiseOperators": "off",
@@ -23,6 +24,7 @@
       },
       "style": {
         "noNestedTernary": "off",
+        "noDescendingSpecificity": "off",
         "noIncrementDecrement": "off",
         "useDestructuring": "off",
         "useDefaultParameterLast": "off",

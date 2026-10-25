@@ -40,6 +40,7 @@ test("server internals get the fallback", () => {
 
 test("missing or odd errors get the fallback", () => {
     assert.strictEqual(publicMessage(undefined, "Failed"), "Failed");
+    // biome-ignore lint/suspicious/useErrorMessage: An empty message intentionally exercises fallback reporting.
     assert.strictEqual(publicMessage(new Error(""), "Failed"), "Failed");
     assert.strictEqual(publicMessage({}, "Failed"), "Failed");
     assert.strictEqual(publicMessage(null), "Something went wrong");

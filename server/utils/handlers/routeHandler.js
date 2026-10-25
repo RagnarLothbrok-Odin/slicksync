@@ -72,19 +72,11 @@ class DatabaseTransactions {
 /**
  * Stremio API utilities
  */
-class StremioAPIUtils {
-    /**
-     * Create standardized StremioAPIStore
-     */
-    static createAPIStore() {
-        const { createStremioStore } = require("../helpers");
-        return createStremioStore();
-    }
-
+const StremioAPIUtils = {
     /**
      * Standardized Stremio authentication flow
      */
-    static async authenticateWithStremio(email, password) {
+    async authenticateWithStremio(email, password) {
         const { store, tempStorage } = this.createAPIStore();
 
         let authResult;
@@ -107,8 +99,15 @@ class StremioAPIUtils {
         }
 
         return { authResult, store, tempStorage };
-    }
-}
+    },
+    /**
+     * Create standardized StremioAPIStore
+     */
+    createAPIStore() {
+        const { createStremioStore } = require("../helpers");
+        return createStremioStore();
+    },
+};
 
 module.exports = {
     asyncHandler,

@@ -108,13 +108,13 @@ export const FLOATING_ICON_STYLE: React.CSSProperties = {
 // to whatever landed first and climb back - 18, then 1, then 18 - on every
 // page change. Each source now starts from what it last held this session;
 // a sign-out reloads the page, so nothing carries over between accounts.
-type NotificationFeeds = {
-    pendingRequests: Awaited<ReturnType<typeof api.getInvitationBell>>["pending"];
+interface NotificationFeeds {
     acceptedRequests: Awaited<ReturnType<typeof api.getInvitationBell>>["accepted"];
-    storedNotifications: Awaited<ReturnType<typeof api.getNotifications>>;
-    episodeAlerts: Awaited<ReturnType<typeof api.getEpisodeAlerts>>;
     addonHealthAlerts: Awaited<ReturnType<typeof api.getAddonHealthAlerts>>;
-};
+    episodeAlerts: Awaited<ReturnType<typeof api.getEpisodeAlerts>>;
+    pendingRequests: Awaited<ReturnType<typeof api.getInvitationBell>>["pending"];
+    storedNotifications: Awaited<ReturnType<typeof api.getNotifications>>;
+}
 const lastKnown: Partial<NotificationFeeds> = {};
 type ListUpdate<K extends keyof NotificationFeeds> =
     | NotificationFeeds[K]

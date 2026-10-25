@@ -143,10 +143,7 @@ test("webhook: a redirect to an address that is not allowed is not followed", as
     const calls = [];
     global.fetch = async (url) => {
         calls.push(String(url));
-        return new Response(null, {
-            headers: { location: "http://10.0.0.5:8080/admin" },
-            status: 307,
-        });
+        return Response.redirect("http://10.0.0.5:8080/admin", 307);
     };
     t.after(() => {
         global.fetch = realFetch;

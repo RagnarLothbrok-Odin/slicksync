@@ -177,7 +177,15 @@ async function tmdbSeriesByPeople(query, people, tmdbKey) {
     const castSets = sets.filter((s) => s.role === "cast").map((s) => s.ids);
     const directorSets = sets.filter((s) => s.role === "director").map((s) => s.ids);
     const intersect = (list) =>
-        list.reduce((acc, idsLocal) => new Set([...acc].filter((x) => idsLocal.has(x))));
+        list.reduce((acc, idsLocal) => {
+            const common = new Set();
+            for (const id of acc) {
+                if (idsLocal.has(id)) {
+                    common.add(id);
+                }
+            }
+            return common;
+        });
     const unite = (list) => new Set(list.flatMap((idsLocal) => [...idsLocal]));
     const castIds = castSets.length
         ? query.castMatch === "any"

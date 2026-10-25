@@ -83,11 +83,11 @@ const NAV_ITEMS = [
 
 // Lets the topbar button (and anything else) open the palette without
 // having to synthesise a fake Ctrl+K keystroke.
-import { COMMAND_PALETTE_OPEN_EVENT, openCommandPalette } from "@/lib/commandPaletteBus";
+import { COMMAND_PALETTE_OPEN_EVENT } from "@/lib/commandPaletteBus";
 
 // Re-exported so existing imports keep working; new code should import
 // from lib/commandPaletteBus so it does not pull this whole module in.
-export { COMMAND_PALETTE_OPEN_EVENT, openCommandPalette };
+export { COMMAND_PALETTE_OPEN_EVENT, openCommandPalette } from "@/lib/commandPaletteBus";
 
 function isMac() {
     if (typeof navigator === "undefined") {

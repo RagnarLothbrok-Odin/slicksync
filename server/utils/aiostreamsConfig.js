@@ -523,7 +523,8 @@ async function checkConfigs(prisma, decrypt) {
  * SlickSync's own write, so an outside change made since the last look is
  * reported rather than folded into the baseline that write leaves behind.
  */
-async function noteOutsideChanges(prisma, person, config, before) {
+async function noteOutsideChanges(prisma, person, config, initialBefore) {
+    let before = initialBefore;
     if (!before) {
         const row = await prisma.user.findUnique({
             select: { aioConfigStateJson: true },

@@ -196,15 +196,14 @@ export function linksFor(
                 label: names(s),
                 url: `streamyfin://items/page?id=${encodeURIComponent(id)}`,
             });
-        } else if (app === "web") {
+        } else if (app === "web" && s.kind === "jellyfin") {
             // Only a real Jellyfin has a web app; AIOStreams and AIOMetadata don't.
-            if (s.kind === "jellyfin") {
-                out.push({
-                    detail: host(s.address),
-                    label: names(s),
-                    url: `${s.address}/web/#/details?id=${encodeURIComponent(id)}${s.serverId ? `&serverId=${encodeURIComponent(s.serverId)}` : ""}`,
-                });
-            }
+
+            out.push({
+                detail: host(s.address),
+                label: names(s),
+                url: `${s.address}/web/#/details?id=${encodeURIComponent(id)}${s.serverId ? `&serverId=${encodeURIComponent(s.serverId)}` : ""}`,
+            });
         }
     }
     return out;

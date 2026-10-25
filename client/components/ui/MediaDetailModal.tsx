@@ -608,7 +608,7 @@ export function MediaDetailModal({
         // MediaDetails carries releaseInfo ("2023-" / "2023"), not a year field.
         const yearMatch = String(details.releaseInfo || "").match(/\d{4}/);
         api.lookupAnime(details.title, yearMatch ? Number(yearMatch[0]) : undefined)
-            .then((r) => {
+            .then(async (r) => {
                 if (cancelled || !r.found || !r.anilistId) {
                     return;
                 }
@@ -617,11 +617,10 @@ export function MediaDetailModal({
                     nextEpisode: r.nextEpisode || null,
                     siteUrl: r.siteUrl || null,
                 });
-                return api.getAnimeWatchOrder(r.anilistId).then((o) => {
-                    if (!cancelled) {
-                        setAnimeOrder({ mainLine: o.mainLine });
-                    }
-                });
+                const order = await api.getAnimeWatchOrder(r.anilistId);
+                if (!cancelled) {
+                    setAnimeOrder({ mainLine: order.mainLine });
+                }
             })
             .catch(() => {
                 /* additive only */

@@ -2202,15 +2202,19 @@ export default function UserDetailPage() {
                                                                             <button
                                                                                 className="mt-1 break-all text-left text-muted text-xs underline underline-offset-2 hover:text-default"
                                                                                 onClick={async () => {
-                                                                                    (await copyToClipboard(
-                                                                                        traxManifestUrl
-                                                                                    ))
-                                                                                        ? toast.success(
-                                                                                              "Manifest URL copied"
-                                                                                          )
-                                                                                        : toast.error(
-                                                                                              "Copy failed - select and copy the URL text directly"
-                                                                                          );
+                                                                                    if (
+                                                                                        await copyToClipboard(
+                                                                                            traxManifestUrl
+                                                                                        )
+                                                                                    ) {
+                                                                                        toast.success(
+                                                                                            "Manifest URL copied"
+                                                                                        );
+                                                                                    } else {
+                                                                                        toast.error(
+                                                                                            "Copy failed - select and copy the URL text directly"
+                                                                                        );
+                                                                                    }
                                                                                 }}
                                                                                 title="Copy manifest URL"
                                                                                 type="button"

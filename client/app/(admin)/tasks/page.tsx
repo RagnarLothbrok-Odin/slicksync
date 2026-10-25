@@ -676,7 +676,7 @@ export default function TasksPage() {
         setImportingConfig(true);
         try {
             const result = await api.importConfig(file, passphrase);
-            const parts = [];
+            const parts: string[] = [];
             if (result.users.created > 0) {
                 parts.push(`${result.users.created} user${result.users.created === 1 ? "" : "s"}`);
             }
@@ -2269,11 +2269,13 @@ export default function TasksPage() {
                                                 </code>
                                                 <Button
                                                     onClick={async () => {
-                                                        (await copyToClipboard(migrationCode))
-                                                            ? toast.success("Code copied")
-                                                            : toast.error(
-                                                                  "Copy failed - select the code text"
-                                                              );
+                                                        if (await copyToClipboard(migrationCode)) {
+                                                            toast.success("Code copied");
+                                                        } else {
+                                                            toast.error(
+                                                                "Copy failed - select the code text"
+                                                            );
+                                                        }
                                                     }}
                                                     size="sm"
                                                     variant="ghost"
@@ -3200,7 +3202,15 @@ function ScheduledTasksSection({
     const nextHealthCheckTime = getNextHealthCheckTime();
 
     // Build list of scheduled tasks
-    const scheduledTasks = [];
+    const scheduledTasks: {
+        id: string;
+        name: string;
+        description: string;
+        frequency: string;
+        icon: React.ReactNode;
+        iconBg: string;
+        nextRun: Date;
+    }[] = [];
 
     if (nextSyncTime) {
         scheduledTasks.push({

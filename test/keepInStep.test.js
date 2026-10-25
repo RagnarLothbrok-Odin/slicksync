@@ -228,11 +228,12 @@ test("a pass that could not read a place does not move the clock, so the next pa
         }
         return w.deps.__nuvio;
     };
-    const nuvio = (w.deps.__nuvio = {
+    const nuvio = {
         getProfileAvatars: async () => new Map(),
         getProfiles: async () => [{ name: "Chris", profile_index: 1 }],
         getWatchState: async () => ({ library: [], progress: [], watched: [] }),
-    });
+    };
+    w.deps.__nuvio = nuvio;
     await kis.runAll(w.prisma, () => w.deps, LATER + 60_000);
     assert.equal(w.setting.lastPassAt, null, "not counted as done");
     assert.match(w.setting.lastError, /Stremio/);

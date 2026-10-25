@@ -69,8 +69,7 @@ function tzOffsetMinutes(timezone, date = new Date()) {
 function offsetFromLog(text) {
     const re = /\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} ([+-])(\d\d):(\d\d)\]/g;
     let last = null;
-    let m;
-    while ((m = re.exec(String(text || "")))) {
+    for (const m of String(text || "").matchAll(re)) {
         last = m;
     }
     if (!last) {

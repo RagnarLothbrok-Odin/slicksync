@@ -270,28 +270,36 @@ async function start(prisma, decrypt, accountId, userId, { showId, season, episo
             const videoId = `${list.showId}:${t.season}:${t.episode}`;
             // An episode they had started already has a row; Undo puts that back
             // to unfinished instead of deleting it.
-            const existed = await prisma.episodeWatchHistory
-                .findUnique({
+            let existed = null;
+            try {
+                existed = await prisma.episodeWatchHistory.findUnique({
                     select: { completed: true },
                     where: { accountId_userId_videoId: { accountId, userId, videoId } },
-                })
-                .catch(() => null);
-            const result = await recordDiscreteWatch(prisma, {
-                accountId,
-                completed: true,
-                episode: t.episode,
-                episodeName: t.title || null,
-                itemId: list.showId,
-                itemType: "series",
-                moveForward: false,
-                poster: list.poster,
-                profileLabel: PROFILE_LABEL,
-                season: t.season,
-                title: list.name || list.showId,
-                userId,
-                videoId,
-                watchedAt: new Date(now),
-            }).catch((e) => ({ ok: false, reason: e?.message }));
+                });
+            } catch {
+                /* Missing prior history does not prevent recording this episode. */
+            }
+            let result;
+            try {
+                result = await recordDiscreteWatch(prisma, {
+                    accountId,
+                    completed: true,
+                    episode: t.episode,
+                    episodeName: t.title || null,
+                    itemId: list.showId,
+                    itemType: "series",
+                    moveForward: false,
+                    poster: list.poster,
+                    profileLabel: PROFILE_LABEL,
+                    season: t.season,
+                    title: list.name || list.showId,
+                    userId,
+                    videoId,
+                    watchedAt: new Date(now),
+                });
+            } catch (error) {
+                result = { ok: false, reason: error?.message };
+            }
             if (result?.ok) {
                 job.recorded++;
                 record.added.push({ existed: !!existed, videoId });
@@ -307,11 +315,15 @@ async function start(prisma, decrypt, accountId, userId, { showId, season, episo
                         .filter(upTo(s, ep))
                         .filter((e) => e.season > 0 && aired(e.premiere, now) && !e.played);
                     const last = serverEpisodes.find((e) => e.season === s && e.episode === ep);
-                    if (
-                        todo.length &&
-                        last &&
-                        (await provider.playedUpTo(last.itemId).catch(() => false))
-                    ) {
+                    let markedUpTo = false;
+                    if (todo.length && last) {
+                        try {
+                            markedUpTo = await provider.playedUpTo(last.itemId);
+                        } catch {
+                            /* Fall back to marking individual episodes below. */
+                        }
+                    }
+                    if (todo.length && last && markedUpTo) {
                         job.server = {
                             how: "played-up-to",
                             marked: todo.length,

@@ -176,7 +176,8 @@ const placeLabel = (p) => `${p.name}${p.profile && p.profile !== p.name ? ` · $
 // as done, so the next one looks back to the last complete pass and nothing
 // watched during an outage is skipped.
 async function runPerson(prisma, deps, setting, now = Date.now(), report = {}) {
-    const problems = (report.problems = []);
+    const problems = [];
+    report.problems = problems;
     const { accountId, userId } = setting;
     const info = await describe(prisma, deps, accountId, userId);
     const active = info.places.filter((p) => p.mode !== "off");

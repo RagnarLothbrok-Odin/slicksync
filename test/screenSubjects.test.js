@@ -39,10 +39,16 @@ function family({
         },
         group: { count: async () => 1 },
         notification: {
-            create: async ({ data }) => (notes.push(data), data),
+            create: async ({ data }) => {
+                notes.push(data);
+                return data;
+            },
             findUnique: async ({ where }) =>
                 notes.find((n) => n.dedupeKey === where.accountId_dedupeKey.dedupeKey) || null,
-            upsert: async ({ create }) => (notes.push(create), create),
+            upsert: async ({ create }) => {
+                notes.push(create);
+                return create;
+            },
         },
         nuvioProfileRoute: { findMany: async () => [] },
         user: {

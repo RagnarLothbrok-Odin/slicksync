@@ -84,7 +84,8 @@ function get(url) {
 // The addon proxy in front of a fake upstream addon, as index.js mounts it.
 async function mountProxy(t, upstreamHandler) {
     const saved = { error: console.error, log: console.log, warn: console.warn };
-    console.log = console.warn = console.error = () => undefined;
+    const silentLog = () => undefined;
+    Object.assign(console, { error: silentLog, log: silentLog, warn: silentLog });
     t.after(() => Object.assign(console, saved));
     const upstream = await listen(t, upstreamHandler);
     const addon = {
@@ -297,7 +298,8 @@ function resolveTo(t, table) {
 // The proxy for an addon saved at `manifestUrl`, wherever that is.
 async function mountProxyFor(t, manifestUrl) {
     const saved = { error: console.error, log: console.log, warn: console.warn };
-    console.log = console.warn = console.error = () => undefined;
+    const silentLog = () => undefined;
+    Object.assign(console, { error: silentLog, log: silentLog, warn: silentLog });
     t.after(() => Object.assign(console, saved));
     const addon = {
         accountId: "acct",

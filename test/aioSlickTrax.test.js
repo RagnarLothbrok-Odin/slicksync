@@ -31,7 +31,8 @@ const slickTrax = (extra = {}) => ({
 });
 
 // AIOStreams' user API: GET returns the configuration, PUT saves it (or refuses).
-function fakeAio(config, { refuse = null } = {}) {
+function fakeAio(initialConfig, { refuse = null } = {}) {
+    let config = initialConfig;
     const saved = [];
     const original = global.fetch;
     global.fetch = async (_url, opts = {}) => {

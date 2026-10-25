@@ -512,10 +512,16 @@ async function run(prisma, deps, accountId, userId, body = {}) {
         };
         // The titles are already written: one more try before saying the undo
         // couldn't be kept, rather than failing the copy that did happen.
-        const row = await prisma.watchCopyRun
-            .create({ data })
-            .catch(() => prisma.watchCopyRun.create({ data }))
-            .catch(() => null);
+        let row = null;
+        try {
+            row = await prisma.watchCopyRun.create({ data });
+        } catch {
+            try {
+                row = await prisma.watchCopyRun.create({ data });
+            } catch {
+                /* The copy remains valid even when its undo record cannot be stored. */
+            }
+        }
         job.runId = row?.id || null;
         job.state = "done";
         if (!row) {

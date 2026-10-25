@@ -128,23 +128,22 @@ self.addEventListener("fetch", (event) => {
                 if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) {
                     cache
                         .put(req, res.clone())
-                        .then(() => {
+                        .then(async () => {
                             imagePutsSinceTrim += 1;
                             if (imagePutsSinceTrim < 25) {
                                 return;
                             }
                             imagePutsSinceTrim = 0;
-                            return cache.keys().then((keys) => {
-                                if (keys.length <= IMAGE_CACHE_MAX) {
-                                    return;
-                                }
-                                // Cache keys come back in insertion order: drop the oldest.
-                                return Promise.all(
-                                    keys
-                                        .slice(0, keys.length - IMAGE_CACHE_MAX + 100)
-                                        .map((k) => cache.delete(k))
-                                );
-                            });
+                            const keys = await cache.keys();
+                            if (keys.length <= IMAGE_CACHE_MAX) {
+                                return;
+                            }
+                            // Cache keys come back in insertion order: drop the oldest.
+                            return Promise.all(
+                                keys
+                                    .slice(0, keys.length - IMAGE_CACHE_MAX + 100)
+                                    .map((k) => cache.delete(k))
+                            );
                         })
                         .catch(() => undefined);
                 }
@@ -222,18 +221,24 @@ self.addEventListener("notificationclick", (event) => {
     event.notification.close();
     const target = event.notification.data?.url || "/";
     event.waitUntil(
-        self.clients.matchAll({ includeUncontrolled: true, type: "window" }).then((clientList) => {
-            // Focus an existing SlickSync tab and navigate it, rather than opening
-            // a duplicate, when one is already open.
-            for (const client of clientList) {
-                if ("focus" in client) {
-                    client.navigate(target).catch(() => undefined);
-                    return client.focus();
+        self.clients
+            .matchAll({ includeUncontrolled: true, type: "window" })
+            .then(async (clientList) => {
+                // Focus an existing SlickSync tab and navigate it, rather than opening
+                // a duplicate, when one is already open.
+                for (const client of clientList) {
+                    if ("focus" in client) {
+                        try {
+                            await client.navigate(target);
+                        } catch {
+                            /* A failed navigation still leaves a tab that can be focused. */
+                        }
+                        return client.focus();
+                    }
                 }
-            }
-            if (self.clients.openWindow) {
-                return self.clients.openWindow(target);
-            }
-        })
+                if (self.clients.openWindow) {
+                    return self.clients.openWindow(target);
+                }
+            })
     );
 });

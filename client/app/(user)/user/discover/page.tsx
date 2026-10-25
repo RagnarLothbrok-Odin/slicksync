@@ -54,7 +54,7 @@ export default function PersonalDiscoverPage() {
             if (!(userId && authKey)) {
                 return { ratings: {} };
             }
-            const batches = [];
+            const batches: Promise<{ ratings: Record<string, RatingsBatchEntry> }>[] = [];
             for (let index = 0; index < ids.length; index += 60) {
                 batches.push(
                     personalRequest<{ ratings: Record<string, RatingsBatchEntry> }>(

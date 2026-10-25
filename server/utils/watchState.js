@@ -409,7 +409,8 @@ async function applyPlayback(prisma, user, type, pathId, event) {
     }
 }
 
-async function applyMark(prisma, user, itemType, itemId, video, kind, at) {
+async function applyMark(prisma, user, itemType, itemId, initialVideo, kind, at) {
+    let video = initialVideo;
     const accountId = user.accountId || "default";
     if (itemType === "series") {
         video = { ...video, videoId: seriesVideoId(itemId, video) };

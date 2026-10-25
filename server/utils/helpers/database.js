@@ -341,7 +341,8 @@ async function getGroupAddons(prisma, groupId, req) {
 // household, so a database lock would add nothing (and SQLite has no
 // row-level one).
 const membershipQueues = new Map(); // accountId -> tail of the queue
-function inMembershipQueue(accountId, task) {
+function inMembershipQueue(initialAccountId, task) {
+    let accountId = initialAccountId;
     // One queue per household whichever way its id is spelled: a
     // single-household install's rows can say 'default' or nothing at all.
     accountId = accountId || require("../config").DEFAULT_ACCOUNT_ID;

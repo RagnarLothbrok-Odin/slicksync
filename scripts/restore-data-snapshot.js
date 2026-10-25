@@ -117,7 +117,9 @@ function main() {
     // file and corrupt it - they belong to the database we just moved aside.
     for (const suffix of ["-wal", "-shm"]) {
         try {
-            fs.existsSync(target + suffix) && fs.unlinkSync(target + suffix);
+            if (fs.existsSync(target + suffix)) {
+                fs.unlinkSync(target + suffix);
+            }
         } catch {
             // Cleanup is best effort when the resource is already unavailable.
         }

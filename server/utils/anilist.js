@@ -240,7 +240,7 @@ async function getWatchOrder(anilistId) {
     const before = [];
     let cursor = root;
     for (let i = 0; i < MAX_HOPS; i++) {
-        const prev = nodesOf(cursor, ["PREQUEL"]).filter(isLine)[0];
+        const prev = nodesOf(cursor, ["PREQUEL"]).find(isLine);
         if (!prev?.id || before.some((m) => m.id === prev.id) || prev.id === root.id) {
             break;
         }
@@ -254,7 +254,7 @@ async function getWatchOrder(anilistId) {
     const after = [];
     cursor = root;
     for (let i = 0; i < MAX_HOPS; i++) {
-        const next = nodesOf(cursor, ["SEQUEL"]).filter(isLine)[0];
+        const next = nodesOf(cursor, ["SEQUEL"]).find(isLine);
         if (!next?.id || after.some((m) => m.id === next.id) || next.id === root.id) {
             break;
         }

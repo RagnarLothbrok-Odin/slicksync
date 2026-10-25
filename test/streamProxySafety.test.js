@@ -80,7 +80,8 @@ function listen(t, handler) {
 // The proxy talks a lot on the console; the tests do not need to hear it.
 function quiet(t) {
     const saved = { error: console.error, log: console.log, warn: console.warn };
-    console.log = console.warn = console.error = () => undefined;
+    const silentLog = () => undefined;
+    Object.assign(console, { error: silentLog, log: silentLog, warn: silentLog });
     t.after(() => Object.assign(console, saved));
 }
 

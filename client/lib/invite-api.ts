@@ -45,11 +45,11 @@ export class InviteApiError extends Error {
     status: number;
     code?: string;
 
-    constructor(message: string, status: number, code?: string, options?: ErrorOptions) {
+    constructor(message: string, options: ErrorOptions & { status: number; code?: string }) {
         super(message, options);
         this.name = "InviteApiError";
-        this.status = status;
-        this.code = code;
+        this.status = options.status;
+        this.code = options.code;
     }
 }
 
@@ -92,7 +92,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
                     : "code" in payload && typeof payload.code === "string"
                       ? payload.code
                       : undefined;
-            throw new InviteApiError(message, response.status, code);
+            throw new InviteApiError(message, { code, status: response.status });
         }
 
         return data as T;
@@ -102,7 +102,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         }
         // Network or other errors
         const message = error instanceof Error ? error.message : "Request failed";
-        throw new InviteApiError(message, 0, undefined, { cause: error });
+        throw new InviteApiError(message, { cause: error, status: 0 });
     }
 }
 

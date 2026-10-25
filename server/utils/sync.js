@@ -312,11 +312,14 @@ async function getDesiredAddons(
             // Ensure we always get an array, even if the response structure is unexpected
             if (Array.isArray(userAddonsResponse)) {
                 userAddons = userAddonsResponse;
-            } else if (userAddonsResponse && typeof userAddonsResponse === "object") {
+            } else if (
+                userAddonsResponse &&
+                typeof userAddonsResponse === "object" &&
+                Array.isArray(userAddonsResponse.addons)
+            ) {
                 // Handle collection shape: { addons: [...] }
-                if (Array.isArray(userAddonsResponse.addons)) {
-                    userAddons = userAddonsResponse.addons;
-                }
+
+                userAddons = userAddonsResponse.addons;
             }
         }
 
@@ -645,11 +648,14 @@ function createGetUserSyncStatus({
         let userAddons = [];
         if (Array.isArray(userAddonsResponse)) {
             userAddons = userAddonsResponse;
-        } else if (userAddonsResponse && typeof userAddonsResponse === "object") {
+        } else if (
+            userAddonsResponse &&
+            typeof userAddonsResponse === "object" &&
+            Array.isArray(userAddonsResponse.addons)
+        ) {
             // Handle collection shape: { addons: [...] }
-            if (Array.isArray(userAddonsResponse.addons)) {
-                userAddons = userAddonsResponse.addons;
-            }
+
+            userAddons = userAddonsResponse.addons;
         }
 
         // Get desired addons (group addons + protected addons)

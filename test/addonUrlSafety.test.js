@@ -48,15 +48,15 @@ function stubFetch(t, handler) {
 }
 
 const manifest = (extra = {}) =>
-    new Response(
-        JSON.stringify({
+    Response.json(
+        {
             catalogs: [],
             id: "org.example.addon",
             name: "Example Addon",
             resources: ["catalog"],
             version: "1.0.0",
             ...extra,
-        }),
+        },
         { headers: { "content-type": "application/json" } }
     );
 const redirect = (location, status = 302) => new Response(null, { headers: { location }, status });

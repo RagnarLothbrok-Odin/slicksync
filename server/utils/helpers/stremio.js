@@ -35,14 +35,10 @@ function createStremioStore() {
  * Validate Stremio auth key by testing API calls
  */
 async function validateStremioAuthKey(authKey) {
-    try {
-        const client = createStremioClient(authKey);
-        const user = await client.getUser();
-        const addons = await client.getAddonCollection();
-        return { addons, user };
-    } catch (error) {
-        throw error;
-    }
+    const client = createStremioClient(authKey);
+    const user = await client.getUser();
+    const addons = await client.getAddonCollection();
+    return { addons, user };
 }
 
 /**

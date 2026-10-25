@@ -30,7 +30,8 @@ const owner = (extra = {}) => ({
 const decrypt = () => "secret";
 const encrypt = (v) => `enc:${v}`;
 
-function fakeAio(config) {
+function fakeAio(initialConfig) {
+    let config = initialConfig;
     const saved = [];
     const original = global.fetch;
     global.fetch = async (url, opts = {}) => {

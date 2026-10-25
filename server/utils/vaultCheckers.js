@@ -223,8 +223,7 @@ function parseNewznabApiLimits(xmlText) {
     }
     const attrs = {};
     const attrRegex = /(\w+)="([^"]*)"/g;
-    let attrMatch;
-    while ((attrMatch = attrRegex.exec(m[1]))) {
+    for (const attrMatch of m[1].matchAll(attrRegex)) {
         attrs[attrMatch[1]] = attrMatch[2];
     }
     const apiCurrent = Number(attrs.apiCurrent);

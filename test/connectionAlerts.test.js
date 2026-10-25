@@ -15,13 +15,21 @@ function fakePrisma(sync = {}) {
     return {
         appAccount: { findUnique: async () => ({ sync: JSON.stringify(sync) }) },
         notification: {
-            create: async ({ data }) => (rows.push(data), data),
+            create: async ({ data }) => {
+                rows.push(data);
+                return data;
+            },
             findUnique: async ({ where }) =>
                 find(where.accountId_dedupeKey.accountId, where.accountId_dedupeKey.dedupeKey) ||
                 null,
             upsert: async ({ where, create }) => {
                 const k = where.accountId_dedupeKey;
-                return find(k.accountId, k.dedupeKey) || (rows.push(create), create);
+                const existing = find(k.accountId, k.dedupeKey);
+                if (existing) {
+                    return existing;
+                }
+                rows.push(create);
+                return create;
             },
         },
         notificationDigestEntry: { create: async () => ({}) },

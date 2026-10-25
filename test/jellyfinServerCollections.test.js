@@ -21,20 +21,25 @@ function fakeJellyfin() {
         const ids = (u.searchParams.get("ids") || "").split(",").filter(Boolean);
         let body = null;
         let status = 200;
-        let m;
+        const collectionItemsMatch = /^\/Collections\/([^/]+)\/Items$/.exec(u.pathname);
+        const primaryImageMatch = /^\/Items\/([^/]+)\/Images\/Primary$/.exec(u.pathname);
+        const collectionMatch = /^\/Items\/([^/]+)$/.exec(u.pathname);
         if (method === "POST" && u.pathname === "/Collections") {
             const id = `col${state.next++}`;
             state.collections.set(id, { items: ids, name: u.searchParams.get("name") });
             body = { Id: id };
-        } else if ((m = /^\/Collections\/([^/]+)\/Items$/.exec(u.pathname))) {
+        } else if (collectionItemsMatch) {
+            const m = collectionItemsMatch;
             const c = state.collections.get(m[1]);
             c.items =
                 method === "POST" ? [...c.items, ...ids] : c.items.filter((i) => !ids.includes(i));
             status = 204;
-        } else if ((m = /^\/Items\/([^/]+)\/Images\/Primary$/.exec(u.pathname))) {
+        } else if (primaryImageMatch) {
+            const m = primaryImageMatch;
             state.pictures.push({ id: m[1], method, type: opts.headers?.["Content-Type"] });
             status = 204;
-        } else if ((m = /^\/Items\/([^/]+)$/.exec(u.pathname))) {
+        } else if (collectionMatch) {
+            const m = collectionMatch;
             const c = state.collections.get(m[1]);
             if (!c) {
                 status = 404;

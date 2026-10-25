@@ -26,6 +26,7 @@ The shared preset is adapted to the existing project rather than forcing structu
 
 - File names may use camelCase, PascalCase, or kebab-case, matching server utilities, React components, and existing route modules.
 - Serial awaits remain valid for ordered provider writes and bounded polling. JSX callbacks and inline regular expressions are not rejected solely on speculative performance grounds; hoisting a stateful global regex can change behavior.
+- Native confirmation dialogs and encrypted-backup passphrase prompts remain permitted. Component and theme overrides keep their deliberate CSS cascade without a global selector ordering requirement.
 - Native image elements remain valid for arbitrary provider artwork and authenticated image paths. Image dimensions are still checked.
 - Async API implementations may return immediately without an artificial await. Nullish equality checks keep their defined handling of both null and undefined. Bitwise operations remain available for binary codecs.
 - Defensive boundary checks remain valid even when a static type assumes the value is present. Existing handler size is not used as a reason to force structural rewrites during cleanup.

@@ -624,9 +624,13 @@ module.exports = ({
             // Dedupe - the same service can appear in both flatrate and free tiers
             // for different content on the same title (rare but confirmed possible).
             const seen = new Set();
-            const deduped = providers.filter((p) =>
-                seen.has(p.name) ? false : (seen.add(p.name), true)
-            );
+            const deduped = providers.filter((p) => {
+                if (seen.has(p.name)) {
+                    return false;
+                }
+                seen.add(p.name);
+                return true;
+            });
 
             const finalValue =
                 deduped.length > 0 ? { link: usResult.link || null, providers: deduped } : null;
@@ -4260,27 +4264,26 @@ module.exports = ({
                         id,
                         getAccountId(req)
                     );
-                } else {
-                    // Validate groupId is a valid string before calling assignUserToGroup
-                    if (typeof groupId === "string" && groupId.trim() !== "") {
-                        // First verify the group exists for this account
-                        const accountId = getAccountId(req);
-                        const groupExists = await prisma.group.findFirst({
-                            select: { id: true },
-                            where: {
-                                accountId,
-                                id: groupId,
-                            },
+                }
+                // Validate groupId is a valid string before calling assignUserToGroup
+                else if (typeof groupId === "string" && groupId.trim() !== "") {
+                    // First verify the group exists for this account
+                    const accountId = getAccountId(req);
+                    const groupExists = await prisma.group.findFirst({
+                        select: { id: true },
+                        where: {
+                            accountId,
+                            id: groupId,
+                        },
+                    });
+
+                    if (!groupExists) {
+                        return res.status(404).json({
+                            error: `Group not found: ${groupId} (accountId: ${accountId})`,
                         });
-
-                        if (!groupExists) {
-                            return res.status(404).json({
-                                error: `Group not found: ${groupId} (accountId: ${accountId})`,
-                            });
-                        }
-
-                        await assignUserToGroup(prisma, id, groupId, req);
                     }
+
+                    await assignUserToGroup(prisma, id, groupId, req);
                 }
             }
 
@@ -9961,8 +9964,7 @@ module.exports = ({
             let nextPosition = (maxPositionResult._max.position ?? -1) + 1;
 
             // Attach all processed addons to the group
-            for (let index = 0; index < processedAddons.length; index++) {
-                const addon = processedAddons[index];
+            for (const addon of processedAddons) {
                 try {
                     // Get the addon URL for comparison
                     const addonUrl = addon.manifestUrl ? decrypt(addon.manifestUrl, req) : null;

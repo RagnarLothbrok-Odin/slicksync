@@ -71,8 +71,7 @@ function stubFetch(t, handler) {
 }
 
 const redirect = (location, status = 302) => new Response(null, { headers: { location }, status });
-const json = (body) =>
-    new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+const json = (body) => Response.json(body, { headers: { "content-type": "application/json" } });
 
 // ---- another SlickSync's shared catalog ------------------------------------
 

@@ -1650,13 +1650,15 @@ export function WatchSyncView({
                                                                                 );
                                                                                 keys.forEach(
                                                                                     (k) => {
-                                                                                        allOn
-                                                                                            ? n.delete(
-                                                                                                  k
-                                                                                              )
-                                                                                            : n.add(
-                                                                                                  k
-                                                                                              );
+                                                                                        if (allOn) {
+                                                                                            n.delete(
+                                                                                                k
+                                                                                            );
+                                                                                        } else {
+                                                                                            n.add(
+                                                                                                k
+                                                                                            );
+                                                                                        }
                                                                                     }
                                                                                 );
                                                                                 return n;

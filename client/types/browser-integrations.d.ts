@@ -2,20 +2,20 @@ export {};
 
 declare global {
     interface YouTubePlayer {
-        destroy(): void;
-        stopVideo(): void;
-        unMute(): void;
+        destroy: () => void;
+        stopVideo: () => void;
+        unMute: () => void;
     }
 
     interface Window {
         Capacitor?: {
             Plugins?: {
                 App?: {
-                    addListener(
+                    addListener: (
                         event: "backButton",
                         listener: (event: { canGoBack: boolean }) => void
-                    ): Promise<{ remove(): void }>;
-                    exitApp(): Promise<void>;
+                    ) => Promise<{ remove: () => void }>;
+                    exitApp: () => Promise<void>;
                 };
             };
         };

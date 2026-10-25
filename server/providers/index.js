@@ -199,7 +199,10 @@ function makeCreateProvider({ prisma, encrypt, getAccountId } = {}) {
 // as createJellyfinProvider's; every method waits for the real one.
 function lazyJellyfinProvider(load) {
     let pending = null;
-    const real = () => (pending = pending || load());
+    const real = () => {
+        pending = pending || load();
+        return pending;
+    };
     const forward =
         (name) =>
         async (...args) => {

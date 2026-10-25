@@ -160,44 +160,43 @@ async function toggleLibraryItemsBatch({
                     type: itemType,
                 };
             }
+        }
+        // Remove from library: preserve watch history (state, _ctime, temp)
+        else if (existingItem) {
+            // Preserve existing item data, especially watch history
+            updatedItem = {
+                _ctime: existingItem._ctime || now,
+                _id: existingItem._id || existingItem.id || baseId,
+                _mtime: now,
+                behaviorHints: {
+                    defaultVideoId: null,
+                    featuredVideoId: null,
+                    hasScheduledVideos: false,
+                },
+                name: existingItem.name || itemName || "Unknown",
+                poster: existingItem.poster || poster || "",
+                posterShape: existingItem.posterShape || "poster",
+                removed: true,
+                // Preserve watch history state
+                state: existingItem.state || {
+                    duration: 0,
+                    flaggedWatched: 0,
+                    lastWatched: now,
+                    noNotif: false,
+                    overallTimeWatched: 0,
+                    timeOffset: 0,
+                    timesWatched: 0,
+                    timeWatched: 0,
+                    video_id: null,
+                    watched: null,
+                },
+                temp: existingItem.temp === undefined ? false : existingItem.temp,
+                type: existingItem.type || itemType || "unknown",
+            };
         } else {
-            // Remove from library: preserve watch history (state, _ctime, temp)
-            if (existingItem) {
-                // Preserve existing item data, especially watch history
-                updatedItem = {
-                    _ctime: existingItem._ctime || now,
-                    _id: existingItem._id || existingItem.id || baseId,
-                    _mtime: now,
-                    behaviorHints: {
-                        defaultVideoId: null,
-                        featuredVideoId: null,
-                        hasScheduledVideos: false,
-                    },
-                    name: existingItem.name || itemName || "Unknown",
-                    poster: existingItem.poster || poster || "",
-                    posterShape: existingItem.posterShape || "poster",
-                    removed: true,
-                    // Preserve watch history state
-                    state: existingItem.state || {
-                        duration: 0,
-                        flaggedWatched: 0,
-                        lastWatched: now,
-                        noNotif: false,
-                        overallTimeWatched: 0,
-                        timeOffset: 0,
-                        timesWatched: 0,
-                        timeWatched: 0,
-                        video_id: null,
-                        watched: null,
-                    },
-                    temp: existingItem.temp === undefined ? false : existingItem.temp,
-                    type: existingItem.type || itemType || "unknown",
-                };
-            } else {
-                // Item doesn't exist, skip it
-                console.log(`${logPrefix} Item not found for removal: ${baseId}, skipping`);
-                continue;
-            }
+            // Item doesn't exist, skip it
+            console.log(`${logPrefix} Item not found for removal: ${baseId}, skipping`);
+            continue;
         }
 
         changes.push(updatedItem);

@@ -249,7 +249,8 @@ const stremio = {
                       temp: false,
                       type: item.type,
                   };
-            const st = (next.state = next.state || {});
+            next.state = next.state || {};
+            const st = next.state;
             let newest = msOf(st.lastWatched);
             let wrote = false;
             if (c.markWatched) {

@@ -228,26 +228,26 @@ export default function DiscoverPage() {
         } else if (tmdbSlug) {
             setSearchQuery(tmdbSlug.replace(/-/g, " "));
         } else if (imdbId) {
-            const nameOf = (d: { meta?: { name?: string }; name?: string } | null) =>
-                d?.meta?.name || d?.name;
-            api.getMediaDetails(imdbId, "movie")
-                .then((d) => {
-                    const n = nameOf(d as never);
-                    if (n) {
-                        setSearchQuery(n);
+            const nameOf = (
+                d: { meta?: { name?: string }; name?: string; title?: string | null } | null
+            ) => d?.meta?.name || d?.name || d?.title;
+            const loadTitle = async () => {
+                let details: Awaited<ReturnType<typeof api.getMediaDetails>>;
+                try {
+                    details = await api.getMediaDetails(imdbId, "movie");
+                } catch {
+                    try {
+                        details = await api.getMediaDetails(imdbId, "series");
+                    } catch {
+                        return;
                     }
-                })
-                .catch(() =>
-                    api
-                        .getMediaDetails(imdbId, "series")
-                        .then((d) => {
-                            const n = nameOf(d as never);
-                            if (n) {
-                                setSearchQuery(n);
-                            }
-                        })
-                        .catch(() => undefined)
-                );
+                }
+                const name = nameOf(details);
+                if (name) {
+                    setSearchQuery(name);
+                }
+            };
+            void loadTitle();
         }
     }, []);
 
@@ -721,19 +721,18 @@ export default function DiscoverPage() {
     useEffect(() => {
         let cancelled = false;
         api.getSyncSettings()
-            .then((ss) => {
+            .then(async (ss) => {
                 if (cancelled || ss.animeSeasonalRow !== true) {
                     return;
                 }
-                return api.getSeasonalAnime().then((r) => {
-                    if (cancelled) {
-                        return;
-                    }
-                    setSeasonalAnime(r.items || []);
-                    setSeasonalUnavailable(
-                        r.unavailable ? r.reason || "AniList is unavailable right now." : null
-                    );
-                });
+                const r = await api.getSeasonalAnime();
+                if (cancelled) {
+                    return;
+                }
+                setSeasonalAnime(r.items || []);
+                setSeasonalUnavailable(
+                    r.unavailable ? r.reason || "AniList is unavailable right now." : null
+                );
             })
             .catch(() => {
                 /* the row simply doesn't appear */

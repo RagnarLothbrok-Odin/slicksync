@@ -161,10 +161,7 @@ test("discovery does not follow a redirect to somewhere internal", async (t) => 
     const asked = [];
     global.fetch = async (url) => {
         asked.push(String(url));
-        return new Response(null, {
-            headers: { location: "http://169.254.169.254/latest/meta-data/" },
-            status: 302,
-        });
+        return Response.redirect("http://169.254.169.254/latest/meta-data/", 302);
     };
     t.after(() => {
         global.fetch = realFetch;
@@ -186,10 +183,13 @@ test("discovery on a public instance still works against a public backend", asyn
     instance(t, "public");
     resolveTo(t, { "backend.example.com": ["93.184.216.34"] });
     global.fetch = async () =>
-        new Response(JSON.stringify({ ...DOC, backend_url: "https://backend.example.com/" }), {
-            headers: { "content-type": "application/json" },
-            status: 200,
-        });
+        Response.json(
+            { ...DOC, backend_url: "https://backend.example.com/" },
+            {
+                headers: { "content-type": "application/json" },
+                status: 200,
+            }
+        );
     t.after(() => {
         global.fetch = realFetch;
     });
@@ -424,10 +424,7 @@ test("a migration code is refused for link-local, and so is a redirect there, wi
             return realFetch(url, init);
         }
         asked.push(String(url));
-        return new Response(null, {
-            headers: { location: "http://169.254.169.254/latest/meta-data/" },
-            status: 302,
-        });
+        return Response.redirect("http://169.254.169.254/latest/meta-data/", 302);
     };
     t.after(() => {
         global.fetch = realFetch;

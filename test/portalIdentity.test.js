@@ -615,10 +615,7 @@ for (const type of ["public", "private"]) {
         resolveTo(t, { "addon.example.com": ["93.184.216.34"] });
         const calls = stubFetch(t, (url) =>
             url.startsWith("https://addon.example.com/")
-                ? new Response(null, {
-                      headers: { location: "http://169.254.169.254/latest/meta-data/" },
-                      status: 302,
-                  })
+                ? Response.redirect("http://169.254.169.254/latest/meta-data/", 302)
                 : new Response("{}", { status: 200 })
         );
         const res = await addAddon("nA", "stremio://addon.example.com/manifest.json");
