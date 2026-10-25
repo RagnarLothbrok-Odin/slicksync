@@ -34,8 +34,8 @@ The shared preset is adapted to the existing project rather than forcing structu
 
 Type-safety, correctness, security, accessibility, unused-code, and formatting checks remain enabled. A failing lint command is not a passing baseline.
 
-## Test runner compatibility
+## Tests
 
-`bun run test` launches the established Node test runner, which preserves per-file process isolation. Node remains a development and CI requirement for this command. The latest complete verification passed all 845 tests after correcting the TCP listener synchronization and a date-insensitive test fixture.
+`bun run test` runs the full suite under Bun with per-file isolation and a 30-second timeout. The latest verification passed all 845 tests under both Bun and Node. TCP safety tests synchronize with the listener accepting a connection, so they do not depend on event-loop timing.
 
-`bun run test:bun` runs the suite under Bun with file isolation and a 30-second test timeout. It currently passes 842 tests, with the TCP address-fallback test in `test/vaultCheckerSafety.test.js` failing. Keep this explicit compatibility check separate until its behavior is resolved; do not disable the test to make the migration pass.
+The obsolete Node retry runner and stdout redirection shim have been removed. Test failures now fail the command directly without an automatic second run.

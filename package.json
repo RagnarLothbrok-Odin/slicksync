@@ -40,8 +40,7 @@
     "start": "bun server/index.js",
     "studio": "cp prisma/schema.sqlite.prisma prisma/schema.prisma && bunx prisma generate && DATABASE_URL=\"file:./prisma/sqlite.db\" bunx prisma studio",
     "studio:public": "cp prisma/schema.postgres.prisma prisma/schema.prisma && bunx prisma generate && DATABASE_URL=\"postgresql://slicksync:slicksync@localhost:5432/slicksync\" bunx prisma studio",
-    "test": "node scripts/run-tests.js",
-    "test:bun": "bun test --isolate --timeout 30000 test/",
+    "test": "bun test --isolate --timeout 30000 test/",
     "type-check": "bun run --cwd client type-check"
   },
   "dependencies": {
