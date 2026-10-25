@@ -436,7 +436,7 @@ See [runtime behavior](docs/runtime-behavior.md) for watch tracking, timezone, n
 
 Information courtesy of IMDb (https://www.imdb.com). Used with permission. This product uses the TMDB API but is not endorsed or certified by TMDB.
 
-See [`README.upstream.md`](./README.upstream.md) for the original project's own README.
+See [`README.upstream.md`](./README.upstream.md) for the original Syncio and SlickSync upstream credits and inherited feature history.
 
 ## License
 
