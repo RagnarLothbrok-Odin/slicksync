@@ -1,10 +1,16 @@
-name: Private Release
+name: Release Images
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-  workflow_dispatch:
+  release:
+    types: [published]
+
+# Serialize releases so overlapping builds cannot race the moving image tags.
+concurrency:
+  group: release-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -28,11 +34,21 @@ jobs:
   # its own tests. The build below waits on this, so a red suite stops the
   # release instead of shipping and being noticed later.
   checks:
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Stable releases require a v<major>.<minor>.<patch> tag"
+            exit 1
+          }
+          node -e 'const expected = "v" + require("./package.json").version; if (process.env.RELEASE_TAG !== expected) { console.error("Release tag must match package.json version"); process.exit(1); }'
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -52,6 +68,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        instance: [private, public]
+        platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
             runner: ubuntu-latest
@@ -84,20 +102,20 @@ jobs:
       # Built and pushed by digest to GHCR only; the merge job below applies
       # the human-readable tags to GHCR from these same digests,
       # so a tag never points at a half-built manifest.
-      - name: Build and push by digest (private)
+      - name: Build and push by digest (${{ matrix.instance }})
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          labels: org.opencontainers.image.title=slicksync-private
+          labels: org.opencontainers.image.title=slicksync-${{ matrix.instance }}
           build-args: |
-            INSTANCE=private
-            APP_VERSION=${{ github.ref_name }}
+            INSTANCE=${{ matrix.instance }}
+            APP_VERSION=${{ github.event.release.tag_name }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           # Keep each architecture's build cache independent.
-          cache-from: type=gha,scope=private-${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,mode=max,scope=private-${{ env.PLATFORM_PAIR }}
+          cache-from: type=gha,scope=${{ matrix.instance }}-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.instance }}-${{ env.PLATFORM_PAIR }}
 
       - name: Export digest
         run: |
@@ -108,7 +126,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-private-${{ env.PLATFORM_PAIR }}
+          name: digests-${{ matrix.instance }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -116,6 +134,9 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     needs: build
+    strategy:
+      matrix:
+        instance: [private, public]
     permissions:
       contents: read
       packages: write
@@ -124,7 +145,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-private-*
+          pattern: digests-${{ matrix.instance }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -137,27 +158,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (private)
+      - name: Extract metadata (${{ matrix.instance }})
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Floating tag only - no per-version tag. The instances track
-          # this moving tag, and a release is identified by its git tag and
-          # GitHub Release rather than by a second copy of the same image
-          # sitting in the registry forever.
+          # Keep an version reference alongside the convenience tag.
           tags: |
-            type=raw,value=private
+            type=raw,value=${{ matrix.instance }}
+            type=raw,value=${{ matrix.instance }}-${{ github.event.release.tag_name }}
           labels: |
-            org.opencontainers.image.title=slicksync-private
+            org.opencontainers.image.title=slicksync-${{ matrix.instance }}
 
       # One imagetools call carries every tag, all built
       # from the same two digests in the fork's GHCR repository.
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
       - name: Inspect pushed image
-        run: docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:private
+        run: docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.instance }}-${{ github.event.release.tag_name }}
