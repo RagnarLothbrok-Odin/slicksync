@@ -1,13 +1,9 @@
 "use client";
 
-import {
-    ArrowPathIcon,
-    ArrowTopRightOnSquareIcon,
-    CheckIcon,
-    ClipboardIcon,
-} from "@heroicons/react/24/outline";
-import { motion } from "framer-motion";
+import { ArrowPathIcon, ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/Button";
+import { VerificationCode } from "@/components/ui/VerificationCode";
 import { copyToClipboard } from "@/lib/clipboard";
 import { inviteApi } from "@/lib/invite-api";
 
@@ -45,6 +41,8 @@ export function NuvioOAuthCard({
     const [expiresAt, setExpiresAt] = useState<number | null>(null);
     const [isStarting, setIsStarting] = useState(false);
     const [isWaiting, setIsWaiting] = useState(false);
+    const [failed, setFailed] = useState(false);
+    const deadline = useRef<number | null>(null);
     const [copied, setCopied] = useState(false);
     const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
@@ -53,16 +51,19 @@ export function NuvioOAuthCard({
     const session = useRef<{ code: string; deviceNonce: string; anonToken: string } | null>(null);
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const cancelled = useRef(false);
+    const started = useRef(false);
+    const callbacks = useRef({ onApproved, onError });
+    callbacks.current = { onApproved, onError };
 
-    useEffect(
-        () => () => {
+    useEffect(() => {
+        cancelled.current = false;
+        return () => {
             cancelled.current = true;
             if (pollTimer.current) {
                 clearTimeout(pollTimer.current);
             }
-        },
-        []
-    );
+        };
+    }, []);
 
     // Countdown, purely so the code on screen visibly goes stale rather than
     // silently failing when it does.
@@ -81,6 +82,10 @@ export function NuvioOAuthCard({
             if (cancelled.current || !session.current) {
                 return;
             }
+            if (deadline.current && Date.now() >= deadline.current) {
+                setIsWaiting(false);
+                return;
+            }
             try {
                 const res = await inviteApi.pollNuvioLogin(inviteCode, session.current);
                 if (cancelled.current) {
@@ -88,7 +93,7 @@ export function NuvioOAuthCard({
                 }
                 if (res?.status === "authorized") {
                     setIsWaiting(false);
-                    await onApproved(session.current.code);
+                    await callbacks.current.onApproved(session.current.code);
                     return;
                 }
                 pollTimer.current = setTimeout(() => poll(intervalSeconds), intervalSeconds * 1000);
@@ -97,28 +102,56 @@ export function NuvioOAuthCard({
                     return;
                 }
                 setIsWaiting(false);
-                onError?.(err instanceof Error ? err.message : "Could not check the Nuvio sign-in");
+                setFailed(true);
+                callbacks.current.onError?.(
+                    err instanceof Error ? err.message : "Could not check the Nuvio sign-in"
+                );
             }
         },
-        [inviteCode, onApproved, onError]
+        [inviteCode]
     );
 
     const start = useCallback(async () => {
+        if (pollTimer.current) {
+            clearTimeout(pollTimer.current);
+        }
         setIsStarting(true);
+        setFailed(false);
         try {
             const s = await inviteApi.startNuvioLogin(inviteCode);
+            if (cancelled.current) {
+                return;
+            }
             session.current = { anonToken: s.anonToken, code: s.code, deviceNonce: s.deviceNonce };
             setCode(s.code);
             setWebUrl(s.webUrl || null);
-            setExpiresAt(s.expiresAt ? new Date(s.expiresAt).getTime() : null);
+            deadline.current = s.expiresAt ? new Date(s.expiresAt).getTime() : null;
+            setExpiresAt(deadline.current);
             setIsWaiting(true);
             poll(s.pollIntervalSeconds || 5);
         } catch (err) {
-            onError?.(err instanceof Error ? err.message : "Could not start the Nuvio sign-in");
+            if (cancelled.current) {
+                return;
+            }
+            setFailed(true);
+            callbacks.current.onError?.(
+                err instanceof Error ? err.message : "Could not start the Nuvio sign-in"
+            );
         } finally {
-            setIsStarting(false);
+            if (!cancelled.current) {
+                setIsStarting(false);
+            }
         }
-    }, [inviteCode, onError, poll]);
+    }, [inviteCode, poll]);
+
+    // Generate once on selection; callback changes must not restart approval.
+    useEffect(() => {
+        if (disabled || started.current) {
+            return;
+        }
+        started.current = true;
+        void start();
+    }, [disabled, start]);
 
     const copy = async () => {
         if (!code) {
@@ -134,74 +167,50 @@ export function NuvioOAuthCard({
     const busy = disabled || isCompleting || isStarting;
 
     return (
-        <motion.div
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-white/10 bg-white/[0.02] p-5"
-            initial={{ opacity: 0, y: 8 }}
-        >
-            <h3 className="font-semibold text-base">{title}</h3>
-            <p className="mt-1 text-muted text-sm">{description}</p>
-
-            {code ? (
-                <div className="mt-4 flex flex-col gap-3">
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                        <span className="font-mono text-xl tracking-[0.2em]">{code}</span>
-                        <button
-                            aria-label="Copy the code"
-                            className="shrink-0 rounded-lg p-2 hover:bg-white/5"
-                            onClick={copy}
-                            type="button"
-                        >
-                            {copied ? (
-                                <CheckIcon className="h-5 w-5 text-primary" />
-                            ) : (
-                                <ClipboardIcon className="h-5 w-5" />
-                            )}
-                        </button>
-                    </div>
-
-                    {webUrl && (
-                        <a
-                            className="inline-flex items-center gap-1.5 text-primary text-sm hover:underline"
-                            href={webUrl}
-                            rel="noopener noreferrer"
-                            target="_blank"
-                        >
-                            Open Nuvio to enter it
-                            <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                        </a>
-                    )}
-
-                    <p className="text-subtle text-xs">
-                        {expired
-                            ? "That code has expired."
-                            : isWaiting
-                              ? `Waiting for you to approve it in Nuvio${secondsLeft === null ? "" : ` · ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} left`}`
-                              : "Approved."}
-                    </p>
-
-                    {expired && (
-                        <button
-                            className="inline-flex items-center gap-1.5 self-start text-primary text-sm hover:underline disabled:opacity-50"
-                            disabled={busy}
-                            onClick={start}
-                            type="button"
-                        >
-                            <ArrowPathIcon className="h-4 w-4" />
-                            Get a new code
-                        </button>
-                    )}
-                </div>
-            ) : (
-                <button
-                    className="mt-4 w-full rounded-xl bg-primary/20 px-4 py-2.5 font-medium text-primary text-sm hover:bg-primary/30 disabled:opacity-50"
+        <div className="min-w-0 space-y-4">
+            <p className="text-center text-muted text-sm">{description}</p>
+            <Button
+                className="w-full"
+                disabled={!webUrl || busy || expired}
+                isLoading={isStarting || isCompleting}
+                leftIcon={<ArrowTopRightOnSquareIcon className="h-5 w-5" />}
+                onClick={() => {
+                    if (webUrl) {
+                        window.open(webUrl, "_blank", "noopener,noreferrer");
+                    }
+                }}
+            >
+                {isCompleting ? "Submitting request..." : "Open Nuvio"}
+            </Button>
+            <div className="space-y-3 pt-2 text-center">
+                <p className="font-medium text-muted text-xs">Verification Code</p>
+                <VerificationCode code={code || ""} copied={copied} onCopy={copy} />
+                <p className="text-muted text-xs" role="status">
+                    {failed
+                        ? "Could not complete sign-in. Please try again."
+                        : expired
+                          ? "That code has expired."
+                          : isWaiting
+                            ? `Waiting for authorization${secondsLeft === null ? "" : ` · ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} left`}`
+                            : isStarting
+                              ? "Preparing your code..."
+                              : code
+                                ? "Approved."
+                                : "Could not prepare a code."}
+                </p>
+            </div>
+            {(failed || expired || !(code || isStarting)) && (
+                <Button
+                    className="w-full"
                     disabled={busy}
+                    leftIcon={<ArrowPathIcon className="h-4 w-4" />}
                     onClick={start}
-                    type="button"
+                    variant="secondary"
                 >
-                    {isStarting ? "Starting…" : "Get a sign-in code"}
-                </button>
+                    Get a new code
+                </Button>
             )}
-        </motion.div>
+            <span className="sr-only">{title}</span>
+        </div>
     );
 }

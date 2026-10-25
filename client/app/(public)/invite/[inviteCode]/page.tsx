@@ -10,6 +10,7 @@ import { StatusCards } from "@/components/invite/StatusCard";
 import { StremioOAuthCard } from "@/components/invite/StremioOAuthCard";
 import JellyfinSignIn, { type JellyfinCredentials } from "@/components/jellyfin/JellyfinSignIn";
 import { NewJellyfinAccountForm } from "@/components/jellyfin/NewJellyfinAccountForm";
+import { FilterTabs } from "@/components/ui/FilterTabs";
 import { InviteApiError, inviteApi } from "@/lib/invite-api";
 
 /**
@@ -468,7 +469,7 @@ export default function InviteRequestPage() {
                 return (
                     <motion.div
                         animate={{ opacity: 1, scale: 1 }}
-                        className="rounded-2xl p-8"
+                        className="interface-login-panel min-w-0 rounded-2xl p-6"
                         initial={{ opacity: 0, scale: 0.98 }}
                         style={{
                             backgroundColor: "var(--color-surface)",
@@ -508,7 +509,7 @@ export default function InviteRequestPage() {
                                 style={{ color: "var(--color-text-muted)" }}
                                 transition={{ delay: 0.2, duration: 0.3 }}
                             >
-                                Choose a username and sign in with Stremio to request access
+                                Choose a username and connect your account to request access.
                             </motion.p>
                         </div>
 
@@ -588,26 +589,25 @@ export default function InviteRequestPage() {
                                     )}
                                     {/* Either provider can join, and the one picked here
                       decides what kind of user the invite creates. */}
-                                    <div className="mb-4 flex gap-2">
-                                        {(["stremio", "nuvio", "jellyfin"] as const).map((p) => (
-                                            <button
-                                                className={`flex-1 rounded-xl px-4 py-2.5 font-medium text-sm transition-colors ${
-                                                    joinProvider === p
-                                                        ? "bg-primary/20 text-primary"
-                                                        : "bg-white/[0.03] text-muted hover:bg-white/[0.06]"
-                                                }`}
-                                                key={p}
-                                                onClick={() => setJoinProvider(p)}
-                                                type="button"
-                                            >
-                                                {p === "stremio"
-                                                    ? "Stremio"
-                                                    : p === "nuvio"
-                                                      ? "Nuvio"
-                                                      : "Jellyfin | AIOStreams"}
-                                            </button>
-                                        ))}
-                                    </div>
+                                    <FilterTabs
+                                        activeKey={joinProvider}
+                                        className="login-provider-tabs mb-5 w-full"
+                                        fill
+                                        onChange={(key) => {
+                                            if (
+                                                key === "stremio" ||
+                                                key === "nuvio" ||
+                                                key === "jellyfin"
+                                            ) {
+                                                setJoinProvider(key);
+                                            }
+                                        }}
+                                        options={[
+                                            { key: "stremio", label: "Stremio" },
+                                            { key: "nuvio", label: "Nuvio" },
+                                            { key: "jellyfin", label: "Jellyfin" },
+                                        ]}
+                                    />
 
                                     {joinProvider === "jellyfin" ? (
                                         <div className="space-y-3">
@@ -703,7 +703,7 @@ export default function InviteRequestPage() {
                             {!usernameConfirmed && (
                                 <>
                                     <br />
-                                    You&apos;ll sign in with Stremio in the next step.
+                                    Choose your service in the next step.
                                 </>
                             )}
                         </motion.p>
