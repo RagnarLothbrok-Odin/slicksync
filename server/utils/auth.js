@@ -22,6 +22,8 @@ function jwtSecret() {
 function pathIsAllowlisted(path) {
     const AUTH_ALLOWLIST = [
         "/health",
+        // Public API reference and its bundled assets; no account data is served.
+        "/api/docs",
         // Only the build stamp - open tabs check it to notice an update, signed in
         // or not. The rest of /api/health is the admin Health page; the bare
         // '/api/health' is matched on its own, exactly, below.
