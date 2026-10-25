@@ -819,8 +819,6 @@ export default function DashboardPage() {
                             </div>
                         )}
 
-                        <UpcomingEpisodesPanel />
-
                         {/* Continue Watching - identical cards/drag logic to Current mode */}
                         {continueWatching.length > 0 && (
                             <ContinueWatchingSection>
@@ -862,6 +860,8 @@ export default function DashboardPage() {
                                 </div>
                             </ContinueWatchingSection>
                         )}
+
+                        <UpcomingEpisodesPanel />
 
                         {/* Recent Activity (left, spans both rows) + Top Viewers / Recent
                 Addons stacked on the right - desktop only (lg:). Recent
@@ -1251,8 +1251,6 @@ export default function DashboardPage() {
                     </PageSection>
                 )}
 
-                <UpcomingEpisodesPanel />
-
                 {/* Continue Watching */}
                 {continueWatching.length > 0 && (
                     <ContinueWatchingSection>
@@ -1279,6 +1277,8 @@ export default function DashboardPage() {
                         </div>
                     </ContinueWatchingSection>
                 )}
+
+                <UpcomingEpisodesPanel />
 
                 {/* Main content grid - Matched heights */}
                 <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
