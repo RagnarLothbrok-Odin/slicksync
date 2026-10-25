@@ -184,6 +184,7 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                                   evidence: row.playback.evidence,
                                   observedAt: row.playback.observedAt,
                                   position: row.playback.position,
+                                  positionUpdatedAt: row.playback.positionUpdatedAt || null,
                                   state: row.playback.state,
                               }
                             : null,

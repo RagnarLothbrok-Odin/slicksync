@@ -479,6 +479,7 @@ async function mergeProxyNowPlaying(
                 evidence: "proxy",
                 observedAt: mostRecentPollConfirmation.toISOString(),
                 position: "checkpoint",
+                positionUpdatedAt: existing?.playback?.positionUpdatedAt || null,
                 state: "unknown",
             },
             source: "aiostreams-proxy",

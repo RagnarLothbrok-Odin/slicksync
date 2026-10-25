@@ -35,6 +35,7 @@ test("native checkpoints never claim a player state or fresh observation", async
         evidence: "history",
         observedAt: null,
         position: "checkpoint",
+        positionUpdatedAt: null,
         state: "unknown",
     });
 });

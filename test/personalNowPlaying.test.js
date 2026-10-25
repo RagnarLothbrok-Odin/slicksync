@@ -75,6 +75,7 @@ test("personal live playback authenticates before loading and returns only the s
             evidence: "player",
             observedAt: "2026-10-25T12:00:00Z",
             position: "reported",
+            positionUpdatedAt: null,
             state: "paused",
         });
         assert.equal(body.items[0].totalDuration, 600);

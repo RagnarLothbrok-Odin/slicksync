@@ -3,6 +3,7 @@
 // falls back to Stremio API when cache is missing.
 
 const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
+const { checkpointSavedAt } = require("./playbackEvidence");
 const { getCachedLibrary, setCachedLibrary: _setCachedLibrary } = require("./libraryCache");
 const { fetchKitsuMetadata } = require("./kitsuUtils");
 const { enrichPostersFromCinemeta } = require("./libraryHelpers");
@@ -398,6 +399,7 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
         );
     }
 
+    const checkpointLibraries = new Map();
     for (const session of activeSessionsFromDb) {
         const user = userMap.get(session.userId);
         if (!user) {
@@ -419,6 +421,11 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             continue;
         }
 
+        if (!checkpointLibraries.has(user.id)) {
+            checkpointLibraries.set(user.id, getCachedLibrary(accountIdValue || "default", user));
+        }
+        const savedAt = checkpointSavedAt(session, checkpointLibraries.get(user.id));
+
         nowPlaying.push({
             item: {
                 episode: session.episode,
@@ -437,9 +444,10 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             lastPosition: session.lastPosition ?? null,
             playback: {
                 evidence: "history",
-                // A database refresh is not a fresh player observation.
-                observedAt: null,
+                // This is the provider's checkpoint time, not the poll time.
+                observedAt: savedAt,
                 position: "checkpoint",
+                positionUpdatedAt: savedAt,
                 state: "unknown",
             },
             source: "native",
@@ -522,6 +530,7 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
                     evidence: v.source === "jellyfin" ? "player" : "event",
                     observedAt: v.observedAt || null,
                     position: v.paused ? "reported" : "estimated",
+                    positionUpdatedAt: v.observedAt || null,
                     state: v.paused ? "paused" : "playing",
                 },
                 source: v.source || "aiostreams",

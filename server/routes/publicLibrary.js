@@ -3504,6 +3504,7 @@ module.exports = ({
                                   evidence: row.playback.evidence,
                                   observedAt: row.playback.observedAt,
                                   position: row.playback.position,
+                                  positionUpdatedAt: row.playback.positionUpdatedAt || null,
                                   state: row.playback.state,
                               }
                             : null,
