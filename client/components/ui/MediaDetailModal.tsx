@@ -2126,11 +2126,14 @@ export function MediaDetailModal({
                                                     </button>
                                                     {aioPickerOpen && (
                                                         <>
-                                                            <div
-                                                                className="fixed inset-0 z-40"
+                                                            <button
+                                                                aria-label="Close popup"
+                                                                className="fixed inset-0 z-40 border-0 bg-transparent p-0"
                                                                 onClick={() =>
                                                                     setAioPickerOpen(false)
                                                                 }
+                                                                tabIndex={-1}
+                                                                type="button"
                                                             />
                                                             <div className="absolute left-0 z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-default bg-surface p-2 shadow-xl sm:right-0 sm:left-auto">
                                                                 <p className="px-1.5 pb-1 font-semibold text-default text-sm">
@@ -2657,6 +2660,7 @@ export function MediaDetailModal({
                                                         type="button"
                                                     >
                                                         {member.photo ? (
+                                                            /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Preventing native image dragging does not make the image a control. */
                                                             <img
                                                                 alt={member.name}
                                                                 className={`pointer-events-none mx-auto h-20 w-20 rounded-full bg-surface-hover object-cover transition-transform ${clickable ? "group-hover/cast:scale-105 group-hover/cast:ring-2 group-hover/cast:ring-primary" : ""}`}
@@ -3025,6 +3029,7 @@ export function MediaDetailModal({
                                                                     </span>
                                                                 )}
                                                                 {part.poster ? (
+                                                                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Preventing native image dragging does not make the image a control. */
                                                                     <img
                                                                         alt={part.title}
                                                                         className="pointer-events-none h-full w-full object-cover transition-transform group-hover:scale-105"
@@ -3144,6 +3149,7 @@ export function MediaDetailModal({
                                                         >
                                                             <div className="h-40 w-28 overflow-hidden rounded-lg bg-surface-hover">
                                                                 {item.poster ? (
+                                                                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Preventing native image dragging does not make the image a control. */
                                                                     <img
                                                                         alt={item.name}
                                                                         className="pointer-events-none h-full w-full object-cover transition-transform group-hover:scale-105"

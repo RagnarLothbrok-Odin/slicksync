@@ -84,7 +84,7 @@ export function AioHistoryButton({ userId, name }: { userId: string; name: strin
         setError(null);
         api.getAioHistory(userId)
             .then(setState)
-            .catch((e: any) => setError(e?.message || "Could not read the history"));
+            .catch((e: unknown) => setError(readErrorMessage(e, "Could not read the history")));
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") {
                 close();
@@ -132,7 +132,13 @@ export function AioHistoryButton({ userId, name }: { userId: string; name: strin
                 typeof document !== "undefined" &&
                 createPortal(
                     <>
-                        <div className="fixed inset-0 z-[9998]" onClick={close} />
+                        <button
+                            aria-label="Close popup"
+                            className="fixed inset-0 z-[9998] border-0 bg-transparent p-0"
+                            onClick={close}
+                            tabIndex={-1}
+                            type="button"
+                        />
                         <div
                             aria-label={`AIOStreams history for ${name}`}
                             className="fixed z-[9999] space-y-3 rounded-2xl border border-default p-4 shadow-2xl"

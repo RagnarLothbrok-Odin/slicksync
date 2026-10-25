@@ -73,6 +73,7 @@ function AddonLogo({ src }: { src: string }) {
     }, [src]);
     return (
         // eslint-disable-next-line @next/next/no-img-element
+        /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
         <img
             alt=""
             className="h-10 w-10 shrink-0 rounded-lg bg-black/20 object-contain"

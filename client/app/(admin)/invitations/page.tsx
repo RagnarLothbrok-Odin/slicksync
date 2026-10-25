@@ -37,6 +37,7 @@ import {
     Modal,
     PageToolbar,
     Select,
+    SelectAllCheckbox,
     SelectionCheckbox,
     UserAvatar,
     useContextMenu,
@@ -516,28 +517,18 @@ export default function InvitationsPage() {
                                                             <thead>
                                                                 <tr className="border-default border-b">
                                                                     <th className="w-12 px-4 py-4 text-left">
-                                                                        <div
-                                                                            className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded border-2 transition-all ${
-                                                                                hasSelection &&
-                                                                                selectedIds.size ===
-                                                                                    invitationsDisplay.length
-                                                                                    ? "border-primary bg-primary"
-                                                                                    : "border-default hover:border-primary"
-                                                                            }`}
-                                                                            onClick={() =>
-                                                                                hasSelection &&
-                                                                                selectedIds.size ===
-                                                                                    invitationsDisplay.length
-                                                                                    ? deselectAll()
-                                                                                    : selectAll()
+                                                                        <SelectAllCheckbox
+                                                                            onDeselectAll={
+                                                                                deselectAll
                                                                             }
-                                                                        >
-                                                                            {hasSelection &&
-                                                                                selectedIds.size ===
-                                                                                    invitationsDisplay.length && (
-                                                                                    <CheckIcon className="h-3 w-3 text-white" />
-                                                                                )}
-                                                                        </div>
+                                                                            onSelectAll={selectAll}
+                                                                            selectedCount={
+                                                                                selectedIds.size
+                                                                            }
+                                                                            totalCount={
+                                                                                invitationsDisplay.length
+                                                                            }
+                                                                        />
                                                                     </th>
                                                                     <th className="px-6 py-4 text-left font-medium text-muted text-sm">
                                                                         Invitation
@@ -1059,6 +1050,7 @@ function InvitationCard({
                 onContextMenu={handleContextMenu}
                 onTouchEnd={handleTouchEnd}
                 onTouchStart={handleTouchStart}
+                role="none"
             >
                 {/* Selection indicator */}
                 <div className="absolute top-4 right-4 z-10">

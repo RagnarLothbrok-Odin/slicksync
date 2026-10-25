@@ -230,7 +230,9 @@ export default function AiostreamsCollectionPage() {
                     setReady(true);
                 }
             })
-            .catch((e: any) => toast.error(e?.message || "Could not load the collections"));
+            .catch((e: unknown) =>
+                toast.error(readErrorMessage(e, "Could not load the collections"))
+            );
         api.getLists()
             .then((r) => setLists(Array.isArray(r) ? r.filter((l) => l.isOwner) : []))
             .catch(() => setLists([]));

@@ -97,6 +97,7 @@ const RecentAddonItem = memo(function RecentAddonItemLocal({
                     }}
                 >
                     {logo && !imageError ? (
+                        /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                         <img
                             alt=""
                             className="h-full w-full object-contain p-1.5"

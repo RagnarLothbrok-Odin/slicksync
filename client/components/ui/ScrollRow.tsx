@@ -61,6 +61,7 @@ export function ScrollRow({
 
     const row = (
         <div
+            role="none"
             {...rest}
             ref={rowRef}
             {...handlers}

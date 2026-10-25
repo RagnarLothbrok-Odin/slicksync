@@ -184,7 +184,7 @@ export default function TasksPage() {
     useEffect(() => {
         api.getUsers()
             .then(setUsers)
-            .catch((e: any) => {
+            .catch((e: unknown) => {
                 console.error("Failed to load users for Tasks selectors:", e);
             });
     }, []);
@@ -268,7 +268,9 @@ export default function TasksPage() {
         setLoadingSnapshots(true);
         api.getSnapshots()
             .then(setSnapshots)
-            .catch((e: any) => toast.error(e.message || "Failed to load addon templates"))
+            .catch((e: unknown) =>
+                toast.error(readErrorMessage(e, "Failed to load addon templates"))
+            )
             .finally(() => setLoadingSnapshots(false));
     };
     useEffect(fetchSnapshots, []);
@@ -287,7 +289,7 @@ export default function TasksPage() {
         setLoadingBackups(true);
         api.listBackups()
             .then(setBackups)
-            .catch((e: any) => toast.error(e.message || "Failed to load backups"))
+            .catch((e: unknown) => toast.error(readErrorMessage(e, "Failed to load backups")))
             .finally(() => setLoadingBackups(false));
     };
     useEffect(fetchBackups, []);
@@ -1401,6 +1403,7 @@ export default function TasksPage() {
                                         setIsDraggingAddons(true);
                                     }}
                                     onDrop={handleAddonDrop}
+                                    role="none"
                                 >
                                     <ActionButton
                                         icon={<ArrowDownTrayIcon className="h-4 w-4" />}
@@ -1867,6 +1870,7 @@ export default function TasksPage() {
                                         setIsDraggingConfig(true);
                                     }}
                                     onDrop={handleConfigDrop}
+                                    role="none"
                                 >
                                     <ActionButton
                                         icon={<DocumentArrowDownIcon className="h-4 w-4" />}

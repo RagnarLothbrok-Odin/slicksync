@@ -47,9 +47,10 @@ export const TopItemsSection = memo(function TopItemsSectionLocal({
     };
 
     const ItemCard = ({ item, rank }: { item: TopItem; rank: number }) => (
-        <div
-            className="flex cursor-pointer gap-4 rounded-xl bg-surface-hover p-4 transition-colors hover:bg-surface"
+        <button
+            className="flex w-full cursor-pointer gap-4 rounded-xl border-0 bg-surface-hover p-0 p-4 text-left transition-colors hover:bg-surface"
             onClick={() => setSelectedItem(item)}
+            type="button"
         >
             <div className="relative h-24 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-surface">
                 {item.poster ? (
@@ -89,7 +90,7 @@ export const TopItemsSection = memo(function TopItemsSectionLocal({
                     </div>
                 </div>
             </div>
-        </div>
+        </button>
     );
 
     return (

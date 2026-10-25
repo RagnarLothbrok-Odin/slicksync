@@ -30,25 +30,33 @@ export function SelectAllCheckbox({
               ? "Deselect all items"
               : `Select all ${totalCount} items`;
     return (
-        <button
-            aria-checked={mixed ? "mixed" : allSelected}
-            aria-label={label}
+        <span
             className={clsx(
-                "interface-checkbox relative flex h-6 w-6 shrink-0 items-center justify-center",
+                "interface-checkbox relative flex h-6 w-6 shrink-0 items-center justify-center focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2",
                 selected && "interface-checkbox-checked",
                 className
             )}
-            disabled={totalCount === 0}
-            onClick={selected ? onDeselectAll : onSelectAll}
-            role="checkbox"
             title={title || label}
-            type="button"
         >
+            <input
+                aria-label={label}
+                checked={allSelected}
+                className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-default"
+                disabled={totalCount === 0}
+                onChange={selected ? onDeselectAll : onSelectAll}
+                onClick={(event) => event.stopPropagation()}
+                ref={(input) => {
+                    if (input) {
+                        input.indeterminate = mixed;
+                    }
+                }}
+                type="checkbox"
+            />
             {mixed ? (
                 <MinusIcon aria-hidden className="h-4 w-4" strokeWidth={2.5} />
             ) : allSelected ? (
                 <CheckIcon aria-hidden className="h-4 w-4" strokeWidth={2.5} />
             ) : null}
-        </button>
+        </span>
     );
 }

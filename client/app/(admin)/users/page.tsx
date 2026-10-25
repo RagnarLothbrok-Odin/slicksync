@@ -45,6 +45,7 @@ import {
     ConfirmModal,
     ContextMenu,
     PageToolbar,
+    SelectAllCheckbox,
     SelectionCheckbox,
     StatusBadge,
     SyncBadge,
@@ -323,8 +324,8 @@ export default function UsersPage() {
                 const rest = prev.filter((u) => !reorderedIds.includes(u.id));
                 return [...reorderedUsers, ...rest];
             });
-            api.reorderUsers(reorderedIds).catch((err: any) => {
-                toast.error(err.message || "Failed to save new order");
+            api.reorderUsers(reorderedIds).catch((err: unknown) => {
+                toast.error(readErrorMessage(err, "Failed to save new order"));
             });
         };
         return registerDragEndHandler(handleDragEnd);
@@ -949,28 +950,14 @@ export default function UsersPage() {
                                                                 </span>
                                                             </th>
                                                             <th className="w-12 px-4 py-4 text-left">
-                                                                <div
-                                                                    className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded border-2 transition-all ${
-                                                                        hasSelection &&
-                                                                        selectedIds.size ===
-                                                                            filteredUsers.length
-                                                                            ? "border-primary bg-primary"
-                                                                            : "border-default hover:border-primary"
-                                                                    }`}
-                                                                    onClick={() =>
-                                                                        hasSelection &&
-                                                                        selectedIds.size ===
-                                                                            filteredUsers.length
-                                                                            ? deselectAll()
-                                                                            : selectAll()
+                                                                <SelectAllCheckbox
+                                                                    onDeselectAll={deselectAll}
+                                                                    onSelectAll={selectAll}
+                                                                    selectedCount={selectedIds.size}
+                                                                    totalCount={
+                                                                        filteredUsers.length
                                                                     }
-                                                                >
-                                                                    {hasSelection &&
-                                                                        selectedIds.size ===
-                                                                            filteredUsers.length && (
-                                                                            <CheckIcon className="h-3 w-3 text-white" />
-                                                                        )}
-                                                                </div>
+                                                                />
                                                             </th>
                                                             <th className="px-6 py-4 text-left font-medium text-muted text-sm">
                                                                 User
@@ -1487,14 +1474,16 @@ function SortableUserRow({
             ref={itemProps.ref as unknown as React.Ref<HTMLTableRowElement>}
             style={itemProps.style}
         >
-            <td className="w-8 py-4 pl-4" onClick={(e) => e.stopPropagation()}>
-                <div
+            <td className="w-8 py-4 pl-4">
+                <button
+                    type="button"
                     {...dragHandleProps}
-                    className="inline-flex cursor-grab rounded p-1 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                    className="inline-flex cursor-grab rounded border-0 bg-transparent p-0 p-1 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                    onClick={(event) => event.stopPropagation()}
                     title="Drag to reorder"
                 >
                     <Bars3Icon className="h-4 w-4" />
-                </div>
+                </button>
             </td>
             {children}
         </motion.tr>
@@ -1617,14 +1606,15 @@ function UserCard({
         >
             <div className="user-card-head">
                 {dragHandleProps && (
-                    <div
+                    <button
+                        type="button"
                         {...dragHandleProps}
-                        className="user-card-drag shrink-0 cursor-grab rounded-lg p-1.5 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                        className="user-card-drag shrink-0 cursor-grab rounded-lg border-0 bg-transparent p-0 p-1.5 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
                         onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         title="Drag to reorder"
                     >
                         <Bars3Icon className="h-4 w-4" />
-                    </div>
+                    </button>
                 )}
                 <div className="user-card-avatar">
                     <UserAvatar

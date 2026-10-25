@@ -17,23 +17,23 @@ export function SelectionCheckbox({
     visible = true,
 }: SelectionCheckboxProps) {
     return (
-        <button
-            aria-checked={checked}
-            aria-label={checked ? "Deselect item" : "Select item"}
+        <span
             className={clsx(
-                "interface-checkbox relative flex h-6 w-6 items-center justify-center",
+                "interface-checkbox relative flex h-6 w-6 items-center justify-center focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2",
                 checked && "interface-checkbox-checked",
-                !(visible || checked) && "opacity-0 focus-visible:opacity-100",
+                !(visible || checked) && "opacity-0 focus-within:opacity-100",
                 className
             )}
-            onClick={(event) => {
-                event.stopPropagation();
-                onChange?.();
-            }}
-            role="checkbox"
-            type="button"
         >
+            <input
+                aria-label={checked ? "Deselect item" : "Select item"}
+                checked={checked}
+                className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+                onChange={() => onChange?.()}
+                onClick={(event) => event.stopPropagation()}
+                type="checkbox"
+            />
             {checked && <CheckIcon aria-hidden className="h-4 w-4" strokeWidth={2.5} />}
-        </button>
+        </span>
     );
 }

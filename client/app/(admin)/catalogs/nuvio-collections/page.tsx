@@ -974,7 +974,9 @@ export default function NuvioCollectionsPage() {
                     handleSelectProfile(userId, list[0].profile_index);
                 }
             })
-            .catch((e: any) => toast.error(e.message || "Failed to load Nuvio profiles"))
+            .catch((e: unknown) =>
+                toast.error(readErrorMessage(e, "Failed to load Nuvio profiles"))
+            )
             .finally(() => setProfilesLoading(false));
         setAddonsLoading(true);
         api.getUserStremioAddons(userId)
@@ -997,7 +999,7 @@ export default function NuvioCollectionsPage() {
                 setCollections(list);
                 setSavedSnapshot(JSON.stringify(list));
             })
-            .catch((e: any) => toast.error(e.message || "Failed to load Collections"))
+            .catch((e: unknown) => toast.error(readErrorMessage(e, "Failed to load Collections")))
             .finally(() => setCollectionsLoading(false));
     };
 

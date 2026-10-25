@@ -120,6 +120,7 @@ export function SharedConfigPill({
             onContextMenu={keep}
             onMouseDown={keep}
             onPointerDown={keep}
+            role="none"
         >
             <button
                 aria-expanded={open}
@@ -141,46 +142,52 @@ export function SharedConfigPill({
                 typeof document !== "undefined" &&
                 createPortal(
                     <div
-                        className="rounded-xl border bg-surface p-3 text-left text-default text-xs leading-relaxed shadow-lg"
+                        className="contents"
                         onClick={keep}
                         onMouseDown={keep}
                         onPointerDown={keep}
-                        ref={popupRef}
-                        role="dialog"
-                        style={{
-                            borderColor:
-                                "color-mix(in srgb, var(--color-warning) 45%, transparent)",
-                            bottom: place.bottom,
-                            left: place.left,
-                            position: "fixed",
-                            top: place.top,
-                            width: place.width,
-                            zIndex: 60,
-                        }}
+                        role="none"
                     >
-                        <p>
-                            <span className="font-semibold">
-                                Same {kind ? `${kind} ` : ""}configuration as {names}.
-                            </span>{" "}
-                            Changing its settings changes{" "}
-                            {peers.length > 1 ? "all of them" : "both"}.
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                            {peers.map((p) => (
-                                <Link
-                                    className="rounded-lg bg-surface-hover px-2 py-1 transition-colors hover:text-primary"
-                                    href={`/addons/${p.id}`}
-                                    key={p.id}
-                                    onClick={() => setOpen(false)}
-                                >
-                                    Open {p.name}
-                                </Link>
-                            ))}
+                        <div
+                            aria-label="Shared addon settings"
+                            className="rounded-xl border bg-surface p-3 text-left text-default text-xs leading-relaxed shadow-lg"
+                            ref={popupRef}
+                            role="dialog"
+                            style={{
+                                borderColor:
+                                    "color-mix(in srgb, var(--color-warning) 45%, transparent)",
+                                bottom: place.bottom,
+                                left: place.left,
+                                position: "fixed",
+                                top: place.top,
+                                width: place.width,
+                                zIndex: 60,
+                            }}
+                        >
+                            <p>
+                                <span className="font-semibold">
+                                    Same {kind ? `${kind} ` : ""}configuration as {names}.
+                                </span>{" "}
+                                Changing its settings changes{" "}
+                                {peers.length > 1 ? "all of them" : "both"}.
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                {peers.map((p) => (
+                                    <Link
+                                        className="rounded-lg bg-surface-hover px-2 py-1 transition-colors hover:text-primary"
+                                        href={`/addons/${p.id}`}
+                                        key={p.id}
+                                        onClick={() => setOpen(false)}
+                                    >
+                                        Open {p.name}
+                                    </Link>
+                                ))}
+                            </div>
+                            <p className="mt-2 text-muted">
+                                To keep them apart, save it as a new configuration and paste the new
+                                link under Manifest URL on one of them.
+                            </p>
                         </div>
-                        <p className="mt-2 text-muted">
-                            To keep them apart, save it as a new configuration and paste the new
-                            link under Manifest URL on one of them.
-                        </p>
                     </div>,
                     document.body
                 )}

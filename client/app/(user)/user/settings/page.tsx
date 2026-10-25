@@ -993,8 +993,8 @@ export default function UserSettingsPage() {
                                         style={{ color: "var(--color-text-subtle)" }}
                                     >
                                         Use this key in the Authorization header:{" "}
-                                        <code
-                                            className="cursor-pointer rounded px-1 py-0.5"
+                                        <button
+                                            className="cursor-pointer rounded border-0 px-1 py-0.5 font-mono"
                                             onClick={() => {
                                                 if (currentApiKey) {
                                                     const fullHeader = `Bearer ${currentApiKey}`;
@@ -1008,9 +1008,10 @@ export default function UserSettingsPage() {
                                                     ? 'Click to copy "Bearer {key}"'
                                                     : "API key not available"
                                             }
+                                            type="button"
                                         >
                                             Bearer {currentApiKey ? "..." : "•••••"}
-                                        </code>
+                                        </button>
                                     </p>
 
                                     <div

@@ -73,8 +73,8 @@ function describeRule(
         .join(", then ");
     const when = (trigger?.label || triggerType).toLowerCase();
     return {
+        action: actText || "do nothing yet",
         cond: condText || null,
-        then: actText || "do nothing yet",
         when,
     };
 }
@@ -101,7 +101,7 @@ function RuleSentence({
                 </>
             )}
             {!d.cond && ", "}
-            <span className="font-medium text-default">{d.then}</span>.
+            <span className="font-medium text-default">{d.action}</span>.
         </p>
     );
 }

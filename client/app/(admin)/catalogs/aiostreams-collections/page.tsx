@@ -89,25 +89,19 @@ function Tile({
         ? posterUrl({ id: c.coverTitleId, poster: c.cover }, rpdbEnabled)
         : cachedImageUrl(c.cover, 342);
     return (
-        <div
+        <button
             ref={setNodeRef}
             style={{
                 transform: CSS.Transform.toString(transform),
                 transition,
                 zIndex: isDragging ? 10 : undefined,
             }}
+            type="button"
             {...attributes}
             {...listeners}
             aria-label={`Open ${c.name}`}
             className={`group cursor-pointer overflow-hidden rounded-2xl border border-default bg-surface-hover transition-colors hover:border-primary/50 active:cursor-grabbing ${c.hidden ? "opacity-50" : ""}`}
             onClick={onOpen}
-            onKeyDown={(e) => {
-                if (e.key === "Enter" && e.target === e.currentTarget) {
-                    onOpen();
-                }
-            }}
-            role="button"
-            tabIndex={0}
             title="Open, or drag to reorder"
         >
             <div className="relative aspect-[2/3] bg-surface">
@@ -142,6 +136,7 @@ function Tile({
                     className="mt-2 flex items-center gap-1"
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
+                    role="none"
                 >
                     <button
                         aria-label={c.hidden ? `Show ${c.name}` : `Hide ${c.name}`}
@@ -167,7 +162,7 @@ function Tile({
                     </button>
                 </div>
             </div>
-        </div>
+        </button>
     );
 }
 
@@ -195,8 +190,8 @@ export default function AiostreamsCollectionsPage() {
     const loadAccounts = useCallback(() => {
         api.getAioCollectionAccounts()
             .then((r) => setAccounts(r.accounts))
-            .catch((e: any) => {
-                toast.error(e?.message || "Could not load the AIOStreams accounts");
+            .catch((e: unknown) => {
+                toast.error(readErrorMessage(e, "Could not load the AIOStreams accounts"));
                 setAccounts((a) => a ?? []);
             });
     }, []);

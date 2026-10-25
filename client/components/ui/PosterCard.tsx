@@ -172,9 +172,9 @@ export const PosterCard = memo(function PosterCardLocal({
     });
 
     const card = (
-        <div
+        <button
             aria-label={`Details for ${item.name}`}
-            className="group tap-card relative cursor-pointer"
+            className="group tap-card relative w-full cursor-pointer border-0 bg-transparent p-0 text-left"
             onClick={() => {
                 // Suppress the click that fires immediately after a long-press
                 // opens the menu - otherwise a long-press both opens the menu AND
@@ -187,15 +187,6 @@ export const PosterCard = memo(function PosterCardLocal({
             onContextMenu={(e) => {
                 handleContextMenu(e);
                 onMenuOpenChange?.(true, menuKey ?? item.id);
-            }}
-            onKeyDown={(event) => {
-                if (
-                    event.target === event.currentTarget &&
-                    (event.key === "Enter" || event.key === " ")
-                ) {
-                    event.preventDefault();
-                    onOpenDetails(item);
-                }
             }}
             // Hovering a poster starts its detail fetch, so the click that
             // usually follows opens on content instead of a spinner. Mouse only
@@ -224,13 +215,13 @@ export const PosterCard = memo(function PosterCardLocal({
                     prefetchTimer.current = null;
                 }
             }}
-            role="button"
-            tabIndex={0}
+            type="button"
             {...longPress}
         >
             <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-slate-800 shadow-xl">
                 {item.poster && !imageError ? (
                     <>
+                        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                         <img
                             alt={item.name}
                             className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
@@ -403,7 +394,7 @@ export const PosterCard = memo(function PosterCardLocal({
                     )}
                 </ContextMenu>
             )}
-        </div>
+        </button>
     );
 
     if (!focusable) {

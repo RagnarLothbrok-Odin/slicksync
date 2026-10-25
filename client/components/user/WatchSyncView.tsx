@@ -770,6 +770,7 @@ function Poster({
             >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 {src ? (
+                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                     <img
                         alt=""
                         className="absolute inset-0 h-full w-full object-cover"

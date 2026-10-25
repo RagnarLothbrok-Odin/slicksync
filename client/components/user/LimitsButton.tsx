@@ -137,6 +137,7 @@ export function LimitsButton({
             onKeyDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
+            role="none"
         >
             <ActionPill
                 icon={AdjustmentsHorizontalIcon}
@@ -154,13 +155,16 @@ export function LimitsButton({
                 typeof document !== "undefined" &&
                 createPortal(
                     <>
-                        <div
-                            className="fixed inset-0 z-[9998]"
+                        <button
+                            aria-label="Close popup"
+                            className="fixed inset-0 z-[9998] border-0 bg-transparent p-0"
                             onClick={close}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 close();
                             }}
+                            tabIndex={-1}
+                            type="button"
                         />
                         <div
                             aria-label={`Limits for ${name}`}

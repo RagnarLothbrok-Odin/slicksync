@@ -630,6 +630,7 @@ const ActivityCard = memo(function ActivityCardLocal({
                     }}
                     type="button"
                 >
+                    {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                     <img
                         alt={activity.contentName}
                         className="h-full w-full object-cover"
@@ -860,16 +861,23 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
             {/* Poster Card */}
             <div
                 className="tap-card cv-poster relative aspect-[2/3] overflow-hidden rounded-xl bg-slate-800 shadow-xl"
+                role="none"
                 {...(onMenu ? press.handlers : {})}
-                onClick={() => {
-                    if (press.suppressClick()) {
-                        return;
-                    }
-                    onOpenDetails?.(activity);
-                }}
             >
+                <button
+                    aria-label={`Details for ${activity.contentName}`}
+                    className="absolute inset-0 z-10 cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-primary"
+                    onClick={() => {
+                        if (press.suppressClick()) {
+                            return;
+                        }
+                        onOpenDetails?.(activity);
+                    }}
+                    type="button"
+                />
                 {activity.poster && !imageError ? (
                     <>
+                        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                         <img
                             alt={activity.contentName}
                             className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
@@ -929,7 +937,7 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
                     const popoverClass =
                         "fixed z-[9999] w-48 rounded-lg bg-slate-900/95 backdrop-blur-sm border border-default shadow-xl p-1.5";
                     return (
-                        <div className="absolute top-2 right-2">
+                        <div className="absolute top-2 right-2 z-20">
                             {count > 1 ? (
                                 <button
                                     aria-label={`${count} people watched — show who`}
@@ -994,17 +1002,21 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
                                     <>
                                         {/* Click-away backdrop so the popover closes on any outside
                       tap without also triggering the card underneath. */}
-                                        <div
-                                            className="fixed inset-0 z-[9998]"
+                                        <button
+                                            aria-label="Close popup"
+                                            className="fixed inset-0 z-[9998] border-0 bg-transparent p-0"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 setShowWatchers(false);
                                                 activePopoverClose = null;
                                             }}
+                                            tabIndex={-1}
+                                            type="button"
                                         />
                                         <div
                                             className={popoverClass}
                                             onClick={(e) => e.stopPropagation()}
+                                            role="none"
                                             style={{
                                                 left: watchersAnchor.left,
                                                 top: watchersAnchor.top,

@@ -468,6 +468,7 @@ export default function UserSharesPage() {
                 <div
                     className="flex items-center border-t"
                     onClick={(e) => e.stopPropagation()}
+                    role="none"
                     style={{ borderColor: "var(--color-surface-border)" }}
                 >
                     <button
@@ -635,7 +636,11 @@ export default function UserSharesPage() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <div
+                    className="flex items-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                    role="none"
+                >
                     <button
                         className={`rounded-lg p-2 transition-colors ${inLibrary ? "text-primary" : "text-muted"}`}
                         disabled={actionLoading === share.id}
@@ -779,9 +784,12 @@ export default function UserSharesPage() {
                         </button>
                         {isFilterDropdownOpen && (
                             <>
-                                <div
-                                    className="fixed inset-0 z-10"
+                                <button
+                                    aria-label="Close popup"
+                                    className="fixed inset-0 z-10 border-0 bg-transparent p-0"
                                     onClick={() => setIsFilterDropdownOpen(false)}
+                                    tabIndex={-1}
+                                    type="button"
                                 />
                                 <div
                                     className="absolute top-full right-0 z-20 mt-1 min-w-40 rounded-lg py-1 shadow-lg"

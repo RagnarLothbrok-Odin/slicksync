@@ -98,6 +98,7 @@ function LibraryCardItem({
             >
                 {item.poster && !imageError ? (
                     <>
+                        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                         <img
                             alt={item.name}
                             className="h-full w-full object-cover transition-all duration-700 group-hover:scale-110"
@@ -254,6 +255,7 @@ function LibraryListItem({
             {/* Poster */}
             <div className="relative h-16 w-12 flex-shrink-0 overflow-hidden rounded-lg">
                 {item.poster && !imageError ? (
+                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                     <img
                         alt={item.name}
                         className="h-full w-full object-cover"
@@ -317,6 +319,7 @@ function LibraryListItem({
             <div
                 className="flex flex-shrink-0 items-center gap-2"
                 onClick={(e) => e.stopPropagation()}
+                role="none"
             >
                 {stremioLink && (
                     <a

@@ -374,8 +374,8 @@ export function SyncBadge({
     // guess about credentials.
     if (finalStatus === "error" && groupId) {
         return (
-            <div
-                className="cursor-pointer"
+            <button
+                className="w-full cursor-pointer border-0 bg-transparent p-0 text-left"
                 onClick={async (e) => {
                     e.stopPropagation();
                     const toastId = `sync-error-${groupId || userId}`;
@@ -392,9 +392,10 @@ export function SyncBadge({
                         });
                     }
                 }}
+                type="button"
             >
                 {content}
-            </div>
+            </button>
         );
     }
 

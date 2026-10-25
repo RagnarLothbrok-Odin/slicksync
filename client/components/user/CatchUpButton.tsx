@@ -60,6 +60,7 @@ function Poster({
             className={`flex items-center justify-center overflow-hidden border border-default bg-surface-hover ${className}`}
         >
             {src && !failed ? (
+                /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                 <img
                     alt=""
                     className="h-full w-full object-cover"
@@ -390,6 +391,7 @@ export function CatchUpButton({
             onKeyDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
+            role="none"
         >
             <ActionPill
                 icon={CheckCircleIcon}
@@ -412,7 +414,13 @@ export function CatchUpButton({
                 typeof document !== "undefined" &&
                 createPortal(
                     <>
-                        <div className="fixed inset-0 z-[9998]" onClick={close} />
+                        <button
+                            aria-label="Close popup"
+                            className="fixed inset-0 z-[9998] border-0 bg-transparent p-0"
+                            onClick={close}
+                            tabIndex={-1}
+                            type="button"
+                        />
                         <div
                             aria-label={`Mark ${name} caught up`}
                             className="fixed z-[9999] space-y-3 rounded-2xl border border-default p-4 shadow-2xl"
@@ -424,8 +432,20 @@ export function CatchUpButton({
                             {job && !picked && (
                                 <div
                                     className="space-y-1.5 rounded-xl px-3 py-2.5"
+                                    onBlurCapture={(event) => {
+                                        if (
+                                            !(
+                                                event.relatedTarget instanceof Node &&
+                                                event.currentTarget.contains(event.relatedTarget)
+                                            )
+                                        ) {
+                                            setHolding(false);
+                                        }
+                                    }}
+                                    onFocusCapture={() => setHolding(true)}
                                     onMouseEnter={() => setHolding(true)}
                                     onMouseLeave={() => setHolding(false)}
+                                    role="none"
                                     style={{ background: "var(--color-surface-hover)" }}
                                 >
                                     <div className="flex items-center justify-between gap-2 text-xs">

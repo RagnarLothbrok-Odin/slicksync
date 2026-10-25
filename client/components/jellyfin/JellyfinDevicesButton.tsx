@@ -61,7 +61,7 @@ export function JellyfinDevicesButton({ userId, name }: { userId: string; name: 
         setError(null);
         api.getJellyfinDevices(userId)
             .then(setState)
-            .catch((e: any) => setError(e?.message || "Could not read the devices"));
+            .catch((e: unknown) => setError(readErrorMessage(e, "Could not read the devices")));
     };
 
     const toggle = () => {
@@ -131,7 +131,13 @@ export function JellyfinDevicesButton({ userId, name }: { userId: string; name: 
                 typeof document !== "undefined" &&
                 createPortal(
                     <>
-                        <div className="fixed inset-0 z-[9998]" onClick={close} />
+                        <button
+                            aria-label="Close popup"
+                            className="fixed inset-0 z-[9998] border-0 bg-transparent p-0"
+                            onClick={close}
+                            tabIndex={-1}
+                            type="button"
+                        />
                         <div
                             aria-label={`Devices signed in as ${name}`}
                             className="fixed z-[9999] space-y-3 rounded-2xl border border-default p-4 shadow-2xl"

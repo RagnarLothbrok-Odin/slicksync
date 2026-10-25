@@ -45,7 +45,7 @@ export function AgeLimitCard({
     useEffect(() => {
         api.getAgeLimit(userId)
             .then(setState)
-            .catch((e: any) => setError(e?.message || "Could not read the age limit"));
+            .catch((e: unknown) => setError(readErrorMessage(e, "Could not read the age limit")));
     }, [userId]);
     useEffect(() => {
         if (!state) {

@@ -135,21 +135,28 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
             onTouchEnd={clearPress}
             onTouchMove={handleTouchMove}
             onTouchStart={handleTouchStart}
+            role="none"
         >
             <div
                 className="group tap-card relative block w-40 cursor-pointer select-none overflow-hidden rounded-xl bg-slate-800 shadow-lg"
                 draggable={false}
-                onClick={() => {
-                    // Suppress the click that fires immediately after a long-press
-                    // opens the menu - otherwise a long-press both opens the menu AND
-                    // the detail modal as soon as the finger lifts.
-                    if (wasDraggedRef.current || isMenuOpen) {
-                        return;
-                    }
-                    onOpenDetails(item);
-                }}
                 onDragStart={(e) => e.preventDefault()}
+                role="none"
             >
+                <button
+                    aria-label={`Details for ${item.showName}`}
+                    className="absolute inset-0 z-10 cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-primary"
+                    onClick={() => {
+                        // Suppress the click that fires immediately after a long-press
+                        // opens the menu - otherwise a long-press both opens the menu AND
+                        // the detail modal as soon as the finger lifts.
+                        if (wasDraggedRef.current || isMenuOpen) {
+                            return;
+                        }
+                        onOpenDetails(item);
+                    }}
+                    type="button"
+                />
                 <div className="relative aspect-video">
                     {/* Image priority for this landscape (16:9) frame: episode still
               first (already 16:9), then the show/movie's landscape backdrop,
@@ -157,6 +164,7 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
               poster forced into a 16:9 frame is what caused the "too zoomed
               in" hard crop. */}
                     {artworkUrl ? (
+                        /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                         <img
                             alt={item.showName}
                             className="pointer-events-none h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
@@ -187,7 +195,7 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
               card's own onClick and opening the modal right behind it. */}
                     <a
                         aria-label={`Resume ${item.showName}`}
-                        className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+                        className="absolute inset-0 z-20 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
                         href={item.appUrl || item.webUrl}
                         onClick={(e) => {
                             e.stopPropagation();
@@ -262,7 +270,7 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
             {item.appUrl && (
                 <button
                     aria-label="View details"
-                    className="absolute top-1.5 right-1.5 z-10 rounded-md p-1.5 transition-colors"
+                    className="absolute top-1.5 right-1.5 z-20 rounded-md p-1.5 transition-colors"
                     onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();

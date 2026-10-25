@@ -214,10 +214,12 @@ const CatalogGridCard = memo(function CatalogGridCardLocal({
     const pcItem = toPosterCardItem(item);
 
     return (
-        <div
+        <button
+            aria-label="Drag to reorder"
             className={`group relative ${isDragging ? "opacity-50" : ""}`}
             ref={setNodeRef}
             style={style}
+            type="button"
             {...(disabled ? {} : { ...attributes, ...listeners })}
         >
             <PosterCard
@@ -253,7 +255,7 @@ const CatalogGridCard = memo(function CatalogGridCardLocal({
                     />
                 </div>
             )}
-        </div>
+        </button>
     );
 });
 
@@ -1197,9 +1199,12 @@ export default function ListDetailPage() {
                     <AnimatePresence>
                         {showMoreMenu && (
                             <>
-                                <div
-                                    className="fixed inset-0 z-40"
+                                <button
+                                    aria-label="Close popup"
+                                    className="fixed inset-0 z-40 border-0 bg-transparent p-0"
                                     onClick={() => setShowMoreMenu(false)}
+                                    tabIndex={-1}
+                                    type="button"
                                 />
                                 <motion.div
                                     animate={{ opacity: 1, scale: 1, y: 0 }}

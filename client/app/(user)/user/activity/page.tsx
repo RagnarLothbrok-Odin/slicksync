@@ -366,6 +366,7 @@ const ActivityCard = memo(function ActivityCardLocal({
                     }}
                     type="button"
                 >
+                    {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                     <img
                         alt={session.itemName}
                         className="h-full w-full object-cover"
@@ -500,6 +501,7 @@ const ActivityCardGrid = memo(function ActivityCardGridLocal({
             >
                 {session.poster && !imageError ? (
                     <>
+                        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                         <img
                             alt={session.itemName}
                             className="h-full w-full object-cover transition-all duration-700 group-hover:scale-110"

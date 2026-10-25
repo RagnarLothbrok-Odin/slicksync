@@ -341,6 +341,7 @@ export function Avatar({
                 whileHover={{ scale: 1.05 }}
             >
                 {showImage ? (
+                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                     <img
                         alt={name}
                         className={clsx("h-full w-full object-cover", imgClassName)}
@@ -356,7 +357,6 @@ export function Avatar({
                             }
                         }}
                         referrerPolicy="no-referrer"
-                        role="img"
                         src={finalSrc}
                         width={128}
                     />

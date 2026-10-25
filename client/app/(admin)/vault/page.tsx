@@ -536,6 +536,7 @@ function SortableEntryCard({
             className={`${itemProps.className} tap-card`}
             onContextMenu={handleContextMenu}
             ref={itemProps.ref}
+            role="none"
             style={itemProps.style}
             {...longPress}
         >
@@ -1107,8 +1108,8 @@ function VaultPageContent() {
                 api.reorderVaultEntries(
                     entry.category,
                     reordered.filter((e) => e.category === entry.category).map((e) => e.id)
-                ).catch((err: any) => {
-                    toast.error(err.message || "Failed to save new order");
+                ).catch((err: unknown) => {
+                    toast.error(readErrorMessage(err, "Failed to save new order"));
                     load();
                 });
             }
@@ -1221,15 +1222,17 @@ function VaultPageContent() {
             <div className="mb-3 flex items-start justify-between">
                 <div className="flex min-w-0 items-center gap-2">
                     {dragHandleProps && (
-                        <div
+                        <button
+                            aria-label="Drag to reorder"
+                            type="button"
                             {...dragHandleProps}
-                            className="-ml-1 shrink-0 cursor-grab rounded p-1 hover:bg-surface-hover active:cursor-grabbing"
+                            className="-ml-1 shrink-0 cursor-grab rounded border-0 bg-transparent p-0 p-1 hover:bg-surface-hover active:cursor-grabbing"
                         >
                             <Bars3Icon
                                 className="h-4 w-4"
                                 style={{ color: "var(--color-text-muted)" }}
                             />
-                        </div>
+                        </button>
                     )}
                     <div className="min-w-0">
                         <h3

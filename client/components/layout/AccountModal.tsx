@@ -842,6 +842,7 @@ export function AccountModal({
                         <div
                             className="pointer-events-auto w-full overflow-hidden rounded-2xl shadow-2xl"
                             onClick={(e) => e.stopPropagation()}
+                            role="none"
                             style={{
                                 backgroundColor: "var(--color-surface)",
                                 border: "1px solid var(--color-surface-border)",

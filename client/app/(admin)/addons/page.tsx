@@ -709,8 +709,8 @@ export default function AddonsPage() {
                 const rest = prev.filter((a) => !reorderedIds.includes(a.id));
                 return [...reorderedAddons, ...rest];
             });
-            api.reorderAddons(reorderedIds).catch((err: any) => {
-                toast.error(err.message || "Failed to save new order");
+            api.reorderAddons(reorderedIds).catch((err: unknown) => {
+                toast.error(readErrorMessage(err, "Failed to save new order"));
             });
         };
         return registerDragEndHandler(handleDragEnd);
@@ -1757,7 +1757,7 @@ function AddonCard({
         </>
     );
     const selectBox = (
-        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0" onClick={(e) => e.stopPropagation()} role="none">
             <SelectionCheckbox checked={isSelected} onChange={onToggleSelect} />
         </div>
     );
@@ -1812,14 +1812,15 @@ function AddonCard({
             <div className={`addon-card-body ${dragHandleProps ? "has-drag" : ""}`}>
                 <div className="addon-card-head flex items-center gap-2.5">
                     {dragHandleProps && (
-                        <div
+                        <button
+                            type="button"
                             {...dragHandleProps}
-                            className="shrink-0 cursor-grab rounded-lg p-1.5 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                            className="shrink-0 cursor-grab rounded-lg border-0 bg-transparent p-0 p-1.5 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
                             title="Drag to reorder"
                         >
                             <Bars3Icon className="h-4 w-4" />
-                        </div>
+                        </button>
                     )}
                     <div
                         className="addon-card-icon flex shrink-0 items-center justify-center overflow-hidden rounded-xl"
@@ -1862,7 +1863,11 @@ function AddonCard({
                             {counts}
                         </div>
                     </div>
-                    <div className="shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
+                    <div
+                        className="shrink-0 self-start"
+                        onClick={(e) => e.stopPropagation()}
+                        role="none"
+                    >
                         <ToggleSwitch
                             checked={addon.isActive !== false}
                             onChange={async () => {
@@ -1925,14 +1930,15 @@ function AddonCard({
         >
             <div className="flex items-center gap-3 p-4">
                 {dragHandleProps && (
-                    <div
+                    <button
+                        type="button"
                         {...dragHandleProps}
-                        className="shrink-0 cursor-grab rounded-lg p-1 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                        className="shrink-0 cursor-grab rounded-lg border-0 bg-transparent p-0 p-1 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
                         onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         title="Drag to reorder"
                     >
                         <Bars3Icon className="h-3.5 w-3.5" />
-                    </div>
+                    </button>
                 )}
                 <div
                     className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl"
@@ -2020,7 +2026,11 @@ function AddonCard({
                 sat inline at the row's right edge instead of moving at all
                 (confirmed live: same line as the version tag, not under it). */}
                         <span aria-hidden="true" className="h-0 basis-full" />
-                        <span className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <span
+                            className="ml-auto shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                            role="none"
+                        >
                             <SelectionCheckbox checked={isSelected} onChange={onToggleSelect} />
                         </span>
                     </div>
@@ -2043,7 +2053,11 @@ function AddonCard({
                         </span>
                     </div>
                 </div>
-                <div className="hidden shrink-0 md:block" onClick={(e) => e.stopPropagation()}>
+                <div
+                    className="hidden shrink-0 md:block"
+                    onClick={(e) => e.stopPropagation()}
+                    role="none"
+                >
                     <ToggleSwitch
                         checked={addon.isActive !== false}
                         onChange={async () => {

@@ -215,7 +215,13 @@ export function AddToListButton({
             {open && (
                 <>
                     {/* Click-away backdrop */}
-                    <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+                    <button
+                        aria-label="Close popup"
+                        className="fixed inset-0 z-40 border-0 bg-transparent p-0"
+                        onClick={() => setOpen(false)}
+                        tabIndex={-1}
+                        type="button"
+                    />
                     <div className="absolute left-0 z-50 mt-2 max-h-72 w-60 overflow-y-auto rounded-xl border border-default bg-surface p-1.5 shadow-xl">
                         <CatalogPickerMenu item={item} />
                     </div>

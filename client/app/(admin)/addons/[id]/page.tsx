@@ -429,18 +429,24 @@ function SortableCatalogItem({
             style={style}
         >
             {/* Drag handle */}
-            <div
+            <button
+                aria-label="Drag to reorder"
+                type="button"
                 {...attributes}
                 {...listeners}
-                className="cursor-grab rounded p-1 hover:bg-surface-hover active:cursor-grabbing"
+                className="cursor-grab rounded border-0 bg-transparent p-0 p-1 hover:bg-surface-hover active:cursor-grabbing"
                 onClick={(e) => e.stopPropagation()}
                 style={{ touchAction: "none" }}
             >
                 <Bars3Icon className="h-5 w-5 text-subtle" />
-            </div>
+            </button>
 
             {/* Content */}
-            <div className="min-w-0 flex-1" onClick={onToggle}>
+            <button
+                className="w-full min-w-0 flex-1 border-0 bg-transparent p-0 text-left"
+                onClick={onToggle}
+                type="button"
+            >
                 <div className="flex items-center gap-2">
                     <span
                         className={`truncate font-medium ${isSelected ? "text-default" : "text-subtle group-hover:text-default"}`}
@@ -451,7 +457,7 @@ function SortableCatalogItem({
                         {catalog.type}
                     </span>
                 </div>
-            </div>
+            </button>
 
             {/* Selection indicator circle */}
             <div
@@ -1589,6 +1595,7 @@ export default function AddonDetailPage() {
                                         >
                                             <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border-2 border-default bg-surface shadow-lg">
                                                 {addon.logo && !logoError ? (
+                                                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
                                                     <img
                                                         alt={addon.name}
                                                         className="h-full w-full object-contain p-2"
@@ -2320,6 +2327,7 @@ export default function AddonDetailPage() {
                                                     <div
                                                         className="flex items-center gap-2 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100"
                                                         onClick={(e) => e.preventDefault()}
+                                                        role="none"
                                                     >
                                                         <Button
                                                             aria-label={`Sync ${group.name}`}

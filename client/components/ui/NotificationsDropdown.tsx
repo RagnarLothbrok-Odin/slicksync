@@ -749,7 +749,13 @@ export function NotificationsDropdown({
                 {isOpen && (
                     <>
                         {/* Backdrop */}
-                        <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+                        <button
+                            aria-label="Close popup"
+                            className="fixed inset-0 z-40 border-0 bg-transparent p-0"
+                            onClick={() => setIsOpen(false)}
+                            tabIndex={-1}
+                            type="button"
+                        />
 
                         {/* Dropdown */}
                         <motion.div
@@ -861,6 +867,7 @@ export function NotificationsDropdown({
                                                                 />
                                                                 {notification.poster ? (
                                                                     <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg border border-default bg-surface">
+                                                                        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */}
                                                                         <img
                                                                             alt={
                                                                                 notification.message

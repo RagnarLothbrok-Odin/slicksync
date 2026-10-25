@@ -42,6 +42,7 @@ import {
     ConfirmModal,
     ContextMenu,
     PageToolbar,
+    SelectAllCheckbox,
     SelectionCheckbox,
     SyncBadge,
     ToggleSwitch,
@@ -227,8 +228,8 @@ export default function GroupsPage() {
                 const rest = prev.filter((g) => !reorderedIds.includes(g.id));
                 return [...reorderedGroups, ...rest];
             });
-            api.reorderGroups(reorderedIds).catch((err: any) => {
-                toast.error(err.message || "Failed to save new order");
+            api.reorderGroups(reorderedIds).catch((err: unknown) => {
+                toast.error(readErrorMessage(err, "Failed to save new order"));
             });
         };
         return registerDragEndHandler(handleDragEnd);
@@ -587,28 +588,14 @@ export default function GroupsPage() {
                                                                 </span>
                                                             </th>
                                                             <th className="w-12 px-4 py-4 text-left">
-                                                                <div
-                                                                    className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded border-2 transition-all ${
-                                                                        hasSelection &&
-                                                                        selectedIds.size ===
-                                                                            filteredGroups.length
-                                                                            ? "border-primary bg-primary"
-                                                                            : "border-default hover:border-primary"
-                                                                    }`}
-                                                                    onClick={() =>
-                                                                        hasSelection &&
-                                                                        selectedIds.size ===
-                                                                            filteredGroups.length
-                                                                            ? deselectAll()
-                                                                            : selectAll()
+                                                                <SelectAllCheckbox
+                                                                    onDeselectAll={deselectAll}
+                                                                    onSelectAll={selectAll}
+                                                                    selectedCount={selectedIds.size}
+                                                                    totalCount={
+                                                                        filteredGroups.length
                                                                     }
-                                                                >
-                                                                    {hasSelection &&
-                                                                        selectedIds.size ===
-                                                                            filteredGroups.length && (
-                                                                            <CheckIcon className="h-3 w-3 text-white" />
-                                                                        )}
-                                                                </div>
+                                                                />
                                                             </th>
                                                             <th className="px-6 py-4 text-left font-medium text-muted text-sm">
                                                                 Group
@@ -959,14 +946,16 @@ function SortableGroupRow({
             ref={itemProps.ref as unknown as React.Ref<HTMLTableRowElement>}
             style={itemProps.style}
         >
-            <td className="w-8 py-4 pl-4" onClick={(e) => e.stopPropagation()}>
-                <div
+            <td className="w-8 py-4 pl-4">
+                <button
+                    type="button"
                     {...dragHandleProps}
-                    className="inline-flex cursor-grab rounded p-1 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                    className="inline-flex cursor-grab rounded border-0 bg-transparent p-0 p-1 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                    onClick={(event) => event.stopPropagation()}
                     title="Drag to reorder"
                 >
                     <Bars3Icon className="h-4 w-4" />
-                </div>
+                </button>
             </td>
             {children}
         </motion.tr>
@@ -1050,14 +1039,15 @@ function GroupCard({
         >
             <div className="flex items-center gap-2.5">
                 {dragHandleProps && (
-                    <div
+                    <button
+                        type="button"
                         {...dragHandleProps}
-                        className="shrink-0 cursor-grab rounded-lg p-1.5 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
+                        className="shrink-0 cursor-grab rounded-lg border-0 bg-transparent p-0 p-1.5 text-subtle hover:bg-surface-hover hover:text-default active:cursor-grabbing"
                         onClick={(e: React.MouseEvent) => e.stopPropagation()}
                         title="Drag to reorder"
                     >
                         <Bars3Icon className="h-4 w-4" />
-                    </div>
+                    </button>
                 )}
                 <Avatar
                     colorIndex={group.colorIndex ?? 0}
@@ -1072,7 +1062,7 @@ function GroupCard({
                 >
                     {group.name}
                 </Link>
-                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                <div className="shrink-0" onClick={(e) => e.stopPropagation()} role="none">
                     <ToggleSwitch
                         checked={group.isActive !== false}
                         onChange={async () => {
@@ -1117,7 +1107,7 @@ function GroupCard({
                         size="sm"
                     />
                 </div>
-                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                <div className="shrink-0" onClick={(e) => e.stopPropagation()} role="none">
                     <SelectionCheckbox checked={isSelected} onChange={onToggleSelect} />
                 </div>
             </div>
