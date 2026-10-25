@@ -275,7 +275,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
     const [detail, setDetail] = useState<UpcomingEpisode | null>(null);
     const [mutedShows, setMutedShows] = useState<MutedShow[]>([]);
     const [isMutedModalOpen, setIsMutedModalOpen] = useState(false);
-    const [selectedDay, setSelectedDay] = useState("");
+    const [selectedDay, setSelectedDay] = useState("all");
     const groups = useMemo(
         () => groupByDay(items.filter((item) => Number.isFinite(Date.parse(item.airDate)))),
         [items]
