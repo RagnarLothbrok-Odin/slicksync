@@ -1,8 +1,9 @@
-# Shell scripts must always be checked out with LF line endings,
-# regardless of core.autocrlf on the checking-out machine. A CRLF shebang
-# line ("#!/bin/sh\r\n") makes the kernel look for a nonexistent
-# "/bin/sh\r" interpreter - confirmed to break a Docker image built from a
-# Windows checkout with core.autocrlf=true (container exits immediately
-# with "exec: line 8: ./start.sh: not found"), even though the exact same
-# file works fine wherever it wasn't converted, like the VPS itself.
+# ========================
+# Line endings
+# ========================
+
+# Detect text files without converting binary assets.
+* text=auto
+
+# Container entrypoints require LF even on Windows checkouts.
 *.sh text eol=lf

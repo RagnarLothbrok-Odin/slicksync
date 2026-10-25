@@ -89,10 +89,10 @@ Reload addons by addon ID, for Nuvio and Stremio accounts alike. This can be use
       "id": "addon-id",
       "name": "Addon Name",
       "diffs": {
-        "addedResources": [...],
-        "removedResources": [...],
-        "addedCatalogs": [...],
-        "removedCatalogs": [...]
+        "addedResources": [],
+        "removedResources": [],
+        "addedCatalogs": [],
+        "removedCatalogs": []
       }
     }
   ]

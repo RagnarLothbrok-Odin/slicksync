@@ -1,0 +1,27 @@
+# Local credentials and persistent data never belong in an image build.
+.env
+.env.*
+!.env.example
+data
+backup
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.backup
+*.bak
+
+# Install and build from the tracked workspace sources instead.
+**/node_modules
+**/.next
+**/*.tsbuildinfo
+client/.build-stamp
+prisma/schema.prisma
+.git
+logs
+**/*.log
+coverage
+tmp
+temp

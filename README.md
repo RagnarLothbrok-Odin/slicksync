@@ -361,7 +361,7 @@ docker compose -f docker-compose.private.yml up -d --pull never
 
 Frontend and API are both served through `:3000` — only that port needs a mapping or a reverse proxy pointed at it.
 
-**Verify it's up**: `docker exec slicksync sh -c 'echo APP_VERSION=$APP_VERSION'` should print the current release tag (matching the latest on the [Releases page](https://github.com/RagnarLothbrok-Odin/slicksync/releases)), and `https://your-domain/` should load the login page.
+**Verify it's up**: `docker compose -f docker-compose.private.yml exec slicksync sh -c 'echo APP_VERSION=$APP_VERSION'` should print the current release tag (matching the latest on the [Releases page](https://github.com/RagnarLothbrok-Odin/slicksync/releases)), and `https://your-domain/` should load the login page.
 
 **Open it from the address your devices use**: SlickSync learns the address phones and TVs reach it at when you open it from there — SlickTrax, pictures on a server and instant pauses use it — and follows you to a new domain the first time you open it there. Nothing to type in. For a setup only ever opened through some other address (a tunnel, say), set `PUBLIC_APP_URL`.
 
