@@ -2,13 +2,15 @@
 
 import {
     CalendarDaysIcon,
+    ChevronLeftIcon,
+    ChevronRightIcon,
     SpeakerWaveIcon,
     SpeakerXMarkIcon,
     TvIcon,
     XCircleIcon,
 } from "@heroicons/react/24/outline";
-import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Button,
     Card,
@@ -22,17 +24,9 @@ import { api, type MutedShow, type UpcomingEpisode } from "@/lib/api";
 import { usePersonalFeatures } from "@/lib/hooks/usePersonalFeatures";
 import { posterUrl } from "@/lib/posterUrl";
 
-// Dashboard "Coming up" calendar: the next upcoming episode for every show
-// someone here is mid-season on. Data is precomputed server-side by the
-// episode-alerts poller (utils/episodeAlerts.js) and read straight from the
-// DB — no Cinemeta call on page load. Renders nothing when there's nothing
-// upcoming, so it never shows an empty shell.
-//
-// Right-click (desktop) or long-press (touch) any row to hide it. Dismissals
-// are keyed by (showId, season, episode) and persisted server-side, so a hide
-// carries across devices AND automatically clears itself when the poller
-// advances the show to a new next episode (that new one isn't in the dismiss
-// list, so it re-appears without any manual reset).
+// Both dashboards share this inline calendar. The poller supplies each tracked
+// show's next episode, not a complete season schedule. Hide and mute remain
+// household controls; personal calendars only read their own scoped data.
 
 const LONG_PRESS_MS = 500;
 
@@ -66,48 +60,14 @@ function airLabel(iso: string): { text: string; soon: boolean } {
     };
 }
 
-// Day-header label for the full-calendar agenda: relative word (Today/Tomorrow/
-// weekday) plus the concrete date, so scanning down the list still reads like a
-// calendar rather than a pile of "Monday"s across different weeks.
-function dayHeaderLabel(iso: string): { text: string; soon: boolean } {
-    const now = new Date();
-    const air = new Date(iso);
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfAir = new Date(air.getFullYear(), air.getMonth(), air.getDate()).getTime();
-    const days = Math.round((startOfAir - startOfToday) / (24 * 60 * 60 * 1000));
-    const date = air.toLocaleDateString(undefined, {
-        day: "numeric",
-        month: "short",
-        weekday: "short",
-    });
-    if (days <= 0) {
-        return { soon: true, text: `Today · ${date}` };
-    }
-    if (days === 1) {
-        return { soon: true, text: `Tomorrow · ${date}` };
-    }
-    return { soon: days < 7, text: date };
+// Use local calendar dates, matching the episode labels. Building days with
+// the Date constructor also handles month boundaries and daylight-saving time.
+function dayKey(date: Date): string {
+    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-// Bucket already-air-date-sorted items into per-calendar-day groups (stable
-// order preserved within each day). Keyed on local Y/M/D so "airs today" and
-// "airs tomorrow" split cleanly regardless of the wall-clock time of day.
-function groupByDay(
-    items: UpcomingEpisode[]
-): { key: string; ts: number; items: UpcomingEpisode[] }[] {
-    const groups = new Map<string, { key: string; ts: number; items: UpcomingEpisode[] }>();
-    for (const it of items) {
-        const air = new Date(it.airDate);
-        const ts = new Date(air.getFullYear(), air.getMonth(), air.getDate()).getTime();
-        const key = String(ts);
-        const group = groups.get(key);
-        if (group) {
-            group.items.push(it);
-        } else {
-            groups.set(key, { items: [it], key, ts });
-        }
-    }
-    return [...groups.values()].sort((a, b) => a.ts - b.ts);
+function monthStart(date: Date): Date {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
 // A single row. Extracted so each has its own context-menu hook, otherwise the
@@ -277,15 +237,115 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
     const [detail, setDetail] = useState<UpcomingEpisode | null>(null);
     const [mutedShows, setMutedShows] = useState<MutedShow[]>([]);
     const [isMutedModalOpen, setIsMutedModalOpen] = useState(false);
-    const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(() => new Date());
+    const [visibleMonth, setVisibleMonth] = useState(() => monthStart(new Date()));
+    const [loadError, setLoadError] = useState(false);
+    const [retry, setRetry] = useState(0);
+    const calendarRef = useRef<HTMLDivElement>(null);
+    const focusDay = useRef(false);
+
+    const sortedItems = useMemo(
+        () =>
+            items
+                .filter((item) => Number.isFinite(Date.parse(item.airDate)))
+                .sort((a, b) => Date.parse(a.airDate) - Date.parse(b.airDate)),
+        [items]
+    );
+    const episodesByDay = useMemo(() => {
+        const grouped = new Map<string, UpcomingEpisode[]>();
+        for (const item of sortedItems) {
+            const key = dayKey(new Date(item.airDate));
+            grouped.set(key, [...(grouped.get(key) || []), item]);
+        }
+        return grouped;
+    }, [sortedItems]);
+    const days = useMemo(() => {
+        const offset = (visibleMonth.getDay() + 6) % 7;
+        return Array.from(
+            { length: 42 },
+            (_, index) =>
+                new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1 - offset + index)
+        );
+    }, [visibleMonth]);
+    const selectedItems = episodesByDay.get(dayKey(selectedDate)) || [];
+    const nextItem = sortedItems.find((item) => {
+        const date = new Date(item.airDate);
+        return (
+            new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() >
+            new Date(
+                selectedDate.getFullYear(),
+                selectedDate.getMonth(),
+                selectedDate.getDate()
+            ).getTime()
+        );
+    });
+    const monthCount = sortedItems.filter((item) => {
+        const date = new Date(item.airDate);
+        return (
+            date.getFullYear() === visibleMonth.getFullYear() &&
+            date.getMonth() === visibleMonth.getMonth()
+        );
+    }).length;
+
+    const selectDate = (date: Date) => {
+        setSelectedDate(date);
+        setVisibleMonth(monthStart(date));
+    };
+    const changeMonth = (offset: number) => {
+        selectDate(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + offset, 1));
+    };
+    const handleDayKey = (event: KeyboardEvent<HTMLButtonElement>, date: Date) => {
+        const weekday = (date.getDay() + 6) % 7;
+        const offsets: Record<string, number> = {
+            ArrowDown: 7,
+            ArrowLeft: -1,
+            ArrowRight: 1,
+            ArrowUp: -7,
+            End: 6 - weekday,
+            Home: -weekday,
+        };
+        const offset = offsets[event.key];
+        if (offset === undefined) {
+            return;
+        }
+        event.preventDefault();
+        focusDay.current = true;
+        selectDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset));
+    };
 
     useEffect(() => {
+        if (focusDay.current) {
+            calendarRef.current
+                ?.querySelector<HTMLButtonElement>(`[data-date="${dayKey(selectedDate)}"]`)
+                ?.focus();
+            focusDay.current = false;
+        }
+    }, [selectedDate]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoadError(false);
         client
             .getUpcomingEpisodes()
-            .then((r) => setItems(Array.isArray(r) ? r : []))
-            .catch(() => setItems([]))
-            .finally(() => setLoaded(true));
-    }, [client]);
+            .then((result) => {
+                if (!cancelled) {
+                    setItems(Array.isArray(result) ? result : []);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setLoadError(true);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setLoaded(true);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [client, retry]);
 
     // Optimistically removes the row, but only keeps it gone (and only tells
     // the user it worked) once the server call actually confirms it - a
@@ -370,83 +430,227 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
         return null;
     }
 
-    // The full card (with the episode grid) only makes sense when there's
-    // something to show - but the Airing Calendar modal below handles an
-    // empty list fine on its own ("Nothing on the calendar right now"), and
-    // previously had NO way to be reached at all once the card vanished
-    // (confirmed real case: a household not currently mid-season on anything
-    // had literally no path to the calendar). A minimal always-visible link
-    // keeps it reachable regardless.
-    const hasItems = items.length > 0;
+    const today = new Date();
+    const selectedLabel = selectedDate.toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "long",
+        weekday: "long",
+        year: "numeric",
+    });
 
     return (
         <>
-            {hasItems ? (
-                <div className="mb-6">
-                    <Card padding="lg">
-                        <div className="mb-4 flex items-center gap-2">
-                            <CalendarDaysIcon className="h-5 w-5 text-primary" />
-                            <h3 className="font-display font-semibold text-base text-default">
-                                Coming up
-                            </h3>
-                            {householdActions && (
-                                <span className="hidden text-muted text-xs sm:inline">
-                                    New episodes for shows you&apos;re watching · right-click or
-                                    long-press to hide
-                                </span>
-                            )}
-                            {householdActions && (
-                                <span className="text-muted text-xs sm:hidden">
-                                    Long-press to hide
-                                </span>
-                            )}
-                            <button
-                                className="ml-auto font-medium text-primary text-xs hover:underline"
-                                onClick={() => setIsCalendarOpen(true)}
-                                type="button"
+            <section aria-label="Episode calendar" className="mb-6">
+                <Card padding="none">
+                    <div className="flex items-center justify-between gap-3 px-5 pt-5 sm:px-6">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                <CalendarDaysIcon className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h2 className="font-display font-semibold text-default text-lg tracking-tight">
+                                    Calendar
+                                </h2>
+                                <p className="mt-0.5 text-muted text-xs">
+                                    Next episodes for the series you’re watching.
+                                </p>
+                            </div>
+                        </div>
+                        {householdActions && (
+                            <Button
+                                aria-label="Manage muted shows"
+                                leftIcon={<SpeakerXMarkIcon className="h-4 w-4" />}
+                                onClick={openMutedModal}
+                                size="sm"
+                                variant="ghost"
                             >
-                                Full calendar
-                            </button>
-                            {householdActions && (
-                                <button
-                                    className="rounded-lg p-1.5 text-muted transition-colors hover:bg-surface-hover hover:text-default"
-                                    onClick={openMutedModal}
-                                    title="Manage muted shows"
-                                    type="button"
-                                >
-                                    <SpeakerXMarkIcon className="h-4 w-4" />
-                                </button>
-                            )}
+                                <span className="hidden sm:inline">Muted shows</span>
+                            </Button>
+                        )}
+                    </div>
+                    {loadError ? (
+                        <div className="flex flex-wrap items-center gap-3 p-6" role="status">
+                            <p className="text-muted text-sm">
+                                Calendar couldn’t load. Please try again.
+                            </p>
+                            <Button
+                                onClick={() => setRetry((value) => value + 1)}
+                                size="sm"
+                                variant="secondary"
+                            >
+                                Retry
+                            </Button>
                         </div>
-
-                        {/* Grid on desktop (two columns from md up) so a healthy watchlist
-            doesn't turn into a long vertical rail; single column on mobile
-            where narrow rows already read cleanly. */}
-                        <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 md:grid-cols-2">
-                            {items.slice(0, 8).map((item) => (
-                                <UpcomingRow
-                                    cacheImages={householdActions}
-                                    householdActions={householdActions}
-                                    item={item}
-                                    key={`${item.showId}-${item.season}-${item.episode}`}
-                                    onDismiss={handleDismiss}
-                                    onMute={handleMute}
-                                    onOpen={setDetail}
-                                />
-                            ))}
+                    ) : (
+                        <div className="grid gap-6 p-3 sm:p-6 lg:grid-cols-2 lg:gap-8">
+                            <div className="min-w-0" ref={calendarRef}>
+                                <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                                    <div aria-live="polite">
+                                        <h3 className="font-display font-semibold text-default text-lg tracking-tight">
+                                            {visibleMonth.toLocaleDateString(undefined, {
+                                                month: "long",
+                                                year: "numeric",
+                                            })}
+                                        </h3>
+                                        <p className="mt-0.5 text-subtle text-xs">
+                                            {monthCount} episode{monthCount === 1 ? "" : "s"} this
+                                            month
+                                        </p>
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-1">
+                                        <Button
+                                            onClick={() => selectDate(new Date())}
+                                            size="sm"
+                                            variant="secondary"
+                                        >
+                                            Today
+                                        </Button>
+                                        <Button
+                                            aria-label="Previous month"
+                                            onClick={() => changeMonth(-1)}
+                                            size="sm"
+                                            variant="ghost"
+                                        >
+                                            <ChevronLeftIcon className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            aria-label="Next month"
+                                            onClick={() => changeMonth(1)}
+                                            size="sm"
+                                            variant="ghost"
+                                        >
+                                            <ChevronRightIcon className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                                <fieldset className="grid min-w-0 grid-cols-7 gap-y-1">
+                                    <legend className="sr-only">Choose a date</legend>
+                                    {Array.from({ length: 7 }, (_, index) => {
+                                        const day = new Date(2024, 0, 1 + index);
+                                        return (
+                                            <span
+                                                className="py-2 text-center font-medium text-subtle text-xs"
+                                                key={index}
+                                            >
+                                                {day.toLocaleDateString(undefined, {
+                                                    weekday: "short",
+                                                })}
+                                            </span>
+                                        );
+                                    })}
+                                    {days.map((date) => {
+                                        const key = dayKey(date);
+                                        const count = episodesByDay.get(key)?.length || 0;
+                                        const selected = key === dayKey(selectedDate);
+                                        const isToday = key === dayKey(today);
+                                        const inMonth = date.getMonth() === visibleMonth.getMonth();
+                                        return (
+                                            <button
+                                                aria-current={isToday ? "date" : undefined}
+                                                aria-label={`${date.toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long", year: "numeric" })}, ${count} episode${count === 1 ? "" : "s"}`}
+                                                aria-pressed={selected}
+                                                className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl py-1 text-sm transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${inMonth ? "text-default" : "text-subtle"}`}
+                                                data-date={key}
+                                                key={key}
+                                                onClick={() => selectDate(date)}
+                                                onKeyDown={(event) => handleDayKey(event, date)}
+                                                tabIndex={selected ? 0 : -1}
+                                                type="button"
+                                            >
+                                                <span
+                                                    className={`flex h-8 w-8 items-center justify-center rounded-full ${selected ? "bg-primary font-semibold" : ""}`}
+                                                    style={
+                                                        selected
+                                                            ? { color: "var(--color-bg)" }
+                                                            : isToday
+                                                              ? {
+                                                                    boxShadow:
+                                                                        "inset 0 0 0 1px var(--color-primary)",
+                                                                    color: "var(--color-primary)",
+                                                                }
+                                                              : undefined
+                                                    }
+                                                >
+                                                    {date.getDate()}
+                                                </span>
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`h-1 w-1 rounded-full bg-primary ${count ? "" : "invisible"}`}
+                                                />
+                                            </button>
+                                        );
+                                    })}
+                                </fieldset>
+                                <p className="mt-3 text-center text-subtle text-xs">
+                                    A dot marks a scheduled episode.
+                                </p>
+                            </div>
+                            <div className="flex min-w-0 flex-col rounded-2xl bg-surface-hover/40 p-4 sm:p-5">
+                                <div aria-live="polite" className="mb-4">
+                                    <p className="font-medium text-primary text-xs">
+                                        {dayKey(selectedDate) === dayKey(today)
+                                            ? "Today"
+                                            : "Selected day"}
+                                    </p>
+                                    <h3 className="mt-1 font-display font-semibold text-default text-lg tracking-tight">
+                                        {selectedLabel}
+                                    </h3>
+                                </div>
+                                {selectedItems.length ? (
+                                    <div className="max-h-80 space-y-2 overflow-y-auto">
+                                        {selectedItems.map((item) => (
+                                            <UpcomingRow
+                                                cacheImages={householdActions}
+                                                householdActions={householdActions}
+                                                item={item}
+                                                key={`${item.showId}-${item.season}-${item.episode}`}
+                                                onDismiss={handleDismiss}
+                                                onMute={handleMute}
+                                                onOpen={setDetail}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-1 flex-col items-center justify-center px-2 py-8 text-center">
+                                        <CalendarDaysIcon className="mb-3 h-8 w-8 text-subtle" />
+                                        <p className="font-medium text-default text-sm">
+                                            A quiet day.
+                                        </p>
+                                        <p className="mt-1 max-w-64 text-muted text-sm">
+                                            {sortedItems.length
+                                                ? "No tracked episodes are scheduled for this date."
+                                                : "Upcoming episodes will appear as your tracked series announce new dates."}
+                                        </p>
+                                    </div>
+                                )}
+                                {nextItem && (
+                                    <button
+                                        className="mt-4 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl p-2 text-left text-primary text-xs transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary"
+                                        onClick={() => selectDate(new Date(nextItem.airDate))}
+                                        type="button"
+                                    >
+                                        <span className="min-w-0">
+                                            <span className="block font-medium">
+                                                Next episode · {airLabel(nextItem.airDate).text}
+                                            </span>
+                                            <span className="mt-1 block truncate text-muted">
+                                                {nextItem.showName || "Upcoming episode"}
+                                            </span>
+                                        </span>
+                                        <ChevronRightIcon className="h-4 w-4 shrink-0" />
+                                    </button>
+                                )}
+                                {householdActions && (
+                                    <p className="mt-3 text-subtle text-xs">
+                                        Right-click or long-press an episode to hide it or stop
+                                        tracking.
+                                    </p>
+                                )}
+                            </div>
                         </div>
-                    </Card>
-                </div>
-            ) : (
-                <button
-                    className="mb-6 flex items-center gap-1.5 font-medium text-muted text-xs transition-colors hover:text-primary"
-                    onClick={() => setIsCalendarOpen(true)}
-                    type="button"
-                >
-                    <CalendarDaysIcon className="h-4 w-4" />
-                    Airing Calendar
-                </button>
-            )}
+                    )}
+                </Card>
+            </section>
 
             {detail &&
                 (renderDetail ? (
@@ -462,63 +666,6 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                     />
                 ))}
 
-            {/* Full airing calendar: every tracked show's next episode, grouped by
-          the day it airs. Reuses the same rows (open detail, hide, mute) as the
-          compact dashboard card, but shows the whole agenda rather than the
-          first eight. */}
-            <Modal
-                isOpen={isCalendarOpen}
-                onClose={() => setIsCalendarOpen(false)}
-                size="lg"
-                title="Airing Calendar"
-            >
-                {items.length === 0 ? (
-                    <p className="py-4 text-center text-muted text-sm">
-                        Nothing on the calendar right now.
-                    </p>
-                ) : (
-                    <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
-                        {groupByDay(items).map((group) => {
-                            const header = dayHeaderLabel(group.items[0].airDate);
-                            return (
-                                <div key={group.key}>
-                                    <div className="sticky top-0 z-10 mb-1.5 flex items-center gap-2 bg-surface py-1">
-                                        <CalendarDaysIcon
-                                            className={`h-4 w-4 ${header.soon ? "text-primary" : "text-muted"}`}
-                                        />
-                                        <h4
-                                            className={`font-semibold text-sm ${header.soon ? "text-primary" : "text-default"}`}
-                                        >
-                                            {header.text}
-                                        </h4>
-                                        <span className="text-subtle text-xs">
-                                            {group.items.length} episode
-                                            {group.items.length === 1 ? "" : "s"}
-                                        </span>
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-                                        {group.items.map((item) => (
-                                            <UpcomingRow
-                                                cacheImages={householdActions}
-                                                householdActions={householdActions}
-                                                item={item}
-                                                key={`${item.showId}-${item.season}-${item.episode}`}
-                                                onDismiss={handleDismiss}
-                                                onMute={handleMute}
-                                                onOpen={(it) => {
-                                                    setIsCalendarOpen(false);
-                                                    setDetail(it);
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </Modal>
-
             <Modal
                 isOpen={isMutedModalOpen}
                 onClose={() => setIsMutedModalOpen(false)}
@@ -527,7 +674,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
             >
                 {mutedShows.length === 0 ? (
                     <p className="py-4 text-center text-muted text-sm">
-                        No muted shows — "Stop tracking this series" on any Coming Up entry adds it
+                        No muted shows. "Stop tracking this series" on any calendar entry adds it
                         here.
                     </p>
                 ) : (
