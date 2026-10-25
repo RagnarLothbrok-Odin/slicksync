@@ -16,11 +16,10 @@ import {
 } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { Avatar } from "@/components/ui";
+import { Avatar, Button } from "@/components/ui";
 import { PersonalCalendar } from "@/components/user/PersonalCalendar";
 import { PersonalContinueWatching } from "@/components/user/PersonalContinueWatching";
 import { usePersonalPreferences } from "@/components/user/PersonalPreferences";
-import { UserPageHeader } from "@/components/user/UserPageContainer";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
@@ -245,105 +244,75 @@ export default function UserHomePage() {
 
     return (
         <div className="p-4 sm:p-8">
-            <UserPageHeader
-                subtitle="Your library, your activity, and what’s next."
-                title={`Hello, ${userInfo?.username || "User"}.`}
-            />
-
-            {/* Profile Card with Sync Button and Risk Badge */}
-            <motion.div
-                animate={{ opacity: 1, y: 0 }}
-                className="mb-8 rounded-xl p-4 sm:p-6"
-                initial={{ opacity: 0, y: 20 }}
-                style={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-surface-border)",
-                }}
-            >
-                {/* Picture and name share a line; on a phone Sync goes underneath
-            rather than squeezing the picture into a pill. */}
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-                    <div className="flex min-w-0 flex-1 items-center gap-4 sm:gap-6">
-                        <Avatar
-                            className="h-16 w-16 shrink-0 sm:h-20 sm:w-20"
-                            colorIndex={userInfo?.colorIndex || 0}
-                            email={preferences.hideSensitive ? "Hidden" : userInfo?.email}
-                            name={userInfo?.username || "User"}
-                            showRing
-                            size="xl"
-                            src={userInfo?.avatarUrl || undefined}
-                            useGravatar={userInfo?.useGravatar}
-                        />
-                        <div className="min-w-0 flex-1">
-                            <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <h2
-                                    className="break-words font-bold text-xl"
-                                    style={{ color: "var(--color-text)" }}
+            {/* Account identity and sync controls share one header so viewing content
+                stays close to the top of the page. */}
+            <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                <div className="flex min-w-0 items-center gap-4">
+                    <Avatar
+                        className="shrink-0"
+                        colorIndex={userInfo?.colorIndex || 0}
+                        email={preferences.hideSensitive ? "Hidden" : userInfo?.email}
+                        name={userInfo?.username || "User"}
+                        size="lg"
+                        src={userInfo?.avatarUrl || undefined}
+                        useGravatar={userInfo?.useGravatar}
+                    />
+                    <div className="min-w-0">
+                        <h1
+                            className="break-words font-bold font-display text-2xl tracking-tight sm:text-3xl"
+                            style={{ color: "var(--color-text)" }}
+                        >
+                            Hello, {userInfo?.username || "User"}.
+                        </h1>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+                            {riskBadge && (
+                                <span
+                                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"
+                                    style={{ background: riskBadge.bg, color: riskBadge.color }}
+                                    title={atRiskStatus?.riskReason || undefined}
                                 >
-                                    {userInfo?.username}
-                                </h2>
-
-                                {/* Risk Badge */}
-                                {riskBadge && (
-                                    <div
-                                        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium text-xs"
-                                        style={{ background: riskBadge.bg, color: riskBadge.color }}
-                                        title={atRiskStatus?.riskReason || undefined}
-                                    >
-                                        {riskBadge.icon}
-                                        <span>{riskBadge.text}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <p
-                                className="truncate text-sm"
-                                style={{ color: "var(--color-text-muted)" }}
-                            >
-                                {preferences.hideSensitive ? "Hidden" : userInfo?.email}
-                            </p>
+                                    {riskBadge.icon}
+                                    {riskBadge.text}
+                                </span>
+                            )}
                             {!preferences.hideSensitive && userInfo?.groupName && (
-                                <p
-                                    className="mt-1 text-sm"
-                                    style={{ color: "var(--color-text-subtle)" }}
+                                <span
+                                    className="break-words"
+                                    style={{
+                                        color: "var(--color-text-muted)",
+                                        overflowWrap: "anywhere",
+                                    }}
                                 >
                                     Group: {userInfo.groupName}
-                                </p>
+                                </span>
                             )}
                         </div>
                     </div>
-
-                    {/* Sync Button */}
-                    <div className="flex shrink-0 flex-row-reverse items-center justify-between gap-2 sm:flex-col sm:items-end">
-                        <button
-                            className="flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 font-medium transition-all hover:opacity-90 disabled:opacity-50"
-                            disabled={syncing}
-                            onClick={handleSync}
-                            style={{
-                                background: "var(--color-primary)",
-                                color: "white",
-                            }}
-                            type="button"
-                        >
-                            <ArrowPathIcon className={`h-5 w-5 ${syncing ? "animate-spin" : ""}`} />
-                            <span>{syncing ? "Syncing..." : "Sync Now"}</span>
-                        </button>
-                        {syncMessage && (
-                            <motion.p
-                                animate={{ opacity: 1 }}
-                                className={`text-xs ${syncMessage.includes("completed") ? "text-success" : "text-error"}`}
-                                initial={{ opacity: 0 }}
-                            >
-                                {syncMessage}
-                            </motion.p>
-                        )}
-                        {atRiskStatus?.lastSyncedAt && (
-                            <p className="text-xs" style={{ color: "var(--color-text-subtle)" }}>
-                                Last sync: {new Date(atRiskStatus.lastSyncedAt).toLocaleString()}
-                            </p>
-                        )}
-                    </div>
                 </div>
-            </motion.div>
+                <div className="flex min-w-0 flex-col items-start gap-2 sm:items-end">
+                    <Button
+                        isLoading={syncing}
+                        leftIcon={<ArrowPathIcon className="h-4 w-4" />}
+                        onClick={handleSync}
+                        type="button"
+                    >
+                        {syncing ? "Syncing..." : "Sync Now"}
+                    </Button>
+                    {syncMessage && (
+                        <p
+                            className={`text-xs ${syncMessage.includes("completed") ? "text-success" : "text-error"}`}
+                            role="status"
+                        >
+                            {syncMessage}
+                        </p>
+                    )}
+                    {atRiskStatus?.lastSyncedAt && (
+                        <p className="text-xs" style={{ color: "var(--color-text-subtle)" }}>
+                            Last sync: {new Date(atRiskStatus.lastSyncedAt).toLocaleString()}
+                        </p>
+                    )}
+                </div>
+            </header>
 
             {/* Loading State */}
             {loading && (
