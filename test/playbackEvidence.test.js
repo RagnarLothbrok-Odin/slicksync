@@ -1,6 +1,26 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const libraryCache = require("../server/utils/libraryCache");
+const originalReadLibrary = libraryCache.getCachedLibrary;
+let savedLibrary = [];
+libraryCache.getCachedLibrary = () => savedLibrary;
 const { buildNowPlaying } = require("../server/utils/metricsBuilder");
+libraryCache.getCachedLibrary = originalReadLibrary;
+test.afterEach(() => {
+    savedLibrary = [];
+});
+function saveCheckpoint(age = 60_000) {
+    savedLibrary = [
+        {
+            _id: "tt123",
+            state: {
+                lastWatched: new Date(Date.now() - age).toISOString(),
+                timeOffset: 10_000,
+                video_id: "tt123:1:2",
+            },
+        },
+    ];
+}
 const jellyfin = require("../server/utils/jellyfinLive");
 const { mergeProxyNowPlaying } = require("../server/utils/proxyNowPlaying");
 
@@ -28,16 +48,18 @@ function database() {
     };
 }
 
-test("native checkpoints never claim a player state or fresh observation", async () => {
+test("native rows without a provider checkpoint cannot claim recent activity", async () => {
+    assert.equal((await buildNowPlaying(database(), "evidence-account", [user])).length, 0);
+});
+test("fresh native checkpoints retain unknown state and expire without a new provider save", async () => {
+    saveCheckpoint();
     const rows = await buildNowPlaying(database(), "evidence-account", [user]);
     assert.equal(rows.length, 1);
-    assert.deepEqual(rows[0].playback, {
-        evidence: "history",
-        observedAt: null,
-        position: "checkpoint",
-        positionUpdatedAt: null,
-        state: "unknown",
-    });
+    assert.equal(rows[0].playback.state, "unknown");
+    assert.equal(rows[0].playback.evidence, "history");
+    assert.equal(rows[0].playback.observedAt, savedLibrary[0].state.lastWatched);
+    saveCheckpoint(5 * 60_000);
+    assert.equal((await buildNowPlaying(database(), "evidence-account", [user])).length, 0);
 });
 
 test("a paused player replaces a stale native checkpoint and preserves pause and position", async () => {
@@ -102,6 +124,7 @@ test("active and recently closed proxy connections cannot displace direct pause 
 });
 
 test("transition events replace native checkpoints but keep another episode separate", async () => {
+    saveCheckpoint();
     const prisma = database();
     const startedAt = new Date(Date.now() - 10_000);
     prisma.watchStateCursor.findMany = async () => [
