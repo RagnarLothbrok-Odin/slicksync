@@ -1,6 +1,6 @@
 /** Playback state is only definite when a player or playback event reports it. */
 export interface PlaybackEvidence {
-    evidence: "player" | "event" | "proxy" | "history";
+    evidence: "player" | "event" | "proxy" | "history" | "tracker";
     observedAt: string | null;
     position: "reported" | "estimated" | "checkpoint";
     /** Provider save time for this position, independent of proxy presence checks. */
@@ -10,7 +10,10 @@ export interface PlaybackEvidence {
 
 /** Shared wording keeps admin and personal cards equally honest about estimates. */
 export function playbackPresentation(playback?: PlaybackEvidence | null) {
-    const direct = playback?.evidence === "player" || playback?.evidence === "event";
+    const direct =
+        playback?.evidence === "player" ||
+        playback?.evidence === "event" ||
+        playback?.evidence === "tracker";
     const playing = direct && playback.state === "playing";
     const paused = direct && playback.state === "paused";
     return {
@@ -23,7 +26,9 @@ export function playbackPresentation(playback?: PlaybackEvidence | null) {
         status: paused
             ? "Paused"
             : playing
-              ? "Playing now"
+              ? playback?.evidence === "tracker"
+                  ? "Playing on Trakt"
+                  : "Playing now"
               : playback?.evidence === "proxy"
                 ? "Stream detected"
                 : "Recently active",
@@ -58,7 +63,11 @@ export function playbackUpdates(playback: PlaybackEvidence | null | undefined, n
         add("Progress saved", playback.positionUpdatedAt);
     } else if (playback) {
         add(
-            playback.evidence === "player" ? "Player checked" : "Playback reported",
+            playback.evidence === "player"
+                ? "Player checked"
+                : playback.evidence === "tracker"
+                  ? "Tracker checked"
+                  : "Playback reported",
             playback.observedAt
         );
     }

@@ -1,9 +1,10 @@
 "use client";
 
 import { ArrowPathIcon, ChevronRightIcon, FilmIcon, PlayIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { PlaybackFreshness } from "@/components/ui/PlaybackFreshness";
-import { useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
+import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { playbackPresentation } from "@/lib/playback";
 import { type NowPlayingItem, personalRequest } from "@/lib/user-api";
 import { PersonalMediaDetailModal } from "./PersonalMediaDetailModal";
@@ -98,9 +99,11 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
 /** A profile's live playback stays separate from its historical activity request. */
 export function PersonalNowPlaying() {
     const { userId, authKey, isReady } = useUserAuthHeaders();
+    const { provider } = useUserAuth();
     const [state, setState] = useState<{
         userId: string;
         items: NowPlayingItem[];
+        trackingWarnings?: string[];
         error: boolean;
     } | null>(null);
     const [selected, setSelected] = useState<NowPlayingItem | null>(null);
@@ -121,13 +124,17 @@ export function PersonalNowPlaying() {
             }
             pending = true;
             try {
-                const result = await personalRequest<{ items: NowPlayingItem[] }>(
-                    userId,
-                    authKey,
-                    "/now-playing"
-                );
+                const result = await personalRequest<{
+                    items: NowPlayingItem[];
+                    trackingWarnings?: string[];
+                }>(userId, authKey, "/now-playing");
                 if (active) {
-                    setState({ error: false, items: result.items, userId });
+                    setState({
+                        error: false,
+                        items: result.items,
+                        trackingWarnings: result.trackingWarnings || [],
+                        userId,
+                    });
                 }
             } catch {
                 // Do not keep showing an old stream as live after a failed refresh.
@@ -161,8 +168,23 @@ export function PersonalNowPlaying() {
                 >
                     Playback Activity
                 </h2>
-                <span className="text-subtle text-xs">Auto-updating</span>
+                {provider === "nuvio" ? (
+                    <Link
+                        className="text-primary text-xs underline-offset-4 hover:underline"
+                        href="/user/settings?section=tracking"
+                    >
+                        Tracking services
+                    </Link>
+                ) : (
+                    <span className="text-subtle text-xs">Auto-updating</span>
+                )}
             </div>
+            {!!current?.trackingWarnings?.length && (
+                <p className="mb-3 text-sm text-warning" role="status">
+                    Trakt could not refresh {current.trackingWarnings.join(", ")}. Available Nuvio
+                    data is shown. Check Tracking services in settings.
+                </p>
+            )}
             {current?.items.length ? (
                 <div className="grid gap-3 lg:grid-cols-2">
                     {current.items.map((item) => (

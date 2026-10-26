@@ -101,3 +101,25 @@ test("missing title identities or invalid progress do not produce misleading car
     assert.deepEqual(await feeds.continueWatching(prisma, person), []);
     assert.equal(feeds.media({ movie: { ids: { tmdb: 123 } } }), null);
 });
+
+test("calendar keeps household muted and dismissed episodes out of tracker results", async () => {
+    tracking.read = async () => ({
+        connected: true,
+        data: [{ episode, first_aired: "2026-10-26T01:30:00Z", show }],
+    });
+    const muted = {
+        mutedShow: {
+            findMany: async ({ where }) => {
+                assert.equal(where.accountId, "household");
+                return [{ showId: "tt123" }];
+            },
+        },
+    };
+    assert.deepEqual(await feeds.calendar(muted, person), []);
+    const dismissed = {
+        dismissedUpcomingEpisode: {
+            findMany: async () => [{ episode: 3, season: 2, showId: "tt123" }],
+        },
+    };
+    assert.deepEqual(await feeds.calendar(dismissed, person), []);
+});

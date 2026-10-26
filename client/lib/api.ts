@@ -6667,6 +6667,7 @@ export interface ContinueWatchingItem {
     rottenTomatoes: string | null;
     showId: string;
     showName: string;
+    trackingService?: string;
     userId: string;
     username: string;
     webUrl?: string;

@@ -31,6 +31,7 @@ import {
     PersonalSyncPanel,
 } from "@/components/user/PersonalSettingsPanels";
 import { PersonPushRow } from "@/components/user/PersonPushRow";
+import { TrackingServicesPanel } from "@/components/user/TrackingServicesPanel";
 import { UserPageHeader } from "@/components/user/UserPageContainer";
 import { copyToClipboard } from "@/lib/clipboard";
 import { readErrorMessage } from "@/lib/errors";
@@ -108,9 +109,18 @@ const PERSONAL_SECTIONS = [
         keywords: "help about guides credits data privacy version support",
         label: "Help & About",
     },
+    {
+        blurb: "Playback, progress, and upcoming episodes",
+        group: "Your setup",
+        icon: ArrowPathIcon,
+        key: "tracking",
+        keywords: "tracking services trakt connections calendar continue watching",
+        label: "Tracking services",
+    },
 ] as const;
 
 export default function UserSettingsPage() {
+    const { userInfo, refreshUserInfo, provider, deleteAccount } = useUserAuth();
     const groupLabelId1 = useId();
     const fieldId1 = useId();
     const [activeSection, setActiveSection] =
@@ -124,14 +134,15 @@ export default function UserSettingsPage() {
     }, []);
     const currentSection =
         PERSONAL_SECTIONS.find((section) => section.key === activeSection) ?? PERSONAL_SECTIONS[0];
-    const matches = PERSONAL_SECTIONS.filter((section) =>
+    const matches = PERSONAL_SECTIONS.filter(
+        (section) => section.key !== "tracking" || provider === "nuvio"
+    ).filter((section) =>
         `${section.label} ${section.blurb} ${section.keywords}`
             .toLowerCase()
             .includes(settingsQuery.trim().toLowerCase())
     );
     const { preferences } = usePersonalPreferences();
     const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
-    const { userInfo, refreshUserInfo, provider, deleteAccount } = useUserAuth();
     const { userId, authKey, isReady } = useUserAuthHeaders();
     const providerLabel = providerTypeLabel(provider);
 
@@ -495,7 +506,9 @@ export default function UserSettingsPage() {
                     }}
                     onQueryChange={setSettingsQuery}
                     query={settingsQuery}
-                    sections={[...PERSONAL_SECTIONS]}
+                    sections={PERSONAL_SECTIONS.filter(
+                        (section) => section.key !== "tracking" || provider === "nuvio"
+                    )}
                 />
                 <div className="settings-content personal-settings-content min-w-0">
                     <div className="settings-section-heading mb-6">
@@ -639,6 +652,11 @@ export default function UserSettingsPage() {
                                 }}
                             />
                         </div>
+                        {provider === "nuvio" && (
+                            <div hidden={activeSection !== "tracking"}>
+                                <TrackingServicesPanel />
+                            </div>
+                        )}
                         <div hidden={activeSection !== "sync"}>
                             <PersonalSyncPanel />
                         </div>

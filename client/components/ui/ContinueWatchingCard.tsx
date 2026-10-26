@@ -246,6 +246,11 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
                             ? `${item.resume ? "Resume " : ""}S${String(item.nextEpisode.season).padStart(2, "0")}E${String(item.nextEpisode.episode).padStart(2, "0")}${item.nextEpisode.title ? ` · ${item.nextEpisode.title}` : ""}`
                             : `Resume${item.progressPercent === null ? "" : ` · ${item.progressPercent}% watched`}`}
                     </p>
+                    {item.trackingService && (
+                        <p className="text-[10px] text-subtle">
+                            Progress from {item.trackingService}
+                        </p>
+                    )}
                     <div className="mt-0.5 flex items-center gap-1">
                         <p className="truncate text-[10px] text-subtle">{item.username}</p>
                         {item.providerType && (

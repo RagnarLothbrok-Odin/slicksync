@@ -300,3 +300,17 @@ test("disconnect during a token refresh cannot recreate the connection", async (
     await assert.rejects(() => reading, /connection changed/);
     assert.equal(fixture.rows.length, 0);
 });
+
+test("source checks report restricted features separately without exposing provider responses", async () => {
+    const fixture = setup((path) =>
+        path.startsWith("/calendars/")
+            ? new Response("private upstream body", { status: 403 })
+            : null
+    );
+    await linked(fixture);
+    const features = await fixture.tracking.check(fixture.prisma, person);
+    assert.equal(features.find((item) => item.key === "watching").available, true);
+    assert.equal(features.find((item) => item.key === "progress").available, true);
+    assert.equal(features.find((item) => item.key === "calendar").available, false);
+    assert.ok(!JSON.stringify(features).includes("private upstream body"));
+});

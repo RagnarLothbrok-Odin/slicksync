@@ -1,0 +1,269 @@
+"use client";
+
+import { ArrowTopRightOnSquareIcon, LinkIcon } from "@heroicons/react/24/outline";
+import { useEffect, useState } from "react";
+import { Button, Card, ConfirmModal } from "@/components/ui";
+import { readErrorMessage } from "@/lib/errors";
+import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
+import { personalRequest } from "@/lib/user-api";
+
+interface Service {
+    configured: boolean;
+    connected: boolean;
+    connectedAt: string | null;
+    provider: "trakt";
+    username: string | null;
+}
+interface Feature {
+    available: boolean;
+    error: string | null;
+    key: string;
+    label: string;
+}
+interface Services {
+    services: Service[];
+    supported: boolean;
+}
+
+export function TrackingServicesPanel() {
+    const { provider, userInfo } = useUserAuth();
+    const { userId, authKey, isReady } = useUserAuthHeaders();
+    const [state, setState] = useState<{ userId: string; value: Services } | null>(null);
+    const [failure, setFailure] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [features, setFeatures] = useState<{ userId: string; items: Feature[] } | null>(null);
+    const [confirm, setConfirm] = useState(false);
+    const [retry, setRetry] = useState(0);
+    const service = state?.userId === userId ? state.value.services[0] : null;
+    useEffect(() => {
+        if (!(isReady && userId && authKey && provider === "nuvio")) {
+            return;
+        }
+        let active = true;
+        setFailure("");
+        personalRequest<Services>(userId, authKey, "/tracking-services")
+            .then((value) => {
+                if (active) {
+                    setState({ userId, value });
+                }
+            })
+            .catch((reason) => {
+                if (active) {
+                    setFailure(readErrorMessage(reason, "Could not load tracking services."));
+                }
+            });
+        return () => {
+            active = false;
+        };
+    }, [isReady, userId, authKey, provider, retry]);
+    useEffect(() => {
+        if (!(service?.connected && userId && authKey)) {
+            return;
+        }
+        let active = true;
+        setFeatures(null);
+        personalRequest<{ features: Feature[] }>(userId, authKey, "/tracking-services/trakt/check")
+            .then((result) => {
+                if (active) {
+                    setFeatures({ items: result.features, userId });
+                }
+            })
+            .catch(() => {
+                if (active) {
+                    setFailure("Could not check the tracking data sources. Try again.");
+                }
+            });
+        return () => {
+            active = false;
+        };
+    }, [service?.connected, userId, authKey, retry]);
+    if (provider !== "nuvio") {
+        return null;
+    }
+    const connect = async () => {
+        if (!(userId && authKey)) {
+            return;
+        }
+        setBusy(true);
+        setFailure("");
+        try {
+            const result = await personalRequest<{ url: string }>(
+                userId,
+                authKey,
+                "/tracking-services/trakt/authorize",
+                { body: "{}", method: "POST" }
+            );
+            window.location.assign(result.url);
+        } catch (reason) {
+            setFailure(readErrorMessage(reason, "Could not start sign-in."));
+            setBusy(false);
+        }
+    };
+    const disconnect = async () => {
+        if (!(userId && authKey)) {
+            return;
+        }
+        setBusy(true);
+        setFailure("");
+        try {
+            await personalRequest(userId, authKey, "/tracking-services/trakt", {
+                method: "DELETE",
+            });
+            setConfirm(false);
+            setRetry((value) => value + 1);
+        } catch (reason) {
+            setFailure(readErrorMessage(reason, "Could not disconnect this service."));
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <>
+            <Card padding="lg">
+                <div className="mb-5 flex items-start gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <LinkIcon aria-hidden="true" className="h-5 w-5" />
+                    </span>
+                    <div>
+                        <h3 className="font-semibold text-base text-default">Tracking services</h3>
+                        <p className="mt-1 text-muted text-sm">
+                            Bring playback activity, saved progress, and upcoming episodes into this
+                            profile.
+                        </p>
+                    </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-default bg-bg p-4">
+                    <div className="min-w-0">
+                        <h4 className="font-semibold text-default">Trakt</h4>
+                        <p className="mt-1 text-muted text-sm">
+                            {service?.connected
+                                ? `Connected as ${service.username}`
+                                : "Not connected"}
+                        </p>
+                    </div>
+                    {service?.connected ? (
+                        <Button
+                            disabled={busy}
+                            onClick={() => setConfirm(true)}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Disconnect
+                        </Button>
+                    ) : (
+                        <Button
+                            disabled={!service?.configured || busy}
+                            isLoading={busy}
+                            onClick={() => void connect()}
+                            size="sm"
+                        >
+                            Connect
+                        </Button>
+                    )}
+                </div>
+                <p className="mt-3 text-muted text-sm">
+                    Use the same Trakt account that you connect in Nuvio for{" "}
+                    {userInfo?.username || "this profile"}. Activity from that Trakt account belongs
+                    only to this SlickSync profile.
+                </p>
+                {!service?.connected && (
+                    <div className="mt-4 rounded-xl border border-default bg-surface-hover p-4 text-muted text-sm">
+                        <p className="font-medium text-default">Uses one Trakt connection slot</p>
+                        <p className="mt-1">
+                            Free Trakt accounts currently allow{" "}
+                            <strong>2 Community App connections</strong>. Connecting SlickSync uses
+                            one of those slots, in addition to any slot used by your player.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+                            <a
+                                className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                                href="https://github.com/trakt/trakt-api/discussions/943"
+                                rel="noreferrer"
+                                target="_blank"
+                            >
+                                Trakt’s limit change
+                                <ArrowTopRightOnSquareIcon
+                                    aria-hidden="true"
+                                    className="h-3.5 w-3.5"
+                                />
+                            </a>
+                            <a
+                                className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                                href="https://app.trakt.tv/settings/apps/connected"
+                                rel="noreferrer"
+                                target="_blank"
+                            >
+                                Check your connections
+                                <ArrowTopRightOnSquareIcon
+                                    aria-hidden="true"
+                                    className="h-3.5 w-3.5"
+                                />
+                            </a>
+                        </div>
+                    </div>
+                )}
+                {service && !service.configured && !service.connected && (
+                    <p className="mt-3 text-muted text-sm">
+                        Your administrator needs to configure the Trakt tracking app before you can
+                        connect.
+                    </p>
+                )}
+                {service?.connected && (
+                    <div className="mt-4 space-y-2 text-sm">
+                        {features?.userId === userId ? (
+                            features.items.map((feature) => (
+                                <div
+                                    className="flex flex-wrap justify-between gap-2"
+                                    key={feature.key}
+                                >
+                                    <span className="text-muted">{feature.label}</span>
+                                    <span
+                                        className={
+                                            feature.available ? "text-success" : "text-muted"
+                                        }
+                                    >
+                                        {feature.available ? "Ready" : feature.error}
+                                    </span>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-muted" role="status">
+                                Checking tracking sources…
+                            </p>
+                        )}
+                    </div>
+                )}
+                {service?.connected && (
+                    <p className="mt-3 text-subtle text-xs">
+                        SlickSync reads Trakt activity. It does not write playback or watched status
+                        back to Trakt or Nuvio. Tracker availability and the player’s scrobbling
+                        determine how current the data is.
+                    </p>
+                )}
+                {failure && (
+                    <div className="mt-3" role="alert">
+                        <p className="text-error text-sm">{failure}</p>
+                        <Button
+                            className="mt-2"
+                            onClick={() => setRetry((value) => value + 1)}
+                            size="sm"
+                            variant="ghost"
+                        >
+                            Try again
+                        </Button>
+                    </div>
+                )}
+            </Card>
+            <ConfirmModal
+                confirmText="Disconnect"
+                description="This stops SlickSync reading this profile’s Trakt data. Existing Nuvio history stays here. Remove SlickSync from Trakt’s Connected Apps as well to revoke access and free its connection slot."
+                isLoading={busy}
+                isOpen={confirm}
+                onClose={() => setConfirm(false)}
+                onConfirm={() => void disconnect()}
+                title="Disconnect tracking service?"
+                variant="danger"
+            />
+        </>
+    );
+}
