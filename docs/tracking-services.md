@@ -68,3 +68,8 @@ excluded. Trakt's artwork is used directly, with metadata fallback when missing.
 Results are cached for five minutes, and the personal row is no longer capped at
 12 items. Paused playback takes priority over a computed next episode for the same
 title; Nuvio and Trakt retain the newest entry per title. Local dismissals still apply.
+
+Tracking settings include a per-profile **Use as source** picker listing connected
+services. Trakt is the only available source currently and is selected by default
+when connected. The saved source is retained separately from display preference
+changes. Disconnecting the service leaves no active source until it is reconnected.

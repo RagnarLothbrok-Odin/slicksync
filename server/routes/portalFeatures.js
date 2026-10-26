@@ -9,6 +9,19 @@ const PREFERENCES = {
     trailerSound: false,
 };
 
+async function storedPersonalPreferences(prisma, userId) {
+    const user = await prisma.user.findUnique({
+        select: { portalPreferences: true },
+        where: { id: userId },
+    });
+    try {
+        const value = JSON.parse(user?.portalPreferences || "{}");
+        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    } catch {
+        return {};
+    }
+}
+
 module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET }) => {
     const router = express.Router();
     // Resolve the credential before every operation, including uploaded files.
@@ -42,7 +55,35 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             if (req.person.providerType !== "nuvio") {
                 return res.json({ services: [], supported: false });
             }
-            res.json({ services: [await tracking.status(prisma, req.person)], supported: true });
+            const service = await tracking.status(prisma, req.person);
+            const preferences = await storedPersonalPreferences(prisma, req.person.id);
+            res.json({
+                services: [service],
+                source: service.connected ? preferences.trackingSource || "trakt" : null,
+                supported: true,
+            });
+        })
+    );
+    router.patch(
+        "/tracking-services/source",
+        handle(async (req, res) => {
+            if (req.person.providerType !== "nuvio" || req.body.provider !== "trakt") {
+                return res.status(400).json({ error: "Choose an available tracking service." });
+            }
+            const service = await tracking.status(prisma, req.person);
+            if (!service.connected) {
+                return res
+                    .status(400)
+                    .json({ error: "Connect this tracking service before using it as a source." });
+            }
+            const preferences = await storedPersonalPreferences(prisma, req.person.id);
+            await prisma.user.update({
+                data: {
+                    portalPreferences: JSON.stringify({ ...preferences, trackingSource: "trakt" }),
+                },
+                where: { id: req.person.id },
+            });
+            res.json({ source: "trakt" });
         })
     );
     router.get(
@@ -110,7 +151,9 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             res.json({
                 ...PREFERENCES,
                 posterRatings: settings.enablePosterRatings === true,
-                ...stored,
+                ...Object.fromEntries(
+                    Object.entries(stored).filter(([key]) => Object.hasOwn(PREFERENCES, key))
+                ),
             });
         })
     );
@@ -131,8 +174,9 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             if (Object.keys(patch).length !== Object.keys(PREFERENCES).length) {
                 return res.status(400).json({ error: "Send all display preferences" });
             }
+            const stored = await storedPersonalPreferences(prisma, req.person.id);
             await prisma.user.update({
-                data: { portalPreferences: JSON.stringify(patch) },
+                data: { portalPreferences: JSON.stringify({ ...stored, ...patch }) },
                 where: { id: req.person.id },
             });
             res.json(patch);
