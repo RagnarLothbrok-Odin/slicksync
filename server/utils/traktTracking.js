@@ -345,10 +345,10 @@ function createTraktTracking({
             if (!linked) {
                 return { connected: false, data: null };
             }
-            const { row, credentials } = linked;
+            const { credentials } = linked;
             const endpoint =
                 resource === "watching"
-                    ? `/users/${encodeURIComponent(row.externalUserId)}/watching?extended=full`
+                    ? "/users/me/watching?extended=full"
                     : resource === "progress"
                       ? "/sync/playback?limit=100&extended=full"
                       : `/calendars/my/shows/${new Date().toISOString().slice(0, 10)}/33?extended=full`;

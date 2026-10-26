@@ -214,6 +214,10 @@ test("read coalesces concurrent requests and respects upstream retry-after", asy
         fixture.tracking.read(fixture.prisma, person, "watching", 30_000),
     ]);
     assert.equal(fixture.calls.filter((call) => call.path.endsWith("/watching")).length, 1);
+    assert.equal(
+        fixture.calls.find((call) => call.path.endsWith("/watching")).path,
+        "/users/me/watching"
+    );
     limited = true;
     await assert.rejects(
         () => fixture.tracking.read(fixture.prisma, person, "progress", 60_000),
