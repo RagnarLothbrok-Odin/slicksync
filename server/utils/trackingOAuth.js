@@ -248,21 +248,45 @@ function createTrackingOAuth(
             },
             method: "POST",
         });
+        const tokenExpiresIn = Number(tokens?.expires_in);
+        const scopes = Array.isArray(tokens?.scope)
+            ? tokens.scope.filter((scope) => typeof scope === "string")
+            : typeof tokens?.scope === "string"
+              ? tokens.scope.split(/\s+/)
+              : [];
+        const validScope =
+            (tokens?.scope === undefined && config.scopeOptional) ||
+            (config.acceptedScopes || [config.scope]).some((scope) => scopes.includes(scope));
         if (
             !(
                 tokens?.access_token &&
                 tokens.refresh_token &&
-                Number.isFinite(tokens.expires_in) &&
-                tokens.expires_in > 0 &&
-                tokens.scope?.split(" ").includes(config.scope)
+                Number.isFinite(tokenExpiresIn) &&
+                tokenExpiresIn > 0 &&
+                (validScope || config.verifyAccessPath)
             )
         ) {
+            console.error("[tracking] Incomplete OAuth token response", {
+                hasAccessToken: !!tokens?.access_token,
+                hasRefreshToken: !!tokens?.refresh_token,
+                provider: PROVIDER,
+                validLifetime: Number.isFinite(tokenExpiresIn) && tokenExpiresIn > 0,
+                validScope,
+            });
             throw error(`${name} returned an incomplete sign-in response.`, 502);
         }
         const profile = await request(config.profilePath, {
             client: pending.client,
             token: tokens.access_token,
         });
+        // Some providers return nonstandard scope descriptions. Verify the
+        // actual read permission with a protected resource before saving a link.
+        if (config.verifyAccessPath) {
+            await request(config.verifyAccessPath, {
+                client: pending.client,
+                token: tokens.access_token,
+            });
+        }
         const externalId = config.identify(profile);
         if (typeof externalId !== "string" || !externalId) {
             throw error(`Could not identify the ${name} account.`, 502);
@@ -284,7 +308,7 @@ function createTrackingOAuth(
         const credentials = {
             accessToken: tokens.access_token,
             client: pending.client,
-            expiresAt: Date.now() + tokens.expires_in * 1000,
+            expiresAt: Date.now() + tokenExpiresIn * 1000,
             refreshToken: tokens.refresh_token,
         };
         await prisma.trackingConnection.update({

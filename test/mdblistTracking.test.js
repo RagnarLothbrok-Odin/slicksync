@@ -89,6 +89,9 @@ function setup(override) {
         if (path === "/oauth/revoke_token/") {
             return new Response(null, { status: 200 });
         }
+        if (path === "/sync/last_activities") {
+            return Response.json({});
+        }
         if (path === "/sync/playback") {
             return Response.json([]);
         }
@@ -309,4 +312,54 @@ test("server registration requires a secret before starting sign-in", async () =
     } finally {
         process.env.MDBLIST_TRACKING_CLIENT_SECRET = previous;
     }
+});
+
+test("MDBList may omit an unchanged scope in a successful OAuth response", async () => {
+    const fixture = setup((path) =>
+        path === "/oauth/token/"
+            ? Response.json({
+                  access_token: "private-access",
+                  expires_in: "2592000",
+                  refresh_token: "private-refresh",
+              })
+            : null
+    );
+    await linked(fixture);
+    assert.equal((await fixture.tracking.status(fixture.prisma, person)).connected, true);
+});
+
+test("MDBList read-only and list-form scopes are sufficient for this read integration", async () => {
+    for (const scope of ["read", ["write"], ["read", "write"]]) {
+        const fixture = setup((path) =>
+            path === "/oauth/token/"
+                ? Response.json({
+                      access_token: "private-access",
+                      expires_in: 2_592_000,
+                      refresh_token: "private-refresh",
+                      scope,
+                  })
+                : null
+        );
+        await linked(fixture);
+        assert.equal((await fixture.tracking.status(fixture.prisma, person)).connected, true);
+    }
+});
+
+test("MDBList verifies actual tracking permission before saving a token with an unfamiliar scope", async () => {
+    const fixture = setup((path) => {
+        if (path === "/oauth/token/") {
+            return Response.json({
+                access_token: "private-access",
+                expires_in: 2_592_000,
+                refresh_token: "private-refresh",
+                scope: ["custom"],
+            });
+        }
+        if (path === "/sync/last_activities") {
+            return new Response(null, { status: 403 });
+        }
+        return null;
+    });
+    await assert.rejects(() => linked(fixture), /does not allow/);
+    assert.equal((await fixture.tracking.status(fixture.prisma, person)).connected, false);
 });

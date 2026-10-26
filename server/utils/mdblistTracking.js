@@ -3,6 +3,7 @@ const { createTrackingOAuth } = require("./trackingOAuth");
 function createMdblistTracking(options) {
     return createTrackingOAuth(
         {
+            acceptedScopes: ["read", "write"],
             api: "https://api.mdblist.com",
             authorizeUrl: "https://mdblist.com/oauth/authorize/",
             identify: (profile) =>
@@ -18,8 +19,10 @@ function createMdblistTracking(options) {
             // MDBList currently exposes only this broad OAuth scope. Media reads
             // remain GET-only, even though the consent grant also permits writes.
             scope: "write",
+            scopeOptional: true,
             tokenPath: "/oauth/token/",
             username: (profile) => profile.username || profile.name,
+            verifyAccessPath: "/sync/last_activities",
         },
         options
     );
