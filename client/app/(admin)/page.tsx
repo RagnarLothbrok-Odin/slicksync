@@ -56,6 +56,7 @@ import { readErrorMessage } from "@/lib/errors";
 import { useIsTV } from "@/lib/hooks/useIsTV";
 import { useLastKnown } from "@/lib/hooks/useLastKnown";
 import { useLayoutMode } from "@/lib/layout-mode";
+import { playbackPresentation } from "@/lib/playback";
 
 // The chart's library (recharts) is loaded on demand - see the component
 // file for why it is not in the dashboard's first-load bundle.
@@ -316,27 +317,6 @@ export default function DashboardPage() {
         return () => clearInterval(id);
     }, [hasLivePlayback]);
 
-    // Calculate live watch time
-    const _liveWatchTimeMinutes = useMemo(() => {
-        if (!metricsData) {
-            return 0;
-        }
-
-        let totalSeconds = (metricsData.summary?.totalWatchTimeHours || 0) * 3600;
-
-        // Add live seconds from active sessions
-        if (metricsData.nowPlaying && metricsData.nowPlaying.length > 0) {
-            metricsData.nowPlaying.forEach((np) => {
-                const startMs = np.watchedAtTimestamp || new Date(np.watchedAt).getTime();
-                if (startMs) {
-                    totalSeconds += Math.max(0, (nowTick - startMs) / 1000);
-                }
-            });
-        }
-
-        return Math.round(totalSeconds / 60);
-    }, [metricsData, nowTick]);
-
     // Instant navigation: last-known metrics/addons shown immediately while
     // refreshData below refreshes them - see useLastKnown's own comment.
     // Only metrics gates the spinner: it's the payload the whole page is
@@ -449,7 +429,11 @@ export default function DashboardPage() {
     // than one nowPlaying entry (e.g. the same title picked up under both
     // their Stremio and Nuvio profiles).
     const activeUsers = metricsData?.nowPlaying
-        ? new Set(metricsData.nowPlaying.map((np) => np.user.id)).size
+        ? new Set(
+              metricsData.nowPlaying
+                  .filter((np) => playbackPresentation(np.playback).playing)
+                  .map((np) => np.user.id)
+          ).size
         : 0;
     const ringCircumference = 2 * Math.PI * 28;
     const ringRatio = stats.totalUsers > 0 ? Math.min(1, activeUsers / stats.totalUsers) : 0;
@@ -518,13 +502,15 @@ export default function DashboardPage() {
 
         // Add live items first
         if (metricsData.nowPlaying) {
-            metricsData.nowPlaying.forEach((np) => {
-                items.push({
-                    ...np,
-                    isLive: true,
-                    timestamp: new Date(np.watchedAt).getTime(),
+            metricsData.nowPlaying
+                .filter((np) => playbackPresentation(np.playback).playing)
+                .forEach((np) => {
+                    items.push({
+                        ...np,
+                        isLive: true,
+                        timestamp: new Date(np.watchedAt).getTime(),
+                    });
                 });
-            });
         }
 
         // Add recently completed sessions
@@ -804,11 +790,11 @@ export default function DashboardPage() {
                                 <NebulaGlassStripe />
                                 <div className="mb-4 flex items-center justify-between">
                                     <h3 className="font-display font-semibold text-base text-default">
-                                        Now Playing
+                                        Playback Activity
                                     </h3>
                                     <div className="flex items-center gap-1.5 text-muted text-xs">
                                         <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-                                        <span>Live</span>
+                                        <span>Auto-updating</span>
                                     </div>
                                 </div>
                                 <NowPlayingSection
@@ -1235,11 +1221,11 @@ export default function DashboardPage() {
                         <Card padding="lg">
                             <div className="mb-4 flex items-center justify-between">
                                 <h3 className="font-display font-semibold text-base text-default">
-                                    Now Playing
+                                    Playback Activity
                                 </h3>
                                 <div className="flex items-center gap-1.5 text-muted text-xs">
                                     <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-                                    <span>Live</span>
+                                    <span>Auto-updating</span>
                                 </div>
                             </div>
                             <NowPlayingSection

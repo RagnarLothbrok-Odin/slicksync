@@ -3,6 +3,7 @@
 // falls back to Stremio API when cache is missing.
 
 const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
+const { checkpointSavedAt } = require("./playbackEvidence");
 const { getCachedLibrary, setCachedLibrary: _setCachedLibrary } = require("./libraryCache");
 const { fetchKitsuMetadata } = require("./kitsuUtils");
 const { enrichPostersFromCinemeta } = require("./libraryHelpers");
@@ -376,19 +377,10 @@ const ACTIVITY_TAKE_DEEP = 100_000;
  */
 async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
     const nowPlaying = [];
-    // "Now Playing" is seeded from BOTH signals, because neither covers
-    // everything on its own:
-    //   - The AIOStreams proxy sees streams it carries open/close in real time
-    //     (accurate liveness), but never sees content routed outside it - e.g.
-    //     usenet via newznab, which bypasses the proxy entirely.
-    //   - Native tracking sees anything the provider records, but only learns of
-    //     a session at the provider's checkpoint (at stop, for Nuvio) and then
-    //     holds it "active" for its whole freshness window (~15 min).
-    // So native is seeded here, and mergeProxyNowPlaying below reconciles them:
-    // the proxy wins for content it carries (including suppressing the stale
-    // native echo of a stream it knows already ended - which is what made an
-    // exited stream linger), while native survives untouched for content the
-    // proxy never carried. Native remains the sole source of history/duration.
+    // Keep the evidence separate: library checkpoints establish recent
+    // activity, proxy connections establish streaming activity, and player
+    // reports establish playback state. Direct reports take priority when
+    // sources describe the same video; none turns a checkpoint into a pause.
     const userMap = new Map(activeUsers.map((u) => [u.id, u]));
 
     let activeSessionsFromDb = [];
@@ -407,6 +399,7 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
         );
     }
 
+    const checkpointLibraries = new Map();
     for (const session of activeSessionsFromDb) {
         const user = userMap.get(session.userId);
         if (!user) {
@@ -428,6 +421,11 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             continue;
         }
 
+        if (!checkpointLibraries.has(user.id)) {
+            checkpointLibraries.set(user.id, getCachedLibrary(accountIdValue || "default", user));
+        }
+        const savedAt = checkpointSavedAt(session, checkpointLibraries.get(user.id));
+
         nowPlaying.push({
             item: {
                 episode: session.episode,
@@ -444,6 +442,15 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             // surface as-is, unlike overallTimeWatched which needs two
             // observations to diff (see docs/runtime-behavior.md).
             lastPosition: session.lastPosition ?? null,
+            playback: {
+                evidence: "history",
+                // This is the provider's checkpoint time, not the poll time.
+                observedAt: savedAt,
+                position: "checkpoint",
+                positionUpdatedAt: savedAt,
+                state: "unknown",
+            },
+            source: "native",
             totalDuration: session.totalDuration ?? null,
             user: {
                 avatarUrl: user.avatarUrl || null,
@@ -496,8 +503,17 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             if (!user) {
                 continue;
             }
-            if (nowPlaying.some((np) => np.user.id === v.userId && np.item.id === v.itemId)) {
-                continue;
+            // Player reports outrank library checkpoints. Replace only the
+            // matching video; another device may be playing a different episode.
+            for (let i = nowPlaying.length - 1; i >= 0; i--) {
+                const np = nowPlaying[i];
+                if (
+                    np.user.id === v.userId &&
+                    np.item.id === v.itemId &&
+                    (!(np.videoId && v.videoId) || np.videoId === v.videoId)
+                ) {
+                    nowPlaying.splice(i, 1);
+                }
             }
             nowPlaying.push({
                 item: {
@@ -510,6 +526,13 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
                     year: null,
                 },
                 lastPosition: v.positionMs,
+                playback: {
+                    evidence: v.source === "jellyfin" ? "player" : "event",
+                    observedAt: v.observedAt || null,
+                    position: v.paused ? "reported" : "estimated",
+                    positionUpdatedAt: v.observedAt || null,
+                    state: v.paused ? "paused" : "playing",
+                },
                 source: v.source || "aiostreams",
                 totalDuration: v.durationMs,
                 user: {

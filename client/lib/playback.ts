@@ -1,0 +1,66 @@
+/** Playback state is only definite when a player or playback event reports it. */
+export interface PlaybackEvidence {
+    evidence: "player" | "event" | "proxy" | "history";
+    observedAt: string | null;
+    position: "reported" | "estimated" | "checkpoint";
+    /** Provider save time for this position, independent of proxy presence checks. */
+    positionUpdatedAt?: string | null;
+    state: "playing" | "paused" | "unknown";
+}
+
+/** Shared wording keeps admin and personal cards equally honest about estimates. */
+export function playbackPresentation(playback?: PlaybackEvidence | null) {
+    const direct = playback?.evidence === "player" || playback?.evidence === "event";
+    const playing = direct && playback.state === "playing";
+    const paused = direct && playback.state === "paused";
+    return {
+        playing,
+        positionLabel: paused
+            ? "Paused at"
+            : playing && playback?.position === "estimated"
+              ? "Estimated position"
+              : "Last known position",
+        status: paused
+            ? "Paused"
+            : playing
+              ? "Playing now"
+              : playback?.evidence === "proxy"
+                ? "Stream detected"
+                : "Recently active",
+    };
+}
+
+/** Save times and presence checks describe different facts and stay separate. */
+export function playbackUpdates(playback: PlaybackEvidence | null | undefined, now: number) {
+    const updates: { label: string; at: string; age: string }[] = [];
+    const add = (label: string, value?: string | null) => {
+        const timestamp = value ? Date.parse(value) : Number.NaN;
+        if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > now + 30_000) {
+            return;
+        }
+        const minutes = Math.floor(Math.max(0, now - timestamp) / 60_000);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+        const age =
+            minutes < 1
+                ? "just now"
+                : minutes < 60
+                  ? `${minutes} min ago`
+                  : hours < 24
+                    ? `${hours} hr ago`
+                    : `${days} ${days === 1 ? "day" : "days"} ago`;
+        updates.push({ age, at: new Date(timestamp).toISOString(), label });
+    };
+    if (playback?.evidence === "history") {
+        add("Progress saved", playback.positionUpdatedAt || playback.observedAt);
+    } else if (playback?.evidence === "proxy") {
+        add("Stream checked", playback.observedAt);
+        add("Progress saved", playback.positionUpdatedAt);
+    } else if (playback) {
+        add(
+            playback.evidence === "player" ? "Player checked" : "Playback reported",
+            playback.observedAt
+        );
+    }
+    return updates;
+}

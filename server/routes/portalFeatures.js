@@ -155,6 +155,47 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
         })
     );
     router.get(
+        "/now-playing",
+        handle(async (req, res) => {
+            // Attribute streams against the whole household first, then return
+            // only this authenticated profile and no household identity fields.
+            const rows = await require("../utils/metricsBuilder").liveNowPlaying(
+                prisma,
+                req.person.accountId
+            );
+            res.set("Cache-Control", "no-store");
+            res.json({
+                items: rows
+                    .filter((row) => row.user?.id === req.person.id)
+                    .map((row) => ({
+                        elapsedFrozen: row.elapsedFrozen === true,
+                        elapsedSeconds: row.elapsedSeconds ?? null,
+                        item: {
+                            episode: row.item.episode,
+                            id: row.item.id,
+                            name: row.item.name,
+                            poster: row.item.poster || null,
+                            season: row.item.season,
+                            type: row.item.type,
+                        },
+                        lastPosition: row.lastPosition ?? null,
+                        playback: row.playback
+                            ? {
+                                  evidence: row.playback.evidence,
+                                  observedAt: row.playback.observedAt,
+                                  position: row.playback.position,
+                                  positionUpdatedAt: row.playback.positionUpdatedAt || null,
+                                  state: row.playback.state,
+                              }
+                            : null,
+                        startTime: row.watchedAt,
+                        totalDuration: row.totalDuration ?? null,
+                        videoId: row.videoId,
+                    })),
+            });
+        })
+    );
+    router.get(
         "/continue-watching",
         handle(async (req, res) => {
             const items = await require("../utils/continueWatching").getContinueWatching(
