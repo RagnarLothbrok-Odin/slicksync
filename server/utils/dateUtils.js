@@ -238,6 +238,24 @@ function zonedWallTimeToUtc(year, month, day, hour, minute, second, timeZone) {
     return new Date(guess + (guess - asIfUtc));
 }
 
+// Calendar-day bounds use timezone conversion at each midnight, including DST.
+function dayBoundsInTimezone(date = new Date(), timeZone = DEFAULT_TIMEZONE) {
+    const [year, month, day] = getAccountDateString(date, timeZone).split("-").map(Number);
+    const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
+    return {
+        end: zonedWallTimeToUtc(
+            tomorrow.getUTCFullYear(),
+            tomorrow.getUTCMonth() + 1,
+            tomorrow.getUTCDate(),
+            0,
+            0,
+            0,
+            timeZone
+        ),
+        start: zonedWallTimeToUtc(year, month, day, 0, 0, 0, timeZone),
+    };
+}
+
 /**
  * Start (inclusive) and end (exclusive) UTC instants for calendar month
  * `yearMonth` ("YYYY-MM") as experienced in `timeZone` - for querying
@@ -320,6 +338,7 @@ function createdAtFromCuid(id) {
 module.exports = {
     createdAtFromCuid,
     DEFAULT_TIMEZONE,
+    dayBoundsInTimezone,
     getAccountDateString,
     getAccountDayNumber,
     getAccountMonthString,

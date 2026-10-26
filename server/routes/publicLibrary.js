@@ -3123,9 +3123,8 @@ module.exports = ({
                 return res.status(404).json({ error: "User not found or inactive" });
             }
 
-            // Auth gate here is identity-check only (the actual data below is
-            // 100% SlickSync's own DB - WatchActivity, library cache - never a
-            // live provider call). Routed through the shared verifyProviderIdentity
+            // Verify the caller before reading either local activity or linked
+            // tracking history. Routed through the shared verifyProviderIdentity
             // (fixed to actually check the caller's own credential for Nuvio too,
             // not just the target's own stored token) instead of a hand-rolled
             // copy of the same logic.
@@ -3133,6 +3132,32 @@ module.exports = ({
                 await verifyProviderIdentity(user, authKey, req);
             } catch (e) {
                 return res.status(401).json({ error: publicMessage(e, "Invalid auth key") });
+            }
+
+            let trackingWarning;
+            if (req.query.home === "true") {
+                try {
+                    const tracked = await require("../utils/traktTracking").read(
+                        prisma,
+                        user,
+                        "home",
+                        300_000
+                    );
+                    if (tracked.connected) {
+                        return res.json({
+                            ...tracked.data,
+                            user: {
+                                colorIndex: user.colorIndex,
+                                email: user.email,
+                                id: user.id,
+                                username: user.username,
+                            },
+                        });
+                    }
+                } catch {
+                    trackingWarning =
+                        "Trakt history could not be loaded completely. Showing SlickSync activity instead.";
+                }
             }
 
             // Fetch watch activity for this user (using WatchActivity table like old slicksync)
@@ -3425,18 +3450,18 @@ module.exports = ({
                 item.totalDuration += a.watchTimeSeconds || 0;
             });
 
-            const mostWatched =
-                [...itemCounts.entries()]
-                    .sort((a, b) => b[1].totalDuration - a[1].totalDuration)
-                    .slice(0, 1)
-                    .map(([id, data]) => ({
-                        count: data.count,
-                        id,
-                        name: data.name,
-                        poster: data.poster,
-                        totalDuration: data.totalDuration,
-                        type: data.type,
-                    }))[0] || null;
+            const mostWatchedItems = [...itemCounts.entries()]
+                .sort((a, b) => b[1].totalDuration - a[1].totalDuration)
+                .slice(0, 5)
+                .map(([id, data]) => ({
+                    count: data.count,
+                    id,
+                    name: data.name,
+                    poster: data.poster,
+                    totalDuration: data.totalDuration,
+                    type: data.type,
+                }));
+            const mostWatched = mostWatchedItems[0] || null;
 
             // Binge watches (3+ episodes of same series in one day)
             const bingeWatches = [];
@@ -3521,8 +3546,11 @@ module.exports = ({
                 bingeWatches: bingeWatches.slice(0, 5),
                 episodeHistory: episodeItems,
                 mostWatched,
+                mostWatchedItems,
                 nowPlaying,
                 sessions: activityItems,
+                source: "slicksync",
+                sourceNote: trackingWarning,
                 stats: {
                     avgWatchTimeHours: avgWatchTimeSeconds / 3600,
                     avgWatchTimeSeconds,

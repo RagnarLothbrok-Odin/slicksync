@@ -69,7 +69,7 @@ function createTraktTracking({
         }
         throw error("Your administrator has not configured the Trakt tracking app yet.", 503);
     }
-    async function request(path, { token, client, body, method = "GET" } = {}) {
+    async function request(path, { token, client, body, method = "GET", pagination = false } = {}) {
         const response = await transport(`${API}${path}`, {
             headers: {
                 "content-type": "application/json",
@@ -83,16 +83,21 @@ function createTraktTracking({
             ...(body ? { body: JSON.stringify(body) } : {}),
         });
         if (!response.ok) {
+            const edgeBlocked =
+                response.status === 403 &&
+                response.headers.get("content-type")?.includes("text/html");
             const failure = error(
-                response.status === 429
-                    ? "Trakt is rate limiting requests. Please try again later."
-                    : response.status === 420
-                      ? "Your Trakt account limit has been reached. Review your connected apps and account limits."
-                      : response.status === 401
-                        ? "Reconnect your Trakt account."
-                        : response.status === 403
-                          ? "Trakt does not allow this feature for this app or account."
-                          : "Trakt is temporarily unavailable.",
+                edgeBlocked
+                    ? "Trakt’s network protection blocked this server request. Please try again later."
+                    : response.status === 429
+                      ? "Trakt is rate limiting requests. Please try again later."
+                      : response.status === 420
+                        ? "Your Trakt account limit has been reached. Review your connected apps and account limits."
+                        : response.status === 401
+                          ? "Reconnect your Trakt account."
+                          : response.status === 403
+                            ? "Trakt does not allow this feature for this app or account."
+                            : "Trakt is temporarily unavailable.",
                 response.status === 401 ? 401 : response.status === 403 ? 403 : 503
             );
             failure.providerStatus = response.status;
@@ -105,7 +110,15 @@ function createTraktTracking({
         if (response.status === 204) {
             return null;
         }
-        return response.json();
+        const data = await response.json();
+        return pagination
+            ? {
+                  data,
+                  pages: response.headers.has("x-pagination-page-count")
+                      ? Number(response.headers.get("x-pagination-page-count"))
+                      : null,
+              }
+            : data;
     }
     async function status(prisma, person) {
         requireNuvio(person);
@@ -340,10 +353,17 @@ function createTraktTracking({
                       ? "/sync/playback?limit=100&extended=full"
                       : `/calendars/my/shows/${new Date().toISOString().slice(0, 10)}/33?extended=full`;
             try {
-                const data = await request(endpoint, {
-                    client: credentials.client,
-                    token: credentials.accessToken,
-                });
+                const options = { client: credentials.client, token: credentials.accessToken };
+                const data =
+                    resource === "home"
+                        ? await require("./traktHome").loadHomeHistory(
+                              (path) => request(path, { ...options, pagination: true }),
+                              await require("./dateUtils").resolveAccountTimezone(
+                                  prisma,
+                                  person.accountId
+                              )
+                          )
+                        : await request(endpoint, options);
                 if ((epochs.get(id) || 0) !== epoch) {
                     throw error("The tracking connection changed. Refresh the page.", 409);
                 }
