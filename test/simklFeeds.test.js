@@ -92,3 +92,36 @@ test("Simkl totals use the aggregate endpoint and cache explicit Home reads with
     await feeds.homeStats({}, person);
     assert.deepEqual(calls, ["/users/42/stats"]);
 });
+
+test("Simkl readiness checks isolate calendar failures and never request expensive statistics", async () => {
+    const calls = [];
+    const feeds = createSimklFeeds({
+        client: {
+            withAccess: (_prisma, _person, load) =>
+                load(
+                    async (path) => {
+                        calls.push(path);
+                        if (path === "/sync/activities") {
+                            return { all: null };
+                        }
+                        if (path.startsWith("/sync/playback")) {
+                            return [];
+                        }
+                        if (path.startsWith("/sync/all-items/")) {
+                            return {};
+                        }
+                        throw new Error("Unexpected resource");
+                    },
+                    "42",
+                    "2026-10-26T11:00:00Z"
+                ),
+        },
+        fetch: async () => new Response("private upstream message", { status: 503 }),
+    });
+    const features = await feeds.check({}, person);
+    assert.equal(features.find((row) => row.key === "progress").available, true);
+    assert.equal(features.find((row) => row.key === "upNext").available, true);
+    assert.equal(features.find((row) => row.key === "calendar").available, false);
+    assert.ok(calls.every((path) => !path.includes("/stats")));
+    assert.ok(!JSON.stringify(features).includes("private upstream message"));
+});

@@ -342,3 +342,32 @@ test("native source bypasses cached Trakt feeds without disconnecting the tracke
         true
     );
 });
+
+test("readiness checks validate response shapes and use aggregate totals without loading history", async () => {
+    const fixture = setup((path) => {
+        if (path === "/users/me/stats") {
+            return Response.json({
+                episodes: { watched: 12 },
+                movies: { watched: 0 },
+                shows: { watched: 2 },
+            });
+        }
+        if (path === "/sync/playback") {
+            return Response.json({ unexpected: true });
+        }
+        if (path.startsWith("/calendars/")) {
+            return Response.json([]);
+        }
+        if (path === "/sync/progress/up_next_nitro") {
+            return Response.json([]);
+        }
+        return null;
+    });
+    await linked(fixture);
+    const features = await fixture.tracking.check(fixture.prisma, person);
+    assert.equal(features.find((row) => row.key === "statistics").available, true);
+    assert.equal(features.find((row) => row.key === "watching").available, true);
+    assert.equal(features.find((row) => row.key === "progress").available, false);
+    assert.equal(features.find((row) => row.key === "calendar").available, true);
+    assert.ok(fixture.calls.every((call) => !call.path.includes("/sync/history")));
+});

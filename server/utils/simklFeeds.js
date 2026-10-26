@@ -240,8 +240,33 @@ function createSimklFeeds({
             }
         });
     }
+    async function check(prisma, person) {
+        const resources = [
+            { key: "progress", label: "Continue Watching" },
+            { key: "upNext", label: "Next episodes" },
+            { key: "calendar", label: "TV calendar" },
+        ];
+        return Promise.all(
+            resources.map(async (resource) => {
+                try {
+                    await adapter.read(prisma, person, resource.key);
+                    return { ...resource, available: true, error: null };
+                } catch (failure) {
+                    return {
+                        ...resource,
+                        available: false,
+                        error:
+                            failure.providerStatus === 403
+                                ? "Not available for this account."
+                                : "Could not refresh this Simkl source. Please try again.",
+                    };
+                }
+            })
+        );
+    }
     return {
         calendar: feeds.calendar,
+        check,
         continueWatching: feeds.continueWatching,
         homeStats,
         snapshot,

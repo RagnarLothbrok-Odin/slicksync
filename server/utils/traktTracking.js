@@ -394,9 +394,11 @@ function createTraktTracking({
             const endpoint =
                 resource === "watching"
                     ? "/users/me/watching?extended=full"
-                    : resource === "progress"
-                      ? "/sync/playback?limit=100&extended=full"
-                      : `/calendars/my/shows/${new Date().toISOString().slice(0, 10)}/33?extended=full`;
+                    : resource === "statistics"
+                      ? "/users/me/stats"
+                      : resource === "progress"
+                        ? "/sync/playback?limit=100&extended=full"
+                        : `/calendars/my/shows/${new Date().toISOString().slice(0, 10)}/33?extended=full`;
             try {
                 const options = { client: credentials.client, token: credentials.accessToken };
                 const data =
@@ -445,6 +447,7 @@ function createTraktTracking({
             { key: "progress", label: "Continue Watching", ttl: 60_000 },
             { key: "upNext", label: "Next episodes", ttl: 300_000 },
             { key: "calendar", label: "Calendar", ttl: 300_000 },
+            { key: "statistics", label: "All-time totals", ttl: 300_000 },
         ];
         return Promise.all(
             resources.map(async (resource) => {
@@ -452,9 +455,26 @@ function createTraktTracking({
                     const result = await read(prisma, person, resource.key, resource.ttl, {
                         ignoreSource: true,
                     });
+                    const valid =
+                        resource.key === "watching"
+                            ? result.data === null ||
+                              (typeof result.data === "object" &&
+                                  !Array.isArray(result.data) &&
+                                  !!(result.data.show || result.data.movie))
+                            : resource.key === "statistics"
+                              ? !!(
+                                    result.data?.movies &&
+                                    result.data?.shows &&
+                                    result.data?.episodes
+                                )
+                              : Array.isArray(result.data);
                     return {
-                        available: result.connected,
-                        error: result.connected ? null : "Connect a tracking service first.",
+                        available: result.connected && valid,
+                        error: result.connected
+                            ? valid
+                                ? null
+                                : "Invalid response. Try again."
+                            : "Connect a tracking service first.",
                         key: resource.key,
                         label: resource.label,
                     };

@@ -131,6 +131,13 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
         })
     );
     const simkl = require("../utils/simklTracking");
+    router.get(
+        "/tracking-services/simkl/check",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json({ features: await require("../utils/simklFeeds").check(prisma, req.person) });
+        })
+    );
     router.post(
         "/tracking-services/simkl/authorize",
         handle(async (req, res) => {
