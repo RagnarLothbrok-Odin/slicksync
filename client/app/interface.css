@@ -1112,3 +1112,23 @@ html.daylight .interface-login {
     var(--color-surface)
   );
 }
+
+.continue-watching-scrollbar {
+  scrollbar-color: color-mix(in srgb, var(--color-text-muted) 40%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+.continue-watching-scrollbar::-webkit-scrollbar {
+  height: 5px;
+}
+.continue-watching-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.continue-watching-scrollbar::-webkit-scrollbar-thumb {
+  min-width: 36px;
+  background: color-mix(in srgb, var(--color-text-muted) 40%, transparent);
+  border-radius: 999px;
+}
+.continue-watching-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-primary) 65%, transparent);
+}

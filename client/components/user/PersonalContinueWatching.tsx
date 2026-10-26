@@ -89,7 +89,7 @@ export function PersonalContinueWatching() {
             <div
                 ref={drag.ref}
                 {...drag.handlers}
-                className="no-scrollbar paint-isolated flex cursor-grab gap-3 overflow-x-auto pb-1 active:cursor-grabbing"
+                className="continue-watching-scrollbar paint-isolated flex cursor-grab gap-3 overflow-x-auto pb-3 active:cursor-grabbing"
             >
                 {items.map((item, index) => (
                     <ContinueWatchingCard

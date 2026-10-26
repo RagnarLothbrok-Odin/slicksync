@@ -22,6 +22,11 @@ export function useDragScroll() {
         if (e.pointerType !== "mouse" || e.button !== 0 || !ref.current) {
             return;
         }
+        // Let the browser handle a drag on the native horizontal scrollbar.
+        const bounds = ref.current.getBoundingClientRect();
+        if (e.clientY >= bounds.top + ref.current.clientTop + ref.current.clientHeight) {
+            return;
+        }
         downRef.current = true;
         capturedRef.current = false;
         startXRef.current = e.clientX;
