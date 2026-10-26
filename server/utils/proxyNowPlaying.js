@@ -382,7 +382,11 @@ async function mergeProxyNowPlaying(
         const existingTitleMatches = !!existing;
         // An open connection cannot override a player's pause or stop state.
         // Direct reports are retained in the final pass below.
-        if (existing?.playback?.evidence === "player" || existing?.playback?.evidence === "event") {
+        if (
+            existing?.playback?.evidence === "player" ||
+            existing?.playback?.evidence === "event" ||
+            existing?.playback?.evidence === "tracker"
+        ) {
             continue;
         }
 
@@ -531,7 +535,9 @@ async function mergeProxyNowPlaying(
         const matches = (streams) => !!streams && streams.some((d) => pairMatches(d, np.item));
         const isSuperseded = matches(active) || matches(ended);
         const directReport =
-            np.playback?.evidence === "player" || np.playback?.evidence === "event";
+            np.playback?.evidence === "player" ||
+            np.playback?.evidence === "event" ||
+            np.playback?.evidence === "tracker";
         if (directReport || !isSuperseded) {
             result.push(np);
         }

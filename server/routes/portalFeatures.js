@@ -34,6 +34,48 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
         }
     };
     const scope = (req) => ({ accountId: req.person.accountId, userId: req.person.id });
+    const tracking = require("../utils/traktTracking");
+    router.get(
+        "/tracking-services",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            if (req.person.providerType !== "nuvio") {
+                return res.json({ services: [], supported: false });
+            }
+            res.json({ services: [await tracking.status(prisma, req.person)], supported: true });
+        })
+    );
+    router.get(
+        "/tracking-services/trakt/check",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json({ features: await tracking.check(prisma, req.person) });
+        })
+    );
+    router.post(
+        "/tracking-services/trakt/authorize",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json(await tracking.begin(prisma, req.person));
+        })
+    );
+    router.post(
+        "/tracking-services/trakt/complete",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            const result = await tracking.complete(prisma, req.person, req.body || {});
+            require("../utils/metricsBuilder").invalidateLiveNowPlaying(req.person.accountId);
+            res.json(result);
+        })
+    );
+    router.delete(
+        "/tracking-services/trakt",
+        handle(async (req, res) => {
+            const result = await tracking.disconnect(prisma, req.person);
+            require("../utils/metricsBuilder").invalidateLiveNowPlaying(req.person.accountId);
+            res.json(result);
+        })
+    );
     router.get(
         "/about",
         handle(async (_req, res) => {
@@ -144,14 +186,20 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     router.get(
         "/upcoming-episodes",
         handle(async (req, res) => {
-            res.json(
-                await require("../utils/episodeAlerts").getUpcomingEpisodes(
-                    prisma,
-                    req.person.accountId,
-                    24,
-                    req.person.id
-                )
+            const native = await require("../utils/episodeAlerts").getUpcomingEpisodes(
+                prisma,
+                req.person.accountId,
+                24,
+                req.person.id
             );
+            const feeds = require("../utils/traktFeeds");
+            let tracked = [];
+            try {
+                tracked = await feeds.calendar(prisma, req.person);
+            } catch {
+                /* Other providers' calendar data stays available during a tracker outage. */
+            }
+            res.json(feeds.mergeCalendar(native, tracked));
         })
     );
     router.get(
@@ -163,6 +211,22 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                 prisma,
                 req.person.accountId
             );
+            const trackingWarnings = [];
+            if (req.person.providerType === "nuvio" && prisma.trackingConnection) {
+                try {
+                    const connection = await tracking.status(prisma, req.person);
+                    if (connection.connected) {
+                        const features = await tracking.check(prisma, req.person);
+                        for (const feature of features) {
+                            if (!feature.available) {
+                                trackingWarnings.push(feature.label);
+                            }
+                        }
+                    }
+                } catch {
+                    trackingWarnings.push("Tracking services");
+                }
+            }
             res.set("Cache-Control", "no-store");
             res.json({
                 items: rows
@@ -192,6 +256,7 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                         totalDuration: row.totalDuration ?? null,
                         videoId: row.videoId,
                     })),
+                trackingWarnings,
             });
         })
     );
@@ -204,7 +269,14 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                 12,
                 req.person.id
             );
-            res.json({ items });
+            const feeds = require("../utils/traktFeeds");
+            let tracked = [];
+            try {
+                tracked = await feeds.continueWatching(prisma, req.person);
+            } catch {
+                /* Preserve native resume points when the supplementary tracker is unavailable. */
+            }
+            res.json({ items: feeds.mergeContinue(items, tracked) });
         })
     );
     router.post(

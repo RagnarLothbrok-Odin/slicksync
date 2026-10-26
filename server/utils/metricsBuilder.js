@@ -570,6 +570,39 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
         console.warn("[MetricsBuilder] Failed to read AIOStreams viewings:", error.message);
     }
 
+    // Tracker presence is a separately reported signal, never a library guess.
+    for (const person of activeUsers.filter((user) => user.providerType === "nuvio")) {
+        try {
+            const rows = await require("./traktFeeds").nowPlaying(prisma, person);
+            for (const row of rows) {
+                for (let i = nowPlaying.length - 1; i >= 0; i--) {
+                    const old = nowPlaying[i];
+                    if (
+                        old.user.id === person.id &&
+                        old.item.id === row.item.id &&
+                        (!old.videoId || old.videoId === row.videoId) &&
+                        old.playback?.evidence === "history"
+                    ) {
+                        nowPlaying.splice(i, 1);
+                    }
+                }
+                // A direct player or transition report remains preferable to a tracker.
+                if (
+                    !nowPlaying.some(
+                        (old) =>
+                            old.user.id === person.id &&
+                            old.item.id === row.item.id &&
+                            old.videoId === row.videoId
+                    )
+                ) {
+                    nowPlaying.push(row);
+                }
+            }
+        } catch {
+            /* A tracker outage must not erase other playback evidence. */
+        }
+    }
+
     // Reconcile against AIOStreams proxy-detected streams (see above).
     try {
         const { mergeProxyNowPlaying } = require("./proxyNowPlaying");

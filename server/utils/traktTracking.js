@@ -11,6 +11,7 @@ function createTraktTracking({
     const locks = new Map();
     const cache = new Map();
     const cooldowns = new Map();
+    const epochs = new Map();
     const error = (message, statusCode = 400) =>
         Object.assign(new Error(message), { status: statusCode });
     const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -85,11 +86,13 @@ function createTraktTracking({
             const failure = error(
                 response.status === 429
                     ? "Trakt is rate limiting requests. Please try again later."
-                    : response.status === 401
-                      ? "Reconnect your Trakt account."
-                      : response.status === 403
-                        ? "Trakt does not allow this feature for this app or account."
-                        : "Trakt is temporarily unavailable.",
+                    : response.status === 420
+                      ? "Your Trakt account limit has been reached. Review your connected apps and account limits."
+                      : response.status === 401
+                        ? "Reconnect your Trakt account."
+                        : response.status === 403
+                          ? "Trakt does not allow this feature for this app or account."
+                          : "Trakt is temporarily unavailable.",
                 response.status === 401 ? 401 : response.status === 403 ? 403 : 503
             );
             failure.providerStatus = response.status;
@@ -248,6 +251,7 @@ function createTraktTracking({
             }
         }
         cooldowns.delete(key(person));
+        epochs.set(key(person), (epochs.get(key(person)) || 0) + 1);
     }
     async function disconnect(prisma, person) {
         requireNuvio(person);
@@ -313,9 +317,11 @@ function createTraktTracking({
             return { connected: false, data: null };
         }
         const id = key(person);
-        if ((cooldowns.get(id) || 0) > Date.now()) {
-            throw error("Trakt is rate limiting requests. Please try again later.", 503);
+        const cooldown = cooldowns.get(id);
+        if (cooldown && cooldown.until > Date.now()) {
+            throw error(cooldown.message, 503);
         }
+        const epoch = epochs.get(id) || 0;
         const cacheKey = `${id}:${resource}`;
         const hit = cache.get(cacheKey);
         if (hit && hit.until > Date.now()) {
@@ -334,17 +340,20 @@ function createTraktTracking({
                       ? "/sync/playback?limit=100&extended=full"
                       : `/calendars/my/shows/${new Date().toISOString().slice(0, 10)}/33?extended=full`;
             try {
-                return {
-                    checkedAt: new Date().toISOString(),
-                    connected: true,
-                    data: await request(endpoint, {
-                        client: credentials.client,
-                        token: credentials.accessToken,
-                    }),
-                };
+                const data = await request(endpoint, {
+                    client: credentials.client,
+                    token: credentials.accessToken,
+                });
+                if ((epochs.get(id) || 0) !== epoch) {
+                    throw error("The tracking connection changed. Refresh the page.", 409);
+                }
+                return { checkedAt: new Date().toISOString(), connected: true, data };
             } catch (failure) {
                 if (failure.providerStatus === 429) {
-                    cooldowns.set(id, Date.now() + failure.retryAfterMs);
+                    cooldowns.set(id, {
+                        message: failure.message,
+                        until: Date.now() + failure.retryAfterMs,
+                    });
                 }
                 throw failure;
             }
@@ -353,11 +362,43 @@ function createTraktTracking({
         try {
             return await promise;
         } catch (failure) {
-            cache.delete(cacheKey);
+            if (cache.get(cacheKey)?.promise === promise) {
+                cache.delete(cacheKey);
+            }
             throw failure;
         }
     }
 
-    return { begin, complete, disconnect, read, status };
+    async function check(prisma, person) {
+        requireNuvio(person);
+        const resources = [
+            { key: "watching", label: "Playback activity", ttl: 30_000 },
+            { key: "progress", label: "Continue Watching", ttl: 60_000 },
+            { key: "calendar", label: "Calendar", ttl: 300_000 },
+        ];
+        return Promise.all(
+            resources.map(async (resource) => {
+                try {
+                    const result = await read(prisma, person, resource.key, resource.ttl);
+                    return {
+                        available: result.connected,
+                        error: result.connected ? null : "Connect a tracking service first.",
+                        key: resource.key,
+                        label: resource.label,
+                    };
+                } catch (failure) {
+                    return {
+                        available: false,
+                        error: failure.providerStatus
+                            ? failure.message
+                            : "Could not refresh this Trakt source. Please try again.",
+                        key: resource.key,
+                        label: resource.label,
+                    };
+                }
+            })
+        );
+    }
+    return { begin, check, complete, disconnect, read, status };
 }
 module.exports = { ...createTraktTracking(), createTraktTracking };
