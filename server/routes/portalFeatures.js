@@ -130,6 +130,27 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             res.json(result);
         })
     );
+    const simkl = require("../utils/simklTracking");
+    router.post(
+        "/tracking-services/simkl/authorize",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json(await simkl.begin(prisma, req.person));
+        })
+    );
+    router.post(
+        "/tracking-services/simkl/complete",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json(await simkl.complete(prisma, req.person, req.body || {}));
+        })
+    );
+    router.delete(
+        "/tracking-services/simkl",
+        handle(async (req, res) => {
+            res.json(await simkl.disconnect(prisma, req.person));
+        })
+    );
     router.get(
         "/about",
         handle(async (_req, res) => {
