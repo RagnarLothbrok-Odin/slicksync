@@ -101,6 +101,7 @@ function setup(override) {
     const prisma = {
         appAccount: { findUnique: async () => ({ sync: {} }) },
         trackingConnection: model,
+        user: { findUnique: async () => ({ portalPreferences: null }) },
     };
     const tracking = createTraktTracking({ decrypt: open, encrypt: seal, fetch: transport });
     return { calls, open, prisma, rows, seal, tracking };
@@ -317,4 +318,27 @@ test("source checks report restricted features separately without exposing provi
     assert.equal(features.find((item) => item.key === "progress").available, true);
     assert.equal(features.find((item) => item.key === "calendar").available, false);
     assert.ok(!JSON.stringify(features).includes("private upstream body"));
+});
+
+test("native source bypasses cached Trakt feeds without disconnecting the tracker", async () => {
+    const fixture = setup();
+    await linked(fixture);
+    await fixture.tracking.read(fixture.prisma, person, "watching", 30_000);
+    const count = fixture.calls.length;
+    fixture.prisma.user.findUnique = async ({ where }) => {
+        assert.equal(where.id, person.id);
+        return { portalPreferences: JSON.stringify({ trackingSource: "nuvio" }) };
+    };
+    assert.deepEqual(await fixture.tracking.read(fixture.prisma, person, "watching", 30_000), {
+        connected: false,
+        data: null,
+    });
+    assert.equal(fixture.calls.length, count);
+    assert.equal((await fixture.tracking.status(fixture.prisma, person)).connected, true);
+    assert.equal(
+        (await fixture.tracking.check(fixture.prisma, person)).find(
+            (feature) => feature.key === "watching"
+        ).available,
+        true
+    );
 });

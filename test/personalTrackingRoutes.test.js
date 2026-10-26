@@ -7,6 +7,7 @@ test("tracking routes authenticate and gate by provider before exposing connecti
     const app = express();
     app.use(express.json());
     const calls = [];
+    let connected = true;
     let preferences = { hideSensitive: true };
     app.use(
         makeRouter({
@@ -26,7 +27,7 @@ test("tracking routes authenticate and gate by provider before exposing connecti
                         calls.push(where);
                         return {
                             connectedAt: new Date(),
-                            credentials: "encrypted-private-value",
+                            credentials: connected ? "encrypted-private-value" : null,
                             username: "my-tracker",
                         };
                     },
@@ -54,7 +55,11 @@ test("tracking routes authenticate and gate by provider before exposing connecti
             401
         );
         const unsupported = await fetch(`${base}/tracking-services?userId=stremio`, { headers });
-        assert.deepEqual(await unsupported.json(), { services: [], supported: false });
+        assert.deepEqual(await unsupported.json(), {
+            services: [],
+            source: "stremio",
+            supported: false,
+        });
         assert.equal(
             (
                 await fetch(`${base}/tracking-services/trakt/authorize?userId=stremio`, {
@@ -116,6 +121,27 @@ test("tracking routes authenticate and gate by provider before exposing connecti
         assert.equal(preferences.trackingSource, "trakt");
         const readDisplay = await fetch(`${base}/preferences?userId=mine`, { headers });
         assert.deepEqual(await readDisplay.json(), display);
+        const native = await fetch(`${base}/tracking-services/source?userId=mine`, {
+            body: JSON.stringify({ provider: "nuvio" }),
+            headers: { ...headers, "content-type": "application/json" },
+            method: "PATCH",
+        });
+        assert.equal(native.status, 200);
+        assert.deepEqual(await native.json(), { source: "nuvio" });
+        assert.equal(preferences.trackingSource, "nuvio");
+        const nativeSelection = await fetch(`${base}/tracking-services?userId=mine`, { headers });
+        assert.equal((await nativeSelection.json()).source, "nuvio");
+        connected = false;
+        const disconnected = await fetch(`${base}/tracking-services?userId=mine`, { headers });
+        const available = await disconnected.json();
+        assert.equal(available.source, "nuvio");
+        assert.equal(available.services.filter((service) => service.connected).length, 0);
+        const rejected = await fetch(`${base}/tracking-services/source?userId=mine`, {
+            body: JSON.stringify({ provider: "trakt" }),
+            headers: { ...headers, "content-type": "application/json" },
+            method: "PATCH",
+        });
+        assert.equal(rejected.status, 400);
     } finally {
         server.closeAllConnections();
         await new Promise((resolve) => server.close(resolve));

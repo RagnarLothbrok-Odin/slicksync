@@ -325,9 +325,24 @@ function createTraktTracking({
         }
         return locks.get(id);
     }
-    async function read(prisma, person, resource, ttl) {
+    async function read(prisma, person, resource, ttl, { ignoreSource = false } = {}) {
         if (person.providerType !== "nuvio" || !prisma.trackingConnection) {
             return { connected: false, data: null };
+        }
+        if (!ignoreSource) {
+            const profile = await prisma.user.findUnique({
+                select: { portalPreferences: true },
+                where: { id: person.id },
+            });
+            let preferences = {};
+            try {
+                preferences = JSON.parse(profile?.portalPreferences || "{}");
+            } catch {
+                /* Default to the existing connected source for older profiles. */
+            }
+            if (preferences?.trackingSource === person.providerType) {
+                return { connected: false, data: null };
+            }
         }
         const id = key(person);
         const cooldown = cooldowns.get(id);
@@ -404,7 +419,9 @@ function createTraktTracking({
         return Promise.all(
             resources.map(async (resource) => {
                 try {
-                    const result = await read(prisma, person, resource.key, resource.ttl);
+                    const result = await read(prisma, person, resource.key, resource.ttl, {
+                        ignoreSource: true,
+                    });
                     return {
                         available: result.connected,
                         error: result.connected ? null : "Connect a tracking service first.",

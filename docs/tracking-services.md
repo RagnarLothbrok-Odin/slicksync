@@ -69,7 +69,9 @@ Results are cached for five minutes, and the personal row is no longer capped at
 12 items. Paused playback takes priority over a computed next episode for the same
 title; Nuvio and Trakt retain the newest entry per title. Local dismissals still apply.
 
-Tracking settings include a per-profile **Use as source** picker listing connected
-services. Trakt is the only available source currently and is selected by default
-when connected. The saved source is retained separately from display preference
-changes. Disconnecting the service leaves no active source until it is reconnected.
+Tracking settings include a per-profile **Use as source** picker. The account's
+native app is always available; trackers appear only while connected. Choosing the
+native app bypasses Trakt feeds without disconnecting it. Choosing Trakt enables
+its feeds again. New profiles with a connected Trakt account retain the existing
+Trakt default. Disconnecting Trakt falls back to the account's native app.
+The saved source is retained separately from display preference changes.

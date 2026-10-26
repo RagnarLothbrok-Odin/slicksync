@@ -53,13 +53,22 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
         handle(async (req, res) => {
             res.set("Cache-Control", "no-store");
             if (req.person.providerType !== "nuvio") {
-                return res.json({ services: [], supported: false });
+                return res.json({
+                    services: [],
+                    source: req.person.providerType,
+                    supported: false,
+                });
             }
             const service = await tracking.status(prisma, req.person);
             const preferences = await storedPersonalPreferences(prisma, req.person.id);
             res.json({
                 services: [service],
-                source: service.connected ? preferences.trackingSource || "trakt" : null,
+                source:
+                    preferences.trackingSource === req.person.providerType
+                        ? req.person.providerType
+                        : service.connected
+                          ? "trakt"
+                          : req.person.providerType,
                 supported: true,
             });
         })
@@ -67,23 +76,27 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     router.patch(
         "/tracking-services/source",
         handle(async (req, res) => {
-            if (req.person.providerType !== "nuvio" || req.body.provider !== "trakt") {
-                return res.status(400).json({ error: "Choose an available tracking service." });
-            }
-            const service = await tracking.status(prisma, req.person);
-            if (!service.connected) {
-                return res
-                    .status(400)
-                    .json({ error: "Connect this tracking service before using it as a source." });
+            const source = req.body.provider;
+            if (source !== req.person.providerType) {
+                if (req.person.providerType !== "nuvio" || source !== "trakt") {
+                    return res.status(400).json({ error: "Choose an available source." });
+                }
+                const service = await tracking.status(prisma, req.person);
+                if (!service.connected) {
+                    return res.status(400).json({
+                        error: "Connect this tracking service before using it as a source.",
+                    });
+                }
             }
             const preferences = await storedPersonalPreferences(prisma, req.person.id);
             await prisma.user.update({
                 data: {
-                    portalPreferences: JSON.stringify({ ...preferences, trackingSource: "trakt" }),
+                    portalPreferences: JSON.stringify({ ...preferences, trackingSource: source }),
                 },
                 where: { id: req.person.id },
             });
-            res.json({ source: "trakt" });
+            require("../utils/metricsBuilder").invalidateLiveNowPlaying(req.person.accountId);
+            res.json({ source });
         })
     );
     router.get(
@@ -259,7 +272,11 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             if (req.person.providerType === "nuvio" && prisma.trackingConnection) {
                 try {
                     const connection = await tracking.status(prisma, req.person);
-                    if (connection.connected) {
+                    const preferences = await storedPersonalPreferences(prisma, req.person.id);
+                    if (
+                        connection.connected &&
+                        preferences.trackingSource !== req.person.providerType
+                    ) {
                         const features = await tracking.check(prisma, req.person);
                         for (const feature of features) {
                             if (!feature.available) {
