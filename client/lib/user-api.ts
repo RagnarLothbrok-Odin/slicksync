@@ -643,8 +643,10 @@ export interface WatchSession {
 export interface UserActivityStats {
     avgWatchTimeHours: number;
     avgWatchTimeSeconds: number;
-    currentStreak: number;
-    longestStreak: number;
+    currentStreak?: number;
+    episodesCount?: number;
+    episodesTodayCount?: number;
+    longestStreak?: number;
     moviesCount: number;
     recentItemsCount: number;
     seriesCount: number;
@@ -705,9 +707,13 @@ export interface UserActivityData {
     bingeWatches: BingeWatch[];
     episodeHistory: WatchSession[];
     mostWatched: MostWatchedItem | null;
+    mostWatchedItems?: MostWatchedItem[];
     nowPlaying: NowPlayingItem[];
     sessions: WatchSession[];
+    source?: "trakt" | "slicksync";
+    sourceNote?: string;
     stats: UserActivityStats;
+    todayAvailable?: boolean;
     user: {
         id: string;
         username: string;
@@ -722,9 +728,17 @@ export const userActivity = {
     /**
      * Get user's activity (watch sessions and stats)
      */
-    async getActivity(userId: string, authKey?: string, limit = 100): Promise<UserActivityData> {
-        const params = new URLSearchParams({ limit: String(limit), userId });
-        return request(`/public-library/activity?${params.toString()}`, { authKey });
+    async getActivity(
+        userId: string,
+        authKey?: string,
+        limit = 100,
+        home = false
+    ): Promise<UserActivityData> {
+        const params = new URLSearchParams({ home: String(home), limit: String(limit), userId });
+        return request(`/public-library/activity?${params.toString()}`, {
+            authKey,
+            signal: AbortSignal.timeout(60_000),
+        });
     },
 };
 

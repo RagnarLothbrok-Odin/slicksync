@@ -34,16 +34,23 @@ import {
 
 // Format watch time from seconds to human-readable
 function formatWatchTime(seconds: number): string {
+    if (seconds === 0) {
+        return "0m";
+    }
     if (seconds < 60) {
         return "<1m";
     }
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.round((seconds % 3600) / 60);
-
-    if (hours > 0) {
-        return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-    }
-    return `${minutes}m`;
+    const totalMinutes = Math.round(seconds / 60);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    return [
+        days ? `${days.toLocaleString()}d` : "",
+        hours ? `${hours}h` : "",
+        minutes ? `${minutes}m` : "",
+    ]
+        .filter(Boolean)
+        .join(" ");
 }
 
 // Format duration in a more compact way for stats
@@ -95,7 +102,7 @@ function StatCard({
                 </div>
                 <div>
                     <p className="font-bold text-2xl" style={{ color: "var(--color-text)" }}>
-                        {value}
+                        {typeof value === "number" ? value.toLocaleString() : value}
                     </p>
                     <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                         {label}
@@ -156,9 +163,8 @@ export default function UserHomePage() {
             setError(null);
             try {
                 // Fetch activity and risk status in parallel, but handle failures gracefully
-                const [activityResult, riskResult] = await Promise.allSettled([
-                    userActivity.getActivity(userId, authKey || undefined),
-                    userSync.getAtRiskStatus(userId, authKey || undefined),
+                const [activityResult] = await Promise.allSettled([
+                    userActivity.getActivity(userId, authKey || undefined, 100, true),
                 ]);
 
                 if (activityResult.status === "fulfilled") {
@@ -168,13 +174,6 @@ export default function UserHomePage() {
                     // Set error only if activity fails - this is the main data
                     setError(activityResult.reason?.message || "Failed to load activity data");
                 }
-
-                if (riskResult.status === "fulfilled") {
-                    setAtRiskStatus(riskResult.value);
-                } else {
-                    console.error("Failed to load risk status:", riskResult.reason);
-                    // Don't set error for risk status - it's optional
-                }
             } catch (err) {
                 console.error("Failed to load data:", err);
                 setError(readErrorMessage(err, "Failed to load data"));
@@ -183,6 +182,12 @@ export default function UserHomePage() {
             }
         };
 
+        userSync
+            .getAtRiskStatus(userId, authKey || undefined)
+            .then(setAtRiskStatus)
+            .catch(() => {
+                // Optional sync health must not block viewing statistics.
+            });
         fetchData();
     }, [userId, authKey, isReady]);
 
@@ -389,6 +394,15 @@ export default function UserHomePage() {
             <PersonalContinueWatching />
             <PersonalCalendar />
 
+            {activityData?.sourceNote && (
+                <p
+                    className="mb-5 text-sm"
+                    role="status"
+                    style={{ color: "var(--color-text-muted)" }}
+                >
+                    {activityData.sourceNote}
+                </p>
+            )}
             {/* Stats Grid */}
             {!(loading || error) && stats && (
                 <>
@@ -407,28 +421,52 @@ export default function UserHomePage() {
                             color="var(--color-primary)"
                             delay={0.15}
                             icon={<ClockIcon className="h-5 w-5" />}
-                            label="Watch Time Today"
-                            value={formatWatchTime(stats.watchTimeTodaySeconds)}
+                            label={
+                                activityData?.source === "trakt"
+                                    ? "Estimated Time Today"
+                                    : "Watch Time Today"
+                            }
+                            value={
+                                activityData?.todayAvailable === false
+                                    ? "Unavailable"
+                                    : formatWatchTime(stats.watchTimeTodaySeconds)
+                            }
                         />
                         <StatCard
                             color="#3b82f6"
                             delay={0.2}
                             icon={<PlayIcon className="h-5 w-5" />}
                             label="Watched Today"
-                            value={stats.watchedTodayCount}
+                            value={
+                                activityData?.todayAvailable === false
+                                    ? "Unavailable"
+                                    : stats.watchedTodayCount
+                            }
                         />
                         <StatCard
                             color="#f59e0b"
                             delay={0.25}
                             icon={<FireIcon className="h-5 w-5" />}
-                            label="Current Streak"
-                            value={`${stats.currentStreak} ${stats.currentStreak === 1 ? "day" : "days"}`}
+                            label={
+                                activityData?.source === "trakt"
+                                    ? "Episodes Today"
+                                    : "Current Streak"
+                            }
+                            value={
+                                activityData?.source === "trakt"
+                                    ? activityData.todayAvailable === false
+                                        ? "Unavailable"
+                                        : (stats.episodesTodayCount ?? 0)
+                                    : `${stats.currentStreak} ${stats.currentStreak === 1 ? "day" : "days"}`
+                            }
                         />
                         <StatCard
                             color="#10b981"
                             delay={0.3}
                             icon={<ClockIcon className="h-5 w-5" />}
-                            label="Avg Watch Time"
+                            label={
+                                activityData?.source === "trakt" ? "Avg Runtime" : "Avg Watch Time"
+                            }
                             value={formatWatchTime(stats.avgWatchTimeSeconds)}
                         />
                     </div>
@@ -448,7 +486,11 @@ export default function UserHomePage() {
                             color="#8b5cf6"
                             delay={0.4}
                             icon={<ClockIcon className="h-5 w-5" />}
-                            label="Total Watch Time"
+                            label={
+                                activityData?.source === "trakt"
+                                    ? "Estimated Watch Time"
+                                    : "Total Watch Time"
+                            }
                             value={formatWatchTime(stats.totalWatchTimeSeconds)}
                         />
                         <StatCard
@@ -469,8 +511,16 @@ export default function UserHomePage() {
                             color="#f59e0b"
                             delay={0.55}
                             icon={<TrophyIcon className="h-5 w-5" />}
-                            label="Longest Streak"
-                            value={`${stats.longestStreak} ${stats.longestStreak === 1 ? "day" : "days"}`}
+                            label={
+                                activityData?.source === "trakt"
+                                    ? "Episodes Watched"
+                                    : "Longest Streak"
+                            }
+                            value={
+                                activityData?.source === "trakt"
+                                    ? (stats.episodesCount ?? 0)
+                                    : `${stats.longestStreak} ${stats.longestStreak === 1 ? "day" : "days"}`
+                            }
                         />
                     </div>
 
@@ -500,58 +550,87 @@ export default function UserHomePage() {
                                         Most Watched
                                     </h3>
                                 </div>
-                                <div className="flex items-center gap-4">
-                                    {activityData.mostWatched.poster ? (
-                                        <img
-                                            alt={activityData.mostWatched.name}
-                                            className="h-24 w-16 rounded-lg object-cover"
-                                            height={96}
-                                            src={activityData.mostWatched.poster}
-                                            width={64}
-                                        />
-                                    ) : (
-                                        <div
-                                            className="flex h-24 w-16 items-center justify-center rounded-lg"
-                                            style={{ background: "var(--color-surface-elevated)" }}
-                                        >
-                                            {activityData.mostWatched.type === "movie" ? (
-                                                <FilmIcon
-                                                    className="h-8 w-8"
+                                <ol className="space-y-4">
+                                    {(
+                                        activityData.mostWatchedItems || [activityData.mostWatched]
+                                    ).map((item, index) => (
+                                        <li key={`${item.type}:${item.id}`}>
+                                            <div className="flex items-center gap-4">
+                                                <span
+                                                    className="w-4 shrink-0 text-sm tabular-nums"
                                                     style={{ color: "var(--color-text-subtle)" }}
-                                                />
-                                            ) : (
-                                                <TvIcon
-                                                    className="h-8 w-8"
-                                                    style={{ color: "var(--color-text-subtle)" }}
-                                                />
-                                            )}
-                                        </div>
-                                    )}
-                                    <div>
-                                        <p
-                                            className="font-medium"
-                                            style={{ color: "var(--color-text)" }}
-                                        >
-                                            {activityData.mostWatched.name}
-                                        </p>
-                                        <p
-                                            className="mt-1 text-sm"
-                                            style={{ color: "var(--color-text-muted)" }}
-                                        >
-                                            {activityData.mostWatched.count}{" "}
-                                            {activityData.mostWatched.count === 1
-                                                ? "session"
-                                                : "sessions"}
-                                        </p>
-                                        <p
-                                            className="text-sm"
-                                            style={{ color: "var(--color-text-muted)" }}
-                                        >
-                                            {formatDuration(activityData.mostWatched.totalDuration)}{" "}
-                                            total
-                                        </p>
-                                    </div>
-                                </div>
+                                                >
+                                                    {index + 1}
+                                                </span>
+                                                {item.poster ? (
+                                                    <img
+                                                        alt={item.name}
+                                                        className="h-14 w-10 rounded-lg object-cover"
+                                                        height={56}
+                                                        src={item.poster}
+                                                        width={40}
+                                                    />
+                                                ) : (
+                                                    <div
+                                                        className="flex h-14 w-10 items-center justify-center rounded-lg"
+                                                        style={{
+                                                            background:
+                                                                "var(--color-surface-elevated)",
+                                                        }}
+                                                    >
+                                                        {item.type === "movie" ? (
+                                                            <FilmIcon
+                                                                className="h-5 w-5"
+                                                                style={{
+                                                                    color: "var(--color-text-subtle)",
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <TvIcon
+                                                                className="h-5 w-5"
+                                                                style={{
+                                                                    color: "var(--color-text-subtle)",
+                                                                }}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                )}
+                                                <div>
+                                                    <p
+                                                        className="font-medium"
+                                                        style={{ color: "var(--color-text)" }}
+                                                    >
+                                                        {item.name}
+                                                    </p>
+                                                    <p
+                                                        className="mt-1 text-sm"
+                                                        style={{ color: "var(--color-text-muted)" }}
+                                                    >
+                                                        {item.count.toLocaleString()}{" "}
+                                                        {item.count === 1
+                                                            ? activityData.source === "trakt"
+                                                                ? "play"
+                                                                : "session"
+                                                            : activityData.source === "trakt"
+                                                              ? "plays"
+                                                              : "sessions"}
+                                                    </p>
+                                                    {activityData.source !== "trakt" && (
+                                                        <p
+                                                            className="text-sm"
+                                                            style={{
+                                                                color: "var(--color-text-muted)",
+                                                            }}
+                                                        >
+                                                            {formatDuration(item.totalDuration)}{" "}
+                                                            total
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ol>
                             </motion.div>
                         )}
 

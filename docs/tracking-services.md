@@ -37,3 +37,21 @@ After linking, SlickSync reads tracking data only. It does not send playback, wa
 ## Verification
 
 Fixture tests cover owner and provider checks, PKCE, callback expiry and replay, encrypted credential boundaries, token-refresh coordination, disconnect races, rate limiting, and conversion of playback, resume points, and calendar entries. A real PKCE sign-in and read access to all three data sources were also verified in a public/PostgreSQL local preview. Playback start, pause, resume, and stop still need a hands-on trial with the same Trakt account enabled in Nuvio.
+
+### Personal Home statistics
+
+For a linked Nuvio profile, Home gets all-time counts and minutes directly from
+Trakt's user stats endpoint. Most Watched uses per-title play summaries, including
+rewatches. Summary pagination covers distinct titles, never lifetime viewing
+events. Today's activity reads only date-filtered history in the account timezone,
+with a maximum of two pages. Incomplete daily data is shown as unavailable.
+
+Times use title runtimes, not measured time in the player. Trakt does not supply
+streaks or binge counts in its statistics response, so these cards are replaced
+with supported episode counts or omitted. No lifetime history scan runs on Home.
+Results are cached for five minutes; optional source failures do not hide the
+all-time figures. Unavailable aggregate stats fall back explicitly to SlickSync.
+Artwork has a two-second budget and cannot keep the statistics loading.
+
+The account header, group membership, sync controls and health remain SlickSync
+data. Continue Watching, playback and calendar retain their existing source rules.
