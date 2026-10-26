@@ -74,9 +74,25 @@ test("tracking routes authenticate and gate by provider before exposing connecti
         assert.equal(body.services[0].connected, true);
         assert.equal(body.source, "trakt");
         assert.ok(!JSON.stringify(body).includes("private-value"));
-        assert.deepEqual(calls, [
-            { accountId_userId_provider: { accountId: "home", provider: "trakt", userId: "mine" } },
-        ]);
+        assert.deepEqual(
+            body.services.map((entry) => entry.provider),
+            ["trakt", "simkl"]
+        );
+        assert.ok(
+            calls.every(
+                (call) =>
+                    call.accountId_userId_provider.accountId === "home" &&
+                    call.accountId_userId_provider.userId === "mine"
+            )
+        );
+        const simklChoice = await fetch(`${base}/tracking-services/source?userId=mine`, {
+            body: JSON.stringify({ provider: "simkl" }),
+            headers: { ...headers, "content-type": "application/json" },
+            method: "PATCH",
+        });
+        assert.equal(simklChoice.status, 200);
+        const selectedSimkl = await fetch(`${base}/tracking-services?userId=mine`, { headers });
+        assert.equal((await selectedSimkl.json()).source, "simkl");
         const choose = await fetch(`${base}/tracking-services/source?userId=mine`, {
             body: JSON.stringify({ provider: "trakt" }),
             headers: { ...headers, "content-type": "application/json" },

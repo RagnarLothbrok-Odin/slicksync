@@ -60,15 +60,12 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                 });
             }
             const service = await tracking.status(prisma, req.person);
-            const preferences = await storedPersonalPreferences(prisma, req.person.id);
             res.json({
-                services: [service],
-                source:
-                    preferences.trackingSource === req.person.providerType
-                        ? req.person.providerType
-                        : service.connected
-                          ? "trakt"
-                          : req.person.providerType,
+                services: [
+                    service,
+                    await require("../utils/simklTracking").status(prisma, req.person),
+                ],
+                source: await tracking.source(prisma, req.person),
                 supported: true,
             });
         })
@@ -78,10 +75,13 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
         handle(async (req, res) => {
             const source = req.body.provider;
             if (source !== req.person.providerType) {
-                if (req.person.providerType !== "nuvio" || source !== "trakt") {
+                if (req.person.providerType !== "nuvio" || !["trakt", "simkl"].includes(source)) {
                     return res.status(400).json({ error: "Choose an available source." });
                 }
-                const service = await tracking.status(prisma, req.person);
+                const service = await (source === "simkl"
+                    ? require("../utils/simklTracking")
+                    : tracking
+                ).status(prisma, req.person);
                 if (!service.connected) {
                     return res.status(400).json({
                         error: "Connect this tracking service before using it as a source.",
@@ -268,12 +268,14 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             const items =
                 source === "trakt"
                     ? await require("../utils/traktFeeds").calendar(prisma, req.person)
-                    : await require("../utils/episodeAlerts").getUpcomingEpisodes(
-                          prisma,
-                          req.person.accountId,
-                          24,
-                          req.person.id
-                      );
+                    : source === "simkl"
+                      ? await require("../utils/simklFeeds").calendar(prisma, req.person)
+                      : await require("../utils/episodeAlerts").getUpcomingEpisodes(
+                            prisma,
+                            req.person.accountId,
+                            24,
+                            req.person.id
+                        );
             res.json(items);
         })
     );
@@ -325,7 +327,12 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                         totalDuration: row.totalDuration ?? null,
                         videoId: row.videoId,
                     })),
-                trackingWarnings: [],
+                trackingWarnings:
+                    source === "simkl"
+                        ? [
+                              "Live playback uses your account’s app because Simkl does not expose a live-watching read endpoint.",
+                          ]
+                        : [],
             });
         })
     );
@@ -336,12 +343,14 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             const items =
                 source === "trakt"
                     ? await require("../utils/traktFeeds").continueWatching(prisma, req.person)
-                    : await require("../utils/continueWatching").getContinueWatching(
-                          prisma,
-                          req.person.accountId,
-                          12,
-                          req.person.id
-                      );
+                    : source === "simkl"
+                      ? await require("../utils/simklFeeds").continueWatching(prisma, req.person)
+                      : await require("../utils/continueWatching").getContinueWatching(
+                            prisma,
+                            req.person.accountId,
+                            12,
+                            req.person.id
+                        );
             res.json({ items });
         })
     );

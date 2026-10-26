@@ -10,6 +10,7 @@ function createSimklTracking({
 } = {}) {
     const locks = new Map();
     const epochs = new Map();
+    const cooldowns = new Map();
     const error = (message, statusCode = 400) =>
         Object.assign(new Error(message), { status: statusCode });
     const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -67,10 +68,22 @@ function createSimklTracking({
         }
         throw error("Your administrator has not configured the Simkl tracking app yet.", 503);
     }
-    async function request(path, { token, client, body, method = "GET", pagination = false } = {}) {
-        const response = await transport(`${API}${path}`, {
+    async function request(path, { token, client, body, method = "GET" } = {}) {
+        const rateKey = client || body?.client_id;
+        const limitedUntil = cooldowns.get(rateKey) || 0;
+        if (limitedUntil > Date.now()) {
+            throw error("Simkl is rate limiting requests. Please try again later.", 503);
+        }
+        const url = new URL(path, API);
+        url.searchParams.set("app-name", "slicksync");
+        url.searchParams.set("app-version", require("../../package.json").version);
+        if (client) {
+            url.searchParams.set("client_id", client);
+        }
+        const response = await transport(url.href, {
             headers: {
                 "content-type": "application/json",
+                "user-agent": `SlickSync/${require("../../package.json").version}`,
                 ...(client ? { "simkl-api-key": client } : {}),
                 ...(token ? { authorization: `Bearer ${token}` } : {}),
             },
@@ -100,6 +113,9 @@ function createSimklTracking({
                 3_600_000,
                 Math.max(30_000, Number(response.headers.get("retry-after")) * 1000 || 60_000)
             );
+            if (response.status === 429) {
+                cooldowns.set(rateKey, Date.now() + failure.retryAfterMs);
+            }
             throw failure;
         }
         if (response.status === 204) {
@@ -109,14 +125,7 @@ function createSimklTracking({
             return null;
         }
         const data = await response.json();
-        return pagination
-            ? {
-                  data,
-                  pages: response.headers.has("x-pagination-page-count")
-                      ? Number(response.headers.get("x-pagination-page-count"))
-                      : null,
-              }
-            : data;
+        return data;
     }
     async function status(prisma, person) {
         requireNuvio(person);
@@ -316,7 +325,8 @@ function createSimklTracking({
                         !(
                             tokens?.access_token &&
                             tokens.refresh_token &&
-                            Number.isFinite(tokens.expires_in)
+                            Number.isFinite(tokens.expires_in) &&
+                            tokens.expires_in > 0
                         )
                     ) {
                         throw error("Reconnect your Simkl account.", 401);
@@ -351,12 +361,19 @@ function createSimklTracking({
             throw error("Connect Simkl before using it as a source.", 409);
         }
         const { credentials, row } = linked;
-        const data = await load((path) => {
-            if (!path.startsWith("/") || path.startsWith("//") || path.includes("://")) {
-                throw error("Invalid Simkl resource.");
-            }
-            return request(path, { client: credentials.client, token: credentials.accessToken });
-        }, row.externalUserId);
+        const data = await load(
+            (path) => {
+                if (!path.startsWith("/") || path.startsWith("//") || path.includes("://")) {
+                    throw error("Invalid Simkl resource.");
+                }
+                return request(path, {
+                    client: credentials.client,
+                    token: credentials.accessToken,
+                });
+            },
+            row.externalUserId,
+            row.connectedAt
+        );
         if ((epochs.get(key(person)) || 0) !== epoch) {
             throw error("The tracking connection changed. Refresh the page.", 409);
         }

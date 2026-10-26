@@ -3543,6 +3543,13 @@ module.exports = ({
                 console.warn("[PublicLibrary] Failed to read playback activity:", error.message);
             }
 
+            // Simkl has no daily activity or personal most-watched summary. Keep
+            // these local sections while replacing only supported aggregate totals.
+            const simklStats =
+                req.query.home === "true" &&
+                (await require("../utils/traktTracking").source(prisma, user)) === "simkl"
+                    ? await require("../utils/simklFeeds").homeStats(prisma, user)
+                    : null;
             res.json({
                 bingeWatches: bingeWatches.slice(0, 5),
                 episodeHistory: episodeItems,
@@ -3550,7 +3557,13 @@ module.exports = ({
                 mostWatchedItems,
                 nowPlaying,
                 sessions: activityItems,
-                source: "slicksync",
+                source: simklStats ? "simkl" : "slicksync",
+                ...(simklStats
+                    ? {
+                          sourceNote:
+                              "All-time watch time, movies and episodes come from Simkl. Daily activity, viewing streaks, series counts and Most Watched use your account’s app because Simkl does not expose equivalent summary endpoints.",
+                      }
+                    : {}),
                 stats: {
                     avgWatchTimeHours: avgWatchTimeSeconds / 3600,
                     avgWatchTimeSeconds,
@@ -3565,6 +3578,7 @@ module.exports = ({
                     watchedTodayCount,
                     watchTimeTodayHours: watchTimeTodaySeconds / 3600,
                     watchTimeTodaySeconds,
+                    ...(simklStats || {}),
                 },
                 user: {
                     colorIndex: user.colorIndex,

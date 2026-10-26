@@ -156,6 +156,12 @@ function createTraktTracking({
         if (preferences?.trackingSource === native) {
             return native;
         }
+        if (preferences?.trackingSource === "simkl") {
+            const simkl = await prisma.trackingConnection.findUnique({
+                where: { accountId_userId_provider: { ...identity(person), provider: "simkl" } },
+            });
+            return simkl?.credentials ? "simkl" : native;
+        }
         const connection = await prisma.trackingConnection.findUnique({ where: where(person) });
         return connection?.credentials ? "trakt" : native;
     }
@@ -361,7 +367,10 @@ function createTraktTracking({
             } catch {
                 /* Default to the existing connected source for older profiles. */
             }
-            if (preferences?.trackingSource === person.providerType) {
+            if (
+                preferences?.trackingSource === person.providerType ||
+                preferences?.trackingSource === "simkl"
+            ) {
                 return { connected: false, data: null };
             }
         }
