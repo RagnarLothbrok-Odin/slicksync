@@ -33,6 +33,8 @@ export function TrackingServicesPanel() {
     const [state, setState] = useState<{ userId: string; value: Services } | null>(null);
     const [failure, setFailure] = useState("");
     const [busy, setBusy] = useState(false);
+    const [sourceBusy, setSourceBusy] = useState(false);
+    const [sourceFailure, setSourceFailure] = useState("");
     const [features, setFeatures] = useState<{ userId: string; items: Feature[] } | null>(null);
     const [confirm, setConfirm] = useState(false);
     const [retry, setRetry] = useState(0);
@@ -102,11 +104,11 @@ export function TrackingServicesPanel() {
         }
     };
     const chooseSource = async (source: string) => {
-        if (!(userId && authKey) || busy) {
+        if (!(userId && authKey) || sourceBusy || busy) {
             return;
         }
-        setBusy(true);
-        setFailure("");
+        setSourceBusy(true);
+        setSourceFailure("");
         try {
             const result = await personalRequest<{ source: string }>(
                 userId,
@@ -120,9 +122,9 @@ export function TrackingServicesPanel() {
                     : current
             );
         } catch (reason) {
-            setFailure(readErrorMessage(reason, "Could not save the tracking source."));
+            setSourceFailure(readErrorMessage(reason, "Could not save the tracking source."));
         } finally {
-            setBusy(false);
+            setSourceBusy(false);
         }
     };
     const disconnect = async () => {
@@ -185,34 +187,6 @@ export function TrackingServicesPanel() {
                         >
                             Connect
                         </Button>
-                    )}
-                </div>
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-default border-t pt-5">
-                    <div className="max-w-md">
-                        <p className="font-medium text-default text-sm">Use as source</p>
-                        <p className="mt-1 text-muted text-sm">
-                            Choose the connected tracker for playback, Continue Watching, calendar
-                            and statistics.
-                        </p>
-                    </div>
-                    {service?.connected ? (
-                        <fieldset disabled={busy}>
-                            <DropdownSelect
-                                ariaLabel="Use as source"
-                                className="min-w-44 rounded-xl border border-default bg-bg px-4 py-2.5 text-default text-sm transition-colors hover:bg-surface-hover disabled:opacity-50"
-                                onChange={(value) => void chooseSource(value)}
-                                options={(state?.userId === userId ? state.value.services : [])
-                                    .filter((entry) => entry.connected)
-                                    .map((entry) => ({
-                                        label:
-                                            entry.provider === "trakt" ? "Trakt" : entry.provider,
-                                        value: entry.provider,
-                                    }))}
-                                value={state?.userId === userId ? state.value.source || "" : ""}
-                            />
-                        </fieldset>
-                    ) : (
-                        <p className="text-sm text-subtle">Connect a tracker to choose a source.</p>
                     )}
                 </div>
                 <p className="mt-3 text-muted text-sm">
@@ -306,6 +280,46 @@ export function TrackingServicesPanel() {
                             Try again
                         </Button>
                     </div>
+                )}
+            </Card>
+            <Card className="mt-6" padding="lg">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="max-w-md">
+                        <h3 className="font-semibold text-base text-default">Use as source</h3>
+                        <p className="mt-1 text-muted text-sm">
+                            Choose the connected tracker for playback, Continue Watching, calendar
+                            and statistics.
+                        </p>
+                    </div>
+                    {service?.connected ? (
+                        <fieldset disabled={busy || sourceBusy}>
+                            <DropdownSelect
+                                ariaLabel="Use as source"
+                                className="inline-flex min-w-44 items-center justify-between gap-4 whitespace-nowrap rounded-xl border border-default bg-bg px-4 py-2.5 text-default text-sm transition-colors hover:bg-surface-hover disabled:opacity-50"
+                                onChange={(value) => void chooseSource(value)}
+                                options={(state?.userId === userId ? state.value.services : [])
+                                    .filter((entry) => entry.connected)
+                                    .map((entry) => ({
+                                        label:
+                                            entry.provider === "trakt" ? "Trakt" : entry.provider,
+                                        value: entry.provider,
+                                    }))}
+                                value={state?.userId === userId ? state.value.source || "" : ""}
+                            />
+                        </fieldset>
+                    ) : (
+                        <p className="text-sm text-subtle">Connect a tracker to choose a source.</p>
+                    )}
+                </div>
+                {sourceBusy && (
+                    <p className="mt-3 text-muted text-sm" role="status">
+                        Saving source…
+                    </p>
+                )}
+                {sourceFailure && (
+                    <p className="mt-3 text-error text-sm" role="alert">
+                        {sourceFailure}
+                    </p>
                 )}
             </Card>
             <ConfirmModal
