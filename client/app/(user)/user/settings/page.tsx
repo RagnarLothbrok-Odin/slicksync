@@ -110,7 +110,7 @@ const PERSONAL_SECTIONS = [
         label: "Help & About",
     },
     {
-        blurb: "Playback, progress, and upcoming episodes",
+        blurb: "Connect accounts and choose your data source.",
         group: "Your setup",
         icon: ArrowPathIcon,
         key: "tracking",
