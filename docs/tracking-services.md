@@ -59,3 +59,10 @@ data. Continue Watching, playback and calendar retain their existing source rule
 Personal playback checks Trakt every 15 seconds while the page is visible. The
 progress display advances each second from Trakt's timing, then reconciles on the
 next check. This is automatic polling, not a push connection or exact player telemetry.
+
+Continue Watching combines paused movies/episodes with the next aired episode for
+recently watched shows. It reads up to 24 recent Trakt show summaries and checks
+show progress with three concurrent requests, cached for five minutes. Completed,
+hidden, dropped and locally dismissed shows are excluded. Paused playback takes
+priority over a computed next episode for the same title. The merged Nuvio/Trakt
+row keeps the newest source per title and displays up to 12 items.

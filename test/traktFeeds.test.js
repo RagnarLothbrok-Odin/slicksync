@@ -145,3 +145,28 @@ test("calendar keeps household muted and dismissed episodes out of tracker resul
     };
     assert.deepEqual(await feeds.calendar(dismissed, person), []);
 });
+
+test("Continue Watching includes next episodes and prefers paused progress for the same show", async () => {
+    const date = new Date().toISOString();
+    tracking.read = async (_db, _person, resource) => ({
+        connected: true,
+        data:
+            resource === "progress"
+                ? [{ episode, paused_at: date, progress: 40, show }]
+                : [
+                      { episode: { ...episode, number: 4 }, paused_at: date, resume: false, show },
+                      {
+                          episode: { ...episode, number: 8 },
+                          paused_at: date,
+                          resume: false,
+                          show: { ...show, ids: { imdb: "tt456" } },
+                      },
+                  ],
+    });
+    const rows = await feeds.continueWatching(prisma, person);
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find((row) => row.showId === "tt123").nextEpisode.episode, 3);
+    assert.equal(rows.find((row) => row.showId === "tt123").resume, true);
+    assert.equal(rows.find((row) => row.showId === "tt456").resume, false);
+    assert.equal(rows.find((row) => row.showId === "tt456").progressPercent, null);
+});

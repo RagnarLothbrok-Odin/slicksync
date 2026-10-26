@@ -105,8 +105,13 @@ async function nowPlaying(prisma, person) {
     ];
 }
 async function continueWatching(prisma, person) {
-    const result = await tracking.read(prisma, person, "progress", 60_000);
-    if (!result.connected) {
+    const [paused, upcoming] = await Promise.allSettled([
+        tracking.read(prisma, person, "progress", 60_000),
+        tracking.read(prisma, person, "upNext", 300_000),
+    ]);
+    const result = paused.status === "fulfilled" ? paused.value : { connected: false, data: [] };
+    const next = upcoming.status === "fulfilled" ? upcoming.value : { connected: false, data: [] };
+    if (!(result.connected || next.connected)) {
         return [];
     }
     const hidden = await prisma.dismissedContinueWatching.findMany({
@@ -114,51 +119,68 @@ async function continueWatching(prisma, person) {
         where: { accountId: person.accountId || "default", userId: person.id },
     });
     const hiddenIds = new Set(hidden.map((row) => row.showId));
-    const entries = (Array.isArray(result.data) ? result.data : [])
+    const entries = [
+        ...(Array.isArray(result.data) ? result.data : []),
+        ...(Array.isArray(next.data) ? next.data.filter((entry) => entry.resume === false) : []),
+    ]
         .filter((entry) => {
             const item = media(entry);
             return (
                 item &&
                 !hiddenIds.has(item.id) &&
-                Number.isFinite(entry.progress) &&
-                entry.progress > 0 &&
-                entry.progress < 100 &&
+                (entry.resume === false ||
+                    (Number.isFinite(entry.progress) &&
+                        entry.progress > 0 &&
+                        entry.progress < 100)) &&
                 Number.isFinite(Date.parse(entry.paused_at))
             );
         })
-        .sort((a, b) => Date.parse(b.paused_at) - Date.parse(a.paused_at))
-        .slice(0, 12);
-    return mapLimit(entries, 3, async (entry) => {
-        const item = media(entry);
-        return {
-            contentType: item.type,
-            showId: item.id,
-            showName: item.name,
-            ...(await artwork(item)),
-            appUrl: buildNuvioAppUrl(item.type, item.id),
-            imdbRating: null,
-            lastWatched:
-                item.type === "series" ? { episode: item.episode, season: item.season } : null,
-            lastWatchedAt: entry.paused_at,
-            metacritic: null,
-            nextEpisode:
-                item.type === "series"
-                    ? {
-                          episode: item.episode,
-                          season: item.season,
-                          thumbnail: null,
-                          title: item.episodeTitle,
-                      }
-                    : null,
-            progressPercent: entry.progress,
-            providerType: "nuvio",
-            resume: true,
-            rottenTomatoes: null,
-            trackingService: "Trakt",
-            userId: person.id,
-            username: person.username || "",
-        };
-    });
+        .sort((a, b) => Date.parse(b.paused_at) - Date.parse(a.paused_at));
+    // A paused episode wins over a computed next episode for the same show.
+    const unique = new Map();
+    for (const entry of entries) {
+        const id = media(entry).id;
+        if (!unique.has(id) || (unique.get(id).resume === false && entry.resume !== false)) {
+            unique.set(id, entry);
+        }
+    }
+    return mapLimit(
+        [...unique.values()]
+            .sort((a, b) => Date.parse(b.paused_at) - Date.parse(a.paused_at))
+            .slice(0, 12),
+        3,
+        async (entry) => {
+            const item = media(entry);
+            return {
+                contentType: item.type,
+                showId: item.id,
+                showName: item.name,
+                ...(await artwork(item)),
+                appUrl: buildNuvioAppUrl(item.type, item.id),
+                imdbRating: null,
+                lastWatched:
+                    item.type === "series" ? { episode: item.episode, season: item.season } : null,
+                lastWatchedAt: entry.paused_at,
+                metacritic: null,
+                nextEpisode:
+                    item.type === "series"
+                        ? {
+                              episode: item.episode,
+                              season: item.season,
+                              thumbnail: null,
+                              title: item.episodeTitle,
+                          }
+                        : null,
+                progressPercent: entry.resume === false ? null : entry.progress,
+                providerType: "nuvio",
+                resume: entry.resume !== false,
+                rottenTomatoes: null,
+                trackingService: "Trakt",
+                userId: person.id,
+                username: person.username || "",
+            };
+        }
+    );
 }
 async function calendar(prisma, person) {
     const result = await tracking.read(prisma, person, "calendar", 300_000);

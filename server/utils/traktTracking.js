@@ -363,7 +363,11 @@ function createTraktTracking({
                                   person.accountId
                               )
                           )
-                        : await request(endpoint, options);
+                        : resource === "upNext"
+                          ? await require("./traktUpNext").loadUpNext((path) =>
+                                request(path, { ...options, pagination: true })
+                            )
+                          : await request(endpoint, options);
                 if ((epochs.get(id) || 0) !== epoch) {
                     throw error("The tracking connection changed. Refresh the page.", 409);
                 }
@@ -394,6 +398,7 @@ function createTraktTracking({
         const resources = [
             { key: "watching", label: "Playback activity", ttl: 15_000 },
             { key: "progress", label: "Continue Watching", ttl: 60_000 },
+            { key: "upNext", label: "Next episodes", ttl: 300_000 },
             { key: "calendar", label: "Calendar", ttl: 300_000 },
         ];
         return Promise.all(
