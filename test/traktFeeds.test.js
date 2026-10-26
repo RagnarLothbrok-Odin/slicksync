@@ -170,3 +170,22 @@ test("Continue Watching includes next episodes and prefers paused progress for t
     assert.equal(rows.find((row) => row.showId === "tt456").resume, false);
     assert.equal(rows.find((row) => row.showId === "tt456").progressPercent, null);
 });
+
+test("personal Continue Watching retains the complete Trakt list when merged", async () => {
+    tracking.read = async (_db, _person, resource) => ({
+        connected: true,
+        data:
+            resource === "upNext"
+                ? Array.from({ length: 36 }, (_, index) => ({
+                      episode,
+                      paused_at: "2026-10-26T12:00:00Z",
+                      resume: false,
+                      show: { ...show, ids: { imdb: `tt${index + 1000}` } },
+                  }))
+                : [],
+    });
+    const rows = await feeds.continueWatching(prisma, person);
+    assert.equal(rows.length, 36);
+    assert.equal(feeds.mergeContinue([], rows, 2000).length, 36);
+    assert.equal(feeds.mergeContinue([], rows).length, 12);
+});

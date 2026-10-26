@@ -2,6 +2,19 @@ const tracking = require("./traktTracking");
 const { buildNuvioAppUrl } = require("./appLinks");
 const { mapLimit } = require("./mapLimit");
 
+function image(values) {
+    const value = values?.[0];
+    if (typeof value !== "string") {
+        return null;
+    }
+    try {
+        const url = new URL(value.startsWith("https://") ? value : `https://${value}`);
+        return url.protocol === "https:" ? url.href : null;
+    } catch {
+        return null;
+    }
+}
+
 function media(entry) {
     const show = entry?.show;
     const content = show || entry?.movie;
@@ -145,21 +158,34 @@ async function continueWatching(prisma, person) {
         }
     }
     return mapLimit(
-        [...unique.values()]
-            .sort((a, b) => Date.parse(b.paused_at) - Date.parse(a.paused_at))
-            .slice(0, 12),
+        [...unique.values()].sort((a, b) => Date.parse(b.paused_at) - Date.parse(a.paused_at)),
         3,
         async (entry) => {
             const item = media(entry);
+            const providerImages = {
+                background: image(entry.show?.images?.fanart || entry.movie?.images?.fanart),
+                poster: image(entry.show?.images?.poster || entry.movie?.images?.poster),
+            };
             return {
                 contentType: item.type,
                 showId: item.id,
                 showName: item.name,
-                ...(await artwork(item)),
+                ...(providerImages.poster || providerImages.background
+                    ? providerImages
+                    : await artwork(item)),
                 appUrl: buildNuvioAppUrl(item.type, item.id),
                 imdbRating: null,
                 lastWatched:
-                    item.type === "series" ? { episode: item.episode, season: item.season } : null,
+                    item.type === "series"
+                        ? entry.resume === false
+                            ? entry.lastEpisode
+                                ? {
+                                      episode: entry.lastEpisode.number,
+                                      season: entry.lastEpisode.season,
+                                  }
+                                : null
+                            : { episode: item.episode, season: item.season }
+                        : null,
                 lastWatchedAt: entry.paused_at,
                 metacritic: null,
                 nextEpisode:
@@ -167,7 +193,7 @@ async function continueWatching(prisma, person) {
                         ? {
                               episode: item.episode,
                               season: item.season,
-                              thumbnail: null,
+                              thumbnail: image(entry.episode?.images?.screenshot),
                               title: item.episodeTitle,
                           }
                         : null,
@@ -223,7 +249,7 @@ async function calendar(prisma, person) {
         };
     });
 }
-function mergeContinue(native, tracked) {
+function mergeContinue(native, tracked, limit = 12) {
     const items = new Map();
     for (const item of [...native, ...tracked]) {
         const id = `${item.userId}:${item.showId}`;
@@ -234,7 +260,7 @@ function mergeContinue(native, tracked) {
     }
     return [...items.values()]
         .sort((a, b) => Date.parse(b.lastWatchedAt) - Date.parse(a.lastWatchedAt))
-        .slice(0, 12);
+        .slice(0, limit);
 }
 function mergeCalendar(native, tracked) {
     const rows = new Map();

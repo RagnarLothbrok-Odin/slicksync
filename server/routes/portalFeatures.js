@@ -280,7 +280,7 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             } catch {
                 /* Preserve native resume points when the supplementary tracker is unavailable. */
             }
-            res.json({ items: feeds.mergeContinue(items, tracked) });
+            res.json({ items: feeds.mergeContinue(items, tracked, 2000) });
         })
     );
     router.post(

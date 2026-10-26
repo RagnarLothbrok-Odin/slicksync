@@ -1,56 +1,47 @@
-const { mapLimit } = require("./mapLimit");
-
-/** Read recent show summaries and their next aired episodes, never lifetime events. */
-async function loadUpNext(get) {
-    const [watched, hidden, dropped] = await Promise.all([
-        get("/sync/watched/shows?extended=noseasons&page=1&limit=24"),
-        get("/users/hidden/progress_watched?type=show&page=1&limit=250"),
-        get("/users/hidden/dropped?type=show&page=1&limit=250"),
-    ]);
-    if (!(Array.isArray(watched.data) && Array.isArray(hidden.data))) {
-        throw new Error("Trakt show progress is unavailable.");
-    }
-    if (hidden.pages > 1 || dropped.pages > 1) {
-        throw new Error("Trakt hidden show preferences could not be loaded completely.");
-    }
-    const excluded = new Set(
-        [...hidden.data, ...dropped.data].map((entry) => entry.show?.ids?.trakt)
-    );
-    const candidates = watched.data
-        .filter(
-            (entry) =>
-                entry.show?.ids?.trakt &&
-                /^tt\d+$/.test(entry.show?.ids?.imdb || "") &&
-                !excluded.has(entry.show.ids.trakt)
-        )
-        .slice(0, 24);
-    const entries = await mapLimit(candidates, 3, async (entry) => {
-        try {
-            const result = await get(
-                `/shows/${entry.show.ids.trakt}/progress/watched?hidden=false&specials=false&last_activity=watched`
-            );
-            const progress = result.data;
+/** Use the same Continue Watching endpoint as Trakt's web client. */
+async function loadUpNext(get, now = Date.now()) {
+    const entries = new Map();
+    const limit = 100;
+    for (let page = 1; page <= 20; page++) {
+        const result = await get(
+            `/sync/progress/up_next_nitro?intent=continue&page=${page}&limit=${limit}`
+        );
+        if (!Array.isArray(result.data)) {
+            throw new Error("Trakt Continue Watching is unavailable.");
+        }
+        for (const entry of result.data) {
+            const progress = entry.progress;
             const episode = progress?.next_episode;
+            const aired = Date.parse(episode?.first_aired);
             if (
-                !(Number.isInteger(episode?.season) && Number.isInteger(episode?.number)) ||
+                progress?.hidden ||
+                !/^tt\d+$/.test(entry.show?.ids?.imdb || "") ||
+                !Number.isInteger(episode?.season) ||
+                !Number.isInteger(episode?.number) ||
                 episode.number < 1 ||
-                episode.season < 0
+                episode.season < 0 ||
+                !Number.isFinite(aired) ||
+                aired > now
             ) {
-                return null;
+                continue;
             }
-            return {
+            entries.set(entry.show.ids.imdb, {
                 episode,
-                paused_at: progress.last_watched_at || entry.last_watched_at,
+                lastEpisode: progress.last_episode || null,
+                paused_at: progress.last_watched_at,
                 resume: false,
                 show: entry.show,
-            };
-        } catch (error) {
-            if (error.providerStatus === 404) {
-                return null;
-            }
-            throw error;
+            });
         }
-    });
-    return entries.filter(Boolean);
+        // This endpoint can retain broader pagination headers after filtering.
+        // A short body page is exhausted even when those headers report more pages.
+        if (
+            result.data.length < limit ||
+            (Number.isInteger(result.pages) && page >= result.pages)
+        ) {
+            return [...entries.values()];
+        }
+    }
+    throw new Error("Trakt Continue Watching could not be loaded completely.");
 }
 module.exports = { loadUpNext };
