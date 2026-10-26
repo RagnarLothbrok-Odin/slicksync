@@ -125,6 +125,12 @@ async function continueWatching(prisma, person) {
     const result = paused.status === "fulfilled" ? paused.value : { connected: false, data: [] };
     const next = upcoming.status === "fulfilled" ? upcoming.value : { connected: false, data: [] };
     if (!(result.connected || next.connected)) {
+        if (paused.status === "rejected") {
+            throw paused.reason;
+        }
+        if (upcoming.status === "rejected") {
+            throw upcoming.reason;
+        }
         return [];
     }
     const hidden = await prisma.dismissedContinueWatching.findMany({

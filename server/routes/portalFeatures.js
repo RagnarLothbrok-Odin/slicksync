@@ -243,55 +243,38 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
     router.get(
         "/upcoming-episodes",
         handle(async (req, res) => {
-            const native = await require("../utils/episodeAlerts").getUpcomingEpisodes(
-                prisma,
-                req.person.accountId,
-                24,
-                req.person.id
-            );
-            const feeds = require("../utils/traktFeeds");
-            let tracked = [];
-            try {
-                tracked = await feeds.calendar(prisma, req.person);
-            } catch {
-                /* Other providers' calendar data stays available during a tracker outage. */
-            }
-            res.json(feeds.mergeCalendar(native, tracked));
+            const source = await tracking.source(prisma, req.person);
+            const items =
+                source === "trakt"
+                    ? await require("../utils/traktFeeds").calendar(prisma, req.person)
+                    : await require("../utils/episodeAlerts").getUpcomingEpisodes(
+                          prisma,
+                          req.person.accountId,
+                          24,
+                          req.person.id
+                      );
+            res.json(items);
         })
     );
     router.get(
         "/now-playing",
         handle(async (req, res) => {
-            // Attribute streams against the whole household first, then return
-            // only this authenticated profile and no household identity fields.
-            const rows = await require("../utils/metricsBuilder").liveNowPlaying(
-                prisma,
-                req.person.accountId
-            );
-            const trackingWarnings = [];
-            if (req.person.providerType === "nuvio" && prisma.trackingConnection) {
-                try {
-                    const connection = await tracking.status(prisma, req.person);
-                    const preferences = await storedPersonalPreferences(prisma, req.person.id);
-                    if (
-                        connection.connected &&
-                        preferences.trackingSource !== req.person.providerType
-                    ) {
-                        const features = await tracking.check(prisma, req.person);
-                        for (const feature of features) {
-                            if (!feature.available) {
-                                trackingWarnings.push(feature.label);
-                            }
-                        }
-                    }
-                } catch {
-                    trackingWarnings.push("Tracking services");
-                }
-            }
+            const source = await tracking.source(prisma, req.person);
+            const rows =
+                source === "trakt"
+                    ? await require("../utils/traktFeeds").nowPlaying(prisma, req.person)
+                    : await require("../utils/metricsBuilder").liveNowPlaying(
+                          prisma,
+                          req.person.accountId
+                      );
             res.set("Cache-Control", "no-store");
             res.json({
                 items: rows
-                    .filter((row) => row.user?.id === req.person.id)
+                    .filter(
+                        (row) =>
+                            row.user?.id === req.person.id &&
+                            (source === "trakt" || row.playback?.evidence !== "tracker")
+                    )
                     .map((row) => ({
                         elapsedFrozen: row.elapsedFrozen === true,
                         elapsedSeconds: row.elapsedSeconds ?? null,
@@ -321,27 +304,24 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                         totalDuration: row.totalDuration ?? null,
                         videoId: row.videoId,
                     })),
-                trackingWarnings,
+                trackingWarnings: [],
             });
         })
     );
     router.get(
         "/continue-watching",
         handle(async (req, res) => {
-            const items = await require("../utils/continueWatching").getContinueWatching(
-                prisma,
-                req.person.accountId,
-                12,
-                req.person.id
-            );
-            const feeds = require("../utils/traktFeeds");
-            let tracked = [];
-            try {
-                tracked = await feeds.continueWatching(prisma, req.person);
-            } catch {
-                /* Preserve native resume points when the supplementary tracker is unavailable. */
-            }
-            res.json({ items: feeds.mergeContinue(items, tracked, 2000) });
+            const source = await tracking.source(prisma, req.person);
+            const items =
+                source === "trakt"
+                    ? await require("../utils/traktFeeds").continueWatching(prisma, req.person)
+                    : await require("../utils/continueWatching").getContinueWatching(
+                          prisma,
+                          req.person.accountId,
+                          12,
+                          req.person.id
+                      );
+            res.json({ items });
         })
     );
     router.post(

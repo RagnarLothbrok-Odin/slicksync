@@ -3134,16 +3134,16 @@ module.exports = ({
                 return res.status(401).json({ error: publicMessage(e, "Invalid auth key") });
             }
 
-            let trackingWarning;
             if (req.query.home === "true") {
-                try {
-                    const tracked = await require("../utils/traktTracking").read(
-                        prisma,
-                        user,
-                        "home",
-                        300_000
-                    );
-                    if (tracked.connected) {
+                const tracking = require("../utils/traktTracking");
+                if ((await tracking.source(prisma, user)) === "trakt") {
+                    try {
+                        const tracked = await tracking.read(prisma, user, "home", 300_000);
+                        if (!tracked.connected) {
+                            return res
+                                .status(409)
+                                .json({ error: "The tracking source changed. Refresh the page." });
+                        }
                         return res.json({
                             ...tracked.data,
                             user: {
@@ -3153,10 +3153,11 @@ module.exports = ({
                                 username: user.username,
                             },
                         });
+                    } catch {
+                        return res.status(503).json({
+                            error: "Trakt statistics are unavailable. Try again or change your source in Tracking settings.",
+                        });
                     }
-                } catch {
-                    trackingWarning =
-                        "Trakt history could not be loaded completely. Showing SlickSync activity instead.";
                 }
             }
 
@@ -3550,7 +3551,6 @@ module.exports = ({
                 nowPlaying,
                 sessions: activityItems,
                 source: "slicksync",
-                sourceNote: trackingWarning,
                 stats: {
                     avgWatchTimeHours: avgWatchTimeSeconds / 3600,
                     avgWatchTimeSeconds,

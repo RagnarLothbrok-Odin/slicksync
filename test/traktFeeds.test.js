@@ -189,3 +189,10 @@ test("personal Continue Watching retains the complete Trakt list when merged", a
     assert.equal(feeds.mergeContinue([], rows, 2000).length, 36);
     assert.equal(feeds.mergeContinue([], rows).length, 12);
 });
+
+test("a complete Trakt outage is reported instead of looking like an empty Continue Watching list", async () => {
+    tracking.read = async () => {
+        throw Object.assign(new Error("Trakt unavailable"), { status: 503 });
+    };
+    await assert.rejects(feeds.continueWatching(prisma, person), /Trakt unavailable/);
+});

@@ -26,11 +26,11 @@ Disconnecting in SlickSync removes its locally stored authorization. Also remove
 
 ## Data and accuracy
 
-- **Playback activity:** reads Trakt's current watching report, with playback position estimated from its expiry and runtime. The UI labels the source as Trakt. A saved resume point is not treated as a live pause event.
-- **Continue Watching:** adds saved Trakt progress alongside native items, preferring the newer timestamp for the same title and respecting local dismissals.
-- **Calendar:** adds the user's Trakt calendar for the next 33 days, preserving UTC airing times and local muted/dismissed episode settings.
+- **Playback activity:** reads Trakt's current watching report, with playback position estimated from its expiry and runtime. The selected source is shown in Tracking settings. A saved resume point is not treated as a live pause event.
+- **Continue Watching:** uses paused Trakt playback and next episodes exclusively when Trakt is selected, respecting local dismissals.
+- **Calendar:** uses the user's Trakt calendar exclusively when selected for the next 33 days, preserving UTC airing times and local muted/dismissed episode settings.
 
-The settings panel checks all three sources separately. Provider restrictions, expired authorization, rate limits, or outages can affect individual sources. Available native data remains visible if a supplementary source fails.
+The settings panel checks each Trakt feature separately. Provider restrictions, expired authorization, rate limits, or outages can affect individual sources. An unavailable selected source shows an error instead of substituting data from another source.
 
 After linking, SlickSync reads tracking data only. It does not send playback, watched-state, or calendar changes back to Trakt or Nuvio, and it does not import historical watch events into the local database.
 
@@ -50,7 +50,7 @@ Times use title runtimes, not measured time in the player. Trakt does not supply
 streaks or binge counts in its statistics response, so these cards are replaced
 with supported episode counts or omitted. No lifetime history scan runs on Home.
 Results are cached for five minutes; optional source failures do not hide the
-all-time figures. Unavailable aggregate stats fall back explicitly to SlickSync.
+all-time figures. Unavailable aggregate stats show an error without falling back to SlickSync.
 Artwork has a two-second budget and cannot keep the statistics loading.
 
 The account header, group membership, sync controls and health remain SlickSync
@@ -67,7 +67,7 @@ or individual show progress. Episodes with a future or unknown air date are
 excluded. Trakt's artwork is used directly, with metadata fallback when missing.
 Results are cached for five minutes, and the personal row is no longer capped at
 12 items. Paused playback takes priority over a computed next episode for the same
-title; Nuvio and Trakt retain the newest entry per title. Local dismissals still apply.
+title. Local dismissals still apply. The selected provider is exclusive; native and tracker rows are never merged.
 
 Tracking settings include a per-profile **Use as source** picker. The account's
 native app is always available; trackers appear only while connected. Choosing the

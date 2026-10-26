@@ -138,6 +138,27 @@ function createTraktTracking({
             username: connection?.username || null,
         };
     }
+    async function source(prisma, person) {
+        const native = person.providerType || "stremio";
+        if (native !== "nuvio" || !prisma.trackingConnection) {
+            return native;
+        }
+        const profile = await prisma.user.findUnique({
+            select: { portalPreferences: true },
+            where: { id: person.id },
+        });
+        let preferences = {};
+        try {
+            preferences = JSON.parse(profile?.portalPreferences || "{}");
+        } catch {
+            /* Older profiles retain their connected source. */
+        }
+        if (preferences?.trackingSource === native) {
+            return native;
+        }
+        const connection = await prisma.trackingConnection.findUnique({ where: where(person) });
+        return connection?.credentials ? "trakt" : native;
+    }
     async function begin(prisma, person) {
         requireNuvio(person);
         const client = await clientId();
@@ -441,6 +462,6 @@ function createTraktTracking({
             })
         );
     }
-    return { begin, check, complete, disconnect, read, status };
+    return { begin, check, complete, disconnect, read, source, status };
 }
 module.exports = { ...createTraktTracking(), createTraktTracking };
