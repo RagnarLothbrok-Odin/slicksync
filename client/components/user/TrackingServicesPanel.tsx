@@ -324,7 +324,7 @@ export function TrackingServicesPanel() {
                                         .filter((entry) => entry.connected)
                                         .map((entry) => ({
                                             label: entry.provider === "trakt" ? "Trakt" : "Simkl",
-                                            value: "Simkl",
+                                            value: entry.provider,
                                         })),
                                 ]}
                                 value={
