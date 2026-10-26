@@ -36,4 +36,4 @@ After linking, SlickSync reads tracking data only. It does not send playback, wa
 
 ## Verification
 
-Fixture tests cover owner and provider checks, PKCE, callback expiry and replay, encrypted credential boundaries, token-refresh coordination, disconnect races, rate limiting, and conversion of playback, resume points, and calendar entries. A real sign-in and playback trial is still required with the instance's registered app and a consenting user's Trakt account.
+Fixture tests cover owner and provider checks, PKCE, callback expiry and replay, encrypted credential boundaries, token-refresh coordination, disconnect races, rate limiting, and conversion of playback, resume points, and calendar entries. A real PKCE sign-in and read access to all three data sources were also verified in a public/PostgreSQL local preview. Playback start, pause, resume, and stop still need a hands-on trial with the same Trakt account enabled in Nuvio.
