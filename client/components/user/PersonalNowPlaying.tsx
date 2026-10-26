@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon, ChevronRightIcon, FilmIcon, PlayIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useState } from "react";
+import { PlaybackFreshness } from "@/components/ui/PlaybackFreshness";
 import { useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { playbackPresentation } from "@/lib/playback";
 import { type NowPlayingItem, personalRequest } from "@/lib/user-api";
@@ -63,6 +64,7 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
                     {title}
                 </span>
                 <span className="mt-1 block text-muted text-sm">{episode}</span>
+                <PlaybackFreshness playback={item.playback} />
                 {progress !== null && (
                     <span
                         aria-label={presentation.positionLabel}

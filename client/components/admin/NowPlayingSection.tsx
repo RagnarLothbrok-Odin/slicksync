@@ -4,6 +4,7 @@ import { FilmIcon, PlayIcon, TvIcon } from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Badge, UserAvatar } from "@/components/ui";
+import { PlaybackFreshness } from "@/components/ui/PlaybackFreshness";
 import { type PlaybackEvidence, playbackPresentation } from "@/lib/playback";
 
 interface NowPlayingItem {
@@ -187,6 +188,7 @@ export function NowPlayingSection({ items, now }: NowPlayingSectionProps) {
                         <p className="mt-0.5 text-muted text-xs">
                             {playbackPresentation(item.playback).status}
                         </p>
+                        <PlaybackFreshness playback={item.playback} />
                         {watchingFor(item) && (
                             <p className="mt-0.5 text-subtle text-xs">
                                 Connection open for {watchingFor(item)}

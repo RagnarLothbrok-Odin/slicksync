@@ -62,6 +62,7 @@ import {
     UserAvatar,
 } from "@/components/ui";
 import { MetricStrip } from "@/components/ui/MetricStrip";
+import { PlaybackFreshness } from "@/components/ui/PlaybackFreshness";
 import { toast } from "@/components/ui/Toast";
 import { showDeletedWithUndo } from "@/components/ui/undoToast";
 import { startAdaptivePoll } from "@/lib/adaptivePoll";
@@ -1700,6 +1701,7 @@ function NowPlayingItemBody({
                 <p className="mt-0.5 text-muted text-xs">
                     {playbackPresentation(np.playback).status}
                 </p>
+                <PlaybackFreshness playback={np.playback} />
                 {/* "Resume here" - jumps to the right title/episode on whatever
             device you tap this from, with the exact position shown so you
             know where to seek to. Neither Stremio's nor Nuvio's deep-link
