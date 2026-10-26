@@ -1,28 +1,42 @@
 "use client";
 
-import { ArrowPathIcon, ChevronRightIcon, FilmIcon, PlayIcon } from "@heroicons/react/24/outline";
+import {
+    ArrowPathIcon,
+    FilmIcon,
+    InformationCircleIcon,
+    PlayIcon,
+} from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/Button";
 import { PlaybackFreshness } from "@/components/ui/PlaybackFreshness";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
-import { playbackPresentation } from "@/lib/playback";
+import { livePlaybackPosition, playbackPresentation } from "@/lib/playback";
 import { type NowPlayingItem, personalRequest } from "@/lib/user-api";
 import { PersonalMediaDetailModal } from "./PersonalMediaDetailModal";
 
 function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => void }) {
-    const [failedArtwork, setFailedArtwork] = useState(false);
+    const [artworkIndex, setArtworkIndex] = useState(0);
     const title =
         item.item.name && item.item.name !== item.item.id ? item.item.name : "Your current title";
     const presentation = playbackPresentation(item.playback);
     const duration = item.totalDuration;
-    const position = item.lastPosition;
+    const tracker = item.playback?.evidence === "tracker";
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+        if (!tracker) {
+            return;
+        }
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [tracker]);
+    const position = livePlaybackPosition(item.playback, item.lastPosition, duration, now);
     const knownProgress =
         typeof duration === "number" &&
         duration > 0 &&
         typeof position === "number" &&
         position >= 0;
     const progress = knownProgress ? Math.min(100, Math.max(0, (position / duration) * 100)) : null;
-    const remaining = knownProgress ? Math.max(0, Math.ceil((duration - position) / 60_000)) : null;
     const episode =
         item.item.type === "series" && item.item.episode != null
             ? `${item.item.season == null ? "" : `Season ${item.item.season}, `}Episode ${item.item.episode}`
@@ -30,69 +44,97 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
               ? "Movie"
               : "Series";
 
+    const artwork = [item.item.thumbnail, item.item.background, item.item.poster].filter(
+        (source): source is string => typeof source === "string" && source.length > 0
+    )[artworkIndex];
     return (
-        <button
-            aria-label={`View details for ${title}`}
-            className="group flex w-full min-w-0 items-center gap-4 rounded-2xl border border-default bg-surface p-4 text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary active:bg-surface-hover sm:gap-5 sm:p-5"
-            onClick={onOpen}
-            onErrorCapture={() => setFailedArtwork(true)}
-            type="button"
-        >
-            <span className="relative flex h-28 w-[4.5rem] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-bg text-subtle">
-                {item.item.poster && !failedArtwork ? (
-                    <img
-                        alt=""
-                        className="h-full w-full object-cover"
-                        height={112}
-                        src={item.item.poster}
-                        width={72}
-                    />
-                ) : (
-                    <FilmIcon aria-hidden="true" className="h-7 w-7" />
-                )}
-            </span>
-            <span className="min-w-0 flex-1">
-                <span
-                    className={`mb-2 inline-flex items-center gap-1.5 text-xs ${presentation.playing ? "text-success" : "text-muted"}`}
+        <article className="relative isolate overflow-hidden rounded-3xl border border-default bg-surface">
+            {item.item.background && (
+                <img
+                    alt=""
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 -z-10 h-full w-full scale-110 object-cover opacity-10 blur-2xl"
+                    height={900}
+                    src={item.item.background}
+                    width={1600}
+                />
+            )}
+            <div className="grid items-center gap-4 p-4 sm:gap-5 lg:grid-cols-[12rem_minmax(0,1fr)_auto]">
+                <button
+                    aria-label={`View details for ${title}`}
+                    className="group flex aspect-video w-full max-w-xs items-center justify-center justify-self-center overflow-hidden rounded-2xl bg-bg text-subtle focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 lg:max-w-none"
+                    onClick={onOpen}
+                    onErrorCapture={() => setArtworkIndex((index) => index + 1)}
+                    type="button"
                 >
-                    <span
-                        aria-hidden="true"
-                        className={`h-1.5 w-1.5 rounded-full ${presentation.playing ? "bg-success" : "bg-current"}`}
-                    />
-                    {presentation.status}
-                </span>
-                <span className="line-clamp-2 font-semibold text-default text-lg leading-snug tracking-tight sm:text-xl">
-                    {title}
-                </span>
-                <span className="mt-1 block text-muted text-sm">{episode}</span>
-                <PlaybackFreshness playback={item.playback} />
-                {progress !== null && (
-                    <span
-                        aria-label={presentation.positionLabel}
-                        aria-valuemax={100}
-                        aria-valuemin={0}
-                        aria-valuenow={Math.round(progress)}
-                        className="mt-3 block"
-                        role="progressbar"
-                    >
-                        <span className="block h-1 overflow-hidden rounded-full bg-primary/15">
-                            <span
-                                className="block h-full rounded-full bg-primary"
-                                style={{ width: `${progress}%` }}
-                            />
-                        </span>
-                        <span className="mt-1.5 block text-subtle text-xs">
-                            {presentation.positionLabel} · {Math.round(progress)}%
-                            {remaining !== null && ` · ${remaining} min remaining at update`}
-                        </span>
-                    </span>
-                )}
-            </span>
-            <ChevronRightIcon
-                aria-hidden="true"
-                className="h-4 w-4 shrink-0 text-subtle transition-colors group-hover:text-default"
-            />
-        </button>
+                    {artwork ? (
+                        <img
+                            alt={title}
+                            className="h-full w-full object-cover transition-opacity group-hover:opacity-85 group-active:opacity-70"
+                            height={270}
+                            src={artwork}
+                            width={480}
+                        />
+                    ) : (
+                        <FilmIcon aria-hidden="true" className="h-10 w-10" />
+                    )}
+                </button>
+                <div className="min-w-0 py-1">
+                    <p className="mb-2 font-semibold text-primary text-xs uppercase tracking-[0.14em]">
+                        {presentation.playing ? "Now Playing" : presentation.status}
+                    </p>
+                    <h3 className="font-semibold text-default text-xl leading-tight tracking-tight sm:text-2xl">
+                        {title}
+                    </h3>
+                    <p className="mt-1.5 text-muted text-sm">
+                        {episode}
+                        {item.item.episodeTitle && ` · ${item.item.episodeTitle}`}
+                    </p>
+                    {item.item.description && (
+                        <p className="mt-2 line-clamp-2 text-muted text-sm leading-relaxed">
+                            {item.item.description}
+                        </p>
+                    )}
+                    {!tracker && <PlaybackFreshness playback={item.playback} />}
+                    {progress !== null && (
+                        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                            <div
+                                aria-label="Playback progress"
+                                aria-valuemax={100}
+                                aria-valuemin={0}
+                                aria-valuenow={Math.round(progress)}
+                                className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full"
+                                role="progressbar"
+                                style={{ background: "var(--color-surface-border)" }}
+                            >
+                                <div
+                                    className="h-full rounded-full"
+                                    style={{
+                                        background: "var(--color-primary)",
+                                        width: `${progress}%`,
+                                    }}
+                                />
+                            </div>
+                            <span className="text-subtle text-xs tabular-nums">
+                                {knownProgress
+                                    ? `${Math.floor(position / 60_000)} min / ${Math.round(duration / 60_000)} min`
+                                    : ""}{" "}
+                                · {Math.round(progress)}%
+                            </span>
+                        </div>
+                    )}
+                </div>
+                <Button
+                    aria-label={`View details for ${title}`}
+                    className="playback-details"
+                    leftIcon={<InformationCircleIcon aria-hidden="true" className="h-5 w-5" />}
+                    onClick={onOpen}
+                    variant="secondary"
+                >
+                    View Details
+                </Button>
+            </div>
+        </article>
     );
 }
 
@@ -161,12 +203,16 @@ export function PersonalNowPlaying() {
 
     return (
         <section aria-labelledby="personal-now-playing-heading" className="mb-8">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-3 flex items-center justify-end gap-3">
                 <h2
-                    className="font-semibold text-default text-lg tracking-tight"
+                    className={
+                        current?.items.length
+                            ? "sr-only"
+                            : "font-semibold text-default text-lg tracking-tight"
+                    }
                     id="personal-now-playing-heading"
                 >
-                    Playback Activity
+                    {current?.items.length ? "Now Playing" : "Playback Activity"}
                 </h2>
                 {provider === "nuvio" ? (
                     <Link
@@ -186,7 +232,7 @@ export function PersonalNowPlaying() {
                 </p>
             )}
             {current?.items.length ? (
-                <div className="grid gap-3 lg:grid-cols-2">
+                <div className="grid gap-4">
                     {current.items.map((item) => (
                         <PlaybackCard
                             item={item}

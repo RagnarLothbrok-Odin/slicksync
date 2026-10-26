@@ -692,6 +692,10 @@ export interface NowPlayingItem {
         name: string;
         type: string;
         poster?: string | null;
+        background?: string | null;
+        thumbnail?: string | null;
+        description?: string | null;
+        episodeTitle?: string | null;
         season?: number;
         episode?: number;
     };

@@ -1093,3 +1093,22 @@ html.daylight .interface-login {
     padding: 1.25rem;
   }
 }
+
+/* Give the playback action a clear highlight over the artwork surface. */
+.playback-details:hover:not(:disabled),
+.playback-details:focus-visible {
+  color: var(--color-primary);
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 18%,
+    var(--color-surface)
+  );
+  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+.playback-details:active:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 26%,
+    var(--color-surface)
+  );
+}
