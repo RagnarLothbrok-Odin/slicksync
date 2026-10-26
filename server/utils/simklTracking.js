@@ -63,12 +63,25 @@ function createSimklTracking({
     async function clientId() {
         // Tracking has its own registration; list-import keys are not OAuth credentials.
         const configured = process.env.SIMKL_TRACKING_CLIENT_ID;
-        if (configured && /^[a-zA-Z0-9_-]{1,160}$/.test(configured)) {
+        if (
+            configured &&
+            /^[a-zA-Z0-9_-]{1,160}$/.test(configured) &&
+            process.env.SIMKL_TRACKING_CLIENT_SECRET?.trim()
+        ) {
             return configured;
         }
         throw error("Your administrator has not configured the Simkl tracking app yet.", 503);
     }
     async function request(path, { token, client, body, method = "GET" } = {}) {
+        if (path === "/oauth2/token" || path === "/oauth2/revoke") {
+            // Server registrations authenticate every grant and revocation. Never
+            // attach the application secret to ordinary media requests or URLs.
+            const configuredClient = await clientId();
+            if (body?.client_id !== configuredClient) {
+                throw error("The Simkl registration changed. Reconnect this profile.", 409);
+            }
+            body = { ...body, client_secret: process.env.SIMKL_TRACKING_CLIENT_SECRET.trim() };
+        }
         const rateKey = client || body?.client_id;
         const limitedUntil = cooldowns.get(rateKey) || 0;
         if (limitedUntil > Date.now()) {

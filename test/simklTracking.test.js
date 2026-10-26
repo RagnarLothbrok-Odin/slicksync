@@ -118,6 +118,7 @@ async function linked(fixture) {
 
 test.before(() => {
     process.env.SIMKL_TRACKING_CLIENT_ID = "fixture-client-123456";
+    process.env.SIMKL_TRACKING_CLIENT_SECRET = "fixture-server-secret";
     process.env.PUBLIC_APP_URL = "https://preview.example.test";
 });
 
@@ -131,7 +132,13 @@ test("PKCE links only the authenticated Nuvio profile and never exposes stored c
         crypto.createHash("sha256").update(exchange.body.code_verifier).digest("base64url"),
         url.searchParams.get("code_challenge")
     );
-    assert.equal(exchange.body.client_secret, undefined);
+    assert.equal(exchange.body.client_secret, "fixture-server-secret");
+    assert.equal(url.searchParams.has("client_secret"), false);
+    assert.ok(
+        fixture.calls
+            .filter((call) => call.path === "/users/settings")
+            .every((call) => !JSON.stringify(call).includes("fixture-server-secret"))
+    );
     assert.equal(
         exchange.body.redirect_uri,
         "https://preview.example.test/user/settings/tracking/simkl/callback"
@@ -286,4 +293,20 @@ test("disconnect during a token refresh cannot recreate the connection", async (
     release();
     await assert.rejects(() => reading, /connection changed/);
     assert.equal(fixture.rows.length, 0);
+});
+
+test("server registration requires a secret before starting sign-in", async () => {
+    const previous = process.env.SIMKL_TRACKING_CLIENT_SECRET;
+    delete process.env.SIMKL_TRACKING_CLIENT_SECRET;
+    try {
+        const fixture = setup();
+        assert.equal((await fixture.tracking.status(fixture.prisma, person)).configured, false);
+        await assert.rejects(
+            () => fixture.tracking.begin(fixture.prisma, person),
+            /not configured/
+        );
+        assert.equal(fixture.calls.length, 0);
+    } finally {
+        process.env.SIMKL_TRACKING_CLIENT_SECRET = previous;
+    }
 });
