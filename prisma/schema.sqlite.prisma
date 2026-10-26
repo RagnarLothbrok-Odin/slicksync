@@ -142,6 +142,7 @@ model User {
   healthIgnored      Boolean   @default(false)
 
   // Relationships
+  trackingConnections TrackingConnection[]
 
   @@unique([email, providerType, nuvioProfileId])
   @@index([expiresAt])
@@ -1634,4 +1635,25 @@ model PersonalTitleState {
   @@unique([userId, itemId])
   @@index([accountId, userId, saved])
   @@map("personal_title_state")
+}
+
+// Supplementary tracking services belong to one registered person, not their
+// shared Nuvio login. OAuth credentials and pending PKCE verifiers are encrypted.
+model TrackingConnection {
+  id             String    @id @default(cuid())
+  accountId      String
+  userId         String
+  provider       String
+  credentials    String?
+  pending        String?
+  stateHash      String?
+  pendingUntil   DateTime?
+  externalUserId String?
+  username       String?
+  connectedAt    DateTime?
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, userId, provider])
+  @@unique([accountId, provider, externalUserId])
+  @@map("tracking_connections")
 }
