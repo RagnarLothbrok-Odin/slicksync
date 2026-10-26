@@ -2,7 +2,7 @@
 
 import { ArrowTopRightOnSquareIcon, LinkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
-import { Button, Card, ConfirmModal } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { DropdownSelect } from "@/components/ui/DropdownSelect";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
@@ -39,7 +39,6 @@ export function TrackingServicesPanel() {
     const [sourceBusy, setSourceBusy] = useState(false);
     const [sourceFailure, setSourceFailure] = useState("");
     const [features, setFeatures] = useState<{ userId: string; items: Feature[] } | null>(null);
-    const [confirm, setConfirm] = useState(false);
     const [retry, setRetry] = useState(0);
     const service = state?.userId === userId ? state.value.services[0] : null;
     useEffect(() => {
@@ -137,7 +136,6 @@ export function TrackingServicesPanel() {
             await personalRequest(userId, authKey, "/tracking-services/trakt", {
                 method: "DELETE",
             });
-            setConfirm(false);
             setRetry((value) => value + 1);
         } catch (reason) {
             setFailure(readErrorMessage(reason, "Could not disconnect this service."));
@@ -175,7 +173,8 @@ export function TrackingServicesPanel() {
                         {service?.connected ? (
                             <Button
                                 disabled={busy}
-                                onClick={() => setConfirm(true)}
+                                isLoading={busy}
+                                onClick={() => void disconnect()}
                                 size="sm"
                                 variant="secondary"
                             >
@@ -343,16 +342,6 @@ export function TrackingServicesPanel() {
                     </p>
                 )}
             </Card>
-            <ConfirmModal
-                confirmText="Disconnect"
-                description="This stops SlickSync reading this profile’s Trakt data. Existing Nuvio history stays here. Remove SlickSync from Trakt’s Connected Apps as well to revoke access and free its connection slot."
-                isLoading={busy}
-                isOpen={confirm}
-                onClose={() => setConfirm(false)}
-                onConfirm={() => void disconnect()}
-                title="Disconnect tracking service?"
-                variant="danger"
-            />
         </>
     );
 }
