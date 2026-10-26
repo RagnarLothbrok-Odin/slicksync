@@ -512,12 +512,12 @@ export default function UserHomePage() {
                             delay={0.55}
                             icon={<TrophyIcon className="h-5 w-5" />}
                             label={
-                                activityData?.source === "trakt"
+                                activityData?.source === "trakt" || activityData?.source === "simkl"
                                     ? "Episodes Watched"
                                     : "Longest Streak"
                             }
                             value={
-                                activityData?.source === "trakt"
+                                activityData?.source === "trakt" || activityData?.source === "simkl"
                                     ? (stats.episodesCount ?? 0)
                                     : `${stats.longestStreak} ${stats.longestStreak === 1 ? "day" : "days"}`
                             }

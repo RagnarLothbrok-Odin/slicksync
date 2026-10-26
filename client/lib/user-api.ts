@@ -714,7 +714,7 @@ export interface UserActivityData {
     mostWatchedItems?: MostWatchedItem[];
     nowPlaying: NowPlayingItem[];
     sessions: WatchSession[];
-    source?: "trakt" | "slicksync";
+    source?: "trakt" | "simkl" | "slicksync";
     sourceNote?: string;
     stats: UserActivityStats;
     todayAvailable?: boolean;

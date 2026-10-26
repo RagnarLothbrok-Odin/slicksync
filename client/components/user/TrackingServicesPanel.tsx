@@ -4,6 +4,7 @@ import { ArrowTopRightOnSquareIcon, LinkIcon } from "@heroicons/react/24/outline
 import { useEffect, useState } from "react";
 import { Button, Card } from "@/components/ui";
 import { DropdownSelect } from "@/components/ui/DropdownSelect";
+import { SimklTrackingCard } from "@/components/user/SimklTrackingCard";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerLabel } from "@/lib/providers";
@@ -13,7 +14,7 @@ interface Service {
     configured: boolean;
     connected: boolean;
     connectedAt: string | null;
-    provider: "trakt";
+    provider: "trakt" | "simkl";
     username: string | null;
 }
 interface Feature {
@@ -40,7 +41,10 @@ export function TrackingServicesPanel() {
     const [sourceFailure, setSourceFailure] = useState("");
     const [features, setFeatures] = useState<{ userId: string; items: Feature[] } | null>(null);
     const [retry, setRetry] = useState(0);
-    const service = state?.userId === userId ? state.value.services[0] : null;
+    const service =
+        state?.userId === userId
+            ? state.value.services.find((entry) => entry.provider === "trakt")
+            : null;
     useEffect(() => {
         if (!(isReady && userId && authKey)) {
             return;
@@ -288,6 +292,17 @@ export function TrackingServicesPanel() {
                     )}
                 </Card>
             )}
+            {provider === "nuvio" && (
+                <SimklTrackingCard
+                    nativeLabel={nativeLabel}
+                    onChange={() => setRetry((value) => value + 1)}
+                    service={
+                        state?.userId === userId
+                            ? state.value.services.find((entry) => entry.provider === "simkl")
+                            : undefined
+                    }
+                />
+            )}
             <Card className={provider === "nuvio" ? "mt-6" : ""} padding="lg">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="max-w-md">
@@ -308,11 +323,8 @@ export function TrackingServicesPanel() {
                                     ...(state?.userId === userId ? state.value.services : [])
                                         .filter((entry) => entry.connected)
                                         .map((entry) => ({
-                                            label:
-                                                entry.provider === "trakt"
-                                                    ? "Trakt"
-                                                    : entry.provider,
-                                            value: entry.provider,
+                                            label: entry.provider === "trakt" ? "Trakt" : "Simkl",
+                                            value: "Simkl",
                                         })),
                                 ]}
                                 value={
