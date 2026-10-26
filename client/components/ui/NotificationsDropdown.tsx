@@ -28,6 +28,11 @@ import { api, type InviteRequest } from "@/lib/api";
 import { readErrorMessage } from "@/lib/errors";
 import { useCoarsePointer } from "@/lib/hooks/useCoarsePointer";
 import { useIsTV } from "@/lib/hooks/useIsTV";
+import {
+    notificationClearStorageKey,
+    notificationSurvivesClear,
+    storedNotificationCutoff,
+} from "@/lib/notificationVisibility";
 
 interface NotificationBase {
     id: string;
@@ -157,10 +162,21 @@ export function NotificationsDropdown({
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
+    // A clear on one admin account must not hide another account's bell.
+    const clearStorageKey = notificationClearStorageKey(api.getToken());
+    // Unlike the default activity window, this is only set by an actual Clear.
+    const [clearedBefore, setClearedBefore] = useState<Date | null>(() => {
+        if (typeof window === "undefined") {
+            return null;
+        }
+        return storedNotificationCutoff(localStorage.getItem(clearStorageKey));
+    });
     const [lastChecked, setLastChecked] = useState<Date>(() => {
         if (typeof window !== "undefined") {
             const stored = localStorage.getItem("notifications-last-checked");
-            return stored ? new Date(stored) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // Default to 7 days ago
+            return (
+                storedNotificationCutoff(stored) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            ); // Default to 7 days ago
         }
         return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     });
@@ -213,7 +229,11 @@ export function NotificationsDropdown({
         // server-side too, so they don't just reappear on the next poll.
         if (id.startsWith("stored-")) {
             const realId = id.slice("stored-".length);
-            api.dismissNotifications([realId]).catch(() => undefined);
+            api.dismissNotifications([realId]).catch(() => {
+                toast.error(
+                    "Hidden on this browser, but could not save the dismissal. Please try again."
+                );
+            });
         }
     };
 
@@ -475,21 +495,23 @@ export function NotificationsDropdown({
         // Persistent bell notifications (watch/sync/vault/invite/mismatch). These
         // carry server-side read state; readIds is layered on top only as an
         // optimistic client override so "Mark all read" reflects instantly before
-        // the next poll. The lastChecked window doesn't apply - these are already
-        // time-bounded by the server query and cleared via server-side delete.
-        storedNotifications.forEach((n) => {
-            const id = `stored-${n.id}`;
-            items.push({
-                data: { url: n.url },
-                id,
-                message: n.body,
-                poster: n.poster || undefined,
-                read: n.read || readIds.has(id),
-                timestamp: new Date(n.createdAt),
-                title: n.title,
-                type: n.type,
+        // the next poll. The clear boundary also applies while an older request
+        // is in flight, or if the server-side deletion could not be saved.
+        storedNotifications
+            .filter((n) => notificationSurvivesClear(n.createdAt, clearedBefore))
+            .forEach((n) => {
+                const id = `stored-${n.id}`;
+                items.push({
+                    data: { url: n.url },
+                    id,
+                    message: n.body,
+                    poster: n.poster || undefined,
+                    read: n.read || readIds.has(id),
+                    timestamp: new Date(n.createdAt),
+                    title: n.title,
+                    type: n.type,
+                });
             });
-        });
 
         // Add recent activities
         combinedActivities
@@ -606,6 +628,7 @@ export function NotificationsDropdown({
         episodeAlerts,
         addonHealthAlerts,
         storedNotifications,
+        clearedBefore,
         lastChecked,
         pendingRequests,
         dismissedIds,
@@ -648,14 +671,20 @@ export function NotificationsDropdown({
         persistReadIds(next);
         // Persist read state server-side for the stored subset so it stays read
         // across devices / reloads, not just in this browser's localStorage.
-        api.markNotificationsRead().catch(() => undefined);
+        api.markNotificationsRead().catch(() => {
+            toast.error(
+                "Marked read on this browser, but could not save the change. Please try again."
+            );
+        });
     };
 
     const handleClearAll = () => {
         const now = new Date();
         setLastChecked(now);
+        setClearedBefore(now);
         if (typeof window !== "undefined") {
             localStorage.setItem("notifications-last-checked", now.toISOString());
+            localStorage.setItem(clearStorageKey, now.toISOString());
         }
         // Nothing before `now` will ever be shown again anyway (see the
         // lastChecked filter above), so the individually-dismissed and
@@ -663,11 +692,14 @@ export function NotificationsDropdown({
         // indefinitely.
         persistDismissedIds(new Set());
         persistReadIds(new Set());
-        // The lastChecked window hides the derived sources (episode/addon/etc.);
-        // stored bell notifications aren't windowed, so Clear deletes them
-        // server-side (and locally) to actually empty them.
+        // Clear the remembered list too. The cutoff prevents an older
+        // in-flight response from putting dismissed rows back on screen.
         setStoredNotifications([]);
-        api.dismissNotifications().catch(() => undefined);
+        api.dismissNotifications().catch(() => {
+            toast.error(
+                "Cleared on this browser, but could not save the change. Please try again."
+            );
+        });
         setIsOpen(false);
     };
 
