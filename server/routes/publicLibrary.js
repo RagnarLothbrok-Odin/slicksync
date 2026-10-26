@@ -33,6 +33,21 @@ module.exports = ({
     const { getAccountId } = require("../utils/helpers");
     const createProvider = makeCreateProvider({ encrypt, getAccountId, prisma });
     const router = express.Router();
+    function respondToDatabaseFailure(error, res) {
+        const code = error?.code || error?.errorCode;
+        if (!/^P\d{4}$/.test(code || "") && error?.name !== "PrismaClientInitializationError") {
+            return false;
+        }
+        // Infrastructure failures do not revoke the caller's signed session.
+        const unavailable =
+            ["P1001", "P1002", "P1008", "P1017", "P2024"].includes(code) ||
+            error?.name === "PrismaClientInitializationError";
+        res.status(unavailable ? 503 : 500).json({
+            error: "SERVICE_UNAVAILABLE",
+            message: "SlickSync could not access its database. Please try again shortly.",
+        });
+        return true;
+    }
 
     // Helper to get existing user from Stremio auth (does NOT create new users)
     // Signing in on their own page with a login that works fixes a sign-in
@@ -973,6 +988,9 @@ module.exports = ({
             });
         } catch (error) {
             console.error("Error authenticating with Nuvio:", error);
+            if (respondToDatabaseFailure(error, res)) {
+                return;
+            }
 
             if (error?.message === "USER_NOT_FOUND") {
                 return res.status(403).json({
@@ -1067,6 +1085,9 @@ module.exports = ({
             });
         } catch (error) {
             console.error("Error validating Nuvio user:", error);
+            if (respondToDatabaseFailure(error, res)) {
+                return;
+            }
 
             if (error?.message === "USER_NOT_FOUND") {
                 return res.status(403).json({
