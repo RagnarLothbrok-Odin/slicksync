@@ -80,7 +80,7 @@ test("hasReachedEnd: the last 2% of the runtime counts as the end, anything earl
     assert.equal(hasReachedEnd(DURATION, undefined), false);
 });
 
-test("a checkpoint at the end of the runtime closes the open session on that poll, not 18 minutes later", async () => {
+test("a checkpoint at the end of the runtime closes the open session on that poll, without waiting for checkpoint expiry", async () => {
     const now = Date.now();
     const startedAt = new Date(now - 30 * MIN);
     const prisma = fakePrisma([
@@ -252,7 +252,7 @@ test("a checkpoint short of the end keeps the session open, as before", async ()
         prisma,
         "default",
         "u1",
-        [episode(now, { lastWatchedAgo: 5 * MIN, position: 20 * MIN })],
+        [episode(now, { lastWatchedAgo: 4 * MIN, position: 20 * MIN })],
         new Date(now)
     );
     assert.equal(r.sessionsClosed, 0);
@@ -379,4 +379,17 @@ test("the next episode starting does not close the session it just opened", asyn
         2 * 60,
         "its own two minutes, not the previous episode's time"
     );
+});
+
+test("unchanged checkpoints expire after five minutes and newer provider saves renew activity", async () => {
+    const now = Date.now();
+    const prisma = fakePrisma();
+    const checkpoint = episode(now, { lastWatchedAgo: 4 * MIN, position: 10 * MIN });
+    await processUserSessions(prisma, "default", "u1", [checkpoint], new Date(now));
+    assert.equal(prisma.rows()[0].isActive, true);
+    await processUserSessions(prisma, "default", "u1", [checkpoint], new Date(now + 2 * MIN));
+    assert.equal(prisma.rows()[0].isActive, false);
+    const advanced = episode(now + 2 * MIN, { lastWatchedAgo: 0, position: 11 * MIN });
+    await processUserSessions(prisma, "default", "u1", [advanced], new Date(now + 2 * MIN));
+    assert.equal(prisma.rows()[0].isActive, true);
 });

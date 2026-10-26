@@ -3,7 +3,7 @@
 // falls back to Stremio API when cache is missing.
 
 const { StremioAPIClient: _StremioAPIClient } = require("stremio-api-client");
-const { checkpointSavedAt } = require("./playbackEvidence");
+const { checkpointSavedAt, RECENT_ACTIVITY_WINDOW_MS } = require("./playbackEvidence");
 const { getCachedLibrary, setCachedLibrary: _setCachedLibrary } = require("./libraryCache");
 const { fetchKitsuMetadata } = require("./kitsuUtils");
 const { enrichPostersFromCinemeta } = require("./libraryHelpers");
@@ -415,7 +415,7 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
         }
         // Someone on a Jellyfin-compatible server has a real live signal - the
         // server's own sessions list, added below - so a session only kept open
-        // by the library read's ~15-minute freshness window would leave a
+        // by the library read's freshness window would leave a
         // finished viewing on screen long after it stopped.
         if (user.providerType === "jellyfin") {
             continue;
@@ -425,6 +425,14 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
             checkpointLibraries.set(user.id, getCachedLibrary(accountIdValue || "default", user));
         }
         const savedAt = checkpointSavedAt(session, checkpointLibraries.get(user.id));
+        // Render freshness from provider data even before the next session poll
+        // closes an old database row. Missing checkpoints cannot imply activity.
+        if (
+            user.providerType === "nuvio" &&
+            (!savedAt || Date.now() - Date.parse(savedAt) >= RECENT_ACTIVITY_WINDOW_MS)
+        ) {
+            continue;
+        }
 
         nowPlaying.push({
             item: {

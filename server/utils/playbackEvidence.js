@@ -1,3 +1,5 @@
+const RECENT_ACTIVITY_WINDOW_MS = 5 * 60_000;
+
 // Provider save times belong to a specific video and position. A cache file's
 // write time or a WatchSession refresh cannot make an old checkpoint newer.
 function checkpointSavedAt(session, library, now = Date.now()) {
@@ -35,4 +37,4 @@ function checkpointSavedAt(session, library, now = Date.now()) {
     return null;
 }
 
-module.exports = { checkpointSavedAt };
+module.exports = { checkpointSavedAt, RECENT_ACTIVITY_WINDOW_MS };

@@ -1,3 +1,4 @@
+const { RECENT_ACTIVITY_WINDOW_MS } = require("./playbackEvidence");
 /**
  * Session Tracker - Tracks individual watch sessions with start/end times
  *
@@ -27,15 +28,8 @@ function heartbeat(event, data = {}) {
     }
 }
 
-// Intentionally NOT tied to activityMonitor's poll scheduling interval
-// (which runs every 1 minute as of v1.9.27) - this is a freshness *window*,
-// not a poll frequency, and needs to stay generous regardless of how often
-// we check. Nuvio only writes a position/lastWatched checkpoint on
-// pause/stop/background, not continuously, so a short window here would
-// reintroduce the false-negative bug fixed in v1.9.26 (isActivelyWatching
-// concluding "stopped" just because the provider hasn't checkpointed
-// recently, even during genuine continuous playback).
-const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes - freshness window base, not a poll interval
+// Session accounting uses a five-minute base independently of polling frequency.
+const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 // Ceiling for the wall-clock fallback duration (used only when position data
 // isn't available - see both call sites below). A WatchSession row is reused
@@ -313,38 +307,11 @@ function getWatchDate(item) {
 }
 
 /**
- * Check if item is actively being watched.
- * Uses a time-based freshness check alone: lastWatched within the window.
- *
- * Previously also required the watch-state hash to change between two
- * consecutive 5-minute polls before counting as "still watching" (falling
- * back to a time-based check only on the very first observation after a
- * server restart). That state-comparison assumed the provider updates
- * lastWatched/position continuously during playback - but Nuvio only
- * writes a checkpoint on pause/stop/background, not continuously (see the
- * activity-tracking investigation elsewhere in this codebase). During
- * genuine continuous viewing the hash often doesn't change between polls
- * at all, so the comparison concluded "user stopped" while they were
- * actively still watching - a false negative on every poll after the
- * first. Time-based freshness alone is more reliable for this provider's
- * update cadence, at the cost of "Now Playing" potentially lingering up to
- * one window's worth of time after playback genuinely stops.
- *
- * Window at 3.6x (18min) as of this change, up from 3x (15min) - direct user
- * request for a bit more slack after confirming (real production check,
- * 2026-07-20) that a single pause is enough to write a checkpoint, but the
- * "Now Playing" that checkpoint produces then stays showing for the rest of
- * this window even while genuinely paused, not just while still playing -
- * there's no signal that distinguishes the two, only "a checkpoint landed
- * recently." 15min itself was already a deliberate walk-back from 4x
- * (20min) in v1.9.35, after direct user feedback that 20min of lingering
- * after a real stop was too long in practice - so this stops short of that
- * value rather than re-trying it outright. Inherent tension either way:
- * Nuvio's data only tells us "last saved position," never "user just
- * stopped" or "user just paused," so any fixed window trades missing
- * genuine slow-checkpoint sessions against lingering after a real stop/
- * pause. If this still lingers too long in practice, walk it back toward
- * 15min rather than raising it further.
+ * Checkpoint freshness is recent activity, not a reported play/pause state.
+ * Only a newer provider timestamp renews the five-minute window. Re-reading
+ * the same checkpoint cannot keep a stopped viewing visible indefinitely.
+ * Nuvio may also stop checkpointing during uninterrupted playback, so an
+ * expired checkpoint does not prove the player has stopped.
  */
 function isActivelyWatching(item, _userId, now) {
     const watchDate = getWatchDate(item);
@@ -352,7 +319,7 @@ function isActivelyWatching(item, _userId, now) {
         return false;
     }
 
-    return now - watchDate.getTime() < CHECK_INTERVAL_MS * 3.6;
+    return now - watchDate.getTime() < RECENT_ACTIVITY_WINDOW_MS;
 }
 
 // The one checkpoint that does say "stopped": a position at the end of the
@@ -361,7 +328,7 @@ function isActivelyWatching(item, _userId, now) {
 // a position there is playback that has ended, however recent the
 // checkpoint is. Confirmed real case (2026-10-04): an episode that finished
 // (26:12 of 26:12, Nuvio's final checkpoint) stayed in Now Playing, labelled
-// "Paused at 26:12 of 26:12 (100%)", for the whole 18 minutes after.
+// "Paused at 26:12 of 26:12 (100%)", for the whole freshness window after.
 // 98%, not 100%: players stop a little short of the end (credits, the
 // autoplay countdown), and a position inside the last 2% is still a watch
 // that is over, not one that is paused.
@@ -527,7 +494,7 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
         // specifically to avoid this gate and that one disagreeing about what
         // counts as "recent."
         const hasRecentActivity =
-            watchDate && nowMs - watchDate.getTime() < CHECK_INTERVAL_MS * 3.6;
+            watchDate && nowMs - watchDate.getTime() < RECENT_ACTIVITY_WINDOW_MS;
 
         const hasWatchProgress = hasTimeWatched || hasVideoId || hasRecentActivity;
 
@@ -797,7 +764,7 @@ async function processUserSessions(prisma, accountId, userId, library, now = new
                         // the freshness window. Reactivating it here would reopen the
                         // finished watch every poll, only for the close loop to shut it
                         // again - a session flickering in and out of Now Playing for
-                        // 18 minutes. A rewatch starts from a lower position, so it is
+                        // freshness window. A rewatch starts from a lower position, so it is
                         // not caught by this.
                         if (
                             reachedEnd &&
