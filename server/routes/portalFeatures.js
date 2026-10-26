@@ -158,6 +158,27 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             res.json(await simkl.disconnect(prisma, req.person));
         })
     );
+    const mdblist = require("../utils/mdblistTracking");
+    router.post(
+        "/tracking-services/mdblist/authorize",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json(await mdblist.begin(prisma, req.person));
+        })
+    );
+    router.post(
+        "/tracking-services/mdblist/complete",
+        handle(async (req, res) => {
+            res.set("Cache-Control", "no-store");
+            res.json(await mdblist.complete(prisma, req.person, req.body || {}));
+        })
+    );
+    router.delete(
+        "/tracking-services/mdblist",
+        handle(async (req, res) => {
+            res.json(await mdblist.disconnect(prisma, req.person));
+        })
+    );
     router.get(
         "/about",
         handle(async (_req, res) => {
