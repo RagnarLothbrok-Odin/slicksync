@@ -73,3 +73,23 @@ export function playbackUpdates(playback: PlaybackEvidence | null | undefined, n
     }
     return updates;
 }
+
+/** Advance Trakt timing between polls; checkpoints and paused players stay fixed. */
+export function livePlaybackPosition(
+    playback: PlaybackEvidence | null | undefined,
+    position: number | null | undefined,
+    duration: number | null | undefined,
+    now: number
+) {
+    if (typeof position !== "number" || typeof duration !== "number" || duration <= 0) {
+        return null;
+    }
+    const observed = playback?.observedAt ? Date.parse(playback.observedAt) : Number.NaN;
+    const elapsed =
+        playback?.evidence === "tracker" &&
+        playback.state === "playing" &&
+        Number.isFinite(observed)
+            ? Math.max(0, now - observed)
+            : 0;
+    return Math.min(duration, Math.max(0, position + elapsed));
+}

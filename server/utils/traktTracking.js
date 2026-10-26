@@ -392,7 +392,7 @@ function createTraktTracking({
     async function check(prisma, person) {
         requireNuvio(person);
         const resources = [
-            { key: "watching", label: "Playback activity", ttl: 30_000 },
+            { key: "watching", label: "Playback activity", ttl: 15_000 },
             { key: "progress", label: "Continue Watching", ttl: 60_000 },
             { key: "calendar", label: "Calendar", ttl: 300_000 },
         ];

@@ -55,3 +55,7 @@ Artwork has a two-second budget and cannot keep the statistics loading.
 
 The account header, group membership, sync controls and health remain SlickSync
 data. Continue Watching, playback and calendar retain their existing source rules.
+
+Personal playback checks Trakt every 15 seconds while the page is visible. The
+progress display advances each second from Trakt's timing, then reconciles on the
+next check. This is automatic polling, not a push connection or exact player telemetry.

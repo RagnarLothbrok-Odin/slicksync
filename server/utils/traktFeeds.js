@@ -27,16 +27,27 @@ function media(entry) {
         type: show ? "series" : "movie",
     };
 }
-async function artwork(item) {
+async function artwork(item, episodeDetails = false) {
     try {
-        const metadata = await require("./notify").fetchMetadata(item.id, item.type);
-        return { background: metadata?.background || null, poster: metadata?.poster || null };
+        const metadata = await require("./notify").fetchMetadata(
+            item.id,
+            item.type,
+            episodeDetails && item.type === "series"
+                ? `${item.id}:${item.season}:${item.episode}`
+                : null
+        );
+        return {
+            background: metadata?.background || null,
+            description: metadata?.episode?.overview || metadata?.description || null,
+            poster: metadata?.poster || null,
+            thumbnail: metadata?.episode?.thumbnail || null,
+        };
     } catch {
         return { background: null, poster: null };
     }
 }
 async function nowPlaying(prisma, person) {
-    const result = await tracking.read(prisma, person, "watching", 30_000);
+    const result = await tracking.read(prisma, person, "watching", 15_000);
     const item = media(result.data);
     if (!item) {
         return [];
@@ -53,12 +64,21 @@ async function nowPlaying(prisma, person) {
     }
     const duration =
         Number.isFinite(item.runtime) && item.runtime > 0 ? item.runtime * 60_000 : null;
+    // Anchor cached timing to its observation so clients can advance it once.
     const position = duration
-        ? Math.min(duration, Math.max(0, duration - (expires - Date.now())))
+        ? Math.min(duration, Math.max(0, duration - (expires - Date.parse(result.checkedAt))))
         : null;
+    const images = await artwork(item, true);
     return [
         {
-            item: { ...item, ...(await artwork(item)) },
+            item: {
+                ...item,
+                ...images,
+                description:
+                    result.data.episode?.overview ||
+                    result.data.movie?.overview ||
+                    images.description,
+            },
             lastPosition: position,
             nuvioAppUrl: buildNuvioAppUrl(item.type, item.id),
             playback: {

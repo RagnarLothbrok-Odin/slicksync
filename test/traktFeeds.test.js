@@ -10,7 +10,11 @@ const prisma = { dismissedContinueWatching: { findMany: async () => [] } };
 const originalRead = tracking.read;
 const originalMetadata = notify.fetchMetadata;
 test.before(() => {
-    notify.fetchMetadata = async () => ({ background: "backdrop.jpg", poster: "poster.jpg" });
+    notify.fetchMetadata = async () => ({
+        background: "backdrop.jpg",
+        episode: { overview: "Episode synopsis", thumbnail: "episode.jpg" },
+        poster: "poster.jpg",
+    });
 });
 test.after(() => {
     tracking.read = originalRead;
@@ -39,8 +43,26 @@ test("tracker presence uses expiry and runtime as an estimate, not a reported pa
     assert.equal(rows[0].playback.state, "playing");
     assert.ok(Math.abs(rows[0].lastPosition - 25 * 60_000) < 1000);
     assert.equal(rows[0].videoId, "tt123:2:3");
+    assert.equal(rows[0].item.thumbnail, "episode.jpg");
+    assert.equal(rows[0].item.description, "Episode synopsis");
     tracking.read = async () => ({ connected: true, data: null });
     assert.deepEqual(await feeds.nowPlaying(prisma, person), []);
+});
+
+test("cached tracker position is anchored to the original observation", async () => {
+    const now = Date.now();
+    tracking.read = async () => ({
+        checkedAt: new Date(now - 20_000).toISOString(),
+        connected: true,
+        data: {
+            episode,
+            expires_at: new Date(now + 20 * 60_000).toISOString(),
+            show,
+            started_at: new Date(now - 60_000).toISOString(),
+        },
+    });
+    const [row] = await feeds.nowPlaying(prisma, person);
+    assert.equal(row.lastPosition, 25 * 60_000 - 20_000);
 });
 
 test("Continue Watching keeps resume points, excludes dismissals and picks newer native progress", async () => {
