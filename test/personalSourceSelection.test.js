@@ -75,6 +75,8 @@ test("personal feeds use one selected source and never substitute native data du
             assert.equal((await fetch(`${base}/${endpoint}`)).status, 200);
         }
         assert.deepEqual(calls, ["simkl", "native", "simkl"]);
+        const fallbackPlayback = await fetch(`${base}/now-playing`);
+        assert.equal((await fallbackPlayback.json()).trackingWarnings, undefined);
         unavailable = true;
         calls.length = 0;
         for (const endpoint of ["continue-watching", "upcoming-episodes"]) {

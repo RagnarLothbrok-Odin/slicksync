@@ -145,7 +145,6 @@ export function PersonalNowPlaying() {
     const [state, setState] = useState<{
         userId: string;
         items: NowPlayingItem[];
-        trackingWarnings?: string[];
         error: boolean;
     } | null>(null);
     const [selected, setSelected] = useState<NowPlayingItem | null>(null);
@@ -168,13 +167,11 @@ export function PersonalNowPlaying() {
             try {
                 const result = await personalRequest<{
                     items: NowPlayingItem[];
-                    trackingWarnings?: string[];
                 }>(userId, authKey, "/now-playing");
                 if (active) {
                     setState({
                         error: false,
                         items: result.items,
-                        trackingWarnings: result.trackingWarnings || [],
                         userId,
                     });
                 }
@@ -225,12 +222,6 @@ export function PersonalNowPlaying() {
                     <span className="text-subtle text-xs">Auto-updating</span>
                 )}
             </div>
-            {!!current?.trackingWarnings?.length && (
-                <p className="mb-3 text-sm text-warning" role="status">
-                    Trakt could not refresh {current.trackingWarnings.join(", ")}. Available Nuvio
-                    data is shown. Check Tracking services in settings.
-                </p>
-            )}
             {current?.items.length ? (
                 <div className="grid gap-4">
                     {current.items.map((item) => (

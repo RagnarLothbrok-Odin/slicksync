@@ -327,12 +327,6 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                         totalDuration: row.totalDuration ?? null,
                         videoId: row.videoId,
                     })),
-                trackingWarnings:
-                    source === "simkl"
-                        ? [
-                              "Live playback uses your account’s app because Simkl does not expose a live-watching read endpoint.",
-                          ]
-                        : [],
             });
         })
     );
