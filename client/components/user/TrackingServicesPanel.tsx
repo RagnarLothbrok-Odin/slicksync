@@ -3,6 +3,7 @@
 import { ArrowTopRightOnSquareIcon, LinkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
 import { Button, Card, ConfirmModal } from "@/components/ui";
+import { DropdownSelect } from "@/components/ui/DropdownSelect";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { personalRequest } from "@/lib/user-api";
@@ -22,6 +23,7 @@ interface Feature {
 }
 interface Services {
     services: Service[];
+    source: string | null;
     supported: boolean;
 }
 
@@ -99,6 +101,30 @@ export function TrackingServicesPanel() {
             setBusy(false);
         }
     };
+    const chooseSource = async (source: string) => {
+        if (!(userId && authKey) || busy) {
+            return;
+        }
+        setBusy(true);
+        setFailure("");
+        try {
+            const result = await personalRequest<{ source: string }>(
+                userId,
+                authKey,
+                "/tracking-services/source",
+                { body: JSON.stringify({ provider: source }), method: "PATCH" }
+            );
+            setState((current) =>
+                current?.userId === userId
+                    ? { ...current, value: { ...current.value, source: result.source } }
+                    : current
+            );
+        } catch (reason) {
+            setFailure(readErrorMessage(reason, "Could not save the tracking source."));
+        } finally {
+            setBusy(false);
+        }
+    };
     const disconnect = async () => {
         if (!(userId && authKey)) {
             return;
@@ -159,6 +185,34 @@ export function TrackingServicesPanel() {
                         >
                             Connect
                         </Button>
+                    )}
+                </div>
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-default border-t pt-5">
+                    <div className="max-w-md">
+                        <p className="font-medium text-default text-sm">Use as source</p>
+                        <p className="mt-1 text-muted text-sm">
+                            Choose the connected tracker for playback, Continue Watching, calendar
+                            and statistics.
+                        </p>
+                    </div>
+                    {service?.connected ? (
+                        <fieldset disabled={busy}>
+                            <DropdownSelect
+                                ariaLabel="Use as source"
+                                className="min-w-44 rounded-xl border border-default bg-bg px-4 py-2.5 text-default text-sm transition-colors hover:bg-surface-hover disabled:opacity-50"
+                                onChange={(value) => void chooseSource(value)}
+                                options={(state?.userId === userId ? state.value.services : [])
+                                    .filter((entry) => entry.connected)
+                                    .map((entry) => ({
+                                        label:
+                                            entry.provider === "trakt" ? "Trakt" : entry.provider,
+                                        value: entry.provider,
+                                    }))}
+                                value={state?.userId === userId ? state.value.source || "" : ""}
+                            />
+                        </fieldset>
+                    ) : (
+                        <p className="text-sm text-subtle">Connect a tracker to choose a source.</p>
                     )}
                 </div>
                 <p className="mt-3 text-muted text-sm">
