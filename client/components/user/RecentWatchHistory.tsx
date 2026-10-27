@@ -43,6 +43,23 @@ export function RecentWatchHistory({
                   type: item.itemType,
                   watchedAt: item.endTime || item.startTime,
               }));
+    // Collapse adjacent episode watches only, preserving chronology and the
+    // newest record for the timestamp and detail action. Never fetch more to fill gaps.
+    const groups: (RecentHistoryItem & { episodeCount: number })[] = [];
+    for (const item of items) {
+        const previous = groups.at(-1);
+        if (
+            item.type === "series" &&
+            item.episode != null &&
+            previous?.type === "series" &&
+            previous.episode != null &&
+            previous.id === item.id
+        ) {
+            previous.episodeCount++;
+        } else {
+            groups.push({ ...item, episodeCount: 1 });
+        }
+    }
     return (
         <section className="rounded-xl border border-default bg-surface p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -54,7 +71,7 @@ export function RecentWatchHistory({
             </div>
             {items.length ? (
                 <ol className="space-y-4">
-                    {items.map((item) => (
+                    {groups.map((item) => (
                         <li key={item.key}>
                             <button
                                 className="flex w-full items-center gap-4 rounded-lg text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary"
@@ -86,11 +103,13 @@ export function RecentWatchHistory({
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate font-medium text-default">{item.name}</p>
                                     <p className="mt-1 truncate text-muted text-sm">
-                                        {item.type === "series" && item.episode != null
-                                            ? `${item.season == null ? "" : `S${String(item.season).padStart(2, "0")} · `}E${String(item.episode).padStart(2, "0")}`
-                                            : item.type === "movie"
-                                              ? "Movie"
-                                              : "Series"}
+                                        {item.episodeCount > 1
+                                            ? `${item.episodeCount} episodes`
+                                            : item.type === "series" && item.episode != null
+                                              ? `${item.season == null ? "" : `S${String(item.season).padStart(2, "0")} · `}E${String(item.episode).padStart(2, "0")}`
+                                              : item.type === "movie"
+                                                ? "Movie"
+                                                : "Series"}
                                         <span aria-hidden="true"> · </span>
                                         <time dateTime={item.watchedAt}>
                                             {new Date(item.watchedAt).toLocaleString(undefined, {
