@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
@@ -18,14 +18,12 @@ export function TrackingServiceRow({
     disabled,
     onBusyChange,
     onChange,
-    children,
 }: {
     provider: "trakt" | "simkl" | "mdblist";
     service: Service | undefined;
     disabled: boolean;
     onBusyChange: (busy: boolean) => void;
     onChange: () => void;
-    children: ReactNode;
 }) {
     const { userId, authKey } = useUserAuthHeaders();
     const [busy, setBusy] = useState(false);
@@ -85,7 +83,6 @@ export function TrackingServiceRow({
                     {service?.connected ? "Disconnect" : "Connect"}
                 </Button>
             </div>
-            {service && !service.connected && children}
             {service && !service.connected && !service.configured && (
                 <p className="mt-3 text-muted text-sm">
                     Your administrator needs to configure the {name} tracking app before you can

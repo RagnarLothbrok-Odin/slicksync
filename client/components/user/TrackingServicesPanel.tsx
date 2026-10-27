@@ -1,10 +1,8 @@
 "use client";
 
-import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
 import { Button, Card } from "@/components/ui";
 import { DropdownSelect } from "@/components/ui/DropdownSelect";
-import { SimklTrackingDisclaimer } from "@/components/user/SimklTrackingDisclaimer";
 import { TrackingServiceRow } from "@/components/user/TrackingServiceRow";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
@@ -23,6 +21,25 @@ interface Services {
     source: string | null;
     supported: boolean;
 }
+
+// This describes implemented tracker data, independent of connection or temporary API errors.
+const trackingFeatures = [
+    { name: "Playback activity", support: [true, false, true] },
+    { name: "Continue Watching", support: [true, true, true] },
+    { name: "Next episodes", support: [true, true, true] },
+    { name: "TV calendar", support: [true, true, true] },
+    { name: "Movie calendar", support: [true, false, true] },
+    { name: "All-time watch time", support: [true, true, true] },
+    { name: "Movies watched", support: [true, true, true] },
+    { name: "Series watched", support: [true, false, true] },
+    { name: "Episodes watched", support: [true, true, true] },
+    { name: "Today’s activity", support: [true, false, false] },
+    { name: "Average runtime", support: [true, false, false] },
+    { name: "Most Watched", support: [true, false, false] },
+    { name: "Recent History", support: [true, false, false] },
+    { name: "Viewing streaks", support: [false, false, true] },
+    { name: "Binge history", support: [false, false, false] },
+];
 
 export function TrackingServicesPanel() {
     const { provider, userInfo } = useUserAuth();
@@ -98,44 +115,7 @@ export function TrackingServicesPanel() {
                                       )
                                     : undefined
                             }
-                        >
-                            <div className="mt-4 space-y-3 text-muted text-sm leading-relaxed">
-                                <p className="font-medium text-default">
-                                    Uses one Trakt connection slot
-                                </p>
-                                <p className="mt-1">
-                                    Free accounts allow <strong>2 Community App connections</strong>
-                                    . SlickSync uses one; your player may use the other. Official
-                                    Trakt apps do not count.
-                                </p>
-                                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-                                    <a
-                                        className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                                        href="https://github.com/trakt/trakt-api/discussions/943"
-                                        rel="noreferrer"
-                                        target="_blank"
-                                    >
-                                        Trakt’s limit change
-                                        <ArrowTopRightOnSquareIcon
-                                            aria-hidden="true"
-                                            className="h-3.5 w-3.5"
-                                        />
-                                    </a>
-                                    <a
-                                        className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                                        href="https://app.trakt.tv/settings/apps/connected"
-                                        rel="noreferrer"
-                                        target="_blank"
-                                    >
-                                        Check your connections
-                                        <ArrowTopRightOnSquareIcon
-                                            aria-hidden="true"
-                                            className="h-3.5 w-3.5"
-                                        />
-                                    </a>
-                                </div>
-                            </div>
-                        </TrackingServiceRow>
+                        />
                         <TrackingServiceRow
                             disabled={busy || sourceBusy}
                             key={`${userId}:simkl`}
@@ -149,9 +129,7 @@ export function TrackingServicesPanel() {
                                       )
                                     : undefined
                             }
-                        >
-                            <SimklTrackingDisclaimer nativeLabel={nativeLabel} />
-                        </TrackingServiceRow>
+                        />
                         <TrackingServiceRow
                             disabled={busy || sourceBusy}
                             key={`${userId}:mdblist`}
@@ -165,33 +143,50 @@ export function TrackingServicesPanel() {
                                       )
                                     : undefined
                             }
-                        >
-                            <div className="mt-4 space-y-3 text-muted text-sm leading-relaxed">
-                                <p>
-                                    MDBList grants access that includes writes. SlickSync only reads
-                                    your tracking data.
-                                </p>
-                                <p>
-                                    Free accounts have 1,000 requests per day, shared with other
-                                    apps. Playback refreshes up to once a minute; other data can
-                                    take longer, including MDBList’s background statistics.
-                                </p>
-                                <p>
-                                    Today’s activity, average session time, Most Watched and binge
-                                    history use {nativeLabel} data. MDBList supplies playback,
-                                    Continue Watching, calendar, all-time totals and streaks when
-                                    available.
-                                </p>
-                                <a
-                                    className="inline-block text-primary underline-offset-4 hover:underline"
-                                    href="https://api.mdblist.com/docs/authentication/"
-                                    rel="noreferrer"
-                                    target="_blank"
-                                >
-                                    MDBList permissions and API limits
-                                </a>
-                            </div>
-                        </TrackingServiceRow>
+                        />
+                    </div>
+                    <div className="mt-5 overflow-x-auto border-default border-t pt-5">
+                        <table className="w-full text-left text-sm">
+                            <caption className="mb-4 text-left font-semibold text-default">
+                                Feature support in SlickSync
+                            </caption>
+                            <thead>
+                                <tr className="text-muted">
+                                    <th className="py-3 pr-4 font-medium" scope="col">
+                                        Feature
+                                    </th>
+                                    {["Trakt", "Simkl", "MDBList"].map((name) => (
+                                        <th
+                                            className="px-3 py-3 text-center font-medium"
+                                            key={name}
+                                            scope="col"
+                                        >
+                                            {name}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {trackingFeatures.map(({ name, support }) => (
+                                    <tr className="border-default border-t" key={name}>
+                                        <th
+                                            className="py-3 pr-4 font-normal text-default"
+                                            scope="row"
+                                        >
+                                            {name}
+                                        </th>
+                                        {support.map((supported, index) => (
+                                            <td
+                                                className={`px-3 py-3 text-center ${supported ? "text-success" : "text-subtle"}`}
+                                                key={["trakt", "simkl", "mdblist"][index]}
+                                            >
+                                                {supported ? "Supported" : "Unsupported"}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </Card>
             )}
