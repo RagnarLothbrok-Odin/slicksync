@@ -1,5 +1,21 @@
 [
   {
+    "version": "2.1.0",
+    "date": "2026-10-27",
+    "title": "Personal tracking and a refreshed Home",
+    "features": [
+      "Connect Trakt, Simkl and MDBList to Nuvio profiles and choose a personal Home data source. Available playback, progress, calendar and statistics features depend on the selected service.",
+      "Redesigned Now Playing and Continue Watching, a shared TV and movie release calendar, and grouped recent history beside Most Watched."
+    ],
+    "bugFixes": [
+      "More accurate playback freshness and automatic updates without refreshing the page.",
+      "Keep cleared notifications hidden and preserve valid Nuvio sessions during database outages.",
+      "Clean up tracker credentials when a profile or household is deleted.",
+      "Updated documentation and screenshots."
+    ],
+    "htmlUrl": "https://github.com/RagnarLothbrok-Odin/slicksync/releases/tag/v2.1.0"
+  },
+  {
     "version": "1.101.0",
     "date": "2026-10-22",
     "title": "1.101.0 - A new Discover with a page for every actor, AIOSync between any app, person and profile, and a faster app",

@@ -199,6 +199,7 @@ interface LocalChangelogEntry {
     bugFixes: string[];
     date: string;
     features: string[];
+    htmlUrl?: string;
     miscChores: string[];
     title?: string;
     version: string;
@@ -208,7 +209,9 @@ const mapLocalEntry = (entry: LocalChangelogEntry): Release => ({
     bugFixes: entry.bugFixes || [],
     date: entry.date,
     features: entry.features || [],
-    htmlUrl: `https://github.com/slicknsliding/slicksync/releases/tag/v${entry.version}`,
+    htmlUrl:
+        entry.htmlUrl ||
+        `https://github.com/slicknsliding/slicksync/releases/tag/v${entry.version}`,
     isPreRelease: false,
     miscChores: entry.miscChores || [],
     otherSections: [],
