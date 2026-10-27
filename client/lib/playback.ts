@@ -5,6 +5,7 @@ export interface PlaybackEvidence {
     position: "reported" | "estimated" | "checkpoint";
     /** Provider save time for this position, independent of proxy presence checks. */
     positionUpdatedAt?: string | null;
+    provider?: "trakt" | "mdblist";
     state: "playing" | "paused" | "unknown";
 }
 
@@ -27,7 +28,9 @@ export function playbackPresentation(playback?: PlaybackEvidence | null) {
             ? "Paused"
             : playing
               ? playback?.evidence === "tracker"
-                  ? "Playing on Trakt"
+                  ? playback.provider === "mdblist"
+                      ? "Playing on MDBList"
+                      : "Playing on Trakt"
                   : "Playing now"
               : playback?.evidence === "proxy"
                 ? "Stream detected"

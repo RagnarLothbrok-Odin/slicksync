@@ -4,6 +4,7 @@ const express = require("express");
 const makeRouter = require("../server/routes/portalFeatures");
 const tracking = require("../server/utils/traktTracking");
 const feeds = require("../server/utils/traktFeeds");
+const mdblist = require("../server/utils/mdblistFeeds");
 const simkl = require("../server/utils/simklFeeds");
 const native = require("../server/utils/continueWatching");
 const metrics = require("../server/utils/metricsBuilder");
@@ -20,6 +21,9 @@ test("personal feeds use one selected source and never substitute native data du
         calendar.getUpcomingEpisodes,
         simkl.continueWatching,
         simkl.calendar,
+        mdblist.calendar,
+        mdblist.continueWatching,
+        mdblist.nowPlaying,
     ];
     let source = "trakt";
     let unavailable = false;
@@ -27,7 +31,7 @@ test("personal feeds use one selected source and never substitute native data du
     const row = (name) => ({ item: { id: name }, showId: name, user: { id: "mine" } });
     const reader = (name) => async () => {
         calls.push(name);
-        if (unavailable && ["trakt", "simkl"].includes(name)) {
+        if (unavailable && ["trakt", "simkl", "mdblist"].includes(name)) {
             throw Object.assign(new Error("Unavailable"), { status: 503 });
         }
         return [row(name)];
@@ -38,6 +42,9 @@ test("personal feeds use one selected source and never substitute native data du
     feeds.calendar = reader("trakt");
     simkl.calendar = reader("simkl");
     simkl.continueWatching = reader("simkl");
+    mdblist.calendar = reader("mdblist");
+    mdblist.continueWatching = reader("mdblist");
+    mdblist.nowPlaying = reader("mdblist");
     native.getContinueWatching = reader("native");
     metrics.liveNowPlaying = reader("native");
     calendar.getUpcomingEpisodes = reader("native");
@@ -69,6 +76,12 @@ test("personal feeds use one selected source and never substitute native data du
             }
             assert.deepEqual(calls, new Array(3).fill(selected === "trakt" ? "trakt" : "native"));
         }
+        source = "mdblist";
+        calls.length = 0;
+        for (const endpoint of ["continue-watching", "now-playing", "upcoming-episodes"]) {
+            assert.equal((await fetch(`${base}/${endpoint}`)).status, 200);
+        }
+        assert.deepEqual(calls, ["mdblist", "mdblist", "mdblist"]);
         source = "simkl";
         calls.length = 0;
         for (const endpoint of ["continue-watching", "now-playing", "upcoming-episodes"]) {
@@ -90,6 +103,12 @@ test("personal feeds use one selected source and never substitute native data du
             assert.equal((await fetch(`${base}/${endpoint}`)).status, 503);
         }
         assert.deepEqual(calls, ["trakt", "trakt", "trakt"]);
+        source = "mdblist";
+        calls.length = 0;
+        for (const endpoint of ["continue-watching", "now-playing", "upcoming-episodes"]) {
+            assert.equal((await fetch(`${base}/${endpoint}`)).status, 503);
+        }
+        assert.deepEqual(calls, ["mdblist", "mdblist", "mdblist"]);
     } finally {
         [
             tracking.source,
@@ -101,6 +120,9 @@ test("personal feeds use one selected source and never substitute native data du
             calendar.getUpcomingEpisodes,
             simkl.continueWatching,
             simkl.calendar,
+            mdblist.calendar,
+            mdblist.continueWatching,
+            mdblist.nowPlaying,
         ] = originals;
         server.closeAllConnections();
         await new Promise((resolve) => server.close(resolve));

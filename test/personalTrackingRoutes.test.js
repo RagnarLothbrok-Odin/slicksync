@@ -76,7 +76,7 @@ test("tracking routes authenticate and gate by provider before exposing connecti
         assert.ok(!JSON.stringify(body).includes("private-value"));
         assert.deepEqual(
             body.services.map((entry) => entry.provider),
-            ["trakt", "simkl"]
+            ["trakt", "simkl", "mdblist"]
         );
         assert.ok(
             calls.every(

@@ -581,7 +581,11 @@ async function buildNowPlaying(prisma, accountIdValue, activeUsers) {
     // Tracker presence is a separately reported signal, never a library guess.
     for (const person of activeUsers.filter((user) => user.providerType === "nuvio")) {
         try {
-            const rows = await require("./traktFeeds").nowPlaying(prisma, person);
+            const source = await require("./traktTracking").source(prisma, person);
+            const rows = await (source === "mdblist"
+                ? require("./mdblistFeeds")
+                : require("./traktFeeds")
+            ).nowPlaying(prisma, person);
             for (const row of rows) {
                 for (let i = nowPlaying.length - 1; i >= 0; i--) {
                     const old = nowPlaying[i];

@@ -32,10 +32,16 @@ function epLabel(season: number, episode: number) {
     return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }
 
+// Date-only calendar events have no air time. Keep their provided day local
+// rather than interpreting midnight as UTC and shifting it in western zones.
+function calendarDate(value: string) {
+    return new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
+}
+
 // "Today" / "Tomorrow" / weekday within a week / short date beyond that.
 function airLabel(iso: string): { text: string; soon: boolean } {
     const now = new Date();
-    const air = new Date(iso);
+    const air = calendarDate(iso);
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfAir = new Date(air.getFullYear(), air.getMonth(), air.getDate()).getTime();
     const days = Math.round((startOfAir - startOfToday) / (24 * 60 * 60 * 1000));
@@ -64,7 +70,7 @@ function airLabel(iso: string): { text: string; soon: boolean } {
 // calendar rather than a pile of "Monday"s across different weeks.
 function dayHeaderLabel(iso: string): { text: string; soon: boolean } {
     const now = new Date();
-    const air = new Date(iso);
+    const air = calendarDate(iso);
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfAir = new Date(air.getFullYear(), air.getMonth(), air.getDate()).getTime();
     const days = Math.round((startOfAir - startOfToday) / (24 * 60 * 60 * 1000));
@@ -91,7 +97,7 @@ function groupByDay(
 ): { key: string; ts: number; items: UpcomingEpisode[] }[] {
     const groups = new Map<string, { key: string; ts: number; items: UpcomingEpisode[] }>();
     for (const it of items) {
-        const air = new Date(it.airDate);
+        const air = calendarDate(it.airDate);
         const ts = new Date(air.getFullYear(), air.getMonth(), air.getDate()).getTime();
         const key = String(ts);
         const group = groups.get(key);

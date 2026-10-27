@@ -714,10 +714,11 @@ export interface UserActivityData {
     mostWatchedItems?: MostWatchedItem[];
     nowPlaying: NowPlayingItem[];
     sessions: WatchSession[];
-    source?: "trakt" | "simkl" | "slicksync";
+    source?: "trakt" | "simkl" | "mdblist" | "slicksync";
     sourceNote?: string;
     stats: UserActivityStats;
     todayAvailable?: boolean;
+    totalsAvailable?: boolean;
     user: {
         id: string;
         username: string;

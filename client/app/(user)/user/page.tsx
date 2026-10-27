@@ -491,34 +491,52 @@ export default function UserHomePage() {
                                     ? "Estimated Watch Time"
                                     : "Total Watch Time"
                             }
-                            value={formatWatchTime(stats.totalWatchTimeSeconds)}
+                            value={
+                                activityData.totalsAvailable === false
+                                    ? "Unavailable"
+                                    : formatWatchTime(stats.totalWatchTimeSeconds)
+                            }
                         />
                         <StatCard
                             color="#ec4899"
                             delay={0.45}
                             icon={<FilmIcon className="h-5 w-5" />}
                             label="Movies Watched"
-                            value={stats.moviesCount}
+                            value={
+                                activityData.totalsAvailable === false
+                                    ? "Unavailable"
+                                    : stats.moviesCount
+                            }
                         />
                         <StatCard
                             color="#14b8a6"
                             delay={0.5}
                             icon={<TvIcon className="h-5 w-5" />}
                             label="Series Watched"
-                            value={stats.seriesCount}
+                            value={
+                                activityData.totalsAvailable === false
+                                    ? "Unavailable"
+                                    : stats.seriesCount
+                            }
                         />
                         <StatCard
                             color="#f59e0b"
                             delay={0.55}
                             icon={<TrophyIcon className="h-5 w-5" />}
                             label={
-                                activityData?.source === "trakt" || activityData?.source === "simkl"
+                                activityData?.source === "trakt" ||
+                                activityData?.source === "simkl" ||
+                                activityData?.source === "mdblist"
                                     ? "Episodes Watched"
                                     : "Longest Streak"
                             }
                             value={
-                                activityData?.source === "trakt" || activityData?.source === "simkl"
-                                    ? (stats.episodesCount ?? 0)
+                                activityData?.source === "trakt" ||
+                                activityData?.source === "simkl" ||
+                                activityData?.source === "mdblist"
+                                    ? activityData.totalsAvailable === false
+                                        ? "Unavailable"
+                                        : (stats.episodesCount ?? 0)
                                     : `${stats.longestStreak} ${stats.longestStreak === 1 ? "day" : "days"}`
                             }
                         />

@@ -3552,6 +3552,7 @@ module.exports = ({
                                   observedAt: row.playback.observedAt,
                                   position: row.playback.position,
                                   positionUpdatedAt: row.playback.positionUpdatedAt || null,
+                                  provider: row.playback.provider,
                                   state: row.playback.state,
                               }
                             : null,
@@ -3564,12 +3565,19 @@ module.exports = ({
                 console.warn("[PublicLibrary] Failed to read playback activity:", error.message);
             }
 
-            // Simkl has no daily activity or personal most-watched summary. Keep
-            // these local sections while replacing only supported aggregate totals.
+            // Trackers replace only the summaries they expose; the remaining
+            // personal sections retain the native source disclosed before linking.
+            const homeSource =
+                req.query.home === "true"
+                    ? await require("../utils/traktTracking").source(prisma, user)
+                    : "slicksync";
             const simklStats =
-                req.query.home === "true" &&
-                (await require("../utils/traktTracking").source(prisma, user)) === "simkl"
+                homeSource === "simkl"
                     ? await require("../utils/simklFeeds").homeStats(prisma, user)
+                    : null;
+            const mdblistStats =
+                homeSource === "mdblist"
+                    ? await require("../utils/mdblistFeeds").homeStats(prisma, user)
                     : null;
             res.json({
                 bingeWatches: bingeWatches.slice(0, 5),
@@ -3578,7 +3586,18 @@ module.exports = ({
                 mostWatchedItems,
                 nowPlaying,
                 sessions: activityItems,
-                source: simklStats ? "simkl" : "slicksync",
+                source: mdblistStats ? "mdblist" : simklStats ? "simkl" : "slicksync",
+                ...(mdblistStats
+                    ? {
+                          totalsAvailable: mdblistStats.available,
+                          ...(mdblistStats.available
+                              ? {}
+                              : {
+                                    sourceNote:
+                                        "MDBList has not calculated statistics for this account yet.",
+                                }),
+                      }
+                    : {}),
                 ...(simklStats
                     ? {
                           sourceNote:
@@ -3600,6 +3619,7 @@ module.exports = ({
                     watchTimeTodayHours: watchTimeTodaySeconds / 3600,
                     watchTimeTodaySeconds,
                     ...(simklStats || {}),
+                    ...(mdblistStats?.stats || {}),
                 },
                 user: {
                     colorIndex: user.colorIndex,

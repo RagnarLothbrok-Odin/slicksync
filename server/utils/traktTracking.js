@@ -156,11 +156,12 @@ function createTraktTracking({
         if (preferences?.trackingSource === native) {
             return native;
         }
-        if (preferences?.trackingSource === "simkl") {
-            const simkl = await prisma.trackingConnection.findUnique({
-                where: { accountId_userId_provider: { ...identity(person), provider: "simkl" } },
+        if (["simkl", "mdblist"].includes(preferences?.trackingSource)) {
+            const provider = preferences.trackingSource;
+            const connection = await prisma.trackingConnection.findUnique({
+                where: { accountId_userId_provider: { ...identity(person), provider } },
             });
-            return simkl?.credentials ? "simkl" : native;
+            return connection?.credentials ? provider : native;
         }
         const connection = await prisma.trackingConnection.findUnique({ where: where(person) });
         return connection?.credentials ? "trakt" : native;
@@ -369,7 +370,7 @@ function createTraktTracking({
             }
             if (
                 preferences?.trackingSource === person.providerType ||
-                preferences?.trackingSource === "simkl"
+                ["simkl", "mdblist"].includes(preferences?.trackingSource)
             ) {
                 return { connected: false, data: null };
             }

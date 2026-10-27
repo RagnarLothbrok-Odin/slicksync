@@ -64,6 +64,7 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                 services: [
                     service,
                     await require("../utils/simklTracking").status(prisma, req.person),
+                    await require("../utils/mdblistTracking").status(prisma, req.person),
                 ],
                 source: await tracking.source(prisma, req.person),
                 supported: true,
@@ -75,12 +76,17 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
         handle(async (req, res) => {
             const source = req.body.provider;
             if (source !== req.person.providerType) {
-                if (req.person.providerType !== "nuvio" || !["trakt", "simkl"].includes(source)) {
+                if (
+                    req.person.providerType !== "nuvio" ||
+                    !["trakt", "simkl", "mdblist"].includes(source)
+                ) {
                     return res.status(400).json({ error: "Choose an available source." });
                 }
                 const service = await (source === "simkl"
                     ? require("../utils/simklTracking")
-                    : tracking
+                    : source === "mdblist"
+                      ? require("../utils/mdblistTracking")
+                      : tracking
                 ).status(prisma, req.person);
                 if (!service.connected) {
                     return res.status(400).json({
@@ -296,14 +302,16 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             const items =
                 source === "trakt"
                     ? await require("../utils/traktFeeds").calendar(prisma, req.person)
-                    : source === "simkl"
-                      ? await require("../utils/simklFeeds").calendar(prisma, req.person)
-                      : await require("../utils/episodeAlerts").getUpcomingEpisodes(
-                            prisma,
-                            req.person.accountId,
-                            24,
-                            req.person.id
-                        );
+                    : source === "mdblist"
+                      ? await require("../utils/mdblistFeeds").calendar(prisma, req.person)
+                      : source === "simkl"
+                        ? await require("../utils/simklFeeds").calendar(prisma, req.person)
+                        : await require("../utils/episodeAlerts").getUpcomingEpisodes(
+                              prisma,
+                              req.person.accountId,
+                              24,
+                              req.person.id
+                          );
             res.json(items);
         })
     );
@@ -314,17 +322,20 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             const rows =
                 source === "trakt"
                     ? await require("../utils/traktFeeds").nowPlaying(prisma, req.person)
-                    : await require("../utils/metricsBuilder").liveNowPlaying(
-                          prisma,
-                          req.person.accountId
-                      );
+                    : source === "mdblist"
+                      ? await require("../utils/mdblistFeeds").nowPlaying(prisma, req.person)
+                      : await require("../utils/metricsBuilder").liveNowPlaying(
+                            prisma,
+                            req.person.accountId
+                        );
             res.set("Cache-Control", "no-store");
             res.json({
                 items: rows
                     .filter(
                         (row) =>
                             row.user?.id === req.person.id &&
-                            (source === "trakt" || row.playback?.evidence !== "tracker")
+                            (["trakt", "mdblist"].includes(source) ||
+                                row.playback?.evidence !== "tracker")
                     )
                     .map((row) => ({
                         elapsedFrozen: row.elapsedFrozen === true,
@@ -348,6 +359,7 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
                                   observedAt: row.playback.observedAt,
                                   position: row.playback.position,
                                   positionUpdatedAt: row.playback.positionUpdatedAt || null,
+                                  provider: row.playback.provider,
                                   state: row.playback.state,
                               }
                             : null,
@@ -365,14 +377,16 @@ module.exports = ({ prisma, personAsking, decrypt, createProvider, JWT_SECRET })
             const items =
                 source === "trakt"
                     ? await require("../utils/traktFeeds").continueWatching(prisma, req.person)
-                    : source === "simkl"
-                      ? await require("../utils/simklFeeds").continueWatching(prisma, req.person)
-                      : await require("../utils/continueWatching").getContinueWatching(
-                            prisma,
-                            req.person.accountId,
-                            12,
-                            req.person.id
-                        );
+                    : source === "mdblist"
+                      ? await require("../utils/mdblistFeeds").continueWatching(prisma, req.person)
+                      : source === "simkl"
+                        ? await require("../utils/simklFeeds").continueWatching(prisma, req.person)
+                        : await require("../utils/continueWatching").getContinueWatching(
+                              prisma,
+                              req.person.accountId,
+                              12,
+                              req.person.id
+                          );
             res.json({ items });
         })
     );
