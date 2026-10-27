@@ -137,3 +137,35 @@ test("MDBList invalid playback fails instead of masquerading as an empty source"
     await assert.rejects(() => feeds.nowPlaying(prisma, person), /invalid playback/);
     assert.equal(normalize({ episode: { number: 2, season: null }, show: show(1) }), null);
 });
+
+test("MDBList calendar preserves distinct movie releases without refetching events or identity", async () => {
+    const original = notify.fetchMetadata;
+    notify.fetchMetadata = async () => null;
+    try {
+        const { feeds, calls } = fixture((path) =>
+            path.startsWith("/calendar/events")
+                ? {
+                      events: ["release", "digital"].map((kind, index) => ({
+                          id: kind,
+                          release_type: kind,
+                          start: `2026-11-0${index + 1}`,
+                          title: "Film",
+                          tmdb: 99,
+                          type: "movie",
+                      })),
+                  }
+                : { imdb_id: "tt99" }
+        );
+        const rows = await feeds.calendar(prisma, person);
+        assert.equal(rows.length, 2);
+        assert.ok(rows.every((row) => row.mediaType === "movie"));
+        assert.notEqual(rows[0].eventId, rows[1].eventId);
+        assert.equal(rows[1].releaseType, "digital");
+        const before = calls.length;
+        await feeds.calendar(prisma, person);
+        assert.equal(calls.length, before);
+        assert.equal(calls.filter((path) => path === "/tmdb/movie/99/").length, 1);
+    } finally {
+        notify.fetchMetadata = original;
+    }
+});

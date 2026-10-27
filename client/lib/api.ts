@@ -6528,7 +6528,10 @@ export interface HealthStatus {
 export interface UpcomingEpisode {
     airDate: string;
     episode: number;
+    eventId?: string;
+    mediaType?: "movie" | "series";
     poster: string | null;
+    releaseType?: string | null;
     season: number;
     showId: string;
     showName: string | null;

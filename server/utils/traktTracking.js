@@ -415,7 +415,17 @@ function createTraktTracking({
                           ? await require("./traktUpNext").loadUpNext((path) =>
                                 request(path, { ...options, pagination: true })
                             )
-                          : await request(endpoint, options);
+                          : resource === "calendar"
+                            ? (
+                                  await Promise.all([
+                                      request(endpoint, options),
+                                      request(
+                                          `/calendars/my/movies/${new Date().toISOString().slice(0, 10)}/33?extended=full`,
+                                          options
+                                      ),
+                                  ])
+                              ).flat()
+                            : await request(endpoint, options);
                 if ((epochs.get(id) || 0) !== epoch) {
                     throw error("The tracking connection changed. Refresh the page.", 409);
                 }

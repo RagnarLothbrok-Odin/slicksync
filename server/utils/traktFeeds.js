@@ -220,17 +220,20 @@ function createTrackingFeeds(tracking, label = "Trakt") {
         );
     }
     async function calendar(prisma, person) {
-        const result = await tracking.read(prisma, person, "calendar", 300_000);
+        const result = await tracking.read(prisma, person, "calendar", 3_600_000);
         if (!result.connected) {
             return [];
         }
         const entries = (Array.isArray(result.data) ? result.data : [])
             .filter(
                 (entry) =>
-                    media(entry)?.type === "series" &&
-                    Number.isFinite(Date.parse(entry.first_aired))
+                    media(entry) && Number.isFinite(Date.parse(entry.first_aired || entry.released))
             )
-            .slice(0, 100);
+            .sort(
+                (a, b) =>
+                    Date.parse(a.first_aired || a.released) -
+                    Date.parse(b.first_aired || b.released)
+            );
         const ids = [...new Set(entries.map((entry) => media(entry).id))];
         const [muted, dismissed] = await Promise.all([
             prisma.mutedShow?.findMany({
@@ -255,10 +258,15 @@ function createTrackingFeeds(tracking, label = "Trakt") {
         return mapLimit(visible, 3, async (entry) => {
             const item = media(entry);
             return {
-                airDate: entry.first_aired,
-                episode: item.episode,
+                airDate: entry.first_aired || entry.released,
+                episode: item.episode ?? 0,
+                eventId:
+                    entry.eventId ||
+                    `${item.type}:${item.id}:${entry.first_aired || entry.released}`,
+                mediaType: item.type,
                 poster: (await artwork(item)).poster,
-                season: item.season,
+                releaseType: entry.releaseType || null,
+                season: item.season ?? 0,
                 showId: item.id,
                 showName: item.name,
                 title: item.episodeTitle,

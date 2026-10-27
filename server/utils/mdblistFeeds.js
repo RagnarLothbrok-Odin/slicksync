@@ -171,23 +171,36 @@ function createMdblistFeeds({ client = tracking } = {}) {
                             "MDBList’s calendar response reached its event limit. Narrow the calendar settings in MDBList."
                         );
                     }
-                    const episodes = result.events.filter(
+                    const events = result.events.filter(
                         (row) =>
-                            row.type === "episode" && /^\d{4}-\d{2}-\d{2}$/.test(row.start || "")
+                            ["episode", "movie"].includes(row.type) &&
+                            /^\d{4}-\d{2}-\d{2}$/.test(row.start || "")
                     );
-                    return mapLimit(episodes, 3, async (row) => ({
-                        episode: {
-                            number: row.episode_number,
-                            season: row.season_number,
-                            title: row.episode_title,
-                        },
-                        first_aired: row.start,
-                        show: await mappedContent(
+                    return mapLimit(events, 3, async (row) => {
+                        const content = await mappedContent(
                             get,
-                            { ids: { tmdb: row.show_tmdb }, title: row.title },
-                            "show"
-                        ),
-                    }));
+                            {
+                                ids: { tmdb: row.type === "movie" ? row.tmdb : row.show_tmdb },
+                                title: row.title,
+                            },
+                            row.type === "movie" ? "movie" : "show"
+                        );
+                        return {
+                            eventId: row.id,
+                            first_aired: row.start,
+                            releaseType: row.release_type,
+                            ...(row.type === "movie"
+                                ? { movie: content }
+                                : {
+                                      episode: {
+                                          number: row.episode_number,
+                                          season: row.season_number,
+                                          title: row.episode_title,
+                                      },
+                                      show: content,
+                                  }),
+                        };
+                    });
                 }
                 if (resource === "statistics") {
                     return get("/user/stats");

@@ -196,3 +196,22 @@ test("a complete Trakt outage is reported instead of looking like an empty Conti
     };
     await assert.rejects(feeds.continueWatching(prisma, person), /Trakt unavailable/);
 });
+
+test("calendar keeps movies and episodes typed and uses the hourly resource cache", async () => {
+    tracking.read = async (_db, _person, resource, ttl) => {
+        assert.equal(resource, "calendar");
+        assert.equal(ttl, 3_600_000);
+        return {
+            connected: true,
+            data: [
+                { episode, first_aired: "2026-11-01T20:00:00Z", show },
+                { movie: { ids: { imdb: "tt456" }, title: "Film" }, released: "2026-11-02" },
+            ],
+        };
+    };
+    const rows = await feeds.calendar(prisma, person);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].mediaType, "series");
+    assert.equal(rows[1].mediaType, "movie");
+    assert.equal(rows[1].airDate, "2026-11-02");
+});
