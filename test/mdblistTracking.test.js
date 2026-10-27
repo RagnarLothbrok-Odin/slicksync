@@ -363,3 +363,28 @@ test("MDBList verifies actual tracking permission before saving a token with an 
     await assert.rejects(() => linked(fixture), /does not allow/);
     assert.equal((await fixture.tracking.status(fixture.prisma, person)).connected, false);
 });
+
+test("a newer sign-in cannot be overwritten by an older callback still exchanging tokens", async () => {
+    let release;
+    let began;
+    const started = new Promise((resolve) => {
+        began = resolve;
+    });
+    const fixture = setup(async (path, body) => {
+        if (path === "/oauth/token/" && body.grant_type === "authorization_code") {
+            began();
+            await new Promise((resolve) => {
+                release = resolve;
+            });
+        }
+        return null;
+    });
+    const previous = linked(fixture);
+    await started;
+    const next = await fixture.tracking.begin(fixture.prisma, person);
+    release();
+    await assert.rejects(() => previous, /connection changed/);
+    assert.equal((await fixture.tracking.status(fixture.prisma, person)).connected, false);
+    assert.ok(fixture.rows[0].pending);
+    assert.ok(new URL(next.url).searchParams.get("state"));
+});

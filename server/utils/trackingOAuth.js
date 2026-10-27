@@ -311,15 +311,19 @@ function createTrackingOAuth(
             expiresAt: Date.now() + tokenExpiresIn * 1000,
             refreshToken: tokens.refresh_token,
         };
-        await prisma.trackingConnection.update({
+        // A newer sign-in or a disconnect must win over a callback in flight.
+        const saved = await prisma.trackingConnection.updateMany({
             data: {
                 connectedAt: new Date(),
                 credentials: encrypt(JSON.stringify(credentials), context(person)),
                 externalUserId: externalId,
                 username: config.username(profile) || externalId,
             },
-            where: where(person),
+            where: { credentials: row.credentials, id: row.id, pending: null, stateHash: null },
         });
+        if (saved.count !== 1) {
+            throw error("The tracking connection changed. Start sign-in again.", 409);
+        }
         clear(person);
         return status(prisma, person);
     }
