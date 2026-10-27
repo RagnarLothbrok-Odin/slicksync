@@ -43,7 +43,7 @@ export function PersonalCalendar() {
                         id: item.showId,
                         name: item.showName || "Upcoming episode",
                         poster: item.poster,
-                        type: "series",
+                        type: item.mediaType || "series",
                     }}
                     onChange={unchanged}
                     onClose={onClose}

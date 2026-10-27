@@ -10,14 +10,21 @@ import {
 } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, ContextMenu, MediaDetailModal, Modal, useContextMenu } from "@/components/ui";
+import {
+    Button,
+    ContextMenu,
+    FilterTabs,
+    MediaDetailModal,
+    Modal,
+    useContextMenu,
+} from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { api, type MutedShow, type UpcomingEpisode } from "@/lib/api";
 import { usePersonalFeatures } from "@/lib/hooks/usePersonalFeatures";
 import { posterUrl } from "@/lib/posterUrl";
 
 // Shared airing agenda for admin and personal dashboards. Only dates containing
-// a tracked show's next episode appear in the date strip; there are no empty
+// a tracked release appear in the date strip; there are no empty
 // calendar cells. Household hide/mute permissions stay with the calling panel.
 
 const LONG_PRESS_MS = 500;
@@ -220,7 +227,11 @@ const UpcomingRow = memo(function UpcomingRowLocal({
                         {item.showName || "Unknown show"}
                     </p>
                     <p className="truncate text-muted text-xs">
-                        {epLabel(item.season, item.episode)}
+                        {item.mediaType === "movie"
+                            ? item.releaseType === "digital"
+                                ? "Digital release"
+                                : "Movie release"
+                            : epLabel(item.season, item.episode)}
                     </p>
                     {item.title && (
                         <p className="mt-1 line-clamp-2 text-muted text-xs">{item.title}</p>
@@ -284,10 +295,18 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
     const [mutedShows, setMutedShows] = useState<MutedShow[]>([]);
     const [isMutedModalOpen, setIsMutedModalOpen] = useState(false);
     const [selectedDay, setSelectedDay] = useState("all");
+    const [mediaFilter, setMediaFilter] = useState("all");
     const dateStrip = useRef<HTMLFieldSetElement>(null);
     const groups = useMemo(
-        () => groupByDay(items.filter((item) => Number.isFinite(Date.parse(item.airDate)))),
-        [items]
+        () =>
+            groupByDay(
+                items.filter(
+                    (item) =>
+                        Number.isFinite(Date.parse(item.airDate)) &&
+                        (mediaFilter === "all" || (item.mediaType || "series") === mediaFilter)
+                )
+            ),
+        [items, mediaFilter]
     );
     // If a day's final episode is hidden, move to the next available date.
     const activeDay =
@@ -402,17 +421,32 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                 Upcoming
                             </h2>
                         </div>
-                        {householdActions && (
-                            <Button
-                                aria-label="Manage muted shows"
-                                leftIcon={<SpeakerXMarkIcon className="h-4 w-4" />}
-                                onClick={openMutedModal}
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <FilterTabs
+                                activeKey={mediaFilter}
+                                onChange={(value) => {
+                                    setMediaFilter(value);
+                                    setSelectedDay("all");
+                                }}
+                                options={[
+                                    { key: "all", label: "All" },
+                                    { key: "series", label: "TV Shows" },
+                                    { key: "movie", label: "Movies" },
+                                ]}
                                 size="sm"
-                                variant="ghost"
-                            >
-                                <span className="hidden sm:inline">Muted shows</span>
-                            </Button>
-                        )}
+                            />
+                            {householdActions && (
+                                <Button
+                                    aria-label="Manage muted shows"
+                                    leftIcon={<SpeakerXMarkIcon className="h-4 w-4" />}
+                                    onClick={openMutedModal}
+                                    size="sm"
+                                    variant="ghost"
+                                >
+                                    <span className="hidden sm:inline">Muted shows</span>
+                                </Button>
+                            )}
+                        </div>
                     </div>
                     {groups.length ? (
                         <>
@@ -437,7 +471,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                         const label = dayHeaderLabel(group.items[0].airDate);
                                         return (
                                             <button
-                                                aria-label={`${label.text}, ${group.items.length} episode${group.items.length === 1 ? "" : "s"}`}
+                                                aria-label={`${label.text}, ${group.items.length} release${group.items.length === 1 ? "" : "s"}`}
                                                 aria-pressed={selected}
                                                 className="airing-date flex min-h-28 min-w-28 shrink-0 flex-col items-center justify-center rounded-2xl px-3 py-2"
                                                 key={group.key}
@@ -493,7 +527,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                         : "All upcoming"}
                                 </h3>
                                 <span className="text-subtle text-xs">
-                                    {visibleItems.length} episode
+                                    {visibleItems.length} release
                                     {visibleItems.length === 1 ? "" : "s"}
                                 </span>
                             </div>
@@ -501,9 +535,14 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                 {visibleItems.map((item) => (
                                     <UpcomingRow
                                         cacheImages={householdActions}
-                                        householdActions={householdActions}
+                                        householdActions={
+                                            householdActions && item.mediaType !== "movie"
+                                        }
                                         item={item}
-                                        key={`${item.showId}-${item.season}-${item.episode}`}
+                                        key={
+                                            item.eventId ||
+                                            `${item.showId}-${item.season}-${item.episode}`
+                                        }
                                         onDismiss={handleDismiss}
                                         onMute={handleMute}
                                         onOpen={setDetail}
@@ -514,7 +553,9 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                         </>
                     ) : (
                         <p className="py-2 text-muted text-sm">
-                            No upcoming episodes scheduled for your tracked series.
+                            {mediaFilter === "movie"
+                                ? "No upcoming movie releases from your calendar source."
+                                : "No upcoming episodes scheduled for your tracked series."}
                         </p>
                     )}
                 </div>
@@ -529,7 +570,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                         fallbackTitle={detail.showName || "Upcoming episode"}
                         isOpen={!!detail}
                         itemId={detail.showId}
-                        itemType="series"
+                        itemType={detail.mediaType || "series"}
                         onClose={() => setDetail(null)}
                     />
                 ))}

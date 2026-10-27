@@ -262,7 +262,7 @@ function createTrackingFeeds(tracking, label = "Trakt") {
                 episode: item.episode ?? 0,
                 eventId:
                     entry.eventId ||
-                    `${item.type}:${item.id}:${entry.first_aired || entry.released}`,
+                    `${item.type}:${item.id}:${item.season ?? ""}:${item.episode ?? ""}:${entry.first_aired || entry.released}`,
                 mediaType: item.type,
                 poster: (await artwork(item)).poster,
                 releaseType: entry.releaseType || null,

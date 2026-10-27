@@ -205,13 +205,15 @@ test("calendar keeps movies and episodes typed and uses the hourly resource cach
             connected: true,
             data: [
                 { episode, first_aired: "2026-11-01T20:00:00Z", show },
+                { episode: { ...episode, number: 4 }, first_aired: "2026-11-01T20:00:00Z", show },
                 { movie: { ids: { imdb: "tt456" }, title: "Film" }, released: "2026-11-02" },
             ],
         };
     };
     const rows = await feeds.calendar(prisma, person);
-    assert.equal(rows.length, 2);
+    assert.equal(rows.length, 3);
+    assert.equal(new Set(rows.map((row) => row.eventId)).size, 3);
     assert.equal(rows[0].mediaType, "series");
-    assert.equal(rows[1].mediaType, "movie");
-    assert.equal(rows[1].airDate, "2026-11-02");
+    assert.equal(rows[2].mediaType, "movie");
+    assert.equal(rows[2].airDate, "2026-11-02");
 });
