@@ -707,12 +707,24 @@ export interface NowPlayingItem {
     videoId?: string;
 }
 
+export interface RecentHistoryItem {
+    episode?: number | null;
+    id: string;
+    key: string;
+    name: string;
+    poster?: string;
+    season?: number | null;
+    type: "movie" | "series";
+    watchedAt: string;
+}
+
 export interface UserActivityData {
     bingeWatches: BingeWatch[];
     episodeHistory: WatchSession[];
     mostWatched: MostWatchedItem | null;
     mostWatchedItems?: MostWatchedItem[];
     nowPlaying: NowPlayingItem[];
+    recentHistory?: RecentHistoryItem[] | null;
     sessions: WatchSession[];
     source?: "trakt" | "simkl" | "mdblist" | "slicksync";
     sourceNote?: string;

@@ -164,13 +164,15 @@ async function loadHomeHistory(get, timeZone, now = new Date()) {
         }
         return rows;
     }
-    const [totalsResult, todayResult, titlesResult] = await Promise.allSettled([
+    const [totalsResult, todayResult, titlesResult, recentResult] = await Promise.allSettled([
         get("/users/me/stats"),
         get(`/sync/history?${params}&page=1`),
         Promise.all([
             summary("/sync/watched/movies"),
             summary("/sync/watched/shows?extended=noseasons"),
         ]),
+        // A single bounded preview, independent of totals and today's calculations.
+        get("/users/me/history?page=1&limit=5&extended=full"),
     ]);
     if (totalsResult.status !== "fulfilled") {
         throw totalsResult.reason;
@@ -246,6 +248,31 @@ async function loadHomeHistory(get, timeZone, now = new Date()) {
             });
         }
     }
+    data.recentHistory =
+        recentResult.status === "fulfilled" && Array.isArray(recentResult.value.data)
+            ? recentResult.value.data.slice(0, 5).flatMap((entry) => {
+                  const content = entry.type === "episode" ? entry.show : entry.movie;
+                  if (
+                      !(
+                          /^tt\d+$/.test(content?.ids?.imdb || "") &&
+                          Number.isFinite(Date.parse(entry.watched_at))
+                      )
+                  ) {
+                      return [];
+                  }
+                  return [
+                      {
+                          episode: entry.episode?.number ?? null,
+                          id: content.ids.imdb,
+                          key: String(entry.id),
+                          name: content.title || "Unknown title",
+                          season: entry.episode?.season ?? null,
+                          type: entry.type === "episode" ? "series" : "movie",
+                          watchedAt: entry.watched_at,
+                      },
+                  ];
+              })
+            : null;
     data.mostWatchedItems.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     data.mostWatchedItems = data.mostWatchedItems.slice(0, 5);
     data.mostWatched = data.mostWatchedItems[0] || null;
@@ -254,9 +281,11 @@ async function loadHomeHistory(get, timeZone, now = new Date()) {
 }
 
 async function enrichArtwork(data) {
-    const items = [...(data.mostWatchedItems || [data.mostWatched]), ...data.bingeWatches].filter(
-        Boolean
-    );
+    const items = [
+        ...(data.mostWatchedItems || [data.mostWatched]),
+        ...data.bingeWatches,
+        ...(data.recentHistory || []),
+    ].filter(Boolean);
     await Promise.all(
         items.map(async (item) => {
             if (!item.id?.startsWith("tt")) {

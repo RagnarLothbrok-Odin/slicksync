@@ -71,6 +71,9 @@ test("Home uses direct stats, paginated title summaries and only date-filtered h
             if (path === "/users/me/stats") {
                 return { data: totals };
             }
+            if (path.startsWith("/users/me/history?")) {
+                return { data: [], pages: 9000 };
+            }
             if (path.includes("/sync/history")) {
                 const url = new URL(path, "https://example.test");
                 assert.equal(url.searchParams.get("start_at"), "2026-10-24T23:00:00.000Z");
@@ -88,7 +91,9 @@ test("Home uses direct stats, paginated title summaries and only date-filtered h
         "Europe/London",
         new Date("2026-10-25T12:00:00Z")
     );
-    assert.equal(paths.length, 4);
+    assert.equal(paths.length, 5);
+    assert.equal(paths.filter((path) => path.startsWith("/users/me/history?")).length, 1);
+    assert.deepEqual(result.recentHistory, []);
     assert.equal(result.stats.totalWatchTimeSeconds, 108_000);
     assert.equal(result.stats.moviesCount, 5);
     assert.equal(result.stats.totalSessions, 33);
@@ -137,4 +142,37 @@ test("Most Watched returns five titles ranked by plays with a stable top-item fa
         [9, 7, 6, 4, 3]
     );
     assert.equal(data.mostWatched, data.mostWatchedItems[0]);
+});
+
+test("recent history loads one five-item page without affecting aggregate totals", async () => {
+    const notify = require("../server/utils/notify");
+    const original = notify.fetchMetadata;
+    notify.fetchMetadata = async () => ({ poster: "poster.jpg" });
+    const calls = [];
+    try {
+        const data = await loadHomeHistory(async (path) => {
+            calls.push(path);
+            if (path === "/users/me/stats") {
+                return { data: totals };
+            }
+            if (path.startsWith("/users/me/history?")) {
+                assert.equal(new URL(path, "https://example.test").searchParams.get("limit"), "5");
+                return {
+                    data: Array.from({ length: 5 }, (_, index) => ({
+                        ...movie(index + 1, "2020-01-01T10:00:00Z"),
+                        movie: { ids: { imdb: `tt${100 + index}` }, title: "Old film" },
+                    })),
+                    pages: 9000,
+                };
+            }
+            return { data: [], pages: 0 };
+        }, "UTC");
+        assert.equal(data.recentHistory.length, 5);
+        assert.equal(data.recentHistory[0].poster, "poster.jpg");
+        assert.equal(data.stats.totalWatchTimeSeconds, 108_000);
+        assert.equal(data.stats.watchedTodayCount, 0);
+        assert.equal(calls.filter((path) => path.startsWith("/users/me/history?")).length, 1);
+    } finally {
+        notify.fetchMetadata = original;
+    }
 });
