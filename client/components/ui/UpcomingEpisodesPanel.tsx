@@ -2,6 +2,7 @@
 
 import {
     CalendarDaysIcon,
+    ChevronRightIcon,
     SpeakerWaveIcon,
     SpeakerXMarkIcon,
     TvIcon,
@@ -9,14 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-    Button,
-    Card,
-    ContextMenu,
-    MediaDetailModal,
-    Modal,
-    useContextMenu,
-} from "@/components/ui";
+import { Button, ContextMenu, MediaDetailModal, Modal, useContextMenu } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { api, type MutedShow, type UpcomingEpisode } from "@/lib/api";
 import { usePersonalFeatures } from "@/lib/hooks/usePersonalFeatures";
@@ -174,9 +168,9 @@ const UpcomingRow = memo(function UpcomingRowLocal({
     };
 
     return (
-        <div className="relative">
+        <div className="relative w-64 shrink-0 snap-start">
             <button
-                className="tap-card flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-surface-hover"
+                className="tap-card flex h-full min-h-36 w-full items-stretch gap-4 rounded-2xl border border-default bg-surface p-4 text-left transition-colors hover:border-primary/40 hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary active:bg-surface-hover"
                 onClick={() => {
                     // Suppress the click that fires immediately after a long-press.
                     if (isOpen) {
@@ -191,13 +185,13 @@ const UpcomingRow = memo(function UpcomingRowLocal({
                 onTouchStart={householdActions ? handleTouchStart : undefined}
                 type="button"
             >
-                <div className="flex h-14 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-hover">
+                <div className="flex h-28 w-18 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-surface-hover">
                     {item.poster ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                             alt=""
                             className="h-full w-full object-cover"
-                            height={56}
+                            height={112}
                             src={
                                 cacheImages
                                     ? posterUrl(
@@ -206,19 +200,17 @@ const UpcomingRow = memo(function UpcomingRowLocal({
                                       )
                                     : item.poster
                             }
-                            width={40}
+                            width={72}
                         />
                     ) : (
                         <TvIcon className="h-5 w-5 text-subtle" />
                     )}
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 flex-col items-start">
                     {showAirDate && (
                         <span
-                            className={`mb-1 inline-block rounded-full px-2 py-0.5 font-medium text-xs ${
-                                label.soon
-                                    ? "bg-primary/15 text-primary"
-                                    : "bg-surface-hover text-muted"
+                            className={`mb-2 inline-block font-medium text-xs ${
+                                label.soon ? "text-primary" : "text-muted"
                             }`}
                         >
                             {label.text}
@@ -229,8 +221,18 @@ const UpcomingRow = memo(function UpcomingRowLocal({
                     </p>
                     <p className="truncate text-muted text-xs">
                         {epLabel(item.season, item.episode)}
-                        {item.title ? ` · ${item.title}` : ""}
                     </p>
+                    {item.title && (
+                        <p className="mt-1 line-clamp-2 text-muted text-xs">{item.title}</p>
+                    )}
+                    {!/^\d{4}-\d{2}-\d{2}$/.test(item.airDate) && (
+                        <p className="mt-auto pt-3 text-muted text-xs tabular-nums">
+                            {calendarDate(item.airDate).toLocaleTimeString(undefined, {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                            })}
+                        </p>
+                    )}
                 </div>
             </button>
 
@@ -282,6 +284,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
     const [mutedShows, setMutedShows] = useState<MutedShow[]>([]);
     const [isMutedModalOpen, setIsMutedModalOpen] = useState(false);
     const [selectedDay, setSelectedDay] = useState("all");
+    const dateStrip = useRef<HTMLFieldSetElement>(null);
     const groups = useMemo(
         () => groupByDay(items.filter((item) => Number.isFinite(Date.parse(item.airDate)))),
         [items]
@@ -391,12 +394,12 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
     return (
         <>
             <section aria-label="Upcoming episodes" className="mb-6">
-                <Card padding="lg">
+                <div>
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-2">
                             <CalendarDaysIcon className="h-5 w-5 shrink-0 text-primary" />
                             <h2 className="font-display font-semibold text-base text-default">
-                                Coming up
+                                Upcoming
                             </h2>
                         </div>
                         {householdActions && (
@@ -413,51 +416,73 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                     </div>
                     {groups.length ? (
                         <>
-                            <fieldset className="flex min-w-0 gap-2 overflow-x-auto p-1 pb-3">
-                                <legend className="sr-only">Choose an airing date</legend>
+                            <div className="relative">
+                                <fieldset
+                                    className="flex min-w-0 snap-x snap-proximity gap-3 overflow-x-auto p-1 pr-14 pb-3"
+                                    ref={dateStrip}
+                                >
+                                    <legend className="sr-only">Choose an airing date</legend>
+                                    <button
+                                        aria-pressed={activeDay === "all"}
+                                        className="airing-date flex min-h-28 min-w-28 shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-3"
+                                        onClick={() => setSelectedDay("all")}
+                                        type="button"
+                                    >
+                                        <CalendarDaysIcon className="h-5 w-5" />
+                                        <span className="font-medium text-xs">All upcoming</span>
+                                    </button>
+                                    {groups.map((group) => {
+                                        const date = new Date(group.ts);
+                                        const selected = activeDay === group.key;
+                                        const label = dayHeaderLabel(group.items[0].airDate);
+                                        return (
+                                            <button
+                                                aria-label={`${label.text}, ${group.items.length} episode${group.items.length === 1 ? "" : "s"}`}
+                                                aria-pressed={selected}
+                                                className="airing-date flex min-h-28 min-w-28 shrink-0 flex-col items-center justify-center rounded-2xl px-3 py-2"
+                                                key={group.key}
+                                                onClick={() => setSelectedDay(group.key)}
+                                                type="button"
+                                            >
+                                                <span className="font-medium text-xs">
+                                                    {date.toLocaleDateString(undefined, {
+                                                        weekday: "short",
+                                                    })}
+                                                </span>
+                                                <span className="font-display font-semibold text-2xl leading-tight tracking-tight">
+                                                    {date.getDate()}
+                                                </span>
+                                                <span className="text-xs">
+                                                    {date.toLocaleDateString(undefined, {
+                                                        month: "short",
+                                                        ...(date.getFullYear() ===
+                                                        new Date().getFullYear()
+                                                            ? {}
+                                                            : { year: "numeric" as const }),
+                                                    })}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </fieldset>
                                 <button
-                                    aria-pressed={activeDay === "all"}
-                                    className="airing-date flex min-h-20 min-w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-3"
-                                    onClick={() => setSelectedDay("all")}
+                                    aria-label="Show later dates"
+                                    className="absolute top-1 right-0 flex h-28 w-11 items-center justify-center rounded-2xl border border-default bg-surface text-muted transition-colors hover:bg-surface-hover hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                                    onClick={() =>
+                                        dateStrip.current?.scrollBy({
+                                            behavior: window.matchMedia(
+                                                "(prefers-reduced-motion: reduce)"
+                                            ).matches
+                                                ? "instant"
+                                                : "smooth",
+                                            left: dateStrip.current.clientWidth * 0.7,
+                                        })
+                                    }
                                     type="button"
                                 >
-                                    <CalendarDaysIcon className="h-5 w-5" />
-                                    <span className="font-medium text-xs">All upcoming</span>
+                                    <ChevronRightIcon aria-hidden="true" className="h-5 w-5" />
                                 </button>
-                                {groups.map((group) => {
-                                    const date = new Date(group.ts);
-                                    const selected = activeDay === group.key;
-                                    const label = dayHeaderLabel(group.items[0].airDate);
-                                    return (
-                                        <button
-                                            aria-label={`${label.text}, ${group.items.length} episode${group.items.length === 1 ? "" : "s"}`}
-                                            aria-pressed={selected}
-                                            className="airing-date flex min-h-20 min-w-20 shrink-0 flex-col items-center justify-center rounded-2xl px-3 py-2"
-                                            key={group.key}
-                                            onClick={() => setSelectedDay(group.key)}
-                                            type="button"
-                                        >
-                                            <span className="font-medium text-xs">
-                                                {date.toLocaleDateString(undefined, {
-                                                    weekday: "short",
-                                                })}
-                                            </span>
-                                            <span className="font-display font-semibold text-2xl leading-tight tracking-tight">
-                                                {date.getDate()}
-                                            </span>
-                                            <span className="text-xs">
-                                                {date.toLocaleDateString(undefined, {
-                                                    month: "short",
-                                                    ...(date.getFullYear() ===
-                                                    new Date().getFullYear()
-                                                        ? {}
-                                                        : { year: "numeric" as const }),
-                                                })}
-                                            </span>
-                                        </button>
-                                    );
-                                })}
-                            </fieldset>
+                            </div>
                             <div
                                 aria-live="polite"
                                 className="mt-2 mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1"
@@ -472,7 +497,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                     {visibleItems.length === 1 ? "" : "s"}
                                 </span>
                             </div>
-                            <div className="grid max-h-64 grid-cols-1 gap-x-6 gap-y-1.5 overflow-y-auto md:grid-cols-2">
+                            <div className="flex snap-x snap-proximity items-stretch gap-3 overflow-x-auto pb-3">
                                 {visibleItems.map((item) => (
                                     <UpcomingRow
                                         cacheImages={householdActions}
@@ -482,7 +507,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                                         onDismiss={handleDismiss}
                                         onMute={handleMute}
                                         onOpen={setDetail}
-                                        showAirDate={activeDay === "all"}
+                                        showAirDate
                                     />
                                 ))}
                             </div>
@@ -492,7 +517,7 @@ export const UpcomingEpisodesPanel = memo(function UpcomingEpisodesPanelLocal({
                             No upcoming episodes scheduled for your tracked series.
                         </p>
                     )}
-                </Card>
+                </div>
             </section>
 
             {detail &&
