@@ -20,7 +20,7 @@ export function TrackingServiceRow({
     onChange,
     children,
 }: {
-    provider: "trakt" | "simkl";
+    provider: "trakt" | "simkl" | "mdblist";
     service: Service | undefined;
     disabled: boolean;
     onBusyChange: (busy: boolean) => void;
@@ -30,7 +30,7 @@ export function TrackingServiceRow({
     const { userId, authKey } = useUserAuthHeaders();
     const [busy, setBusy] = useState(false);
     const [failure, setFailure] = useState("");
-    const name = provider === "trakt" ? "Trakt" : "Simkl";
+    const name = provider === "trakt" ? "Trakt" : provider === "simkl" ? "Simkl" : "MDBList";
     async function act() {
         if (!(userId && authKey && service) || disabled || busy) {
             return;

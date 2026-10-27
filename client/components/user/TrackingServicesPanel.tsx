@@ -15,7 +15,7 @@ interface Service {
     configured: boolean;
     connected: boolean;
     connectedAt: string | null;
-    provider: "trakt" | "simkl";
+    provider: "trakt" | "simkl" | "mdblist";
     username: string | null;
 }
 interface Services {
@@ -153,6 +153,48 @@ export function TrackingServicesPanel() {
                         >
                             <SimklTrackingDisclaimer nativeLabel={nativeLabel} />
                         </TrackingServiceRow>
+                        <TrackingServiceRow
+                            disabled={busy || sourceBusy}
+                            key={`${userId}:mdblist`}
+                            onBusyChange={setBusy}
+                            onChange={() => setRetry((value) => value + 1)}
+                            provider="mdblist"
+                            service={
+                                state?.userId === userId
+                                    ? state.value.services.find(
+                                          (entry) => entry.provider === "mdblist"
+                                      )
+                                    : undefined
+                            }
+                        >
+                            <div className="mt-4 space-y-3 text-muted text-sm leading-relaxed">
+                                <p>
+                                    MDBList only offers a full-access permission, including writes.
+                                    SlickSync reads tracking data and does not change your watched
+                                    history or playback.
+                                </p>
+                                <p>
+                                    Requests share your MDBList account’s quota with Nuvio and other
+                                    apps. The free tier allows 1,000 requests per day. Updates are
+                                    cached and may take a minute to appear.
+                                </p>
+                                <p>
+                                    Playback, Continue Watching, calendar and all-time totals come
+                                    from MDBList. Totals are calculated in the background by MDBList
+                                    and may lag recent viewing. Today’s activity, average session
+                                    time, Most Watched and binge history use {nativeLabel} because
+                                    MDBList does not provide equivalent summaries.
+                                </p>
+                                <a
+                                    className="inline-block text-primary underline-offset-4 hover:underline"
+                                    href="https://api.mdblist.com/docs/authentication/"
+                                    rel="noreferrer"
+                                    target="_blank"
+                                >
+                                    MDBList permissions and API limits
+                                </a>
+                            </div>
+                        </TrackingServiceRow>
                     </div>
                 </Card>
             )}
@@ -190,7 +232,12 @@ export function TrackingServicesPanel() {
                                     ...(state?.userId === userId ? state.value.services : [])
                                         .filter((entry) => entry.connected)
                                         .map((entry) => ({
-                                            label: entry.provider === "trakt" ? "Trakt" : "Simkl",
+                                            label:
+                                                entry.provider === "trakt"
+                                                    ? "Trakt"
+                                                    : entry.provider === "simkl"
+                                                      ? "Simkl"
+                                                      : "MDBList",
                                             value: entry.provider,
                                         })),
                                 ]}
