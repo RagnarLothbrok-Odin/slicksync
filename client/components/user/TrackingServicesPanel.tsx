@@ -22,25 +22,6 @@ interface Services {
     supported: boolean;
 }
 
-// This describes implemented tracker data, independent of connection or temporary API errors.
-const trackingFeatures = [
-    { name: "Playback activity", support: [true, false, true] },
-    { name: "Continue Watching", support: [true, true, true] },
-    { name: "Next episodes", support: [true, true, true] },
-    { name: "TV calendar", support: [true, true, true] },
-    { name: "Movie calendar", support: [true, false, true] },
-    { name: "All-time watch time", support: [true, true, true] },
-    { name: "Movies watched", support: [true, true, true] },
-    { name: "Series watched", support: [true, false, true] },
-    { name: "Episodes watched", support: [true, true, true] },
-    { name: "Today’s activity", support: [true, false, false] },
-    { name: "Average runtime", support: [true, false, false] },
-    { name: "Most Watched", support: [true, false, false] },
-    { name: "Recent History", support: [true, false, false] },
-    { name: "Viewing streaks", support: [false, false, true] },
-    { name: "Binge history", support: [false, false, false] },
-];
-
 export function TrackingServicesPanel() {
     const { provider, userInfo } = useUserAuth();
     const nativeValue = provider || "stremio";
@@ -144,49 +125,6 @@ export function TrackingServicesPanel() {
                                     : undefined
                             }
                         />
-                    </div>
-                    <div className="mt-5 overflow-x-auto border-default border-t pt-5">
-                        <table className="w-full text-left text-sm">
-                            <caption className="mb-4 text-left font-semibold text-default">
-                                Feature support in SlickSync
-                            </caption>
-                            <thead>
-                                <tr className="text-muted">
-                                    <th className="py-3 pr-4 font-medium" scope="col">
-                                        Feature
-                                    </th>
-                                    {["Trakt", "Simkl", "MDBList"].map((name) => (
-                                        <th
-                                            className="px-3 py-3 text-center font-medium"
-                                            key={name}
-                                            scope="col"
-                                        >
-                                            {name}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {trackingFeatures.map(({ name, support }) => (
-                                    <tr className="border-default border-t" key={name}>
-                                        <th
-                                            className="py-3 pr-4 font-normal text-default"
-                                            scope="row"
-                                        >
-                                            {name}
-                                        </th>
-                                        {support.map((supported, index) => (
-                                            <td
-                                                className={`px-3 py-3 text-center ${supported ? "text-success" : "text-subtle"}`}
-                                                key={["trakt", "simkl", "mdblist"][index]}
-                                            >
-                                                {supported ? "Supported" : "Unsupported"}
-                                            </td>
-                                        ))}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
                     </div>
                 </Card>
             )}
