@@ -21,6 +21,7 @@ import { PersonalCalendar } from "@/components/user/PersonalCalendar";
 import { PersonalContinueWatching } from "@/components/user/PersonalContinueWatching";
 import { PersonalNowPlaying } from "@/components/user/PersonalNowPlaying";
 import { usePersonalPreferences } from "@/components/user/PersonalPreferences";
+import { RecentWatchHistory } from "@/components/user/RecentWatchHistory";
 import { readErrorMessage } from "@/lib/errors";
 import { useUserAuth, useUserAuthHeaders } from "@/lib/hooks/useUserAuth";
 import { providerTypeLabel } from "@/lib/providers";
@@ -650,6 +651,10 @@ export default function UserHomePage() {
                                     ))}
                                 </ol>
                             </motion.div>
+                        )}
+
+                        {activityData && (
+                            <RecentWatchHistory data={activityData} nativeLabel={providerLabel} />
                         )}
 
                         {/* Binge Watches */}
