@@ -104,10 +104,9 @@ export function TrackingServicesPanel() {
                                     Uses one Trakt connection slot
                                 </p>
                                 <p className="mt-1">
-                                    Free Trakt accounts currently allow{" "}
-                                    <strong>2 Community App connections</strong>. Connecting
-                                    SlickSync uses one of those slots, in addition to any slot used
-                                    by your player.
+                                    Free accounts allow <strong>2 Community App connections</strong>
+                                    . SlickSync uses one; your player may use the other. Official
+                                    Trakt apps do not count.
                                 </p>
                                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
                                     <a
@@ -169,21 +168,19 @@ export function TrackingServicesPanel() {
                         >
                             <div className="mt-4 space-y-3 text-muted text-sm leading-relaxed">
                                 <p>
-                                    MDBList only offers a full-access permission, including writes.
-                                    SlickSync reads tracking data and does not change your watched
-                                    history or playback.
+                                    MDBList grants access that includes writes. SlickSync only reads
+                                    your tracking data.
                                 </p>
                                 <p>
-                                    Requests share your MDBList account’s quota with Nuvio and other
-                                    apps. The free tier allows 1,000 requests per day. Updates are
-                                    cached and may take a minute to appear.
+                                    Free accounts have 1,000 requests per day, shared with other
+                                    apps. Playback refreshes up to once a minute; other data can
+                                    take longer, including MDBList’s background statistics.
                                 </p>
                                 <p>
-                                    Playback, Continue Watching, calendar and all-time totals come
-                                    from MDBList. Totals are calculated in the background by MDBList
-                                    and may lag recent viewing. Today’s activity, average session
-                                    time, Most Watched and binge history use {nativeLabel} because
-                                    MDBList does not provide equivalent summaries.
+                                    Today’s activity, average session time, Most Watched and binge
+                                    history use {nativeLabel} data. MDBList supplies playback,
+                                    Continue Watching, calendar, all-time totals and streaks when
+                                    available.
                                 </p>
                                 <a
                                     className="inline-block text-primary underline-offset-4 hover:underline"

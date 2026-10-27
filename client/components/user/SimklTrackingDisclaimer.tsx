@@ -6,28 +6,18 @@ export function SimklTrackingDisclaimer({ nativeLabel }: { nativeLabel: string }
             <h5 className="font-medium text-default">When Simkl is your source</h5>
             <ul className="mt-2 list-disc space-y-2 pl-5">
                 <li>
-                    Live playback uses {nativeLabel} data. Unlike Trakt, Simkl’s API has no read
-                    endpoint for currently watching; its playback endpoint returns paused sessions.
+                    Playback activity, today’s activity, average session time, streaks, series
+                    counts, Most Watched and binge history use {nativeLabel} data. Simkl does not
+                    expose live playback or the summaries needed for these features.
                 </li>
                 <li>
-                    Today’s activity, average session time, streaks, series counts, Most Watched and
-                    binge history use {nativeLabel} data. Simkl’s API does not provide equivalent
-                    personal summaries, and SlickSync does not download every watched episode to
-                    calculate them.
+                    Simkl supplies saved progress, next aired episodes and all-time movie, episode
+                    and watch-time totals. Saved pauses expire after 7 days on Free, 30 days on PRO
+                    or 90 days on VIP.
                 </li>
                 <li>
-                    Continue Watching uses Simkl’s paused progress and next aired episodes. Saved
-                    pauses expire after 7 days on Free, 30 days on PRO or 90 days on VIP.
-                </li>
-                <li>
-                    The calendar uses Simkl’s Watching list and its TV schedule, refreshed every 6
-                    hours. Titles need an IMDb ID and mapped season and episode numbers; anime
-                    without those mappings cannot be shown.
-                </li>
-                <li>
-                    All-time watch time, movies and episodes use Simkl’s statistics endpoint when
-                    you open Home. These totals are cached for 5 minutes and never polled in the
-                    background.
+                    The calendar shows supported TV titles from your Simkl Watching list. Anime
+                    without matching IMDb and episode details cannot be shown.
                 </li>
             </ul>
             <a
