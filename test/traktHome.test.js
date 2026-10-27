@@ -144,7 +144,7 @@ test("Most Watched returns five titles ranked by plays with a stable top-item fa
     assert.equal(data.mostWatched, data.mostWatchedItems[0]);
 });
 
-test("recent history loads one five-item page without affecting aggregate totals", async () => {
+test("recent history loads one bounded page without affecting aggregate totals", async () => {
     const notify = require("../server/utils/notify");
     const original = notify.fetchMetadata;
     notify.fetchMetadata = async () => ({ poster: "poster.jpg" });
@@ -156,7 +156,7 @@ test("recent history loads one five-item page without affecting aggregate totals
                 return { data: totals };
             }
             if (path.startsWith("/users/me/history?")) {
-                assert.equal(new URL(path, "https://example.test").searchParams.get("limit"), "5");
+                assert.equal(new URL(path, "https://example.test").searchParams.get("limit"), "50");
                 return {
                     data: Array.from({ length: 5 }, (_, index) => ({
                         ...movie(index + 1, "2020-01-01T10:00:00Z"),

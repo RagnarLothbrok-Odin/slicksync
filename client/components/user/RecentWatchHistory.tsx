@@ -30,7 +30,7 @@ export function RecentWatchHistory({
                   (a, b) =>
                       Date.parse(b.endTime || b.startTime) - Date.parse(a.endTime || a.startTime)
               )
-              .slice(0, 5)
+              .slice(0, 50)
               .map((item) => ({
                   episode: item.episode,
                   id: item.itemId.startsWith("kitsu:")
@@ -44,7 +44,7 @@ export function RecentWatchHistory({
                   watchedAt: item.endTime || item.startTime,
               }));
     // Collapse adjacent episode watches only, preserving chronology and the
-    // newest record for the timestamp and detail action. Never fetch more to fill gaps.
+    // newest record for the timestamp and detail action. The server provides one bounded recent-history page.
     const groups: (RecentHistoryItem & { episodeCount: number })[] = [];
     for (const item of items) {
         const previous = groups.at(-1);
@@ -71,7 +71,7 @@ export function RecentWatchHistory({
             </div>
             {items.length ? (
                 <ol className="space-y-4">
-                    {groups.map((item) => (
+                    {groups.slice(0, 5).map((item) => (
                         <li key={item.key}>
                             <button
                                 className="flex w-full items-center gap-4 rounded-lg text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary"

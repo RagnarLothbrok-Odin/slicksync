@@ -172,7 +172,7 @@ async function loadHomeHistory(get, timeZone, now = new Date()) {
             summary("/sync/watched/shows?extended=noseasons"),
         ]),
         // A single bounded preview, independent of totals and today's calculations.
-        get("/users/me/history?page=1&limit=5&extended=full"),
+        get("/users/me/history?page=1&limit=50&extended=full"),
     ]);
     if (totalsResult.status !== "fulfilled") {
         throw totalsResult.reason;
@@ -250,7 +250,7 @@ async function loadHomeHistory(get, timeZone, now = new Date()) {
     }
     data.recentHistory =
         recentResult.status === "fulfilled" && Array.isArray(recentResult.value.data)
-            ? recentResult.value.data.slice(0, 5).flatMap((entry) => {
+            ? recentResult.value.data.slice(0, 50).flatMap((entry) => {
                   const content = entry.type === "episode" ? entry.show : entry.movie;
                   if (
                       !(
@@ -284,7 +284,15 @@ async function enrichArtwork(data) {
     const items = [
         ...(data.mostWatchedItems || [data.mostWatched]),
         ...data.bingeWatches,
-        ...(data.recentHistory || []),
+        ...(data.recentHistory || [])
+            .filter(
+                (item, index, rows) =>
+                    index === 0 ||
+                    item.type !== "series" ||
+                    rows[index - 1].type !== "series" ||
+                    rows[index - 1].id !== item.id
+            )
+            .slice(0, 5),
     ].filter(Boolean);
     await Promise.all(
         items.map(async (item) => {
