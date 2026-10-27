@@ -41,17 +41,17 @@ Run it for a household with SQLite or host independent accounts with PostgreSQL.
   <tr>
     <td width="50%">
       <h3>🎬 Discover & Resume</h3>
-      <p>Browse rated movies and shows, pick up where you left off, and see upcoming episodes.</p>
+      <p>Browse rated movies and shows, resume saved progress, and filter upcoming releases by TV or movies.</p>
     </td>
     <td width="50%">
       <h3>📊 Activity & Insights</h3>
-      <p>See recent viewing, live playback where supported, watch history and household statistics.</p>
+      <p>Follow playback, grouped recent history, Most Watched and viewing statistics.</p>
     </td>
   </tr>
   <tr>
     <td width="50%">
       <h3>👤 Personal Dashboards</h3>
-      <p>Give people their own library, activity, profile selection and display preferences.</p>
+      <p>Give people their own library, profiles and preferences. Nuvio profiles can connect Trakt, Simkl or MDBList and choose their Home data source.</p>
     </td>
     <td width="50%">
       <h3>🔐 Vault & Backups</h3>
@@ -62,27 +62,21 @@ Run it for a household with SQLite or host independent accounts with PostgreSQL.
 
 ## 📸 Screenshots
 
-Captured from the running app. Other names are replaced with demo names and email addresses are hidden.
-
 <table>
   <tr>
-    <td align="center" width="50%">
-      <strong>Admin Dashboard</strong><br>
-      <a href="docs/screenshots/admin-dashboard.jpg"><img src="docs/screenshots/admin-dashboard.jpg" width="100%" alt="Admin dashboard with household totals, Continue Watching and upcoming episodes"></a>
+    <td align="center" valign="top" width="50%">
+      <strong>Admin · Users</strong><br>
+      <a href="docs/screenshots/admin-users.png"><img src="docs/screenshots/admin-users.png" width="100%" alt="Admin Users page with profiles, groups and sync status"></a>
     </td>
-    <td align="center" width="50%">
-      <strong>Personal Home</strong><br>
-      <a href="docs/screenshots/personal-home.jpg"><img src="docs/screenshots/personal-home.jpg" width="100%" alt="Personal dashboard with profile status, Continue Watching and an airing-date strip"></a>
+    <td align="center" valign="top" width="50%">
+      <strong>Admin · Addons</strong><br>
+      <a href="docs/screenshots/admin-addons.png"><img src="docs/screenshots/admin-addons.png" width="100%" alt="Admin Addons page with shared configurations and assignments"></a>
     </td>
   </tr>
   <tr>
-    <td align="center" width="50%">
-      <strong>Discover</strong><br>
-      <a href="docs/screenshots/discover.jpg"><img src="docs/screenshots/discover.jpg" width="100%" alt="Discover search, filters and movie posters with ratings"></a>
-    </td>
-    <td align="center" width="50%">
-      <strong>User Addons</strong><br>
-      <a href="docs/screenshots/user-addons.jpg"><img src="docs/screenshots/user-addons.jpg" width="100%" alt="Ragnar’s admin profile showing group addons"></a>
+    <td align="center" colspan="2">
+      <strong>Personal Home</strong><br>
+      <a href="docs/screenshots/personal-home.png"><img src="docs/screenshots/personal-home.png" width="100%" alt="Ragnar’s Home with live playback, Continue Watching, upcoming releases, statistics and grouped history"></a>
     </td>
   </tr>
 </table>
@@ -127,7 +121,13 @@ Captured from the running app. Other names are replaced with demo names and emai
 > [!IMPORTANT]
 > Private mode needs the username and password above unless an authentication proxy protects the entire app. Keep your data volumes and encryption key when updating.
 
-Images are published to `ghcr.io/ragnarlothbrok-odin/slicksync` for AMD64 and ARM64. Use `:private` or `:public`, or pin a release such as `:private-v1.102.0` once that version is published. For local image builds and update instructions, see [DOCKER.md](DOCKER.md).
+Images are published to `ghcr.io/ragnarlothbrok-odin/slicksync` for AMD64 and ARM64. Use `:private` or `:public`, or pin a release with `:private-v<version>` or `:public-v<version>`. For local image builds and update instructions, see [DOCKER.md](DOCKER.md).
+
+## 🔗 Tracking Services
+
+Nuvio profiles can connect **Trakt, Simkl and MDBList** under **Settings → Tracking services**. Pick one source for Home. Feature availability varies by service. SlickSync reads tracking data without writing watched status back to these services.
+
+For self-hosting, register the services you want to offer, set their tracking credentials from [.env.example](.env.example), and register the callback URLs under `/user/settings/tracking/`. Trakt uses `callback`, Simkl uses `simkl/callback`, and MDBList uses `mdblist/callback`. Use your instance’s HTTPS origin.
 
 ## 🧪 Development
 
@@ -150,7 +150,7 @@ bun run build        # Build the frontend for production
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome in **this fork**. Keep changes focused, run the relevant checks, and use the repository's [issue](https://github.com/RagnarLothbrok-Odin/slicksync/issues/new/choose) and [pull request](.github/PULL_REQUEST_TEMPLATE.md) templates.
+Issues and pull requests are welcome in **this fork**. Keep changes focused, run the relevant checks, and use the repository's [issue](https://github.com/RagnarLothbrok-Odin/slicksync/issues/new/choose) and [pull request](.github/pull_request_template.md) templates.
 
 ## 📜 License & Credits
 
