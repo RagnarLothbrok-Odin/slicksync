@@ -53,15 +53,15 @@ export function RecentWatchHistory({
                 <span className="text-subtle text-xs">{tracked ? "Trakt" : nativeLabel}</span>
             </div>
             {items.length ? (
-                <ol className="space-y-2">
+                <ol className="space-y-4">
                     {items.map((item) => (
                         <li key={item.key}>
                             <button
-                                className="flex w-full items-center gap-4 rounded-lg p-2 text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary"
+                                className="flex w-full items-center gap-4 rounded-lg text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-primary"
                                 onClick={() => setSelected(item)}
                                 type="button"
                             >
-                                <div className="flex h-14 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-surface-hover">
+                                <div className="flex h-14 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-hover">
                                     {item.poster ? (
                                         <img
                                             alt=""
@@ -84,27 +84,23 @@ export function RecentWatchHistory({
                                     )}
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                    <p className="truncate font-medium text-default text-sm">
-                                        {item.name}
-                                    </p>
-                                    <p className="mt-1 text-muted text-xs">
+                                    <p className="truncate font-medium text-default">{item.name}</p>
+                                    <p className="mt-1 truncate text-muted text-sm">
                                         {item.type === "series" && item.episode != null
                                             ? `${item.season == null ? "" : `S${String(item.season).padStart(2, "0")} · `}E${String(item.episode).padStart(2, "0")}`
                                             : item.type === "movie"
                                               ? "Movie"
                                               : "Series"}
+                                        <span aria-hidden="true"> · </span>
+                                        <time dateTime={item.watchedAt}>
+                                            {new Date(item.watchedAt).toLocaleString(undefined, {
+                                                day: "numeric",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                                month: "short",
+                                            })}
+                                        </time>
                                     </p>
-                                    <time
-                                        className="mt-1 block text-subtle text-xs"
-                                        dateTime={item.watchedAt}
-                                    >
-                                        {new Date(item.watchedAt).toLocaleString(undefined, {
-                                            day: "numeric",
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                            month: "short",
-                                        })}
-                                    </time>
                                 </div>
                             </button>
                         </li>
