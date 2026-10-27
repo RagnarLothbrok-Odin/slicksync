@@ -62,4 +62,5 @@ test("a person brought back from the Trash keeps their history", async () => {
     prisma.user.findUnique = async () => null;
     await purgePersonLeftovers(prisma, "u1");
     assert.ok(cleared.some((c) => c.table === "watchActivity" && c.where.userId === "u1"));
+    assert.ok(cleared.some((c) => c.table === "trackingConnection" && c.where.userId === "u1"));
 });
