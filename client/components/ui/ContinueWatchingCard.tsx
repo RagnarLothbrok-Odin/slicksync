@@ -1,11 +1,15 @@
 "use client";
 
-import { InformationCircleIcon, PlayIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import {
+    InformationCircleIcon,
+    PlayIcon,
+    UserIcon,
+    XCircleIcon,
+} from "@heroicons/react/24/outline";
 import { memo, useRef, useState } from "react";
 import type { ContinueWatchingItem } from "@/lib/api";
 import { cachedImageUrl } from "@/lib/posterUrl";
-import { providerBadgeVariant, providerTypeLabel } from "@/lib/providers";
-import { Badge } from "./Badge";
+import { providerTypeLabel } from "@/lib/providers";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { toast } from "./Toast";
 
@@ -138,151 +142,126 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardLocal({
             role="none"
         >
             <div
-                className="group tap-card relative block w-40 cursor-pointer select-none overflow-hidden rounded-xl bg-slate-800 shadow-lg"
+                className="group tap-card relative isolate aspect-[5/3] w-72 select-none overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-lg sm:w-80"
                 draggable={false}
                 onDragStart={(e) => e.preventDefault()}
                 role="none"
             >
+                {/* Episode stills take priority, with series artwork as a fallback. */}
+                {artworkUrl ? (
+                    /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image failures select fallback artwork. */
+                    <img
+                        alt=""
+                        className="pointer-events-none absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transform-none motion-reduce:transition-none"
+                        decoding="async"
+                        draggable={false}
+                        fetchPriority={priority ? "high" : undefined}
+                        height={384}
+                        loading={priority ? "eager" : "lazy"}
+                        onError={() =>
+                            setFailedArtwork({ count: artworkIndex + 1, key: artworkKey })
+                        }
+                        src={(cacheImages ? cachedImageUrl(artworkUrl) : artworkUrl) || ""}
+                        width={640}
+                    />
+                ) : (
+                    <PlayIcon
+                        aria-hidden="true"
+                        className="absolute top-6 left-6 h-8 w-8 text-white/30"
+                    />
+                )}
+                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,transparent_15%,rgba(8,12,20,0.3)_40%,rgba(8,12,20,0.92)_75%,#111827_100%)]" />
                 <button
                     aria-label={`Details for ${item.showName}`}
-                    className="absolute inset-0 z-10 cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-primary"
+                    className="absolute inset-0 z-10 cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-primary focus-visible:-outline-offset-2"
                     onClick={() => {
-                        // Suppress the click that fires immediately after a long-press
-                        // opens the menu - otherwise a long-press both opens the menu AND
-                        // the detail modal as soon as the finger lifts.
-                        if (wasDraggedRef.current || isMenuOpen) {
-                            return;
+                        if (!(wasDraggedRef.current || isMenuOpen)) {
+                            onOpenDetails(item);
                         }
-                        onOpenDetails(item);
                     }}
                     type="button"
                 />
-                <div className="relative aspect-video">
-                    {/* Image priority for this landscape (16:9) frame: episode still
-              first (already 16:9), then the show/movie's landscape backdrop,
-              and only then the portrait poster as a last resort - a portrait
-              poster forced into a 16:9 frame is what caused the "too zoomed
-              in" hard crop. */}
-                    {artworkUrl ? (
-                        /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Image load failures choose fallback artwork; this is not a user action. */
-                        <img
-                            alt={item.showName}
-                            className="pointer-events-none h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            decoding="async"
-                            draggable={false}
-                            fetchPriority={priority ? "high" : undefined}
-                            height={360}
-                            loading={priority ? "eager" : "lazy"}
-                            onError={() =>
-                                setFailedArtwork({ count: artworkIndex + 1, key: artworkKey })
-                            }
-                            // Through the server's image cache at the card's size, like
-                            // every poster grid - not the full-size original each launch.
-                            src={(cacheImages ? cachedImageUrl(artworkUrl) : artworkUrl) || ""}
-                            width={640}
-                        />
-                    ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-slate-800">
-                            <PlayIcon className="h-8 w-8 text-slate-600" />
-                        </div>
-                    )}
-                    {/* ONLY this play button navigates straight to the app/web link -
-              everywhere else on the card opens the detail modal instead
-              (onClick above). Previously the whole card was one <a>, so
-              clicking anywhere - poster art, title, anywhere - launched the
-              app link; only the small (i) button below opened the modal.
-              stopPropagation keeps this click from also bubbling to the
-              card's own onClick and opening the modal right behind it. */}
-                    <a
-                        aria-label={`Resume ${item.showName}`}
-                        className="absolute inset-0 z-20 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
-                        href={item.appUrl || item.webUrl}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (wasDraggedRef.current || isMenuOpen) {
-                                e.preventDefault();
-                            }
-                        }}
-                        rel={item.appUrl ? undefined : "noopener noreferrer"}
-                        style={{ background: "rgba(0,0,0,0.4)" }}
-                        target={item.appUrl ? undefined : "_blank"}
-                    >
-                        <PlayIcon className="h-8 w-8 text-white" />
-                    </a>
-                    {/* Netflix-style progress bar for partway-through items - only on
-              resume entries, where progressPercent is real position data from
-              WatchSession (not shown for next-episode cards, which by
-              definition start from 0). Ratings deliberately not shown on this
-              card - they're in the detail modal the info button opens.
-              Fill defaults to the theme's primary→secondary accent gradient
-              (so it re-colors with every theme, not just one) plus a matching
-              glow, but --color-progress (Settings → Themes → Build your own
-              theme → "Progress bar") overrides both with a flat color when
-              set. Over a dark track, so it stays clearly visible against any
-              poster art. Sits in its own thin strip below the thumbnail
-              rather than overlaid on it, so nothing covers it. */}
-                    {item.resume && item.progressPercent != null && (
-                        <div
-                            className="pointer-events-none absolute right-0 bottom-0 left-0 h-1.5"
-                            style={{ background: "rgba(0,0,0,0.55)" }}
-                        >
-                            <div
-                                className="h-full rounded-r-full"
-                                style={{
-                                    background:
-                                        "var(--color-progress, linear-gradient(90deg, var(--color-primary), var(--color-secondary)))",
-                                    boxShadow:
-                                        "0 0 6px var(--color-progress, var(--color-primary))",
-                                    width: `${Math.min(100, Math.max(3, item.progressPercent))}%`,
-                                }}
-                            />
-                        </div>
-                    )}
-                </div>
-                <div className="p-2">
-                    <p className="truncate font-medium text-default text-xs">{item.showName}</p>
-                    <p className="truncate text-[11px] text-muted">
-                        {item.nextEpisode
-                            ? `${item.resume ? "Resume " : ""}S${String(item.nextEpisode.season).padStart(2, "0")}E${String(item.nextEpisode.episode).padStart(2, "0")}${item.nextEpisode.title ? ` · ${item.nextEpisode.title}` : ""}`
-                            : `Resume${item.progressPercent === null ? "" : ` · ${item.progressPercent}% watched`}`}
+                {/* A native link preserves reliable app-scheme navigation. */}
+                <a
+                    aria-label={`Resume ${item.showName}`}
+                    className="absolute top-3 left-3 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/40 text-white opacity-0 transition-opacity hover:bg-black/70 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-primary group-hover:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100"
+                    href={item.appUrl || item.webUrl}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (wasDraggedRef.current || isMenuOpen) {
+                            e.preventDefault();
+                        }
+                    }}
+                    rel={item.appUrl ? undefined : "noopener noreferrer"}
+                    target={item.appUrl ? undefined : "_blank"}
+                >
+                    <PlayIcon aria-hidden="true" className="h-5 w-5" />
+                </a>
+                <button
+                    aria-label={`View details for ${item.showName}`}
+                    className="absolute top-3 right-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-black/35 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-primary active:bg-white/30"
+                    onClick={() => {
+                        if (!(wasDraggedRef.current || isMenuOpen)) {
+                            onOpenDetails(item);
+                        }
+                    }}
+                    type="button"
+                >
+                    <InformationCircleIcon aria-hidden="true" className="h-6 w-6" />
+                </button>
+                <div className="pointer-events-none absolute right-4 bottom-3 left-4 text-white">
+                    <p className="truncate font-semibold text-base tracking-tight">
+                        {item.showName}
                     </p>
-                    <div className="mt-0.5 flex items-center gap-1">
-                        <p className="truncate text-[10px] text-subtle">{item.username}</p>
+                    <p className="mt-0.5 truncate text-white/70 text-xs">
+                        {item.nextEpisode
+                            ? `S${String(item.nextEpisode.season).padStart(2, "0")}E${String(item.nextEpisode.episode).padStart(2, "0")}${item.nextEpisode.title ? ` · ${item.nextEpisode.title}` : ""}`
+                            : "Resume watching"}
+                    </p>
+                    {/* Only saved playback has a meaningful completion percentage. */}
+                    {item.resume &&
+                        item.progressPercent != null &&
+                        Number.isFinite(item.progressPercent) && (
+                            <div className="mt-2 flex items-center gap-3">
+                                <div
+                                    aria-label="Watched"
+                                    aria-valuemax={100}
+                                    aria-valuemin={0}
+                                    aria-valuenow={Math.round(
+                                        Math.min(100, Math.max(0, item.progressPercent))
+                                    )}
+                                    className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/15"
+                                    role="progressbar"
+                                >
+                                    <div
+                                        className="h-full rounded-full"
+                                        style={{
+                                            background:
+                                                "var(--color-progress, var(--color-primary))",
+                                            width: `${Math.min(100, Math.max(0, item.progressPercent))}%`,
+                                        }}
+                                    />
+                                </div>
+                                <span className="min-w-8 text-right text-white/65 text-xs tabular-nums">
+                                    {Math.round(Math.min(100, Math.max(0, item.progressPercent)))}%
+                                </span>
+                            </div>
+                        )}
+                    <div className="mt-2 flex min-w-0 items-center gap-2 text-[11px]">
+                        {item.username && (
+                            <span className="flex min-w-0 items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-white/65">
+                                <UserIcon aria-hidden="true" className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{item.username}</span>
+                            </span>
+                        )}
                         {item.providerType && (
-                            <Badge
-                                className="shrink-0"
-                                size="sm"
-                                variant={providerBadgeVariant(item)}
-                            >
+                            <span className="shrink-0 rounded-full border border-primary/20 bg-primary/15 px-3 py-1 text-primary">
                                 {providerTypeLabel(item.providerType)}
-                            </Badge>
+                            </span>
                         )}
                     </div>
                 </div>
             </div>
-
-            {/* Now redundant with the card's own default click (which opens this
-          same modal), since only the play button navigates away - kept as a
-          visible, explicit affordance for "view details" rather than
-          removing it, and still useful as the one spot that works even if
-          the play button's target changes. stopPropagation avoids also
-          re-firing the card's own onClick behind it. */}
-            {item.appUrl && (
-                <button
-                    aria-label="View details"
-                    className="absolute top-1.5 right-1.5 z-20 rounded-md p-1.5 transition-colors"
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onOpenDetails(item);
-                    }}
-                    style={{ background: "rgba(0,0,0,0.6)", color: "white" }}
-                    title="View details"
-                    type="button"
-                >
-                    <InformationCircleIcon className="h-5 w-5" />
-                </button>
-            )}
 
             <ContextMenu
                 isOpen={isMenuOpen}
