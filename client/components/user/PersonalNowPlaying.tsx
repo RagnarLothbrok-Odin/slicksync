@@ -48,14 +48,14 @@ function PlaybackCard({ item, onOpen }: { item: NowPlayingItem; onOpen: () => vo
                 /* biome-ignore lint/a11y/noNoninteractiveElementInteractions: Failed artwork advances to the next available image. */
                 <img
                     alt=""
-                    className="pointer-events-none absolute inset-0 -z-20 h-full w-full object-cover object-[70%_center]"
+                    className="pointer-events-none absolute inset-y-0 right-0 -z-20 h-full w-[78%] object-cover object-center [mask-image:linear-gradient(to_right,transparent,black_45%)] sm:w-[70%]"
                     height={900}
                     onError={() => setArtworkIndex((index) => index + 1)}
                     src={artwork}
                     width={1600}
                 />
             )}
-            <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(8,15,26,0.98)_0%,rgba(8,15,26,0.9)_30%,rgba(8,15,26,0.55)_58%,rgba(8,15,26,0.08)_100%)]" />
+            <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(8,15,26,1)_0%,rgba(8,15,26,0.96)_25%,rgba(8,15,26,0.25)_60%,transparent_80%)]" />
             <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(0deg,rgba(8,15,26,0.65),transparent_65%)]" />
             <div className="flex min-h-64 items-center p-6 sm:min-h-72 sm:p-8 lg:min-h-80 lg:px-10">
                 <div className="w-full min-w-0 sm:max-w-[65%] lg:max-w-[58%]">
